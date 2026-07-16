@@ -134,10 +134,10 @@ func Test_ClusterBootstrap(t *testing.T) {
 			if inv == nil {
 				continue
 			}
-			kind := inv.Labels()["k8s.kind"]
+			kind := invKind(inv)
 			kindSet[kind] = true
 			if kind == "Namespace" {
-				nsNames[inv.Labels()["k8s.name"]] = true
+				nsNames[invMetaName(inv)] = true
 			}
 		}
 		for _, k := range expectedKinds {
@@ -151,7 +151,7 @@ func Test_ClusterBootstrap(t *testing.T) {
 	var foundNode bool
 	for _, obj := range objs {
 		inv := obj.Inventory()
-		if inv == nil || inv.Labels()["k8s.kind"] != "Node" {
+		if inv == nil || invKind(inv) != "Node" {
 			continue
 		}
 		foundNode = true
@@ -167,7 +167,7 @@ func Test_ClusterBootstrap(t *testing.T) {
 			t.Error("node missing conditions")
 		}
 		if len(inv.Labels()) == 0 {
-			t.Error("node missing identity labels")
+			t.Error("node missing localLabels")
 		}
 	}
 	if !foundNode {
@@ -406,9 +406,9 @@ func Test_DefaultDenyList(t *testing.T) {
 		if inv == nil {
 			continue
 		}
-		gvr := inv.Labels()["k8s.gvr"]
+		gvr := invGVRKey(inv)
 		if deniedGVRs[gvr] {
-			t.Errorf("denied GVR found in inventory: %s (name: %s)", gvr, inv.Labels()["k8s.name"])
+			t.Errorf("denied GVR found in inventory: %s (name: %s)", gvr, invMetaName(inv))
 		}
 	}
 }
@@ -539,7 +539,7 @@ func Test_CRDDeletion(t *testing.T) {
 	foundNode := false
 	for _, obj := range listInventory(t, f.store) {
 		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["k8s.kind"] == "Node" {
+		if inv != nil && invKind(inv) == "Node" {
 			foundNode = true
 			break
 		}
@@ -562,7 +562,7 @@ func Test_EnrichedFields(t *testing.T) {
 		if inv == nil {
 			continue
 		}
-		if inv.Labels()["k8s.kind"] == "Deployment" && inv.Labels()["k8s.name"] == "e2e-enriched" {
+		if invKind(inv) == "Deployment" && invMetaName(inv) == "e2e-enriched" {
 			extracted := parseExtracted(t, inv)
 			if v, _ := extracted["replicas"].(float64); v != 1 {
 				t.Errorf("deployment replicas = %v, want 1", extracted["replicas"])
@@ -581,7 +581,7 @@ func Test_EnrichedFields(t *testing.T) {
 		if inv == nil {
 			continue
 		}
-		if inv.Labels()["k8s.kind"] == "ReplicaSet" && strings.HasPrefix(inv.Labels()["k8s.name"], "e2e-enriched-") {
+		if invKind(inv) == "ReplicaSet" && strings.HasPrefix(invMetaName(inv), "e2e-enriched-") {
 			extracted := parseExtracted(t, inv)
 			if v, _ := extracted["replicas"].(float64); v != 1 {
 				t.Errorf("replicaset replicas = %v, want 1", extracted["replicas"])
@@ -598,7 +598,7 @@ func Test_EnrichedFields(t *testing.T) {
 		if inv == nil {
 			continue
 		}
-		if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], "e2e-enriched-") {
+		if invKind(inv) == "Pod" && strings.HasPrefix(invMetaName(inv), "e2e-enriched-") {
 			extracted := parseExtracted(t, inv)
 			if phase, _ := extracted["phase"].(string); phase != "Running" {
 				t.Errorf("pod phase = %q, want Running", phase)
@@ -620,8 +620,8 @@ func Test_EnrichedFields(t *testing.T) {
 	}
 }
 
-// Test_LabelIndexing verifies identity labels and Kubernetes object
-// labels (in observation metadata) flow through the indexing pipeline.
+// Test_LabelIndexing verifies Kubernetes object metadata.labels are
+// projected onto inventory localLabels through the indexing pipeline.
 func Test_LabelIndexing(t *testing.T) {
 	f := setupE2E(t)
 
@@ -634,15 +634,14 @@ func Test_LabelIndexing(t *testing.T) {
 		if inv == nil {
 			continue
 		}
-		if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], "e2e-labels-") {
+		if invKind(inv) == "Pod" && strings.HasPrefix(invMetaName(inv), "e2e-labels-") {
 			foundPod = true
 			assertObjectIdentity(t, obj, f.clusterResourceName)
-			if inv.Labels()["k8s.name"] == "" {
-				t.Fatal("pod missing k8s.name identity label")
+			if invMetaName(inv) == "" {
+				t.Fatal("pod missing observation metadata.name")
 			}
-			metaLabels := parseMetadataLabels(t, inv)
-			if metaLabels["app"] != "e2e-labels" {
-				t.Errorf("pod metadata label app = %q, want e2e-labels", metaLabels["app"])
+			if inv.Labels()["app"] != "e2e-labels" {
+				t.Errorf("pod localLabels[app] = %q, want e2e-labels", inv.Labels()["app"])
 			}
 			break
 		}
@@ -656,14 +655,14 @@ func Test_LabelIndexing(t *testing.T) {
 		if inv == nil {
 			continue
 		}
-		if inv.Labels()["k8s.kind"] == "Node" {
-			metaLabels := parseMetadataLabels(t, inv)
-			if _, ok := metaLabels["kubernetes.io/os"]; !ok {
-				t.Error("node missing kubernetes.io/os metadata label")
+		if invKind(inv) == "Node" {
+			if _, ok := inv.Labels()["kubernetes.io/os"]; !ok {
+				t.Error("node missing kubernetes.io/os localLabel")
 			}
-			break
+			return
 		}
 	}
+	t.Fatal("no Node found to assert kubernetes.io/os localLabel")
 }
 
 // Test_EnsureIndexerIndexesTarget wires EnsureIndexer against the kind
@@ -740,7 +739,7 @@ func Test_EnsureIndexerIndexesTarget(t *testing.T) {
 	objs := awaitInventoryMatch(t, store, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objs {
 			inv := obj.Inventory()
-			if inv != nil && inv.Labels()["k8s.kind"] == "Node" && strings.HasPrefix(string(obj.Name()), string(clusterResourceName)+"/") {
+			if inv != nil && invKind(inv) == "Node" && strings.HasPrefix(string(obj.Name()), string(clusterResourceName)+"/") {
 				return true
 			}
 		}
@@ -750,7 +749,7 @@ func Test_EnsureIndexerIndexesTarget(t *testing.T) {
 	var found bool
 	for _, obj := range objs {
 		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["k8s.kind"] == "Node" && strings.HasPrefix(string(obj.Name()), string(clusterResourceName)+"/") {
+		if inv != nil && invKind(inv) == "Node" && strings.HasPrefix(string(obj.Name()), string(clusterResourceName)+"/") {
 			found = true
 			assertObjectIdentity(t, obj, clusterResourceName)
 		}
@@ -921,7 +920,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 		awaitInventoryMatch(t, store, func(objs []*domain.ExtensionResource) bool {
 			for _, obj := range objs {
 				inv := obj.Inventory()
-				if inv != nil && inv.Labels()["k8s.kind"] == "Node" {
+				if inv != nil && invKind(inv) == "Node" {
 					return true
 				}
 			}
@@ -1074,25 +1073,88 @@ type objectSpec struct {
 	Name string
 }
 
+func invObservation(t *testing.T, inv *domain.InventoryResource) map[string]any {
+	t.Helper()
+	if inv == nil {
+		t.Fatal("nil inventory")
+	}
+	obs := inv.Observation()
+	if obs == nil {
+		t.Fatal("nil observation")
+	}
+	var top map[string]any
+	if err := json.Unmarshal(*obs, &top); err != nil {
+		t.Fatalf("unmarshal observation: %v", err)
+	}
+	return top
+}
+
+func invKind(inv *domain.InventoryResource) string {
+	if inv == nil || inv.Observation() == nil {
+		return ""
+	}
+	var top map[string]any
+	if err := json.Unmarshal(*inv.Observation(), &top); err != nil {
+		return ""
+	}
+	kind, _ := top["kind"].(string)
+	return kind
+}
+
+func invMetaName(inv *domain.InventoryResource) string {
+	if inv == nil || inv.Observation() == nil {
+		return ""
+	}
+	var top map[string]any
+	if err := json.Unmarshal(*inv.Observation(), &top); err != nil {
+		return ""
+	}
+	meta, _ := top["metadata"].(map[string]any)
+	name, _ := meta["name"].(string)
+	return name
+}
+
+func invGVRKey(inv *domain.InventoryResource) string {
+	if inv == nil || inv.Observation() == nil {
+		return ""
+	}
+	var top map[string]any
+	if err := json.Unmarshal(*inv.Observation(), &top); err != nil {
+		return ""
+	}
+	gvrMap, _ := top["gvr"].(map[string]any)
+	group, _ := gvrMap["group"].(string)
+	version, _ := gvrMap["version"].(string)
+	resource, _ := gvrMap["resource"].(string)
+	return kubeaddon.GVRKey(schema.GroupVersionResource{
+		Group: group, Version: version, Resource: resource,
+	})
+}
+
 func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, clusterResourceName domain.ResourceName) {
 	t.Helper()
 	inv := obj.Inventory()
 	if inv == nil {
 		t.Fatalf("object %s missing inventory", obj.Name())
 	}
-	labels := inv.Labels()
-	gvr := schema.GroupVersionResource{
-		Group:    labels["k8s.group"],
-		Version:  labels["k8s.version"],
-		Resource: labels["k8s.resource"],
-	}
+	obs := invObservation(t, inv)
+	meta, _ := obs["metadata"].(map[string]any)
+	gvrMap, _ := obs["gvr"].(map[string]any)
+	group, _ := gvrMap["group"].(string)
+	version, _ := gvrMap["version"].(string)
+	resource, _ := gvrMap["resource"].(string)
+	kind, _ := obs["kind"].(string)
+	namespace, _ := meta["namespace"].(string)
+	name, _ := meta["name"].(string)
+	uid, _ := meta["uid"].(string)
+	gvr := schema.GroupVersionResource{Group: group, Version: version, Resource: resource}
 	want, err := kubeaddon.ObjectResourceName(kubeaddon.KubernetesObjectIdentity{
 		ClusterResourceName: clusterResourceName,
 		GVR:                 gvr,
-		Kind:                labels["k8s.kind"],
-		Namespace:           labels["k8s.namespace"],
-		Name:                labels["k8s.name"],
-		UID:                 labels["k8s.uid"],
+		Kind:                kind,
+		Namespace:           namespace,
+		Name:                name,
+		UID:                 uid,
 	})
 	if err != nil {
 		t.Fatalf("ObjectResourceName: %v", err)
@@ -1115,7 +1177,7 @@ func (f *e2eFixture) awaitObjects(t *testing.T, specs ...objectSpec) []*domain.E
 				if inv == nil {
 					continue
 				}
-				if inv.Labels()["k8s.kind"] == spec.Kind && inv.Labels()["k8s.name"] == spec.Name {
+				if invKind(inv) == spec.Kind && invMetaName(inv) == spec.Name {
 					found = true
 					break
 				}
@@ -1132,7 +1194,7 @@ func (f *e2eFixture) awaitObjects(t *testing.T, specs ...objectSpec) []*domain.E
 			if inv == nil {
 				continue
 			}
-			if inv.Labels()["k8s.kind"] == spec.Kind && inv.Labels()["k8s.name"] == spec.Name {
+			if invKind(inv) == spec.Kind && invMetaName(inv) == spec.Name {
 				assertObjectIdentity(t, obj, f.clusterResourceName)
 			}
 		}
@@ -1148,7 +1210,7 @@ func (f *e2eFixture) awaitRunningPod(t *testing.T, namePrefix string) []*domain.
 			if inv == nil {
 				continue
 			}
-			if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], namePrefix) {
+			if invKind(inv) == "Pod" && strings.HasPrefix(invMetaName(inv), namePrefix) {
 				extracted := parseExtracted(t, inv)
 				if phase, _ := extracted["phase"].(string); phase == "Running" {
 					return true
@@ -1176,7 +1238,7 @@ func (f *e2eFixture) awaitRunningWorkload(t *testing.T, deployName, namePrefix s
 			if inv == nil {
 				continue
 			}
-			if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], namePrefix) {
+			if invKind(inv) == "Pod" && strings.HasPrefix(invMetaName(inv), namePrefix) {
 				extracted := parseExtracted(t, inv)
 				if phase, _ := extracted["phase"].(string); phase == "Running" {
 					return true
@@ -1196,7 +1258,7 @@ func (f *e2eFixture) awaitPodCount(t *testing.T, namePrefix string, n int) []*do
 			if inv == nil {
 				continue
 			}
-			if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], namePrefix) {
+			if invKind(inv) == "Pod" && strings.HasPrefix(invMetaName(inv), namePrefix) {
 				count++
 			}
 		}
@@ -1212,7 +1274,7 @@ func (f *e2eFixture) awaitObjectGone(t *testing.T, kind, name string) {
 			if inv == nil {
 				continue
 			}
-			if inv.Labels()["k8s.kind"] == kind && inv.Labels()["k8s.name"] == name {
+			if invKind(inv) == kind && invMetaName(inv) == name {
 				return false
 			}
 		}
@@ -1228,7 +1290,7 @@ func (f *e2eFixture) awaitObjectGoneByPrefix(t *testing.T, kind, prefix string) 
 			if inv == nil {
 				continue
 			}
-			if inv.Labels()["k8s.kind"] == kind && strings.HasPrefix(inv.Labels()["k8s.name"], prefix) {
+			if invKind(inv) == kind && strings.HasPrefix(invMetaName(inv), prefix) {
 				return false
 			}
 		}
@@ -1282,31 +1344,10 @@ func parseExtracted(t *testing.T, inv *domain.InventoryResource) map[string]any 
 	return extracted
 }
 
-func parseMetadataLabels(t *testing.T, inv *domain.InventoryResource) map[string]string {
-	t.Helper()
-	obs := inv.Observation()
-	if obs == nil {
-		t.Fatal("nil observation")
-	}
-	var top map[string]any
-	if err := json.Unmarshal(*obs, &top); err != nil {
-		t.Fatalf("unmarshal observation: %v", err)
-	}
-	meta, _ := top["metadata"].(map[string]any)
-	raw, _ := meta["labels"].(map[string]any)
-	out := map[string]string{}
-	for k, v := range raw {
-		if s, ok := v.(string); ok {
-			out[k] = s
-		}
-	}
-	return out
-}
-
 func findByKindName(objs []*domain.ExtensionResource, kind, name string) *domain.ExtensionResource {
 	for _, obj := range objs {
 		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["k8s.kind"] == kind && inv.Labels()["k8s.name"] == name {
+		if inv != nil && invKind(inv) == kind && invMetaName(inv) == name {
 			return obj
 		}
 	}
@@ -1316,7 +1357,7 @@ func findByKindName(objs []*domain.ExtensionResource, kind, name string) *domain
 func findByKindNamePrefix(objs []*domain.ExtensionResource, kind, prefix string) *domain.ExtensionResource {
 	for _, obj := range objs {
 		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["k8s.kind"] == kind && strings.HasPrefix(inv.Labels()["k8s.name"], prefix) {
+		if inv != nil && invKind(inv) == kind && strings.HasPrefix(invMetaName(inv), prefix) {
 			return obj
 		}
 	}

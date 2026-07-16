@@ -103,7 +103,7 @@ func TestIndexerDelegate_Start_ReportsCollectionAndShutdownDoesNotDelete(t *test
 		foundPod := false
 		for _, d := range reporter.getDeltas() {
 			for _, report := range d.delta.Upserts {
-				if report.Labels["k8s.uid"] == "uid-pod-1" {
+				if reportUID(report) == "uid-pod-1" {
 					foundPod = true
 				}
 			}
@@ -168,7 +168,7 @@ func TestIndexerDelegate_Start_AllowListExcludesOtherGVRs(t *testing.T) {
 
 		for _, d := range reporter.getDeltas() {
 			for _, report := range d.delta.Upserts {
-				if report.Labels["k8s.kind"] == "Service" {
+				if reportKind(report) == "Service" {
 					t.Fatal("services GVR must not be indexed when allow-list is pods-only")
 				}
 			}

@@ -213,50 +213,41 @@ func TestResourceNameCollectionIDs(t *testing.T) {
 }
 
 func TestObjectLabels(t *testing.T) {
-	t.Run("Namespaced", func(t *testing.T) {
-		got := kubernetes.ObjectLabels(kubernetes.KubernetesObjectIdentity{
-			ClusterResourceName: "clusters/prod",
-			GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-			Kind:      "Deployment",
-			Namespace: "default",
-			Name:      "nginx",
-			UID:       "0d12-uid",
+	t.Run("CopiesMetadataLabels", func(t *testing.T) {
+		obj := &unstructured.Unstructured{}
+		obj.SetLabels(map[string]string{
+			"app":                    "nginx",
+			"kubernetes.io/hostname": "node-1",
+			"kube-aggregator.kubernetes.io/automanaged": "onstart",
 		})
+		got := kubernetes.ObjectLabels(obj)
 		want := map[string]string{
-			"k8s.gvr":       "apps~v1~deployments",
-			"k8s.group":     "apps",
-			"k8s.version":   "v1",
-			"k8s.resource":  "deployments",
-			"k8s.kind":      "Deployment",
-			"k8s.scope":     "namespaced",
-			"k8s.namespace": "default",
-			"k8s.name":      "nginx",
-			"k8s.uid":       "0d12-uid",
+			"app":                    "nginx",
+			"kubernetes.io/hostname": "node-1",
+			"kube-aggregator.kubernetes.io/automanaged": "onstart",
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("ObjectLabels = %#v, want %#v", got, want)
 		}
 	})
 
-	t.Run("ClusterScopedOmitsNamespaceAndUsesCoreGroup", func(t *testing.T) {
-		got := kubernetes.ObjectLabels(kubernetes.KubernetesObjectIdentity{
-			ClusterResourceName: "clusters/prod",
-			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
-			Kind:     "Node",
-			Name:     "node-1",
-			UID:      "node-uid",
-		})
-		if got["k8s.scope"] != "cluster" {
-			t.Errorf("k8s.scope = %q, want %q", got["k8s.scope"], "cluster")
+	t.Run("EmptyWhenNoLabels", func(t *testing.T) {
+		got := kubernetes.ObjectLabels(&unstructured.Unstructured{})
+		if got == nil {
+			t.Fatal("ObjectLabels = nil, want empty non-nil map")
 		}
-		if got["k8s.gvr"] != "core~v1~nodes" {
-			t.Errorf("k8s.gvr = %q, want %q", got["k8s.gvr"], "core~v1~nodes")
+		if len(got) != 0 {
+			t.Fatalf("ObjectLabels = %#v, want empty map", got)
 		}
-		if got["k8s.group"] != "" {
-			t.Errorf("k8s.group = %q, want empty (raw core group, not the \"core\" path key)", got["k8s.group"])
-		}
-		if _, ok := got["k8s.namespace"]; ok {
-			t.Errorf("k8s.namespace = %q, want key omitted for a cluster-scoped object", got["k8s.namespace"])
+	})
+
+	t.Run("DefensiveCopy", func(t *testing.T) {
+		obj := &unstructured.Unstructured{}
+		obj.SetLabels(map[string]string{"app": "nginx"})
+		got := kubernetes.ObjectLabels(obj)
+		got["app"] = "mutated"
+		if obj.GetLabels()["app"] != "nginx" {
+			t.Fatal("ObjectLabels must not share the object's label map")
 		}
 	})
 }
@@ -286,10 +277,10 @@ func TestObjectObservation(t *testing.T) {
 	id := kubernetes.KubernetesObjectIdentity{
 		ClusterResourceName: "clusters/prod",
 		GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind:      "Deployment",
-		Namespace: "default",
-		Name:      "nginx",
-		UID:       "0d12-uid",
+		Kind:                "Deployment",
+		Namespace:           "default",
+		Name:                "nginx",
+		UID:                 "0d12-uid",
 	}
 
 	t.Run("FieldsMatchTheWatchedObject", func(t *testing.T) {
@@ -321,9 +312,8 @@ func TestObjectObservation(t *testing.T) {
 		if meta["deletionTimestamp"] != nil {
 			t.Fatalf("deletionTimestamp = %v, want null (object is not being deleted)", meta["deletionTimestamp"])
 		}
-		labels, _ := meta["labels"].(map[string]any)
-		if labels["app"] != "nginx" {
-			t.Fatalf("metadata.labels = %#v, want app=nginx", labels)
+		if _, ok := meta["labels"]; ok {
+			t.Fatalf("metadata.labels = %#v, want omitted (labels live on localLabels)", meta["labels"])
 		}
 		annotations, _ := meta["annotations"].(map[string]any)
 		if annotations["note"] != "x" {
@@ -413,9 +403,9 @@ func TestObjectObservation(t *testing.T) {
 		raw := kubernetes.ObjectObservation(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "clusters/prod",
 			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
-			Kind:     "Node",
-			Name:     "node-1",
-			UID:      "node-uid",
+			Kind:                "Node",
+			Name:                "node-1",
+			UID:                 "node-uid",
 		}, obj, nil)
 
 		var got map[string]any

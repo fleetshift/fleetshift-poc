@@ -92,25 +92,14 @@ func TestExtractIdentityFields(t *testing.T) {
 	if string(report.Name) != wantName {
 		t.Errorf("Name = %q, want %q", report.Name, wantName)
 	}
-	if report.Labels["k8s.gvr"] != "apps~v1~deployments" {
-		t.Errorf("Labels[k8s.gvr] = %q, want %q", report.Labels["k8s.gvr"], "apps~v1~deployments")
+	// Kubernetes object labels project onto report localLabels and the
+	// inventory node (selector matching); they are not duplicated under
+	// observation.metadata.labels.
+	if report.Labels["app"] != "web" {
+		t.Errorf("Labels[app] = %q, want web", report.Labels["app"])
 	}
-	if report.Labels["k8s.kind"] != "Deployment" {
-		t.Errorf("Labels[k8s.kind] = %q, want %q", report.Labels["k8s.kind"], "Deployment")
-	}
-	if report.Labels["k8s.name"] != "my-deploy" {
-		t.Errorf("Labels[k8s.name] = %q, want %q", report.Labels["k8s.name"], "my-deploy")
-	}
-	if report.Labels["k8s.namespace"] != "default" {
-		t.Errorf("Labels[k8s.namespace] = %q, want %q", report.Labels["k8s.namespace"], "default")
-	}
-	if report.Labels["k8s.uid"] != "abc-123" {
-		t.Errorf("Labels[k8s.uid] = %q, want %q", report.Labels["k8s.uid"], "abc-123")
-	}
-	// Kubernetes object labels stay on the node for selector matching,
-	// not on the FleetShift report labels.
-	if report.Labels["app"] != "" {
-		t.Errorf("report Labels should not copy Kubernetes object labels, got app=%q", report.Labels["app"])
+	if _, ok := report.Labels["k8s.kind"]; ok {
+		t.Errorf("Labels should not include synthetic identity keys, got %#v", report.Labels)
 	}
 	if node.Labels["app"] != "web" {
 		t.Errorf("node.Labels[app] = %q, want %q", node.Labels["app"], "web")
@@ -128,9 +117,8 @@ func TestExtractIdentityFields(t *testing.T) {
 	if meta["uid"] != "abc-123" || meta["namespace"] != "default" || meta["name"] != "my-deploy" {
 		t.Errorf("metadata identity = %#v", meta)
 	}
-	labels, _ := meta["labels"].(map[string]any)
-	if labels["app"] != "web" {
-		t.Errorf("metadata.labels[app] = %v, want web", labels["app"])
+	if _, ok := meta["labels"]; ok {
+		t.Errorf("metadata.labels = %#v, want omitted", meta["labels"])
 	}
 }
 
@@ -181,11 +169,8 @@ func TestExtractIdentityFields_CoreAPIGroup(t *testing.T) {
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
-	if report.Labels["k8s.gvr"] != "core~v1~pods" {
-		t.Errorf("Labels[k8s.gvr] = %q, want %q", report.Labels["k8s.gvr"], "core~v1~pods")
-	}
-	if report.Labels["k8s.group"] != "" {
-		t.Errorf("Labels[k8s.group] = %q, want empty for core", report.Labels["k8s.group"])
+	if len(report.Labels) != 0 {
+		t.Errorf("Labels = %#v, want empty when object has no metadata.labels", report.Labels)
 	}
 	obs := mustObservation(t, report)
 	if obs["apiVersion"] != "v1" || obs["kind"] != "Pod" {
@@ -642,13 +627,16 @@ func TestExtractAnnotations_StripsInternalKeys(t *testing.T) {
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
-	if report.Labels["k8s.name"] != "strip-pod" {
-		t.Errorf("Labels[k8s.name] = %q, want %q", report.Labels["k8s.name"], "strip-pod")
+	if len(report.Labels) != 0 {
+		t.Errorf("Labels = %#v, want empty when object has no metadata.labels", report.Labels)
 	}
 	meta, _ := mustObservation(t, report)["metadata"].(map[string]any)
 	annotations, _ := meta["annotations"].(map[string]any)
 	if annotations["keep"] != "yes" {
 		t.Errorf("metadata.annotations should retain source annotations, got %#v", annotations)
+	}
+	if meta["name"] != "strip-pod" {
+		t.Errorf("metadata.name = %v, want strip-pod", meta["name"])
 	}
 }
 
@@ -1274,17 +1262,14 @@ func TestExtractObservedResource_ClusterScoped(t *testing.T) {
 	}
 	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
-	if report.Labels["k8s.scope"] != "cluster" {
-		t.Errorf("Labels[k8s.scope] = %q, want cluster", report.Labels["k8s.scope"])
-	}
-	if _, ok := report.Labels["k8s.namespace"]; ok {
-		t.Errorf("Labels should omit k8s.namespace for cluster-scoped objects, got %q", report.Labels["k8s.namespace"])
+	if len(report.Labels) != 0 {
+		t.Errorf("Labels = %#v, want empty when object has no metadata.labels", report.Labels)
 	}
 	if node.Namespace != "" {
 		t.Errorf("node.Namespace = %q, want empty", node.Namespace)
 	}
-	if node.Labels != nil {
-		t.Errorf("node.Labels = %#v, want nil when object has no labels", node.Labels)
+	if len(node.Labels) != 0 {
+		t.Errorf("node.Labels = %#v, want empty when object has no labels", node.Labels)
 	}
 	obs := mustObservation(t, report)
 	gvr, _ := obs["gvr"].(map[string]any)
@@ -1294,6 +1279,9 @@ func TestExtractObservedResource_ClusterScoped(t *testing.T) {
 	meta, _ := obs["metadata"].(map[string]any)
 	if meta["namespace"] != "" {
 		t.Errorf("metadata.namespace = %v, want empty string", meta["namespace"])
+	}
+	if _, ok := meta["labels"]; ok {
+		t.Errorf("metadata.labels = %#v, want omitted", meta["labels"])
 	}
 	wantName := "clusters/target-1/apiResources/core~v1~nodes/objects/node-uid"
 	if string(report.Name) != wantName {

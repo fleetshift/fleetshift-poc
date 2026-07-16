@@ -23,7 +23,7 @@ import (
 // Composition tests exercise the in-process indexing host and writer
 // against a real SQLite extension-resource store with fake Kubernetes
 // clients. They close gaps that unit tests (recording reporters) and
-// kind e2e (host-only, label presence) leave open.
+// kind e2e leave open, including Writer→store localLabels projection.
 
 func configmapsGVR() schema.GroupVersionResource {
 	return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
@@ -478,6 +478,132 @@ func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 	if !foundKeep {
 		t.Fatal("sibling object must survive ReportedUIDs-diff resync")
 	}
+}
+
+// TestWriter_PersistsKubeLabelsAsLocalLabels verifies Writer → store
+// projects metadata.labels onto inventory localLabels, omits synthetic
+// identity labels, drops observation.metadata.labels, and replaces
+// localLabels on a later resync when kube labels change.
+func TestWriter_PersistsKubeLabelsAsLocalLabels(t *testing.T) {
+	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
+	seedObjectType(t, store)
+
+	pods := podsGVR()
+	reporter := newStoreBackedReporter(store)
+	schema := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
+		pods: {GVR: pods, Kind: "Pod"},
+	}}
+	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	labeled := makePod("uid-labeled", "web", "default", "1")
+	labeled.SetLabels(map[string]string{
+		"app":                    "web",
+		"kubernetes.io/hostname": "node-1",
+	})
+	unlabeled := makePod("uid-plain", "plain", "default", "1")
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{labeled, unlabeled}}
+
+	wantLabeled := mustNamedObjectName(t, "prod", pods, "default", "web", "uid-labeled")
+	wantPlain := mustNamedObjectName(t, "prod", pods, "default", "plain", "uid-plain")
+	objs := awaitStoreObjects(t, store, 3*time.Second, func(objs []*domain.ExtensionResource) bool {
+		haveLabeled, havePlain := false, false
+		for _, obj := range objs {
+			switch obj.Name() {
+			case wantLabeled:
+				haveLabeled = true
+			case wantPlain:
+				havePlain = true
+			}
+		}
+		return haveLabeled && havePlain
+	})
+
+	var labeledInv, plainInv *domain.InventoryResource
+	for _, obj := range objs {
+		inv := obj.Inventory()
+		if inv == nil {
+			continue
+		}
+		switch obj.Name() {
+		case wantLabeled:
+			labeledInv = inv
+		case wantPlain:
+			plainInv = inv
+		}
+	}
+	if labeledInv == nil || plainInv == nil {
+		t.Fatalf("missing inventory: labeled=%v plain=%v", labeledInv != nil, plainInv != nil)
+	}
+
+	if got := labeledInv.Labels()["app"]; got != "web" {
+		t.Errorf("labeled localLabels[app] = %q, want web", got)
+	}
+	if got := labeledInv.Labels()["kubernetes.io/hostname"]; got != "node-1" {
+		t.Errorf("labeled localLabels[kubernetes.io/hostname] = %q, want node-1", got)
+	}
+	for _, synthetic := range []string{"k8s.kind", "k8s.gvr", "k8s.name", "k8s.uid", "k8s.group", "k8s.scope"} {
+		if _, ok := labeledInv.Labels()[synthetic]; ok {
+			t.Errorf("labeled localLabels must not include synthetic %q, got %#v", synthetic, labeledInv.Labels())
+		}
+	}
+	if len(plainInv.Labels()) != 0 {
+		t.Errorf("unlabeled localLabels = %#v, want empty", plainInv.Labels())
+	}
+
+	assertObservationOmitsMetadataLabels := func(t *testing.T, inv *domain.InventoryResource) {
+		t.Helper()
+		obs := inv.Observation()
+		if obs == nil {
+			t.Fatal("nil observation")
+		}
+		var top map[string]any
+		if err := json.Unmarshal(*obs, &top); err != nil {
+			t.Fatalf("unmarshal observation: %v", err)
+		}
+		meta, _ := top["metadata"].(map[string]any)
+		if _, ok := meta["labels"]; ok {
+			t.Errorf("observation.metadata.labels = %#v, want omitted", meta["labels"])
+		}
+		if top["kind"] != "Pod" {
+			t.Errorf("observation.kind = %v, want Pod", top["kind"])
+		}
+	}
+	assertObservationOmitsMetadataLabels(t, labeledInv)
+	assertObservationOmitsMetadataLabels(t, plainInv)
+
+	labeled.SetLabels(map[string]string{"app": "api", "tier": "frontend"})
+	labeled.SetResourceVersion("2")
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{labeled, unlabeled}}
+	awaitStoreObjects(t, store, 3*time.Second, func(objs []*domain.ExtensionResource) bool {
+		for _, obj := range objs {
+			if obj.Name() != wantLabeled {
+				continue
+			}
+			inv := obj.Inventory()
+			return inv != nil && inv.Labels()["app"] == "api" && inv.Labels()["tier"] == "frontend"
+		}
+		return false
+	})
+
+	for _, obj := range listObjectInventory(t, store) {
+		if obj.Name() != wantLabeled {
+			continue
+		}
+		inv := obj.Inventory()
+		if inv.Labels()["app"] != "api" || inv.Labels()["tier"] != "frontend" {
+			t.Fatalf("replaced localLabels = %#v, want app=api tier=frontend", inv.Labels())
+		}
+		if _, ok := inv.Labels()["kubernetes.io/hostname"]; ok {
+			t.Fatalf("replaced localLabels still has removed key kubernetes.io/hostname: %#v", inv.Labels())
+		}
+		assertObservationOmitsMetadataLabels(t, inv)
+		return
+	}
+	t.Fatal("labeled object missing after label replace resync")
 }
 
 // TestStartupList_DoesNotDeleteDBOnlyRows verifies a new process/GVR
