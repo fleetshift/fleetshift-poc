@@ -172,6 +172,8 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   }, [onStateChange]);
 
   const clearSearch = useCallback(() => {
+    ++requestIdRef.current;
+    clearTimeout(debounceTimerRef.current);
     setSearchValue("");
     setResults(EMPTY);
     closeMenu();
@@ -181,6 +183,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
     (_e: unknown, value: string) => {
       setSearchValue(value);
       if (!value.trim()) {
+        ++requestIdRef.current;
         clearTimeout(debounceTimerRef.current);
         setResults(EMPTY);
         setIsOpen(false);
@@ -215,6 +218,8 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   );
 
   const handleClear = useCallback(() => {
+    ++requestIdRef.current;
+    clearTimeout(debounceTimerRef.current);
     setSearchValue("");
     setResults(EMPTY);
     setIsOpen(false);

@@ -62,6 +62,7 @@ export default function NodeDetailPage() {
 
   useEffect(() => {
     if (!clusterId || !nodeUid) return;
+    let stale = false;
     setLoading(true);
     setError(null);
     k8sApi
@@ -69,6 +70,7 @@ export default function NodeDetailPage() {
         `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/core~v1~nodes/objects/${nodeUid}`,
       )
       .then((result) => {
+        if (stale) return;
         if (result) {
           setResource(result);
         } else {
@@ -76,9 +78,15 @@ export default function NodeDetailPage() {
         }
       })
       .catch((e) => {
+        if (stale) return;
         setError(e instanceof Error ? e.message : "Failed to load node");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [clusterId, nodeUid]);
 
   if (loading) {

@@ -1,5 +1,5 @@
 import { createResourceApi, type ResourceResult } from "@fleetshift/common";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface K8sObservationMetadata {
   uid: string;
@@ -52,8 +52,10 @@ export function useClusterResources(
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const fetch = useCallback(async () => {
+    const id = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -68,12 +70,17 @@ export function useClusterResources(
         parts.push(`resource.observation.kind == "${kind}"`);
       }
       const filter = parts.join(" && ");
-      const results = await k8sApi.searchAll({ filter });
+      const { resources: results } = await k8sApi.search({
+        filter,
+        pageSize: 200,
+      });
+      if (id !== requestIdRef.current) return;
       setResources(results);
     } catch (e) {
+      if (id !== requestIdRef.current) return;
       setError(e instanceof Error ? e.message : "Failed to load resources");
     } finally {
-      setLoading(false);
+      if (id === requestIdRef.current) setLoading(false);
     }
   }, [clusterId, gvrKey]);
 

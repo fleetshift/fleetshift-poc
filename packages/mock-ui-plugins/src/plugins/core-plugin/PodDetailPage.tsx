@@ -59,6 +59,7 @@ export default function PodDetailPage() {
 
   useEffect(() => {
     if (!clusterId || !podUid) return;
+    let stale = false;
     setLoading(true);
     setError(null);
     k8sApi
@@ -66,6 +67,7 @@ export default function PodDetailPage() {
         `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/core~v1~pods/objects/${podUid}`,
       )
       .then((result) => {
+        if (stale) return;
         if (result) {
           setResource(result);
         } else {
@@ -73,9 +75,15 @@ export default function PodDetailPage() {
         }
       })
       .catch((e) => {
+        if (stale) return;
         setError(e instanceof Error ? e.message : "Failed to load pod");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [clusterId, podUid]);
 
   if (loading) {

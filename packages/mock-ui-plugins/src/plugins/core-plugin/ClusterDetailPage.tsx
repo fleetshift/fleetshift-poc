@@ -400,6 +400,8 @@ export default function ClusterDetailPage() {
             key={tab.eventKey}
             eventKey={tab.eventKey}
             title={<TabTitleText>{tab.title}</TabTitleText>}
+            mountOnEnter
+            unmountOnExit
           >
             <div className="pf-v6-u-pt-md">
               <tab.Component clusterId={clusterId} />
