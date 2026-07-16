@@ -1,10 +1,11 @@
 # Assembles the all-in-one FleetShift image from published component images.
 # Used by the openshift/release periodic that publishes quay.io/stolostron/fleetshift.
 #
-# Kind provisioning uses the embedded sigs.k8s.io/kind library (not a kind
-# CLI). For kind, run privileged as root with the host container socket mounted
-# (USER below is overridden by --user 0:0).
-FROM quay.io/stolostron/fleetshift-server:latest
+# Base is fleetshift-server-local so the kind library can shell out to a
+# container runtime CLI (podman) against a mounted host socket. For kind,
+# run privileged as root with the socket mounted (USER below is overridden
+# by --user 0:0).
+FROM quay.io/stolostron/fleetshift-server-local:latest
 COPY --from=quay.io/stolostron/fleetshift-web:latest /srv/web /srv/web
 RUN useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift \
 	&& chown -R fleetshift:fleetshift /data /srv/web
