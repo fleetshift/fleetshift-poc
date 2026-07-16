@@ -37,6 +37,10 @@ export interface OnboardingActionFormProps {
   onCancel: () => void;
 }
 
+export interface ClusterDetailTabProps {
+  clusterId: string | undefined;
+}
+
 export interface SearchEntry {
   id: string;
   title: string;

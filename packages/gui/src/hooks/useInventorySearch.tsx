@@ -58,16 +58,25 @@ export function useInventorySearch(): {
     async (term: string): Promise<SearchResultItem[]> => {
       try {
         const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        const parts = [
-          `resource.name.startsWith("${escaped}")`,
-          `resource.name.startsWith("clusters/${escaped}")`,
-          `resource_type.startsWith("${escaped}")`,
+        const clusterFilter = [
+          `(resourceType == "gcphcp.fleetshift.io/Cluster" || resourceType == "kind.fleetshift.io/Cluster")`,
+          `&& (resource.name.startsWith("${escaped}") || resource.name.startsWith("clusters/${escaped}"))`,
+        ].join(" ");
+        const k8sFilter = [
+          `resourceType == "kubernetes.fleetshift.io/Object"`,
+          `&& (resource.observation.kind == "Pod" || resource.observation.kind == "Namespace" || resource.observation.kind == "Node")`,
+          `&& resource.observation.metadata.name.startsWith("${escaped}")`,
+        ].join(" ");
+        const [clusterResponse, k8sResponse] = await Promise.all([
+          client.search({ filter: clusterFilter, pageSize: 5 }),
+          client.search({ filter: k8sFilter, pageSize: 5 }),
+        ]);
+        const allResults = [
+          ...clusterResponse.resources,
+          ...k8sResponse.resources,
         ];
-        const results = await client.searchAll({
-          filter: parts.join(" || "),
-        });
 
-        return results.map((result) => {
+        return allResults.map((result) => {
           const renderer = rendererMap.get(result.resourceType);
 
           const id =
@@ -110,7 +119,9 @@ export function useInventorySearch(): {
             id,
             title: highlightText(
               term,
-              result.resource.name.split("/").pop() ?? result.resource.name,
+              rendered.title ??
+                result.resource.name.split("/").pop() ??
+                result.resource.name,
             ),
             description: "",
             descriptionNode: badgedDescription(

@@ -20,6 +20,7 @@ export const FLEETSHIFT_EXTENSION_TYPES = [
   "fleetshift.setup",
   "fleetshift.cluster-provider",
   "fleetshift.onboarding-action",
+  "fleetshift.cluster-detail-tab",
 ] as const;
 
 export type FleetshiftExtensionType =

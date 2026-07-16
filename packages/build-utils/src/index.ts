@@ -4,6 +4,8 @@ export {
 } from "./createPfImportConfig";
 export type {
   BaseExtensionProperties,
+  ClusterDetailTabExtras,
+  ClusterDetailTabProperties,
   ClusterProviderProperties,
   EncodedCodeRef,
   FleetshiftExtension,
@@ -17,6 +19,8 @@ export type {
   SetupProperties,
 } from "./extensions";
 export {
+  CLUSTER_DETAIL_TAB_TYPE,
+  createClusterDetailTab,
   createClusterProvider,
   createModule,
   createModuleGroup,

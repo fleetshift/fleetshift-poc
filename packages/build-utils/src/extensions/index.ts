@@ -5,6 +5,15 @@ export {
   createOnboardingAction,
   createSetup,
 } from "./builders";
+export type {
+  ClusterDetailTabExtras,
+  ClusterDetailTabProperties,
+} from "./clusterDetailTab";
+export {
+  CLUSTER_DETAIL_TAB_TYPE,
+  createClusterDetailTab,
+  validateClusterDetailTabProperties,
+} from "./clusterDetailTab";
 export type { FleetshiftPluginOptions } from "./FleetshiftPlugin";
 export { FleetshiftPlugin } from "./FleetshiftPlugin";
 export type {

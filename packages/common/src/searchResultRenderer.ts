@@ -7,6 +7,7 @@ export interface SearchResultRender {
   module: string;
   to?: string;
   search?: string;
+  title?: string;
   description: ReactNode;
 }
 

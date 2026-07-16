@@ -1,6 +1,11 @@
 import chalk from "chalk";
 
 import {
+  CLUSTER_DETAIL_TAB_TYPE,
+  type ClusterDetailTabProperties,
+  validateClusterDetailTabProperties,
+} from "./clusterDetailTab";
+import {
   RENDER_SEARCH_TYPE,
   type SearchResultRendererProperties,
   validateSearchResultRendererProperties,
@@ -196,6 +201,13 @@ function validateSingleExtension(ext: FleetshiftExtension): string[] {
       return validateOnboardingActionProperties(
         props as unknown as OnboardingActionProperties,
       );
+    case CLUSTER_DETAIL_TAB_TYPE: {
+      const id = typeof props.id === "string" ? props.id : "(no id)";
+      return validateClusterDetailTabProperties(
+        props as unknown as ClusterDetailTabProperties,
+        `${CLUSTER_DETAIL_TAB_TYPE} "${id}"`,
+      );
+    }
     default: {
       const id = typeof props.id === "string" ? props.id : "(no id)";
       return validateBaseProperties(
