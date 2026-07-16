@@ -55,7 +55,7 @@ addon list for the deployment.
 
 ## All-in-one image
 
-Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server (including kind/podman tooling), baked-in UI assets, and defaults to serving the UI. It is assembled on a schedule from `fleetshift-server-local:latest` and `fleetshift-web:latest`, so it can lag component merges by a few hours.
+Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server with baked-in UI assets and defaults to serving the UI. It is assembled on a schedule from `fleetshift-server:latest` and `fleetshift-web:latest`, so it can lag component merges by a few hours. Kind provisioning uses the embedded kind library against a mounted container socket (no kind CLI required).
 
 API + UI (runs as non-root by default):
 
