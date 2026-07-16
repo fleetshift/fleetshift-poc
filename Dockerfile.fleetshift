@@ -2,4 +2,7 @@
 # Used by the openshift/release periodic that publishes quay.io/stolostron/fleetshift.
 FROM quay.io/stolostron/fleetshift-server:latest
 COPY --from=quay.io/stolostron/fleetshift-web:latest /srv/web /srv/web
+RUN useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift \
+	&& chown -R fleetshift:fleetshift /data /srv/web
+USER fleetshift
 CMD ["serve", "--http-addr", ":8085", "--grpc-addr", ":50051", "--db", "/data/fleetshift.db", "--web-dir", "/srv/web", "--log-level", "debug"]
