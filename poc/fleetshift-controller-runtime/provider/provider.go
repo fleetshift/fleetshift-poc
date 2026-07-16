@@ -3,8 +3,9 @@
 //
 // It also implements contract.DeliveryAgent: platform Deliver/Remove calls
 // are projected into Delivery CRs in the target's store, which the
-// controller-runtime reconciler watches. Status updates from the reconciler
-// are reported back through the injected DeliveryReporter.
+// controller-runtime reconciler watches. Controllers write Delivery status
+// via the kube client; a status mirror translates those writes into
+// DeliveryReporter calls.
 package provider
 
 import (
@@ -49,6 +50,7 @@ type Options struct {
 type Provider struct {
 	scheme   *runtime.Scheme
 	reporter contract.DeliveryReporter
+	mirror   *statusMirror
 	logger   logr.Logger
 
 	mu        sync.RWMutex
@@ -80,6 +82,7 @@ func New(opts Options) (*Provider, error) {
 	p := &Provider{
 		scheme:    opts.Scheme,
 		reporter:  opts.Reporter,
+		mirror:    newStatusMirror(opts.Reporter),
 		logger:    opts.Logger,
 		targets:   make(map[multicluster.ClusterName]contract.TargetInfo),
 		clusters:  make(map[multicluster.ClusterName]*fsruntime.Cluster),
@@ -92,8 +95,9 @@ func New(opts Options) (*Provider, error) {
 	return p, nil
 }
 
-// Reporter returns the DeliveryReporter (for reconcilers that need to
-// report progress/results).
+// Reporter returns the DeliveryReporter used for recovery
+// (ListActiveDeliveries). Controllers should not call this; they write
+// Delivery status and the status mirror reports to the platform.
 func (p *Provider) Reporter() contract.DeliveryReporter { return p.reporter }
 
 // Start engages a cluster per known target and blocks until ctx is done.
@@ -131,9 +135,10 @@ func (p *Provider) engageTarget(ctx context.Context, t contract.TargetInfo) erro
 	}
 	st := store.New(p.scheme)
 	cl, err := fsruntime.NewCluster(fsruntime.Options{
-		Scheme: p.scheme,
-		Store:  st,
-		Logger: p.logger.WithValues("target", t.ID),
+		Scheme:     p.scheme,
+		Store:      st,
+		Logger:     p.logger.WithValues("target", t.ID),
+		StatusHook: p.mirror.Hook(),
 	})
 	if err != nil {
 		p.mu.Unlock()
@@ -250,14 +255,15 @@ func (p *Provider) upsertDelivery(ctx context.Context, target contract.TargetInf
 	existing := &deliveryv1.Delivery{}
 	err = direct.Get(ctx, client.ObjectKey{Namespace: "default", Name: string(deliveryID)}, existing)
 	if apierrors.IsNotFound(err) {
+		p.mirror.Reset(deliveryID)
 		return direct.Create(ctx, obj)
 	}
 	if err != nil {
 		return err
 	}
 	existing.Spec = obj.Spec
-	existing.Status.Reported = false
-	existing.Status.Phase = ""
+	existing.Status = deliveryv1.DeliveryStatus{}
+	p.mirror.Reset(deliveryID)
 	return direct.Update(ctx, existing)
 }
 

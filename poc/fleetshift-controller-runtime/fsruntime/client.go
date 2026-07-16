@@ -15,10 +15,16 @@ import (
 	"github.com/fleetshift/fleetshift-poc/poc/fleetshift-controller-runtime/store"
 )
 
+// StatusHook runs on Status().Update before the store write. If it
+// returns an error, the status is not persisted and Status().Update
+// fails — controllers requeue, matching kube status write failure.
+type StatusHook func(ctx context.Context, obj client.Object) error
+
 type fsClient struct {
 	scheme     *runtime.Scheme
 	store      *store.Store
 	restMapper meta.RESTMapper
+	statusHook StatusHook
 }
 
 var _ client.Client = (*fsClient)(nil)
@@ -128,9 +134,17 @@ func (w *fsStatusWriter) Create(ctx context.Context, obj client.Object, subResou
 }
 
 func (w *fsStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-	// Status updates go through the same store Update path. Spec/status
-	// split is a production concern (see pgruntime WriteStatus); the POC
-	// treats the whole object as one document.
+	// Hook runs before the store write so a failed report fails the status
+	// update (controller requeues) and nothing is persisted. This matches
+	// kube Status().Update failure semantics from the reconciler's POV,
+	// with the platform as the durable sink for delivery outcomes.
+	if w.client.statusHook != nil {
+		if err := w.client.statusHook(ctx, obj); err != nil {
+			return err
+		}
+	}
+	// Spec/status split is a production concern (see pgruntime WriteStatus);
+	// the POC treats the whole object as one document.
 	return w.client.store.Update(obj)
 }
 

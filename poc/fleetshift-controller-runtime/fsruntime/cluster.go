@@ -37,6 +37,10 @@ type Options struct {
 	Scheme *runtime.Scheme
 	Store  *store.Store
 	Logger logr.Logger
+	// StatusHook is invoked on Status().Update before the store write.
+	// Used to mirror Delivery status to the FleetShift DeliveryReporter.
+	// Full-object Create/Update (projection) do not invoke the hook.
+	StatusHook StatusHook
 }
 
 // Cluster is a controller-runtime cluster.Cluster backed by Store.
@@ -65,7 +69,12 @@ func NewCluster(opts Options) (*Cluster, error) {
 	}
 
 	restMapper := buildRESTMapper(opts.Scheme)
-	direct := &fsClient{scheme: opts.Scheme, store: opts.Store, restMapper: restMapper}
+	direct := &fsClient{
+		scheme:     opts.Scheme,
+		store:      opts.Store,
+		restMapper: restMapper,
+		statusHook: opts.StatusHook,
+	}
 	c := &fsCache{
 		scheme:     opts.Scheme,
 		store:      opts.Store,
