@@ -53,6 +53,19 @@ At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`,
 mounts that file into `fleetshift-server`, and adds `gcphcp` to the explicit
 addon list for the deployment.
 
+## All-in-one image
+
+Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server with baked-in UI assets. It is assembled on a schedule from `fleetshift-server:latest` and `fleetshift-web:latest`, so it can lag component merges by a few hours.
+
+```bash
+podman run --rm -p 8085:8085 -p 50051:50051 \
+  quay.io/stolostron/fleetshift:latest
+```
+
+In the future, we can hopefully extend this with separate process addons by leveraging a minimal supervisor like s6.
+
+This Podman compose stack remains the local multi-service setup (server + web-builder init, optional Keycloak/Postgres). Use the all-in-one image when you want a single container with API + UI.
+
 ## Deploy Modes
 
 | Mode | DB | Auth | Use Case |
