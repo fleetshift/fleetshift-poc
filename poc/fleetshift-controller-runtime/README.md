@@ -69,10 +69,32 @@ generation fencing / a small journal — not a full object database.
 | `controllers` | Ordinary reconciler; reports via `DeliveryReporter` | greeting controller / gcphcp reconcile |
 | `platform` | Fake control plane for tests | recording delivery + DeliveryReportService |
 
+## List/Watch → stock Reflector
+
+Client-side integration matches ordinary kube controllers:
+
+```
+store (projection + RV journal) 
+  → cache.ListerWatcher (metav1.ListOptions, watch.Interface, 410 Gone)
+  → SharedIndexInformer / stock Reflector
+  → workqueue → Reconcile against informer cache
+```
+
+- `store` is the POC analogue of postgres-controller-backend `internal/reader`:
+  commit-ordered seq, journaled watch, compaction → `ResourceExpired` (410).
+- `store.NewListerWatcher` is the only custom kube API surface.
+- `fsruntime` uses unmodified `toolscache.NewSharedIndexInformer` (Reflector
+  owns relist, watch restart, and indexer population). WatchList streaming
+  is opted out via `IsWatchListSemanticsUnSupported` — classic List+Watch.
+- Reconcile `GetClient()` reads the Reflector cache and writes the store.
+  Delivery projection uses `DirectClient()` so writes are not blocked on
+  informer lag.
+
 ## What stays the same
 
 - `Reconcile(ctx, req) (Result, error)`
 - `mcbuilder.ControllerManagedBy(mgr).For(&Delivery{}).Complete(r)`
+- SharedInformer → workqueue → reconcile against the informer cache
 - `client.Get` / `Status().Update` / `apierrors.IsNotFound`
 - Generation fencing and async report-back (same contract as gcphcp)
 
@@ -111,8 +133,8 @@ the controller-runtime watch/reconcile loop.
 ## Files
 
 - `contract/` — delivery protocol types
-- `store/` — in-memory list/watch object store
-- `fsruntime/` — controller-runtime Cluster/Client/Cache/Manager
+- `store/` — in-memory list/watch object store + `ListerWatcher`
+- `fsruntime/` — Cluster/Client/Cache/Manager (SharedIndexInformer-backed cache)
 - `provider/` — multicluster Provider + DeliveryAgent
 - `apis/delivery/v1alpha1/` — Delivery CR
 - `controllers/` — Delivery reconciler

@@ -243,10 +243,14 @@ func (p *Provider) upsertDelivery(ctx context.Context, target contract.TargetInf
 		},
 	}
 
+	// Project into the store directly so the write is visible immediately.
+	// Reconcilers read via GetClient() (Reflector cache); projection must
+	// not depend on informer lag.
+	direct := cl.(*fsruntime.Cluster).DirectClient()
 	existing := &deliveryv1.Delivery{}
-	err = cl.GetClient().Get(ctx, client.ObjectKey{Namespace: "default", Name: string(deliveryID)}, existing)
+	err = direct.Get(ctx, client.ObjectKey{Namespace: "default", Name: string(deliveryID)}, existing)
 	if apierrors.IsNotFound(err) {
-		return cl.GetClient().Create(ctx, obj)
+		return direct.Create(ctx, obj)
 	}
 	if err != nil {
 		return err
@@ -254,7 +258,7 @@ func (p *Provider) upsertDelivery(ctx context.Context, target contract.TargetInf
 	existing.Spec = obj.Spec
 	existing.Status.Reported = false
 	existing.Status.Phase = ""
-	return cl.GetClient().Update(ctx, existing)
+	return direct.Update(ctx, existing)
 }
 
 func (p *Provider) ensureTarget(ctx context.Context, t contract.TargetInfo) error {

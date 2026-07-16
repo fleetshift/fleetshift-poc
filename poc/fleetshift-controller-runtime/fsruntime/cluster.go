@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
+	toolscache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/tools/record"
 	"net/http"
@@ -42,7 +43,8 @@ type Options struct {
 type Cluster struct {
 	scheme     *runtime.Scheme
 	store      *store.Store
-	client     *fsClient
+	direct     *fsClient     // store-backed reads/writes (APIReader / projection)
+	client     client.Client // cache reads + store writes (reconcile path)
 	cache      *fsCache
 	restMapper meta.RESTMapper
 	logger     logr.Logger
@@ -63,18 +65,20 @@ func NewCluster(opts Options) (*Cluster, error) {
 	}
 
 	restMapper := buildRESTMapper(opts.Scheme)
-	cl := &fsClient{scheme: opts.Scheme, store: opts.Store, restMapper: restMapper}
+	direct := &fsClient{scheme: opts.Scheme, store: opts.Store, restMapper: restMapper}
 	c := &fsCache{
 		scheme:     opts.Scheme,
 		store:      opts.Store,
 		restMapper: restMapper,
 		logger:     opts.Logger.WithName("cache"),
-		informers:  make(map[schema.GroupVersionKind]*fsInformer),
+		informers:  make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer),
 	}
+	caching := &cachingClient{cache: c, writer: direct}
 	return &Cluster{
 		scheme:     opts.Scheme,
 		store:      opts.Store,
-		client:     cl,
+		direct:     direct,
+		client:     caching,
 		cache:      c,
 		restMapper: restMapper,
 		logger:     opts.Logger,
@@ -84,6 +88,11 @@ func NewCluster(opts Options) (*Cluster, error) {
 // Store returns the underlying object store (useful for tests / providers).
 func (c *Cluster) Store() *store.Store { return c.store }
 
+// DirectClient returns a store-backed client that bypasses the informer
+// cache. Use this for projecting desired state into the store; reconcilers
+// should use GetClient() so they read Reflector-populated cache state.
+func (c *Cluster) DirectClient() client.Client { return c.direct }
+
 func (c *Cluster) GetHTTPClient() *http.Client          { return nil }
 func (c *Cluster) GetConfig() *rest.Config              { return nil }
 func (c *Cluster) GetCache() cache.Cache                { return c.cache }
@@ -91,7 +100,7 @@ func (c *Cluster) GetScheme() *runtime.Scheme           { return c.scheme }
 func (c *Cluster) GetClient() client.Client             { return c.client }
 func (c *Cluster) GetFieldIndexer() client.FieldIndexer { return c.cache }
 func (c *Cluster) GetRESTMapper() meta.RESTMapper       { return c.restMapper }
-func (c *Cluster) GetAPIReader() client.Reader          { return c.client }
+func (c *Cluster) GetAPIReader() client.Reader          { return c.direct }
 func (c *Cluster) GetEventRecorderFor(name string) record.EventRecorder {
 	return &noopEventRecorder{}
 }
