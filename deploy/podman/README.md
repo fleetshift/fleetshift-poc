@@ -55,16 +55,32 @@ addon list for the deployment.
 
 ## All-in-one image
 
-Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server with baked-in UI assets. It is assembled on a schedule from `fleetshift-server:latest` and `fleetshift-web:latest`, so it can lag component merges by a few hours.
+Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server (including kind/podman tooling), baked-in UI assets, and defaults to serving the UI. It is assembled on a schedule from `fleetshift-server-local:latest` and `fleetshift-web:latest`, so it can lag component merges by a few hours.
+
+API + UI (runs as non-root by default):
 
 ```bash
 podman run --rm -p 8085:8085 -p 50051:50051 \
   quay.io/stolostron/fleetshift:latest
 ```
 
+With kind provisioning (same privileges/socket pattern as compose):
+
+```bash
+podman run --rm \
+  --privileged --user 0:0 \
+  -p 8085:8085 -p 50051:50051 \
+  -v /tmp:/tmp \
+  -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
+  -e CONTAINER_HOST=unix:///var/run/docker.sock \
+  -e KIND_EXPERIMENTAL_DOCKER_NETWORK=kind \
+  --network kind \
+  quay.io/stolostron/fleetshift:latest
+```
+
 In the future, we can hopefully extend this with separate process addons by leveraging a minimal supervisor like s6.
 
-This Podman compose stack remains the local multi-service setup (server + web-builder init, optional Keycloak/Postgres). Use the all-in-one image when you want a single container with API + UI.
+This Podman compose stack remains the local multi-service setup (server + web-builder init, optional Keycloak/Postgres). Use the all-in-one image when you want a single container with API + UI (and optionally kind).
 
 ## Deploy Modes
 
