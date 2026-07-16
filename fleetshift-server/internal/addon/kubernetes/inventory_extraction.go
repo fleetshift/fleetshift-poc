@@ -20,11 +20,12 @@ import (
 // [inventoryNode] for in-memory edge computation.
 //
 // The report always uses [ObjectResourceType] identity: ResourceName,
-// FleetShift labels, and observation come from [ObjectResourceName],
+// localLabels, and observation come from [ObjectResourceName],
 // [ObjectLabels], and [ObjectObservation]. Schema-defined fields,
 // optional size-capped annotations, and [SchemaEntry.ComputeExtra]
-// land in observation.extracted. Kubernetes object labels stay on the
-// inventory node (for selector matching), not on the report.
+// land in observation.extracted. Kubernetes object labels are
+// projected onto report.Labels (localLabels) and also kept on the
+// inventory node for selector matching.
 //
 // clusterResourceName is the managed cluster (clusters/{id}) used for
 // the object resource-name parent.
@@ -89,15 +90,11 @@ func ExtractObservedResource(
 
 	obs := ObjectObservation(id, r, extracted)
 	conditions := ObjectConditions(extractRawConditions(r), observedAt)
-
-	var k8sLabels map[string]string
-	if l := r.GetLabels(); len(l) > 0 {
-		k8sLabels = l
-	}
+	labels := ObjectLabels(r)
 
 	report := InventoryObjectReport{
 		Name:        name,
-		Labels:      ObjectLabels(id),
+		Labels:      labels,
 		Observation: &obs,
 		Conditions:  conditions,
 		ObservedAt:  observedAt,
@@ -109,7 +106,7 @@ func ExtractObservedResource(
 		Name:       r.GetName(),
 		Namespace:  r.GetNamespace(),
 		OwnerUID:   ownerUID,
-		Labels:     k8sLabels,
+		Labels:     labels,
 		Properties: extracted,
 		GVR:        entry.GVR,
 	}

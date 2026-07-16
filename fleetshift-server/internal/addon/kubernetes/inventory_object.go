@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"time"
 
@@ -16,8 +17,8 @@ import (
 // report every watched Kubernetes object, regardless of GVR or kind.
 // One generic type means new CRDs and API versions never require
 // registering a new FleetShift resource type; GVR, kind, namespace,
-// and name are instead carried in the object's resource name, labels,
-// and observation payload. Built from [AddonID] rather than a
+// and name are instead carried in the object's resource name and
+// observation payload. Built from [AddonID] rather than a
 // separate literal, so its service-name prefix can never drift from
 // the addon-ownership rule the platform validates against.
 const ObjectResourceType domain.ResourceType = domain.ResourceType(AddonID) + "/Object"
@@ -36,9 +37,9 @@ const (
 )
 
 // KubernetesObjectIdentity carries the fields needed to compute a
-// watched Kubernetes object's [domain.ResourceName], query labels, and
-// observation payload. All three are derived from the same identity
-// so they never disagree about which object they describe.
+// watched Kubernetes object's [domain.ResourceName] and observation
+// payload. Both are derived from the same identity so they never
+// disagree about which object they describe.
 //
 // ClusterResourceName is the managed cluster resource (e.g.
 // "clusters/c1") whose ID becomes the object-name parent segment.
@@ -66,12 +67,11 @@ func objectScope(namespace string) string {
 // GVRKey returns a stable, slash-free key for gvr:
 // "{groupKey}~{version}~{resource}", where groupKey is "core" for the
 // core API group and the raw group otherwise. This is used for the
-// [APIResourceCollectionID] resource-name segment and the k8s.gvr
-// label. Neither the raw "group/version/resource" form nor a dotted
-// "group.version.resource" form work as a single resource-name
-// segment: "/" cannot appear inside one segment, and groups already
-// contain dots, which would make a dotted key ambiguous to split back
-// apart.
+// [APIResourceCollectionID] resource-name segment. Neither the raw
+// "group/version/resource" form nor a dotted "group.version.resource"
+// form work as a single resource-name segment: "/" cannot appear
+// inside one segment, and groups already contain dots, which would
+// make a dotted key ambiguous to split back apart.
 func GVRKey(gvr schema.GroupVersionResource) string {
 	groupKey := gvr.Group
 	if groupKey == "" {
@@ -169,31 +169,21 @@ func requireClusterResourceName(name domain.ResourceName) error {
 	return nil
 }
 
-// ObjectLabels returns the initial set of Kubernetes identity labels
-// for id: GVR, kind, scope, namespace, name, and UID, for filtering and
-// grouping. Values are stored unencoded -- unlike [ObjectResourceName]'s
-// path segments, labels are not part of a resource-name path, so there
-// is nothing to escape. k8s.namespace is omitted entirely for
-// cluster-scoped objects rather than set to "", so its mere presence
-// signals namespace scope. Kubernetes' user-defined object labels are
-// deliberately not copied here: they are high-cardinality and
-// uncontrolled, and belong in the observation payload instead of the
-// shared label index.
-func ObjectLabels(id KubernetesObjectIdentity) map[string]string {
-	labels := map[string]string{
-		"k8s.gvr":      GVRKey(id.GVR),
-		"k8s.group":    id.GVR.Group,
-		"k8s.version":  id.GVR.Version,
-		"k8s.resource": id.GVR.Resource,
-		"k8s.kind":     id.Kind,
-		"k8s.scope":    objectScope(id.Namespace),
-		"k8s.name":     id.Name,
-		"k8s.uid":      id.UID,
+// ObjectLabels projects the object's metadata.labels into FleetShift
+// localLabels: the complete latest set, keys and values unchanged.
+// This mirrors [ObjectConditions] lifting status.conditions into the
+// inventory envelope. Nil or empty source labels become an empty map
+// so a ReplaceBatch clears any prior localLabels. Object identity
+// (GVR, kind, namespace, name, UID) lives on the resource name and
+// observation payload, not here.
+func ObjectLabels(obj *unstructured.Unstructured) map[string]string {
+	src := obj.GetLabels()
+	if len(src) == 0 {
+		return map[string]string{}
 	}
-	if id.Namespace != "" {
-		labels["k8s.namespace"] = id.Namespace
-	}
-	return labels
+	out := make(map[string]string, len(src))
+	maps.Copy(out, src)
+	return out
 }
 
 // ObjectObservation returns the base observation payload for id: the
@@ -204,6 +194,10 @@ func ObjectLabels(id KubernetesObjectIdentity) map[string]string {
 // schema-hook-computed enrichment for this object's kind, or an empty
 // object when none applies). extracted is passed through opaquely;
 // this function does not interpret it.
+//
+// metadata.labels are omitted here: they are projected into
+// [ObjectLabels] / resource.localLabels instead, matching how
+// status.conditions are lifted out of the observation blob.
 //
 // deletionTimestamp and ownerReferences are included alongside the
 // other metadata fields even though they are absent from most objects:
@@ -238,7 +232,6 @@ func ObjectObservation(id KubernetesObjectIdentity, obj *unstructured.Unstructur
 			"generation":        obj.GetGeneration(),
 			"creationTimestamp": obj.GetCreationTimestamp(),
 			"deletionTimestamp": obj.GetDeletionTimestamp(),
-			"labels":            obj.GetLabels(),
 			"annotations":       obj.GetAnnotations(),
 			"ownerReferences":   obj.GetOwnerReferences(),
 		},

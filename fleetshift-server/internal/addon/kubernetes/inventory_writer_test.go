@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -109,10 +110,36 @@ func mustObjectName(t *testing.T, clusterID, uid string, gvr schema.GroupVersion
 	return name
 }
 
+func reportObservationMap(r InventoryObjectReport) map[string]any {
+	if r.Observation == nil {
+		return nil
+	}
+	var top map[string]any
+	if err := json.Unmarshal(*r.Observation, &top); err != nil {
+		return nil
+	}
+	return top
+}
+
+func reportMetaName(r InventoryObjectReport) string {
+	meta, _ := reportObservationMap(r)["metadata"].(map[string]any)
+	name, _ := meta["name"].(string)
+	return name
+}
+
+func reportKind(r InventoryObjectReport) string {
+	kind, _ := reportObservationMap(r)["kind"].(string)
+	return kind
+}
+
+func reportUID(r InventoryObjectReport) string {
+	return string(r.Name.ID())
+}
+
 func reportNames(reports []InventoryObjectReport) map[string]bool {
 	names := make(map[string]bool, len(reports))
 	for _, r := range reports {
-		if n := r.Labels["k8s.name"]; n != "" {
+		if n := reportMetaName(r); n != "" {
 			names[n] = true
 		}
 	}
@@ -251,7 +278,7 @@ func TestDedup(t *testing.T) {
 		var upsertCount int
 		for _, d := range mock.getDeltas() {
 			for _, item := range d.delta.Upserts {
-				if item.Labels["k8s.name"] == "deploy-dup" {
+				if reportMetaName(item) == "deploy-dup" {
 					upsertCount++
 				}
 			}
@@ -301,8 +328,8 @@ func TestResync_MissingSchemaEntry(t *testing.T) {
 		if len(first.delta.Upserts) != 1 {
 			t.Fatalf("expected 1 upsert in resync, got %d", len(first.delta.Upserts))
 		}
-		if got := first.delta.Upserts[0].Labels["k8s.kind"]; got != "ConfigMap" {
-			t.Errorf("k8s.kind = %q, want ConfigMap", got)
+		if got := reportKind(first.delta.Upserts[0]); got != "ConfigMap" {
+			t.Errorf("kind = %q, want ConfigMap", got)
 		}
 	})
 }
@@ -323,7 +350,7 @@ func TestLateDeleteProtection(t *testing.T) {
 
 		for _, d := range mock.getDeltas() {
 			for _, item := range d.delta.Upserts {
-				if item.Labels["k8s.name"] == "deploy-late" {
+				if reportMetaName(item) == "deploy-late" {
 					t.Fatal("expected uid-late to be dropped by late-delete protection, but found in upserts")
 				}
 			}
@@ -1075,7 +1102,7 @@ func TestShutdownFlush_PersistsPendingEvents(t *testing.T) {
 		names := map[string]bool{}
 		for _, d := range mock.getDeltas() {
 			for _, item := range d.delta.Upserts {
-				names[item.Labels["k8s.name"]] = true
+				names[reportMetaName(item)] = true
 			}
 		}
 		if !names["deploy-1"] || !names["deploy-2"] {
@@ -1144,7 +1171,7 @@ func TestFlushFailure_ItemsRetriedOnNextTick(t *testing.T) {
 		var found bool
 		for _, d := range mock.getDeltas() {
 			for _, item := range d.delta.Upserts {
-				if item.Labels["k8s.name"] == "deploy-1" {
+				if reportMetaName(item) == "deploy-1" {
 					found = true
 				}
 			}
@@ -1295,7 +1322,7 @@ func TestFlushFailure_NewEventsMergedBetweenRetries(t *testing.T) {
 		names := map[string]bool{}
 		for _, d := range mock.getDeltas() {
 			for _, item := range d.delta.Upserts {
-				names[item.Labels["k8s.name"]] = true
+				names[reportMetaName(item)] = true
 			}
 		}
 		if !names["deploy-1"] {
@@ -1697,7 +1724,7 @@ func TestFlush_UpsertAndDeleteDifferentUIDsSameBatch(t *testing.T) {
 		var sawAdd, sawDel bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				if u.Labels["k8s.uid"] == "uid-add" {
+				if reportUID(u) == "uid-add" {
 					sawAdd = true
 				}
 			}
@@ -1752,7 +1779,7 @@ func TestRemoveGVR_DropsPendingForRemovedGVROnly(t *testing.T) {
 		var sawDeploy, sawRS bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				switch u.Labels["k8s.uid"] {
+				switch reportUID(u) {
 				case "uid-deploy":
 					sawDeploy = true
 				case "uid-rs":
@@ -1789,7 +1816,7 @@ func TestFlush_SkipsExtractionFailureWithoutDroppingSibling(t *testing.T) {
 		var sawOK, sawBad bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				switch u.Labels["k8s.name"] {
+				switch reportMetaName(u) {
 				case "deploy-ok":
 					sawOK = true
 				case "deploy-bad":
@@ -2177,7 +2204,7 @@ func TestResync_SkipsExtractionFailure(t *testing.T) {
 		if len(deltas[0].delta.Upserts) != 1 {
 			t.Fatalf("upserts = %d, want 1 (bad UID skipped)", len(deltas[0].delta.Upserts))
 		}
-		if deltas[0].delta.Upserts[0].Labels["k8s.uid"] != "uid-ok" {
+		if reportUID(deltas[0].delta.Upserts[0]) != "uid-ok" {
 			t.Fatalf("expected uid-ok report, got %+v", deltas[0].delta.Upserts[0].Labels)
 		}
 	})
@@ -2239,10 +2266,10 @@ func TestResync_ListedExtractFailureDoesNotDelete(t *testing.T) {
 		var sawOK bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				if u.Labels["k8s.uid"] == "uid-ok" {
+				if reportUID(u) == "uid-ok" {
 					sawOK = true
 				}
-				if u.Labels["k8s.uid"] == "uid-keep" {
+				if reportUID(u) == "uid-keep" {
 					t.Fatal("failed extract must not upsert uid-keep")
 				}
 			}
@@ -2639,7 +2666,7 @@ func TestWriter_FastReAddDropsPendingUpsertsFromPriorGeneration(t *testing.T) {
 		var sawOld, sawNew bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				switch u.Labels["k8s.uid"] {
+				switch reportUID(u) {
 				case "uid-old":
 					sawOld = true
 				case "uid-new":
@@ -2709,7 +2736,7 @@ func TestWriter_FastReAddDropsPendingDeletesFromPriorGeneration(t *testing.T) {
 				}
 			}
 			for _, u := range d.delta.Upserts {
-				if u.Labels["k8s.uid"] == "uid-keep" && u.IsDelete {
+				if reportUID(u) == "uid-keep" && u.IsDelete {
 					t.Fatal("upsert side must not carry IsDelete for uid-keep")
 				}
 			}
@@ -2717,7 +2744,7 @@ func TestWriter_FastReAddDropsPendingDeletesFromPriorGeneration(t *testing.T) {
 		var sawUpsert bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				if u.Labels["k8s.uid"] == "uid-keep" {
+				if reportUID(u) == "uid-keep" {
 					sawUpsert = true
 				}
 			}
@@ -2768,7 +2795,7 @@ func TestWriter_FastReAddDropsPendingOnlyForAdoptedGVR(t *testing.T) {
 		var sawDeploy1, sawDeploy2, sawRS bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
-				switch u.Labels["k8s.uid"] {
+				switch reportUID(u) {
 				case "uid-deploy":
 					sawDeploy1 = true
 				case "uid-deploy-2":
