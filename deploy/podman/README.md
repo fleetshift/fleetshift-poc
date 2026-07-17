@@ -59,8 +59,20 @@ Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server (fr
 
 API + UI (runs as non-root by default):
 
+Assumes an OIDC issuer is already running (not bundled). Use
+`host.docker.internal` rather than `localhost` so the same issuer URL works
+from the browser, the server process inside the container, and kind nodes
+(`localhost` inside a container is that container, not the host). Map
+`host.docker.internal` to loopback in the host’s `/etc/hosts` so the browser
+can resolve it; add `--add-host=host.docker.internal:host-gateway` if the
+runtime does not inject it. Compose Keycloak path:
+
+`https://host.docker.internal:8443/auth/realms/fleetshift`
+
 ```bash
 podman run --rm -p 8085:8085 -p 50051:50051 \
+  --add-host=host.docker.internal:host-gateway \
+  -e OIDC_ISSUER_URL=https://host.docker.internal:8443/auth/realms/fleetshift \
   quay.io/stolostron/fleetshift:latest
 ```
 
@@ -72,7 +84,9 @@ podman run --rm \
   -p 8085:8085 -p 50051:50051 \
   -v /tmp:/tmp \
   -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
+  --add-host=host.docker.internal:host-gateway \
   -e CONTAINER_HOST=unix:///var/run/docker.sock \
+  -e OIDC_ISSUER_URL=https://host.docker.internal:8443/auth/realms/fleetshift \
   -e KIND_EXPERIMENTAL_DOCKER_NETWORK=kind \
   --network kind \
   quay.io/stolostron/fleetshift:latest
