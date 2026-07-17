@@ -1,6 +1,8 @@
 import "./ClusterDetailPage.scss";
 
+import type { ClusterDetailTabProps } from "@fleetshift/common";
 import { PluginLink, usePluginNavigate } from "@fleetshift/common";
+import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 import {
   Breadcrumb,
@@ -33,6 +35,7 @@ import {
   TabTitleText,
   Title,
 } from "@patternfly/react-core";
+import type { ComponentType } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
@@ -44,6 +47,20 @@ import {
 } from "../gcphcp-plugin/api";
 import GcpHcpDeliveryEventsTab from "../gcphcp-plugin/GcpHcpDeliveryEventsTab";
 import { formatTime, stateLabel } from "../gcphcp-plugin/gcpHcpUtils";
+
+interface ResolvedTab {
+  id: string;
+  title: string;
+  eventKey: string;
+  priority: number;
+  Component: ComponentType<ClusterDetailTabProps>;
+}
+
+const CLUSTER_DETAIL_TAB_TYPE = "fleetshift.cluster-detail-tab";
+
+function isClusterDetailTabExtension(e: { type: string }): boolean {
+  return e.type === CLUSTER_DETAIL_TAB_TYPE;
+}
 
 function OverviewTab({ cluster }: { cluster: GcpHcpCluster }) {
   const sl = stateLabel(cluster.state);
@@ -186,6 +203,28 @@ export default function ClusterDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
+
+  const [tabExtensions] = useResolvedExtensions(isClusterDetailTabExtension);
+  const resolvedTabs = useMemo<ResolvedTab[]>(() => {
+    const tabs: ResolvedTab[] = [];
+    for (const ext of tabExtensions) {
+      const p = ext.properties as unknown as {
+        id: string;
+        title: string;
+        eventKey: string;
+        priority?: number;
+        component: ComponentType<ClusterDetailTabProps>;
+      };
+      tabs.push({
+        id: p.id,
+        title: p.title,
+        eventKey: p.eventKey,
+        priority: p.priority ?? 100,
+        Component: p.component,
+      });
+    }
+    return tabs.sort((a, b) => a.priority - b.priority);
+  }, [tabExtensions]);
 
   const fetchCluster = useCallback(
     async (silent = false) => {
@@ -356,6 +395,19 @@ export default function ClusterDetailPage() {
             <GcpHcpDeliveryEventsTab />
           </div>
         </Tab>
+        {resolvedTabs.map((tab) => (
+          <Tab
+            key={tab.eventKey}
+            eventKey={tab.eventKey}
+            title={<TabTitleText>{tab.title}</TabTitleText>}
+            mountOnEnter
+            unmountOnExit
+          >
+            <div className="pf-v6-u-pt-md">
+              <tab.Component clusterId={clusterId} />
+            </div>
+          </Tab>
+        ))}
       </Tabs>
 
       <Modal

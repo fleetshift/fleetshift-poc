@@ -68,6 +68,7 @@ export type {
   SearchResultResolve,
 } from "./searchResultRenderer.js";
 export type {
+  ClusterDetailTabProps,
   ClusterProviderCardProps,
   ClusterProviderWizardProps,
   OnboardingActionCardProps,

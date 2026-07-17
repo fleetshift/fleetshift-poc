@@ -162,6 +162,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const blockCloseRef = useRef(false);
   const requestIdRef = useRef(0);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const total = totalCount(results);
 
@@ -171,35 +172,54 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   }, [onStateChange]);
 
   const clearSearch = useCallback(() => {
+    ++requestIdRef.current;
+    clearTimeout(debounceTimerRef.current);
     setSearchValue("");
     setResults(EMPTY);
     closeMenu();
   }, [closeMenu]);
 
   const handleChange = useCallback(
-    async (_e: unknown, value: string) => {
+    (_e: unknown, value: string) => {
       setSearchValue(value);
       if (!value.trim()) {
+        ++requestIdRef.current;
+        clearTimeout(debounceTimerRef.current);
         setResults(EMPTY);
         setIsOpen(false);
         onStateChange?.(false);
         return;
       }
+
       const id = ++requestIdRef.current;
-      const [invEntoryResults, r] = await Promise.all([
-        inventorySearch(value),
-        query(value),
-      ]);
-      if (id !== requestIdRef.current) return;
-      setResults({ ...r, resources: invEntoryResults });
-      const hasResults = totalCount(r) > 0;
-      setIsOpen(hasResults);
-      onStateChange?.(hasResults);
+
+      query(value).then((r) => {
+        if (id !== requestIdRef.current) return;
+        setResults((prev) => ({ ...prev, ...r }));
+        const hasResults = totalCount(r) > 0;
+        if (hasResults) {
+          setIsOpen(true);
+          onStateChange?.(true);
+        }
+      });
+
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(async () => {
+        const invResults = await inventorySearch(value);
+        if (id !== requestIdRef.current) return;
+        setResults((prev) => ({ ...prev, resources: invResults }));
+        if (invResults.length > 0) {
+          setIsOpen(true);
+          onStateChange?.(true);
+        }
+      }, 300);
     },
     [query, onStateChange, inventorySearch],
   );
 
   const handleClear = useCallback(() => {
+    ++requestIdRef.current;
+    clearTimeout(debounceTimerRef.current);
     setSearchValue("");
     setResults(EMPTY);
     setIsOpen(false);
