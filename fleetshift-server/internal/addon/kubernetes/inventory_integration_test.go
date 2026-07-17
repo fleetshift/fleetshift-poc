@@ -1222,17 +1222,29 @@ func (f *e2eFixture) awaitRunningPod(t *testing.T, namePrefix string) []*domain.
 }
 
 // awaitRunningWorkload waits until Deployment, ReplicaSet, and a Running
-// Pod are all present. A Running Pod alone can race ahead of RS/Deploy
-// indexing on slower CI.
+// Pod are all present with status-derived extracted fields populated.
+// A Running Pod alone can race ahead of RS/Deploy indexing and ahead of
+// Deployment/ReplicaSet status updates (availableReplicas/readyReplicas
+// are omitempty and absent until the controllers report readiness).
 func (f *e2eFixture) awaitRunningWorkload(t *testing.T, deployName, namePrefix string) []*domain.ExtensionResource {
 	t.Helper()
 	return awaitInventoryMatch(t, f.store, func(objs []*domain.ExtensionResource) bool {
-		if findByKindName(objs, "Deployment", deployName) == nil {
+		deploy := findByKindName(objs, "Deployment", deployName)
+		if deploy == nil {
 			return false
 		}
-		if findByKindNamePrefix(objs, "ReplicaSet", namePrefix) == nil {
+		if _, ok := parseExtracted(t, deploy.Inventory())["availableReplicas"]; !ok {
 			return false
 		}
+
+		rs := findByKindNamePrefix(objs, "ReplicaSet", namePrefix)
+		if rs == nil {
+			return false
+		}
+		if _, ok := parseExtracted(t, rs.Inventory())["readyReplicas"]; !ok {
+			return false
+		}
+
 		for _, obj := range objs {
 			inv := obj.Inventory()
 			if inv == nil {
