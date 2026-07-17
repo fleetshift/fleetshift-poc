@@ -1,6 +1,6 @@
 # Kubernetes Addon — Architecture Diagrams
 
-Companion diagrams for [kubernetes-addon.md](kubernetes-addon.md). Diagrams 1–3 cover the indexing pipeline; diagram 4 covers platform wiring and indexer lifecycle.
+Companion diagrams for [kubernetes-inventory-and-delivery.md](kubernetes-inventory-and-delivery.md). Diagrams 1–3 cover the indexing pipeline; diagram 4 covers platform wiring and indexer lifecycle.
 
 ## 1. Watch Pipeline and Configuration
 
