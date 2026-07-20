@@ -52,10 +52,9 @@ require_oc_login
 [ -f "${ROOT_DIR}/.env" ] || { echo "ERROR: ${ROOT_DIR}/.env not found. Copy from .env.template."; exit 1; }
 
 # --- Generate config/secrets from .env ---
+# Caller-exported environment variables take precedence over .env values.
 echo "Generating config.env and secrets.env from .env..."
-set -a
-source "${ROOT_DIR}/.env"
-set +a
+load_dotenv "${ROOT_DIR}/.env"
 
 FLEETSHIFT_SERVER_ADDONS="kubernetes"
 GCPHCP_CONFIG_PATH=""

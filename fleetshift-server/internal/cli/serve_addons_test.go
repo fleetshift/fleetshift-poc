@@ -1,10 +1,55 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+func TestDefaultAddons(t *testing.T) {
+	t.Setenv("FLEETSHIFT_SERVER_ADDONS", "")
+	if got := defaultAddons(); got != "kind,kubernetes" {
+		t.Fatalf("defaultAddons() = %q, want kind,kubernetes", got)
+	}
+
+	t.Setenv("FLEETSHIFT_SERVER_ADDONS", "kubernetes,gcphcp")
+	if got := defaultAddons(); got != "kubernetes,gcphcp" {
+		t.Fatalf("defaultAddons() with env = %q, want kubernetes,gcphcp", got)
+	}
+}
+
+func TestRequireGCPHCPConfig(t *testing.T) {
+	if err := requireGCPHCPConfig("/tmp/gcphcp.yaml"); err != nil {
+		t.Fatalf("requireGCPHCPConfig(path) unexpected error: %v", err)
+	}
+
+	err := requireGCPHCPConfig("")
+	if err == nil {
+		t.Fatal("requireGCPHCPConfig(\"\") = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "GCPHCP_CONFIG") {
+		t.Fatalf("requireGCPHCPConfig error %q does not mention GCPHCP_CONFIG", err)
+	}
+	if !strings.Contains(err.Error(), "--gcphcp-config") {
+		t.Fatalf("requireGCPHCPConfig error %q does not mention --gcphcp-config", err)
+	}
+}
+
+func TestResolveGCPHCPConfigPath(t *testing.T) {
+	t.Setenv("GCPHCP_CONFIG", "/env/gcphcp.yaml")
+	if got := resolveGCPHCPConfigPath("/flag/gcphcp.yaml"); got != "/flag/gcphcp.yaml" {
+		t.Fatalf("flag path should win, got %q", got)
+	}
+	if got := resolveGCPHCPConfigPath(""); got != "/env/gcphcp.yaml" {
+		t.Fatalf("env path = %q, want /env/gcphcp.yaml", got)
+	}
+
+	t.Setenv("GCPHCP_CONFIG", "")
+	if got := resolveGCPHCPConfigPath(""); got != "" {
+		t.Fatalf("empty path = %q, want empty", got)
+	}
+}
 
 func TestParseAddons(t *testing.T) {
 	tests := []struct {

@@ -96,6 +96,8 @@ tasks:
         msg: "AUTH must be local or external, got: {{.RESOLVED_AUTH}}"
       - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
         msg: "OIDC_ISSUER_URL is required when AUTH=external"
+      - sh: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}[ "{{.RESOLVED_AUTH}}" = "external" ]{{else}}true{{end}}'
+        msg: "GCPHCP_ENABLED=true requires AUTH=external. gcphcp does not work with local Keycloak."
     cmds:
       - '{{if eq .RESOLVED_AUTH "local"}}./scripts/generate-certs.sh{{else}}true{{end}}'
       - ./scripts/start.sh

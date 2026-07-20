@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # Shared helpers for deploy scripts. Source this, don't execute it.
 
+# Source a dotenv file without overriding variables already present in the
+# process environment. Explicitly exported caller values win over file values.
+load_dotenv() {
+  local env_file="$1"
+  local caller_env
+  caller_env="$(export -p | sed 's/^declare -x /export /')"
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+  eval "${caller_env}"
+}
+
 # Run a command with a deadline. Prefers GNU timeout, then gtimeout
 # (Homebrew coreutils on macOS), then perl alarm. Fails closed if none
 # are available so callers never hang indefinitely.

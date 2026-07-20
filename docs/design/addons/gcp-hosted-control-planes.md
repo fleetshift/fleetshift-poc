@@ -194,6 +194,16 @@ backend service. Target config is strictly infrastructure wiring: identity feder
 (`workforce_pool`, `workforce_provider`, `broker_sa_email`) and provisioning destination
 (`gcp_project`, `region`).
 
+Operators may supply the YAML file directly (`--gcphcp-config` / `GCPHCP_CONFIG`) or render it
+from environment variables through the shared `deploy/scripts/render-gcphcp-config.sh` path used by
+developer deployments and the all-in-one image. Environment-driven rendering is a supported
+operator configuration path: `GCPHCP_GATEWAY_URL` is required, and the remaining target/gateway
+fields may use the approved shared POC defaults when left unset. The concrete gateway URL remains
+private and must not appear in tracked source, documentation, tests, or image layers. Public
+configuration identifiers used as shared POC defaults (audience, project ID, workforce pool names,
+broker service-account email) are distinct from private credentials (tokens, private keys, client
+secrets, and the concrete gateway URL).
+
 ### 3.2 Config file
 
 The addon loads a single YAML config file at startup. The config enforces strict field validation:
@@ -207,7 +217,7 @@ gateway:
   audience: "<google-client-id>.apps.googleusercontent.com"
 
 targets:
-  - id: "gcphcp-example-region-staging"
+  - id: "gcphcp"
     gcp_project: "example-hcp-target-project"
     region: "us-central1"
     workforce_pool: "example-workforce-pool"
@@ -305,8 +315,9 @@ constructs a broker auth client for that target's identity federation path.
 Each target represents a provisioning destination: identity federation path plus GCP project +
 region.
 
-Target IDs are human-readable and encode scope (e.g. `gcphcp-example-region-staging`), but the
-addon keys off `Properties` values, not the ID string.
+Target IDs are human-readable. Earlier guidance suggested encoding scope in the ID
+(e.g. `gcphcp-example-region-staging`); the approved v1 default target ID is the stable
+identifier `gcphcp`. The addon keys off `Properties` values, not the ID string.
 
 V1 uses exactly one active target for managed-resource fulfillment.
 

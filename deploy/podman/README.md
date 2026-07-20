@@ -28,30 +28,29 @@ bin/fleetctl auth login       # log in (opens browser)
 ```
 
 `gcphcp` is opt-in in the Podman harness. A plain `task podman:up` starts the
-default local addon set without `gcphcp`. To enable `gcphcp`, set the
-`GCPHCP_*` values in `.env`, flip the enable flag, and choose the auth mode you
-want to run with:
+default local addon set without `gcphcp`. To enable `gcphcp`, set
+`GCPHCP_ENABLED=true` and `GCPHCP_GATEWAY_URL` (the only required value). The
+seven optional `GCPHCP_*` overrides default in
+`deploy/scripts/render-gcphcp-config.sh` when left empty:
 
 ```bash
 GCPHCP_ENABLED=true
 GCPHCP_GATEWAY_URL=https://<your-cls-gateway>
-GCPHCP_GATEWAY_AUDIENCE=<your-cls-gateway-audience>
-GCPHCP_TARGET_ID=gcphcp-example-us-central1
-GCPHCP_GCP_PROJECT=<your-gcp-project>
-GCPHCP_GCP_REGION=us-central1
-GCPHCP_WORKFORCE_POOL=<your-workforce-pool>
-GCPHCP_WORKFORCE_PROVIDER=<your-workforce-provider>
-GCPHCP_BROKER_SA_EMAIL=hcp-idtoken-broker@<your-gcp-project>.iam.gserviceaccount.com
+# Optional overrides — leave empty to use renderer defaults:
+# GCPHCP_GATEWAY_AUDIENCE, GCPHCP_TARGET_ID, GCPHCP_GCP_PROJECT,
+# GCPHCP_GCP_REGION, GCPHCP_WORKFORCE_POOL, GCPHCP_WORKFORCE_PROVIDER,
+# GCPHCP_BROKER_SA_EMAIL
 
 task podman:up AUTH=external
 ```
-For GCPHCP_ENABLED=true, you must also use AUTH=external. gcphcp does not work with local keycloak.
 
-For `AUTH=external`, make sure `OIDC_ISSUER_URL` is also set in `.env`.
+`GCPHCP_ENABLED=true` requires `AUTH=external`. The task fails early if local
+Keycloak auth is selected. For `AUTH=external`, also set `OIDC_ISSUER_URL` in
+`.env`.
 
-At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`,
-mounts that file into `fleetshift-server`, and adds `gcphcp` to the explicit
-addon list for the deployment.
+At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`
+(before Compose starts), mounts that file into `fleetshift-server`, and adds
+`gcphcp` to the explicit addon list for the deployment.
 
 ## All-in-one image
 
@@ -76,7 +75,7 @@ podman run --rm -p 8085:8085 -p 50051:50051 \
   quay.io/stolostron/fleetshift:latest
 ```
 
-With kind provisioning (same privileges/socket pattern as compose). This path is a trusted local/dev tool: privileged + host container socket means full control of the host engine.
+With kind provisioning (same privileges/socket pattern as compose). This path is a trusted local/dev tool: privileged + host container socket means full control of the host engine. With no GCP HCP variables, the image starts with `kind,kubernetes`. Supply only `-e GCPHCP_GATEWAY_URL=...` to activate `gcphcp` with the shared renderer defaults.
 
 ```bash
 podman run --rm \
@@ -162,8 +161,9 @@ Copy `.env.template` to `.env` and edit. All available settings are documented i
 ### `gcphcp` Addon Toggle
 
 - Default: `kind,kubernetes`
-- Add `gcphcp`: set `GCPHCP_ENABLED=true` and fill in the `GCPHCP_*` values in
-  `.env`
+- Add `gcphcp`: set `GCPHCP_ENABLED=true` and `GCPHCP_GATEWAY_URL` in `.env`
+  (`AUTH=external` required). Optional `GCPHCP_*` overrides use renderer
+  defaults when empty.
 - Runtime artifact: Podman renders `deploy/podman/.gcphcp.yaml` from `.env` and
   mounts it as `/config/gcphcp.yaml`
 - Follow-on tasks such as `task podman:logs`, `task podman:status`, and

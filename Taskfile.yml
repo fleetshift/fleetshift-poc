@@ -49,7 +49,12 @@ tasks:
 
   test:all:
     desc: Run unit tests for all modules
-    deps: [test:server, test:cli, test:server-integration]
+    deps: [test:server, test:cli, test:server-integration, test:deploy]
+
+  test:deploy:
+    desc: Run deploy script contract tests (renderer, entrypoint, dotenv precedence)
+    cmds:
+      - bash deploy/scripts/test-gcphcp-defaults.sh
 
   test:server:
     desc: Run server tests

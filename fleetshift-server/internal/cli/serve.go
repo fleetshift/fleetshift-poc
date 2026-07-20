@@ -92,7 +92,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
 	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
 	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
-	cmd.Flags().StringVar(&f.addons, "addons", "kind,kubernetes,gcphcp", "comma-separated list of addons to enable (default: all)")
+	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
 	return cmd
 }
@@ -264,30 +264,25 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	var gcphcpConcreteAgent *gcphcpaddon.Agent
 	var gcphcpCfg gcphcpaddon.Config
 	if enabledAddons["gcphcp"] {
-		configPath := f.gcphcpConfig
-		if configPath == "" {
-			configPath = os.Getenv("GCPHCP_CONFIG")
+		configPath := resolveGCPHCPConfigPath(f.gcphcpConfig)
+		if err := requireGCPHCPConfig(configPath); err != nil {
+			return err
 		}
-		if configPath != "" {
-			var err error
-			gcphcpCfg, err = gcphcpaddon.ParseConfig(configPath)
-			if err != nil {
-				return fmt.Errorf("parse gcphcp config: %w", err)
-			}
-			deps := gcphcpaddon.AgentDeps{
-				Gateway:  gcphcpCfg.Gateway,
-				Observer: gcphcpaddon.NewSlogAgentObserver(logger),
-				Reporter: deliveryReporter,
-			}
-			if kubeIndexing != nil {
-				deps.IndexingRuntime = kubeIndexing.Runtime
-			}
-			gcphcpConcreteAgent = gcphcpaddon.NewAgent(deps)
-			gcphcpAgent = gcphcpConcreteAgent
-		} else {
-			logger.Warn("gcphcp addon enabled but no config provided, skipping")
-			delete(enabledAddons, "gcphcp")
+		var err error
+		gcphcpCfg, err = gcphcpaddon.ParseConfig(configPath)
+		if err != nil {
+			return fmt.Errorf("parse gcphcp config: %w", err)
 		}
+		deps := gcphcpaddon.AgentDeps{
+			Gateway:  gcphcpCfg.Gateway,
+			Observer: gcphcpaddon.NewSlogAgentObserver(logger),
+			Reporter: deliveryReporter,
+		}
+		if kubeIndexing != nil {
+			deps.IndexingRuntime = kubeIndexing.Runtime
+		}
+		gcphcpConcreteAgent = gcphcpaddon.NewAgent(deps)
+		gcphcpAgent = gcphcpConcreteAgent
 	}
 
 	orchSpec := domain.NewOrchestrationWorkflowSpec(
@@ -856,6 +851,29 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// defaultAddons returns the serve --addons default. An explicit --addons flag
+// remains authoritative over FLEETSHIFT_SERVER_ADDONS.
+func defaultAddons() string {
+	return envOrDefault("FLEETSHIFT_SERVER_ADDONS", "kind,kubernetes")
+}
+
+func resolveGCPHCPConfigPath(flagPath string) string {
+	if flagPath != "" {
+		return flagPath
+	}
+	return os.Getenv("GCPHCP_CONFIG")
+}
+
+// requireGCPHCPConfig fails when gcphcp is in the effective addon list but no
+// config path is available. Explicitly requested addons must not be silently
+// dropped.
+func requireGCPHCPConfig(configPath string) error {
+	if configPath != "" {
+		return nil
+	}
+	return fmt.Errorf("gcphcp addon is enabled but no config was provided; set --gcphcp-config or GCPHCP_CONFIG to a gcphcp.yaml path")
 }
 
 func parseAddons(spec string) map[string]bool {

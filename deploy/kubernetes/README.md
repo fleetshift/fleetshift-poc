@@ -51,7 +51,8 @@ All tasks use the `kubernetes:` namespace (alias `k8:`).
 ## Configuration
 
 The deploy script reads the root `.env` and generates three files consumed by
-Kustomize generators:
+Kustomize generators. Values already exported in the process environment take
+precedence over `.env` (so `GCPHCP_GATEWAY_URL=... task kubernetes:deploy` wins).
 
 **`config.env`** (ConfigMap) — OIDC issuer URL, client IDs, audience, key
 enrollment settings, log level, resolved addon list, and optional
@@ -59,11 +60,11 @@ enrollment settings, log level, resolved addon list, and optional
 
 **`secrets.env`** (Secret) — PostgreSQL user, password, database name, and `DATABASE_URL`.
 
-**`gcphcp.yaml`** (Secret) — rendered from the `GCPHCP_*` values in `.env`.
-Contains identity federation wiring (workforce pool, provider, broker SA email)
-so it is stored as a Kubernetes Secret rather than a ConfigMap. When
-`GCPHCP_ENABLED=true`, the server mounts this file and starts with `gcphcp`
-enabled. When `false`, the generated file is a disabled placeholder and the
+**`gcphcp.yaml`** (Secret) — rendered from the `GCPHCP_*` values via the shared
+`deploy/scripts/render-gcphcp-config.sh`. When `GCPHCP_ENABLED=true`, only
+`GCPHCP_GATEWAY_URL` is required; the seven optional settings use renderer
+defaults when empty. The file is stored as a Kubernetes Secret rather than a
+ConfigMap. When `false`, the generated file is a disabled placeholder and the
 addon list stays `kubernetes`.
 
 Use the root `.env.template` for the authoritative input keys. The exact

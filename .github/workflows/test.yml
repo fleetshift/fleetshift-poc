@@ -54,3 +54,16 @@ jobs:
         if: matrix.module == 'fleetshift-server'
         working-directory: ${{ matrix.module }}
         run: go test -race -count=1 ./internal/addon/kubernetes/
+
+  deploy-scripts:
+    name: Deploy script contracts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run deploy contract tests
+        run: bash deploy/scripts/test-gcphcp-defaults.sh

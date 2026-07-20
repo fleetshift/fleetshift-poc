@@ -7,6 +7,9 @@ Usage: render-gcphcp-config.sh --output <path>
 
 Renders a gcphcp YAML config file from environment variables.
 When GCPHCP_ENABLED is not truthy, writes a disabled placeholder file.
+
+Only GCPHCP_GATEWAY_URL is required when enabled. The remaining values use
+built-in POC defaults unless overridden by a nonempty environment variable.
 EOF
   exit 1
 }
@@ -22,10 +25,13 @@ is_truthy() {
   esac
 }
 
-require_env() {
-  local name="$1"
-  if [ -z "${!name:-}" ]; then
-    echo "ERROR: ${name} is required when GCPHCP_ENABLED=true" >&2
+require_gateway_url() {
+  if [ -z "${GCPHCP_GATEWAY_URL:-}" ]; then
+    cat >&2 <<'EOF'
+ERROR: GCPHCP_GATEWAY_URL is required when GCPHCP_ENABLED=true.
+Set it in .env (for example GCPHCP_GATEWAY_URL=https://your-cls-gateway)
+or pass it with podman -e GCPHCP_GATEWAY_URL=https://your-cls-gateway.
+EOF
     exit 1
   fi
 }
@@ -39,6 +45,17 @@ yaml_escape() {
   s=${s//$'\t'/\\t}
   printf '%s' "$s"
 }
+
+# Built-in defaults for optional GCP HCP settings. Unset and empty values
+# are treated identically. Keep this block as the single runtime source of
+# defaults for deploy/podman, deploy/kubernetes, and the all-in-one image.
+default_gateway_audience="32555940559.apps.googleusercontent.com"
+default_target_id="gcphcp"
+default_gcp_project="gcp-ome-poc"
+default_gcp_region="us-central1"
+default_workforce_pool="ome-hcp"
+default_workforce_provider="ome-oidc"
+default_broker_sa_email="hcp-idtoken-broker@gcp-ome-poc.iam.gserviceaccount.com"
 
 OUTPUT_PATH=""
 
@@ -66,24 +83,25 @@ EOF
   exit 0
 fi
 
-require_env GCPHCP_GATEWAY_URL
-require_env GCPHCP_GATEWAY_AUDIENCE
-require_env GCPHCP_TARGET_ID
-require_env GCPHCP_GCP_PROJECT
-require_env GCPHCP_GCP_REGION
-require_env GCPHCP_WORKFORCE_POOL
-require_env GCPHCP_WORKFORCE_PROVIDER
-require_env GCPHCP_BROKER_SA_EMAIL
+require_gateway_url
+
+gateway_audience="${GCPHCP_GATEWAY_AUDIENCE:-$default_gateway_audience}"
+target_id="${GCPHCP_TARGET_ID:-$default_target_id}"
+gcp_project="${GCPHCP_GCP_PROJECT:-$default_gcp_project}"
+gcp_region="${GCPHCP_GCP_REGION:-$default_gcp_region}"
+workforce_pool="${GCPHCP_WORKFORCE_POOL:-$default_workforce_pool}"
+workforce_provider="${GCPHCP_WORKFORCE_PROVIDER:-$default_workforce_provider}"
+broker_sa_email="${GCPHCP_BROKER_SA_EMAIL:-$default_broker_sa_email}"
 
 cat > "$OUTPUT_PATH" <<EOF
 gateway:
   url: "$(yaml_escape "${GCPHCP_GATEWAY_URL}")"
-  audience: "$(yaml_escape "${GCPHCP_GATEWAY_AUDIENCE}")"
+  audience: "$(yaml_escape "${gateway_audience}")"
 targets:
-  - id: "$(yaml_escape "${GCPHCP_TARGET_ID}")"
-    gcp_project: "$(yaml_escape "${GCPHCP_GCP_PROJECT}")"
-    region: "$(yaml_escape "${GCPHCP_GCP_REGION}")"
-    workforce_pool: "$(yaml_escape "${GCPHCP_WORKFORCE_POOL}")"
-    workforce_provider: "$(yaml_escape "${GCPHCP_WORKFORCE_PROVIDER}")"
-    broker_sa_email: "$(yaml_escape "${GCPHCP_BROKER_SA_EMAIL}")"
+  - id: "$(yaml_escape "${target_id}")"
+    gcp_project: "$(yaml_escape "${gcp_project}")"
+    region: "$(yaml_escape "${gcp_region}")"
+    workforce_pool: "$(yaml_escape "${workforce_pool}")"
+    workforce_provider: "$(yaml_escape "${workforce_provider}")"
+    broker_sa_email: "$(yaml_escape "${broker_sa_email}")"
 EOF

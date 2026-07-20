@@ -5,9 +5,17 @@
 # container runtime CLI (podman) against a mounted host socket. For kind,
 # run privileged as root with the socket mounted (USER below is overridden
 # by --user 0:0).
+#
+# The entrypoint optionally renders GCP HCP config when the caller expresses
+# intent (GCPHCP_GATEWAY_URL, GCPHCP_CONFIG, or GCPHCP_ENABLED=true). The
+# default addon list remains kind,kubernetes until that intent is present.
 FROM quay.io/stolostron/fleetshift-server-local:latest
 COPY --from=quay.io/stolostron/fleetshift-web:latest /srv/web /srv/web
-RUN useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift \
+COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
+COPY deploy/scripts/fleetshift-aio-entrypoint.sh /usr/local/bin/fleetshift-aio-entrypoint.sh
+RUN chmod +x /usr/local/bin/render-gcphcp-config.sh /usr/local/bin/fleetshift-aio-entrypoint.sh \
+	&& useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift \
 	&& chown -R fleetshift:fleetshift /data /srv/web
 USER fleetshift
+ENTRYPOINT ["/usr/local/bin/fleetshift-aio-entrypoint.sh"]
 CMD ["serve", "--http-addr", ":8085", "--grpc-addr", ":50051", "--db", "/data/fleetshift.db", "--web-dir", "/srv/web", "--log-level", "debug"]
