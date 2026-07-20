@@ -38,7 +38,7 @@ describe("buildSignedInputEnvelope", () => {
     );
 
     expect(env).toBe(
-      '{"content":{"deployment_id":"my-dep","manifest_strategy":{"type":"inline","manifests":[{"manifest_type":"api.kind.cluster","content":{"name":"c1"}}]},"placement_strategy":{"type":"static","targets":["target-a"]}},"output_constraints":[],"valid_until":1773230400,"expected_generation":1}',
+      '{"content":{"name":"deployments/my-dep","manifest_strategy":{"type":"inline","manifests":[{"manifest_type":"api.kind.cluster","content":{"name":"c1"}}]},"placement_strategy":{"type":"static","targets":["target-a"]}},"output_constraints":[],"valid_until":1773230400,"expected_generation":1}',
     );
   });
 
@@ -55,7 +55,7 @@ describe("buildSignedInputEnvelope", () => {
     );
 
     expect(env).toBe(
-      '{"content":{"deployment_id":"dep-1","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"all"}},"output_constraints":[],"valid_until":1773230400}',
+      '{"content":{"name":"deployments/dep-1","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"all"}},"output_constraints":[],"valid_until":1773230400}',
     );
   });
 
@@ -76,7 +76,7 @@ describe("buildSignedInputEnvelope", () => {
     );
 
     expect(env).toBe(
-      '{"content":{"deployment_id":"dep-1","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"all"}},"output_constraints":[{"expression":"output.bar == true","name":"a-constraint"},{"expression":"output.foo == true","name":"z-constraint"}],"valid_until":1773230400,"expected_generation":1}',
+      '{"content":{"name":"deployments/dep-1","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"all"}},"output_constraints":[{"expression":"output.bar == true","name":"a-constraint"},{"expression":"output.foo == true","name":"z-constraint"}],"valid_until":1773230400,"expected_generation":1}',
     );
   });
 
@@ -96,7 +96,7 @@ describe("buildSignedInputEnvelope", () => {
     );
 
     expect(env).toBe(
-      '{"content":{"deployment_id":"dep-2","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"label","match_labels":{"env":"prod","zone":"us-east"}}},"output_constraints":[],"valid_until":1773230400,"expected_generation":1}',
+      '{"content":{"name":"deployments/dep-2","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"label","match_labels":{"env":"prod","zone":"us-east"}}},"output_constraints":[],"valid_until":1773230400,"expected_generation":1}',
     );
   });
 
@@ -119,8 +119,23 @@ describe("buildSignedInputEnvelope", () => {
     );
 
     expect(env).toBe(
-      '{"content":{"deployment_id":"dep-3","manifest_strategy":{"type":"inline","manifests":[{"manifest_type":"Deployment","content":{"replicas":3}},{"manifest_type":"Service","content":{"port":80}}]},"placement_strategy":{"type":"static","targets":["t1","t2"]}},"output_constraints":[],"valid_until":1773230400,"expected_generation":2}',
+      '{"content":{"name":"deployments/dep-3","manifest_strategy":{"type":"inline","manifests":[{"manifest_type":"Deployment","content":{"replicas":3}},{"manifest_type":"Service","content":{"port":80}}]},"placement_strategy":{"type":"static","targets":["t1","t2"]}},"output_constraints":[],"valid_until":1773230400,"expected_generation":2}',
     );
+  });
+
+  it("preserves full resource name when already prefixed", () => {
+    const ms: ManifestStrategy = { type: "inline" };
+    const ps: PlacementStrategy = { type: "all" };
+    const env = buildSignedInputEnvelope(
+      "deployments/already-prefixed",
+      ms,
+      ps,
+      testValidUntil,
+      [],
+      1,
+    );
+
+    expect(env).toContain('"name":"deployments/already-prefixed"');
   });
 
   it("is deterministic — same inputs produce same output", () => {
@@ -148,19 +163,19 @@ describe("buildSignedInputEnvelope", () => {
 describe("hashIntent", () => {
   it("vector 1: matches Go SHA-256 hash", async () => {
     const envelope =
-      '{"content":{"deployment_id":"my-dep","manifest_strategy":{"type":"inline","manifests":[{"manifest_type":"api.kind.cluster","content":{"name":"c1"}}]},"placement_strategy":{"type":"static","targets":["target-a"]}},"output_constraints":[],"valid_until":1773230400,"expected_generation":1}';
+      '{"content":{"name":"deployments/my-dep","manifest_strategy":{"type":"inline","manifests":[{"manifest_type":"api.kind.cluster","content":{"name":"c1"}}]},"placement_strategy":{"type":"static","targets":["target-a"]}},"output_constraints":[],"valid_until":1773230400,"expected_generation":1}';
     const hash = await hashIntent(envelope);
     expect(toHex(hash)).toBe(
-      "8e7a7e339e2a7fbc90f309f840af484cb995337c5618aef0ae7fe981fa199d88",
+      "51b18238a9177eb2f75b491df63b5df43152f286e76aa1189188a834a485f261",
     );
   });
 
   it("vector 2: minimal envelope hash", async () => {
     const envelope =
-      '{"content":{"deployment_id":"dep-1","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"all"}},"output_constraints":[],"valid_until":1773230400}';
+      '{"content":{"name":"deployments/dep-1","manifest_strategy":{"type":"inline"},"placement_strategy":{"type":"all"}},"output_constraints":[],"valid_until":1773230400}';
     const hash = await hashIntent(envelope);
     expect(toHex(hash)).toBe(
-      "4bd6fbf0aff573befbaca9f28d0ea1eabca91aabca6757e3629cda597c97ddb1",
+      "7d14a987dd45a4be7a16ceed059ded1889d14eb5b7be79098444d806c2e58583",
     );
   });
 
