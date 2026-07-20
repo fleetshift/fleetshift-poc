@@ -138,6 +138,21 @@ describe("buildSignedInputEnvelope", () => {
     expect(env).toContain('"name":"deployments/already-prefixed"');
   });
 
+  it("prefixes slash-containing non-resource IDs", () => {
+    const ms: ManifestStrategy = { type: "inline" };
+    const ps: PlacementStrategy = { type: "all" };
+    const env = buildSignedInputEnvelope(
+      "foo/bar",
+      ms,
+      ps,
+      testValidUntil,
+      [],
+      1,
+    );
+
+    expect(env).toContain('"name":"deployments/foo/bar"');
+  });
+
   it("is deterministic — same inputs produce same output", () => {
     const ms: ManifestStrategy = {
       type: "inline",

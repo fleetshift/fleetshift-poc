@@ -346,10 +346,11 @@ export default function ClusterDetailPage() {
         }
       } catch (e) {
         if (id !== requestIdRef.current) return;
-        const message =
-          e instanceof Error ? e.message : "Failed to load cluster";
-        setError(message);
-        if (silent) setResult(null);
+        if (!silent) {
+          const message =
+            e instanceof Error ? e.message : "Failed to load cluster";
+          setError(message);
+        }
       } finally {
         if (id === requestIdRef.current && !silent) setLoading(false);
       }

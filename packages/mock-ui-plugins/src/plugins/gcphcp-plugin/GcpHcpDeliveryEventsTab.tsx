@@ -9,7 +9,7 @@ import {
   ToolbarGroup,
   ToolbarItem,
 } from "@patternfly/react-core";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import EventLogTerminal from "./EventLogTerminal";
 import { useAutoScroll } from "./useAutoScroll";
@@ -25,9 +25,13 @@ export default function GcpHcpDeliveryEventsTab({
   const { events, connected } = useDeliveryEvents(clusterId);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const lines = events.map(
-    (ev) =>
-      `[${formatTimestamp(ev.timestamp)}] [${ev.eventKind}] ${ev.message}`,
+  const lines = useMemo(
+    () =>
+      events.map(
+        (ev) =>
+          `[${formatTimestamp(ev.timestamp)}] [${ev.eventKind}] ${ev.message}`,
+      ),
+    [events],
   );
 
   const { containerRef } = useAutoScroll([lines.length]);

@@ -41,7 +41,7 @@ export function buildSignedInputEnvelope(
   expectedGeneration: number,
 ): string {
   const content: Record<string, unknown> = {
-    name: deploymentId.includes("/")
+    name: deploymentId.startsWith("deployments/")
       ? deploymentId
       : `deployments/${deploymentId}`,
     manifest_strategy: marshalManifestStrategy(manifestStrategy),
