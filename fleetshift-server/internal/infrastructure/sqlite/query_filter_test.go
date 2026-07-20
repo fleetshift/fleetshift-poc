@@ -635,3 +635,18 @@ func TestQueryFieldResolver_NestedInventoryPathsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryFieldResolver_PresenceAndMembershipSQLShape(t *testing.T) {
+	pred := compile(t, `has(resource.labels.team)`)
+	if !strings.Contains(pred.SQL, "json_type(er.labels") {
+		t.Errorf("SQL = %q, want json_type for label key presence", pred.SQL)
+	}
+	pred = compile(t, `"k" in resource.observation.foo`)
+	if !strings.Contains(pred.SQL, "json_type(") || !strings.Contains(pred.SQL, "json_each(") {
+		t.Errorf("SQL = %q, want dynamic json_type/json_each dispatch", pred.SQL)
+	}
+	err := compileErr(t, `"x" in resource.pauseReason`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("scalar membership: err = %v, want ErrInvalidArgument", err)
+	}
+}

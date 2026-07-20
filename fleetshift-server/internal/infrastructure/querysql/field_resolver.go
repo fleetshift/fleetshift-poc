@@ -111,14 +111,56 @@ type ResolveContext struct {
 	Bind func(v any) string
 }
 
+// ContainerKind classifies the RHS of a string-literal container
+// membership test (`"key" in <path>`). The compiler passes
+// [ContainerKindUnknown] unless a caller/test forces a specialized
+// lowering; resolvers may also upgrade Unknown to Object/List from a
+// known path shape or schema, or reject [ContainerKindScalar].
+type ContainerKind int
+
+const (
+	// ContainerKindUnknown means the runtime JSON shape decides:
+	// object → key membership, array → string-value membership,
+	// missing/null/scalar → SQL NULL (CEL unknown/error).
+	ContainerKindUnknown ContainerKind = iota
+	// ContainerKindObject means object-key membership (including a
+	// JSON-null value for that key).
+	ContainerKindObject
+	// ContainerKindList means string-value membership in a JSON array.
+	ContainerKindList
+	// ContainerKindScalar is not a container; ResolveMembership must
+	// fail closed with [domain.ErrInvalidArgument].
+	ContainerKindScalar
+)
+
 // FieldResolver maps a CEL field path to a SQL expression. This
 // package's compiler owns CEL AST lowering -- boolean/comparison
-// structure, literals, in, startsWith, parameter binding,
-// resourceType guard detection -- and knows about field paths only
-// generically; a FieldResolver owns the actual row shape a path reads
-// from (column names, JSON extraction, schema-backed path
-// validation). The postgres and sqlite packages each supply a
-// QueryResources FieldResolver for their row shapes.
+// structure, literals, in, startsWith, has / presence, container
+// membership, parameter binding, resourceType guard detection -- and
+// knows about field paths only generically; a FieldResolver owns the
+// actual row shape a path reads from (column names, JSON extraction,
+// schema-backed path validation, projection-faithful presence). The
+// postgres and sqlite packages each supply a QueryResources
+// FieldResolver for their row shapes.
+//
+// Presence and container membership are first-class operations, not
+// "SQL IS NOT NULL" over [Resolve]'s value expression: ProtoJSON
+// default omission means a non-NULL storage column can still be
+// absent from the projected response body.
 type FieldResolver interface {
 	Resolve(path FieldPath, hint TypeHint, ctx ResolveContext) (SQLExpr, error)
+
+	// ResolvePresence compiles a CEL has(path) / test-only select into
+	// a SQL boolean predicate that is true iff path is present on the
+	// projected ProtoJSON resource body for reachable writer shapes.
+	ResolvePresence(path FieldPath, ctx ResolveContext) (sql string, err error)
+
+	// ResolveMembership compiles `"key" in <path>` container membership.
+	// path is the container field path (not including key). kind is a
+	// hint: Unknown selects runtime object/list dispatch (or a
+	// schema/path-equivalent specialization); Object/List force that
+	// branch; Scalar must be rejected. For an object-valued parent,
+	// object-key membership must agree with ResolvePresence of
+	// path+key when both spellings are supported.
+	ResolveMembership(path FieldPath, key string, kind ContainerKind, ctx ResolveContext) (sql string, err error)
 }

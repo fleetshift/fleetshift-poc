@@ -604,3 +604,239 @@ func numericAsString(v *structpb.Value) (string, bool) {
 	}
 	return "", false
 }
+
+// TestResourceQuery_PresenceRoundTrip asserts has() / container-key in
+// match if and only if the corresponding key appears on
+// ResourceResult.resource for reachable writer shapes (including
+// condition default omission and missing inventory).
+func TestResourceQuery_PresenceRoundTrip(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	registry := extensionresource.NewActiveResourceRegistry()
+	store := &sqlite.Store{DB: db, SchemaProvider: registry}
+
+	cfg := kindClusterConfig(t)
+	cfg.Capabilities.Inventory = &extensionresource.InventoryCapabilityConfig{}
+	built, err := extensionresource.Build(cfg, extensionresource.Deps{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := registry.Register(extensionresource.ActiveResourceVersion{
+		APIVersion:                  domain.APIVersion(cfg.Version),
+		GRPCServiceName:             cfg.ProtoPackage + "." + cfg.Singular + "Service",
+		HTTPPrefix:                  "/apis/" + string(cfg.ResourceType.ServiceName()) + "/" + cfg.Version + "/" + cfg.CollectionID,
+		DescriptorPath:              string(built.Descriptors.File.Path()),
+		ExtensionServiceDescriptors: built.Descriptors,
+		Config:                      cfg,
+		QuerySchema: domain.ResourceQuerySchema{
+			ResourceType:   cfg.ResourceType,
+			ServiceName:    cfg.ResourceType.ServiceName(),
+			TypeName:       cfg.Singular,
+			APIVersion:     domain.APIVersion(cfg.Version),
+			CollectionName: domain.CollectionName(cfg.CollectionID),
+			SpecDescriptor: cfg.Capabilities.Management.SpecDescriptor,
+		},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ctx := context.Background()
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	schema := kindaddon.Schema()
+	typeDef := domain.NewExtensionResourceType(
+		cfg.ResourceType, domain.APIVersion(cfg.Version), domain.CollectionID(cfg.CollectionID), now,
+		domain.WithManagement(
+			schema.Management.Relation,
+			domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
+				ContentHash:    []byte("hash"),
+				SignatureBytes: []byte("sig"),
+			},
+		),
+		domain.WithInventory(),
+	)
+	if err := tx.ExtensionResources().CreateType(ctx, typeDef); err != nil {
+		tx.Rollback()
+		t.Fatalf("CreateType: %v", err)
+	}
+
+	// Managed cluster with intent + pauseReason, no inventory report.
+	fID := domain.FulfillmentID("ful-presence")
+	if err := tx.Fulfillments().Create(ctx, domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
+		ID: fID, State: domain.FulfillmentStateActive, PauseReason: "waiting",
+		Generation: 2, CreatedAt: now, UpdatedAt: now,
+	})); err != nil {
+		tx.Rollback()
+		t.Fatalf("Create fulfillment: %v", err)
+	}
+	managedUID := domain.NewExtensionResourceUID()
+	managed := domain.NewExtensionResource(managedUID, cfg.ResourceType,
+		domain.ResourceName("clusters/presence"), now,
+		domain.WithManagedState(fID),
+		domain.WithExtensionLabels(map[string]string{"team": "platform"}),
+	)
+	if _, err := managed.RecordIntent(json.RawMessage(`{"name":"presence"}`), now); err != nil {
+		tx.Rollback()
+		t.Fatalf("RecordIntent: %v", err)
+	}
+	if err := tx.ExtensionResources().Create(ctx, managed); err != nil {
+		tx.Rollback()
+		t.Fatalf("Create managed: %v", err)
+	}
+
+	// Second managed cluster with inventory report (default-omitted condition fields).
+	fID2 := domain.FulfillmentID("ful-presence-inv")
+	if err := tx.Fulfillments().Create(ctx, domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
+		ID: fID2, State: domain.FulfillmentStateActive, Generation: 1, CreatedAt: now, UpdatedAt: now,
+	})); err != nil {
+		tx.Rollback()
+		t.Fatalf("Create fulfillment 2: %v", err)
+	}
+	invUID := domain.NewExtensionResourceUID()
+	withInv := domain.NewExtensionResource(invUID, cfg.ResourceType,
+		domain.ResourceName("clusters/with-inv"), now, domain.WithManagedState(fID2))
+	if _, err := withInv.RecordIntent(json.RawMessage(`{"name":"with-inv"}`), now); err != nil {
+		tx.Rollback()
+		t.Fatalf("RecordIntent 2: %v", err)
+	}
+	if err := tx.ExtensionResources().Create(ctx, withInv); err != nil {
+		tx.Rollback()
+		t.Fatalf("Create with-inv: %v", err)
+	}
+	ready, err := domain.NewCondition("Ready", domain.ConditionTrue, "", "", time.Time{})
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("NewCondition: %v", err)
+	}
+	obs := json.RawMessage(`{}`)
+	if err := tx.ExtensionResources().ReplaceInventory(ctx, []domain.InventoryReplacement{{
+		ResourceType: cfg.ResourceType,
+		Name:         domain.ResourceName("clusters/with-inv"),
+		CandidateUID: invUID,
+		Labels:       map[string]string{"node-role": "worker"},
+		Observation:  &obs,
+		Conditions:   []domain.Condition{ready},
+		ObservedAt:   now,
+		ReceivedAt:   now,
+	}}); err != nil {
+		tx.Rollback()
+		t.Fatalf("ReplaceInventory: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	lis := bufconn.Listen(1 << 20)
+	srv := grpc.NewServer()
+	pb.RegisterResourceQueryServiceServer(srv, &transportgrpc.ResourceQueryServer{
+		Queries:  application.NewResourceQueryService(store),
+		Registry: registry,
+	})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	client := pb.NewResourceQueryServiceClient(conn)
+
+	query := func(t *testing.T, filter string) []*pb.ResourceResult {
+		t.Helper()
+		page, err := client.QueryResources(context.Background(), &pb.QueryResourcesRequest{
+			Scope: "-", Filter: filter, PageSize: 50,
+		})
+		if err != nil {
+			t.Fatalf("QueryResources(%s): %v", filter, err)
+		}
+		return page.Resources
+	}
+	assertBodyKey := func(t *testing.T, body *structpb.Struct, key string, wantPresent bool) {
+		t.Helper()
+		_, present := body.Fields[key]
+		if present != wantPresent {
+			t.Fatalf("body key %q present=%v, want %v; fields=%v", key, present, wantPresent, body.Fields)
+		}
+	}
+
+	t.Run("managed_no_inventory", func(t *testing.T) {
+		results := query(t, `name == "//kind.fleetshift.io/clusters/presence"`)
+		if len(results) != 1 {
+			t.Fatalf("len=%d", len(results))
+		}
+		body := results[0].Resource
+		assertBodyKey(t, body, "spec", true)
+		assertBodyKey(t, body, "pauseReason", true)
+		assertBodyKey(t, body, "observation", false)
+		assertBodyKey(t, body, "localLabels", false)
+		assertBodyKey(t, body, "conditions", false)
+
+		if n := len(query(t, `has(resource.spec) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+			t.Fatalf("has(spec)=%d", n)
+		}
+		if n := len(query(t, `"spec" in resource && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+			t.Fatalf("spec in resource=%d", n)
+		}
+		if n := len(query(t, `has(resource.pauseReason) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+			t.Fatalf("has(pauseReason)=%d", n)
+		}
+		if n := len(query(t, `has(resource.observation) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 0 {
+			t.Fatalf("has(observation) on managed-only=%d", n)
+		}
+		if n := len(query(t, `!has(resource.observation) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+			t.Fatalf("!has(observation)=%d", n)
+		}
+	})
+
+	t.Run("inventory_condition_defaults", func(t *testing.T) {
+		results := query(t, `name == "//kind.fleetshift.io/clusters/with-inv"`)
+		if len(results) != 1 {
+			t.Fatalf("len=%d", len(results))
+		}
+		body := results[0].Resource
+		assertBodyKey(t, body, "observation", true)
+		assertBodyKey(t, body, "conditions", true)
+		conds := body.Fields["conditions"].GetStructValue()
+		if conds == nil {
+			t.Fatal("conditions not a struct")
+		}
+		ready := conds.Fields["Ready"].GetStructValue()
+		if ready == nil {
+			t.Fatal("Ready condition missing")
+		}
+		if _, ok := ready.Fields["status"]; !ok {
+			t.Fatal("status missing from projected Ready")
+		}
+		if _, ok := ready.Fields["reason"]; ok {
+			t.Fatal("empty reason should be omitted from projected Ready")
+		}
+		if _, ok := ready.Fields["message"]; ok {
+			t.Fatal("empty message should be omitted from projected Ready")
+		}
+		if _, ok := ready.Fields["lastTransitionTime"]; ok {
+			t.Fatal("zero lastTransitionTime should be omitted from projected Ready")
+		}
+
+		if n := len(query(t, `has(resource.conditions.Ready.status) && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 1 {
+			t.Fatalf("has(status)=%d", n)
+		}
+		if n := len(query(t, `has(resource.conditions.Ready.reason) && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 0 {
+			t.Fatalf("has(reason) with empty=%d", n)
+		}
+		if n := len(query(t, `"reason" in resource.conditions.Ready && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 0 {
+			t.Fatalf("reason in Ready=%d", n)
+		}
+		if n := len(query(t, `has(resource.observation) && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 1 {
+			t.Fatalf("has(empty observation)=%d", n)
+		}
+	})
+}

@@ -201,6 +201,9 @@ func seedQRBClusters(t *testing.T, db *sql.DB) {
 	}
 }
 
+// seedQRBNodes mirrors the postgres corpus: numeric capacity.cpu,
+// ~2% rare bench-rare local-label + observation.tags.canary, and
+// observation.roles string arrays on every node.
 func seedQRBNodes(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
@@ -219,9 +222,21 @@ func seedQRBNodes(t *testing.T, db *sql.DB) {
 			uids[i] = domain.NewExtensionResourceUID().String()
 			resourceIDs[i] = fmt.Sprintf("node-%08d", idx)
 			role := roles[idx%len(roles)]
-			invLabels[i] = fmt.Sprintf(`{"node-role":%q}`, role)
+			if idx%50 == 0 {
+				invLabels[i] = fmt.Sprintf(`{"node-role":%q,"bench-rare":"1"}`, role)
+			} else {
+				invLabels[i] = fmt.Sprintf(`{"node-role":%q}`, role)
+			}
 			cpu := idx%64 + 1
-			observations[i] = fmt.Sprintf(`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d}}`, cpu, max(cpu-2, 1))
+			if idx%50 == 0 {
+				observations[i] = fmt.Sprintf(
+					`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d},"roles":[%q],"tags":{"canary":true}}`,
+					cpu, max(cpu-2, 1), role)
+			} else {
+				observations[i] = fmt.Sprintf(
+					`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d},"roles":[%q]}`,
+					cpu, max(cpu-2, 1), role)
+			}
 			ready := "True"
 			if idx%20 == 0 {
 				ready = "False"
@@ -405,6 +420,31 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 		`resource.localLabels["node-role"] == "worker"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "inventory condition equality (json_extract)",
 		`resource.conditions["Ready"].status == "True"`, "", defaultQueryPageSize, nil)
+	// Presence / container membership: residual JSON probes. Common /
+	// rare / missing keys, type-guarded vs fleet-wide, dynamic
+	// object/list membership, and max page size. Corpus: ~2% of nodes
+	// carry bench-rare / tags.canary.
+	explainQueryResources(t, db, "presence common extension label key",
+		`has(resource.labels.team)`, "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence common local-label key type-guarded (in)",
+		fmt.Sprintf(`resourceType == "%s/%s" && "node-role" in resource.localLabels`, qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence rare local-label key type-guarded",
+		fmt.Sprintf(`resourceType == "%s/%s" && "bench-rare" in resource.localLabels`, qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence missing label key fleet-wide",
+		`has(resource.labels.nonexistent_bench_key)`, "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence missing label key type-guarded",
+		fmt.Sprintf(`resourceType == "%s/%s" && has(resource.labels.nonexistent_bench_key)`, qrbClusterService, qrbClusterType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence dynamic object membership type-guarded",
+		fmt.Sprintf(`resourceType == "%s/%s" && "canary" in resource.observation.tags`, qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence dynamic list membership type-guarded",
+		fmt.Sprintf(`resourceType == "%s/%s" && "worker" in resource.observation.roles`, qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence common label key max page",
+		`has(resource.labels.team)`, "", maxQueryPageSize, nil)
 	explainQueryResources(t, db, "guarded numeric observation filter (safeJSONNumberCast)",
 		fmt.Sprintf(`resourceType == "%s/%s" && resource.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
 		"", defaultQueryPageSize, nil)
@@ -549,6 +589,43 @@ func TestQueryResourcesBenchmark(t *testing.T) {
 		{"inventory condition equality", domain.QueryResourcesRequest{
 			Filter:   `resource.conditions["Ready"].status == "True"`,
 			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence common extension label key", domain.QueryResourcesRequest{
+			Filter:   `has(resource.labels.team)`,
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence common local-label key type-guarded (in)", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && "node-role" in resource.localLabels`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence rare local-label key type-guarded", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && "bench-rare" in resource.localLabels`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence missing label key fleet-wide", domain.QueryResourcesRequest{
+			Filter:   `has(resource.labels.nonexistent_bench_key)`,
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		{"presence missing label key type-guarded", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && has(resource.labels.nonexistent_bench_key)`,
+				qrbClusterService, qrbClusterType),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		{"presence dynamic object membership type-guarded", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && "canary" in resource.observation.tags`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence dynamic list membership type-guarded", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && "worker" in resource.observation.roles`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence common label key max page", domain.QueryResourcesRequest{
+			Filter:   `has(resource.labels.team)`,
+			PageSize: int32(maxQueryPageSize),
 		}, false},
 		{"guarded numeric observation filter", domain.QueryResourcesRequest{
 			Filter: fmt.Sprintf(`resourceType == "%s/%s" && resource.observation.capacity.cpu > 32`,

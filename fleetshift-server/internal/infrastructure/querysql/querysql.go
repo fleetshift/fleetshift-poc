@@ -65,35 +65,38 @@
 // # Package split
 //
 // This package owns only CEL AST lowering: boolean/logical structure,
-// comparison, "in", and startsWith handling, literal binding
-// (including [ParseCELTimestamp] for timestamp() string literals), and
-// resourceType guard detection (compiler.go). It does not know what
-// field paths actually mean — column names, JSON extraction,
-// label/condition map keys, schema-backed path validation, dialect
-// boolean/collation spelling, or timestamp/JSON SQL rendering are all
-// the concern of whatever [FieldResolver] the caller supplies (see
-// field_resolver.go for that contract and the postgres/sqlite
-// packages' query_filter.go + query_expr_*.go for this project's
-// backend implementations). This split exists because querysql's
-// supported CEL subset is a QueryResources-wide contract — any storage
-// backend would parse and validate filters the same way — while the
-// row shape a field path resolves to is backend-specific.
+// comparison, "in" (value-list and container membership), startsWith,
+// has()/presence, literal binding (including [ParseCELTimestamp] for
+// timestamp() string literals), and resourceType guard detection
+// (compiler.go). It does not know what field paths actually mean —
+// column names, JSON extraction, label/condition map keys,
+// schema-backed path validation, dialect boolean/collation spelling,
+// projection-faithful presence predicates, or timestamp/JSON SQL
+// rendering are all the concern of whatever [FieldResolver] the caller
+// supplies (see field_resolver.go for that contract and the
+// postgres/sqlite packages' query_filter.go + query_expr_*.go for this
+// project's backend implementations). This split exists because
+// querysql's supported CEL subset is a QueryResources-wide contract —
+// any storage backend would parse and validate filters the same way —
+// while the row shape a field path resolves to is backend-specific.
 //
 // Parameter placeholder style is likewise a dialect concern, owned
 // by the caller's [ParamBinder] (see param_binder.go). [Compiler.Params]
 // is required; there is no default binder.
 //
 // Supported filter shape: see compiler.go for the supported operators
-// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith, timestamp) and
-// field-path syntax (identifiers, dotted selects, and string-keyed
-// index expressions). Timestamp response fields remain ProtoJSON
-// strings (direct comparison uses the canonical spelling);
+// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith, has, timestamp)
+// and field-path syntax (identifiers, dotted selects, and
+// string-keyed index expressions). Timestamp response fields remain
+// ProtoJSON strings (direct comparison uses the canonical spelling);
 // chronological / instant comparisons use timestamp() on both sides
-// and may wrap any string-valued path. Anything else -- unsupported
-// operators, arithmetic, regex, endsWith/contains/matches, and
-// exists/all/map/filter/has macros -- fails closed with
-// [domain.ErrInvalidArgument], as does any field path a configured
-// [FieldResolver] doesn't recognize.
+// and may wrap any string-valued path. Presence uses CEL has(select)
+// (not has(index)); container membership uses `"key" in <field path>`
+// alongside the existing `field in [literals]` value-list form.
+// Anything else -- unsupported operators, arithmetic, regex,
+// endsWith/contains/matches, and exists/all/map/filter macros --
+// fails closed with [domain.ErrInvalidArgument], as does any field
+// path a configured [FieldResolver] doesn't recognize.
 package querysql
 
 import (
@@ -276,9 +279,27 @@ func (st *state) resolve(path FieldPath, hint TypeHint) (SQLExpr, error) {
 	if st.fields == nil {
 		return SQLExpr{}, fmt.Errorf("filter: %w: field %q: no field resolver configured", domain.ErrInvalidArgument, path)
 	}
-	return st.fields.Resolve(path, hint, ResolveContext{
+	return st.fields.Resolve(path, hint, st.resolveContext())
+}
+
+func (st *state) resolvePresence(path FieldPath) (string, error) {
+	if st.fields == nil {
+		return "", fmt.Errorf("filter: %w: field %q: no field resolver configured", domain.ErrInvalidArgument, path)
+	}
+	return st.fields.ResolvePresence(path, st.resolveContext())
+}
+
+func (st *state) resolveMembership(path FieldPath, key string, kind ContainerKind) (string, error) {
+	if st.fields == nil {
+		return "", fmt.Errorf("filter: %w: field %q: no field resolver configured", domain.ErrInvalidArgument, path)
+	}
+	return st.fields.ResolveMembership(path, key, kind, st.resolveContext())
+}
+
+func (st *state) resolveContext() ResolveContext {
+	return ResolveContext{
 		Context:             st.ctx,
 		GuardedResourceType: st.guard,
 		Bind:                st.b.bind,
-	})
+	}
 }

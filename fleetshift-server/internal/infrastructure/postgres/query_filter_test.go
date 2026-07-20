@@ -911,3 +911,41 @@ func TestQueryFieldResolver_ConditionKeyInjectionAttempt(t *testing.T) {
 		t.Errorf("Args = %v, want the raw payload bound as a parameter", pred.Args)
 	}
 }
+
+func TestQueryFieldResolver_PresenceAndMembershipSQLShape(t *testing.T) {
+	pred := compile(t, `has(resource.labels.team)`)
+	if !strings.Contains(pred.SQL, "er.labels") || !strings.Contains(pred.SQL, "?") {
+		t.Errorf("SQL = %q, want er.labels ? key", pred.SQL)
+	}
+	if !argsContain(pred.Args, "team") {
+		t.Errorf("Args = %v, want team", pred.Args)
+	}
+
+	pred = compile(t, `"team" in resource.labels`)
+	if !strings.Contains(pred.SQL, "er.labels") || !strings.Contains(pred.SQL, "?") {
+		t.Errorf("SQL = %q, want object-key membership", pred.SQL)
+	}
+
+	pred = compile(t, `has(resource.conditions.Ready.reason)`)
+	if !strings.Contains(pred.SQL, "<> ''") {
+		t.Errorf("SQL = %q, want non-empty reason check (not raw ?)", pred.SQL)
+	}
+
+	pred = compile(t, `"k" in resource.observation.foo`)
+	if !strings.Contains(pred.SQL, "jsonb_typeof") {
+		t.Errorf("SQL = %q, want dynamic jsonb_typeof dispatch", pred.SQL)
+	}
+
+	err := compileErr(t, `"x" in resource.pauseReason`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("scalar membership: err = %v, want ErrInvalidArgument", err)
+	}
+	err = compileErr(t, `"x" in resource.name`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("body name membership: err = %v, want ErrInvalidArgument", err)
+	}
+	err = compileErr(t, `"x" in resourceType`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("envelope membership: err = %v, want ErrInvalidArgument", err)
+	}
+}

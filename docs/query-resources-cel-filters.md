@@ -51,12 +51,66 @@ still matches even when the right-hand side would not (see
 |------|---------|
 | `a == b`, `a != b` | Equality / inequality |
 | `a < b`, `a <= b`, `a > b`, `a >= b` | Ordering (when both sides are comparable) |
-| `a in […]` | Membership in a list of literals |
+| `a in […]` | Value membership in a list of literals |
+| `"key" in field` | Container membership (object key or list value; see below) |
+| `has(field.path)` | Presence of a select path on the projected resource body |
 | `field.startsWith("prefix")` | String prefix match |
 
 Operands on each side of a comparison must be consistent with the
 field’s value rules (see [Value types](#value-types)). Ordered
 comparisons across incompatible types are rejected as invalid.
+
+### Presence with `has()`
+
+`has(path)` is true when `path` appears on the projected ProtoJSON
+`resource` body. It follows standard CEL: the argument must be a
+**select** (`has(resource.labels.team)`), not an index
+(`has(resource.labels["team"])` is invalid).
+
+Message-shaped containers such as `resource.spec` and
+`resource.observation` remain present when the projected value is an
+empty object `{}`. Map-shaped fields (`labels`, `localLabels`,
+`conditions`) are omitted when empty, so `has(resource.labels)` is
+false when there are no labels.
+
+For free-form or non-identifier keys, use container membership instead
+of trying to force `has` with brackets:
+
+```text
+has(resource.labels.team)              # identifier-safe key
+"node-role" in resource.localLabels    # free-form key (use in, not has(index))
+has(resource.conditions.Ready.status)
+"status" in resource.conditions.Ready  # same meaning as the has() line above
+has(resource.spec)                     # empty {} spec still present
+"spec" in resource                     # same as has(resource.spec)
+has(resource.pauseReason)              # false when omitted as ""
+```
+
+Presence matches the response body, not raw storage defaults. For
+example, empty condition `reason` / `message` and a zero
+`lastTransitionTime` are omitted from ProtoJSON and therefore fail
+`has(...)` even if they exist in storage.
+
+### Container membership with `"key" in field`
+
+`"key" in <field path>` tests membership in a container field:
+
+- If the field is an **object** (map, condition entry, message, or JSON
+  object), the key is present when that object member exists (including
+  a JSON `null` value).
+- If the field is a **JSON array**, the key is present when a string
+  element equal to `key` exists.
+- If the field is missing, JSON `null`, or a scalar, the membership
+  test is unknown and the row does not match (including under `!`).
+
+For object-valued parents, `"key" in parent` has the same meaning as
+`has(parent.key)` when both can be spelled. Prefer `"key" in …` when
+the key is not a legal CEL identifier.
+
+Value-list membership (`field in ["a", "b"]`) is unchanged and
+distinct. Container membership requires a **string literal** on the
+left and a **field path** on the right; forms such as `1 in
+resource.labels` or `"x" in resource.pauseReason` are rejected.
 
 ### `timestamp()`
 
@@ -233,12 +287,18 @@ resource.state == "active"             # does not match
 
 A path that does not resolve (missing map key, missing nested field,
 absent inventory on a managed-only row, and similar) is a **non-match**
-for comparisons and membership — including `!=`.
+for comparisons and value-list membership — including `!=`.
+
+Use `has(...)` or `"key" in …` when you need to select rows where a
+field or key is present regardless of its value:
 
 ```text
 resource.observation.absent != 5       # does not select the row
+has(resource.observation.absent)       # true only if that key exists
+!has(resource.observation)             # managed-only / not-yet-reported rows
 true || resource.observation.absent != 5   # still matches (short-circuit)
 false && resource.observation.absent != 5  # does not match
+has(resource.observation) || resourceType == "kind.fleetshift.io/Cluster"
 ```
 
 Invalid `timestamp()` inputs (non-string JSON, non-RFC 3339 text) are
@@ -312,6 +372,17 @@ name.startsWith("//kind.fleetshift.io/")
 resourceType == "kubernetes.fleetshift.io/Node"
   && resource.observation.capacity.cpu > 4
 
+# Ready condition present (any status)
+has(resource.conditions.Ready)
+"Ready" in resource.conditions
+
+# Hyphenated local-label key exists
+"node-role" in resource.localLabels
+
+# Nested observation key (object) or string in a JSON array field
+"k" in resource.observation.tags
+"k" in resource.observation.roles
+
 # Instant: observed at or after noon UTC on 2026-06-01
 timestamp(resource.localUpdateTime) >= timestamp("2026-06-01T12:00:00Z")
 
@@ -329,3 +400,4 @@ timestamp(resource.conditions["Ready"].lastTransitionTime)
 5. Do not expect string↔number coercion.
 6. Use `timestamp()` on both sides for chronological comparisons.
 7. Remember missing paths do not match — including under `!=`.
+8. Use `has(select)` or `"key" in field` for presence; `has(map["key"])` is invalid.
