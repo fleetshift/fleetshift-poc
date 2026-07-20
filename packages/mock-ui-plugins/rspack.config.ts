@@ -596,16 +596,32 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       searchIcon: { $codeRef: "EksIcon.default" },
     }),
     createClusterProvider({
-      id: "aks",
-      label: "Azure AKS",
+      id: "assisted-installer",
+      label: "Assisted Installer",
       description:
-        "Create a managed Kubernetes cluster on Azure Kubernetes Service.",
-      keywords: ["aks", "azure", "microsoft"],
-      to: { search: "?create=aks" },
-      icon: { $codeRef: "AksProvider.AksIcon" },
-      card: { $codeRef: "AksProvider.AksProviderCard" },
-      wizard: { $codeRef: "AksProvider.AksWizard" },
-      searchIcon: { $codeRef: "AksIcon.default" },
+        "Create an OpenShift cluster on bare-metal or on-premise infrastructure using the Assisted Installer.",
+      keywords: ["assisted installer", "bare-metal", "on-premise", "openshift"],
+      to: { search: "?create=assisted-installer" },
+      icon: { $codeRef: "AssistedInstallerProvider.AssistedInstallerIcon" },
+      card: {
+        $codeRef: "AssistedInstallerProvider.AssistedInstallerProviderCard",
+      },
+      wizard: {
+        $codeRef: "AssistedInstallerProvider.AssistedInstallerWizard",
+      },
+      searchIcon: { $codeRef: "AssistedInstallerIcon.default" },
+    }),
+    createClusterProvider({
+      id: "aro",
+      label: "Azure Red Hat OpenShift",
+      description:
+        "Create a managed OpenShift cluster on Azure Red Hat OpenShift (ARO).",
+      keywords: ["aro", "azure", "openshift", "red hat"],
+      to: { search: "?create=aro" },
+      icon: { $codeRef: "AroProvider.AroIcon" },
+      card: { $codeRef: "AroProvider.AroProviderCard" },
+      wizard: { $codeRef: "AroProvider.AroWizard" },
+      searchIcon: { $codeRef: "AroIcon.default" },
     }),
     createClusterProvider({
       id: "rosa",
@@ -643,13 +659,27 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       category: "fleetshift.cluster-provider",
     }),
     createOnboardingAction({
-      id: "aks-connect",
-      label: "Azure AKS",
+      id: "assisted-installer-connect",
+      label: "Assisted Installer",
       description:
-        "Link your Azure subscription to import and manage AKS clusters.",
-      icon: { $codeRef: "AksIcon.default" },
-      card: { $codeRef: "AksOnboarding.AksOnboardingCard" },
-      form: { $codeRef: "AksOnboarding.AksOnboardingForm" },
+        "Link your infrastructure to deploy and manage bare-metal OpenShift clusters.",
+      icon: { $codeRef: "AssistedInstallerIcon.default" },
+      card: {
+        $codeRef: "AssistedInstallerOnboarding.AssistedInstallerOnboardingCard",
+      },
+      form: {
+        $codeRef: "AssistedInstallerOnboarding.AssistedInstallerOnboardingForm",
+      },
+      category: "fleetshift.cluster-provider",
+    }),
+    createOnboardingAction({
+      id: "aro-connect",
+      label: "Azure Red Hat OpenShift",
+      description:
+        "Link your Azure subscription to deploy and manage ARO clusters.",
+      icon: { $codeRef: "AroIcon.default" },
+      card: { $codeRef: "AroOnboarding.AroOnboardingCard" },
+      form: { $codeRef: "AroOnboarding.AroOnboardingForm" },
       category: "fleetshift.cluster-provider",
     }),
     createOnboardingAction({
@@ -771,8 +801,11 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       EksProvider: p(
         "./src/plugins/addon-demo-plugin/providers/EksProvider.tsx",
       ),
-      AksProvider: p(
-        "./src/plugins/addon-demo-plugin/providers/AksProvider.tsx",
+      AssistedInstallerProvider: p(
+        "./src/plugins/addon-demo-plugin/providers/AssistedInstallerProvider.tsx",
+      ),
+      AroProvider: p(
+        "./src/plugins/addon-demo-plugin/providers/AroProvider.tsx",
       ),
       RosaProvider: p(
         "./src/plugins/addon-demo-plugin/providers/RosaProvider.tsx",
@@ -782,15 +815,21 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       ),
       // Provider icons
       EksIcon: p("./src/plugins/addon-demo-plugin/icons/EksIcon.tsx"),
-      AksIcon: p("./src/plugins/addon-demo-plugin/icons/AksIcon.tsx"),
+      AssistedInstallerIcon: p(
+        "./src/plugins/addon-demo-plugin/icons/AssistedInstallerIcon.tsx",
+      ),
+      AroIcon: p("./src/plugins/addon-demo-plugin/icons/AroIcon.tsx"),
       RosaIcon: p("./src/plugins/addon-demo-plugin/icons/RosaIcon.tsx"),
       VsphereIcon: p("./src/plugins/addon-demo-plugin/icons/VsphereIcon.tsx"),
       // Provider onboarding
       EksOnboarding: p(
         "./src/plugins/addon-demo-plugin/providers/EksOnboarding.tsx",
       ),
-      AksOnboarding: p(
-        "./src/plugins/addon-demo-plugin/providers/AksOnboarding.tsx",
+      AssistedInstallerOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/AssistedInstallerOnboarding.tsx",
+      ),
+      AroOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/AroOnboarding.tsx",
       ),
       RosaOnboarding: p(
         "./src/plugins/addon-demo-plugin/providers/RosaOnboarding.tsx",
