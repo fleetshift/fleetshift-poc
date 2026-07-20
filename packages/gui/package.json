@@ -19,6 +19,7 @@
     "@patternfly/react-core": "^6.5.1",
     "@patternfly/react-icons": "^6.5.1",
     "@patternfly/react-table": "^6.5.1",
+    "@react-querybuilder/core": "^8.20.2",
     "@scalprum/core": "^0.10.0",
     "@scalprum/react-core": "^0.13.0",
     "clsx": "^2.1.1",

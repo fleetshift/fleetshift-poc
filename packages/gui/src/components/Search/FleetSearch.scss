@@ -1,6 +1,14 @@
 .ome-search {
   width: 100%;
   max-width: 480px;
+  transition: max-width 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+
+  &--advanced {
+    max-width: none;
+  }
 
   mark {
     font-weight: var(--pf-t--global--font--weight--body--bold);
@@ -99,5 +107,9 @@
       color: var(--pf-t--global--color--nonstatus--gray--default);
       font-style: italic;
     }
+  }
+
+  &__advanced-toggle {
+    flex-shrink: 0;
   }
 }

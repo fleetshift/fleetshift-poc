@@ -1,0 +1,117 @@
+.ome-search__advanced-bar {
+  width: 100%;
+  position: relative;
+}
+
+.ome-search__autocomplete {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: var(--pf-t--global--z-index--lg);
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: var(--pf-t--global--box-shadow--lg);
+
+  code {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+  }
+
+  .pf-v6-c-menu__group-title {
+    padding-bottom: var(--pf-t--global--spacer--sm);
+    text-transform: uppercase;
+    font-size: var(--pf-t--global--font--size--xs);
+    letter-spacing: 0.05em;
+  }
+}
+
+// Operator chips — compact inline layout
+.ome-search__operator-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+}
+
+.ome-search__operator-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm);
+  border: var(--pf-t--global--border--width--regular) solid
+    var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: var(--pf-t--global--font--size--sm);
+
+  &:hover,
+  &--active {
+    background: var(--pf-t--global--background--color--primary--default);
+    color: var(--pf-t--global--color--nonstatus--white--default);
+    border-color: var(--pf-t--global--background--color--primary--default);
+  }
+
+  code {
+    font-family: var(--pf-t--global--font--family--mono);
+  }
+}
+
+// CEL preview in menu footer
+.ome-search__cel-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--sm);
+  font-size: var(--pf-t--global--font--size--sm);
+}
+
+.ome-search__cel-preview-status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ome-search__cel-preview-icon--valid {
+  color: var(--pf-t--global--color--status--success--default);
+}
+
+.ome-search__cel-preview-icon--invalid {
+  color: var(--pf-t--global--color--status--danger--default);
+}
+
+.ome-search__cel-preview-expression {
+  font-family: var(--pf-t--global--font--family--mono);
+  font-size: var(--pf-t--global--font--size--sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex: 1;
+}
+
+.ome-search__cel-preview-error {
+  color: var(--pf-t--global--color--status--danger--default);
+  font-size: var(--pf-t--global--font--size--xs);
+  font-style: italic;
+}
+
+// Syntax coloring tokens
+.ome-search__cel-token--field {
+  color: var(--pf-t--global--color--brand--default);
+}
+
+.ome-search__cel-token--operator {
+  color: var(--pf-t--global--color--status--danger--default);
+}
+
+.ome-search__cel-token--value {
+  color: var(--pf-t--global--color--status--success--default);
+}
+
+.ome-search__cel-token--combinator {
+  color: var(--pf-t--global--color--nonstatus--gray--default);
+  font-weight: var(--pf-t--global--font--weight--body--bold);
+}
+
+.ome-search__cel-token--paren {
+  color: var(--pf-t--global--color--nonstatus--gray--default);
+}

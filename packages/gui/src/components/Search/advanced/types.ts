@@ -1,0 +1,68 @@
+export type {
+  DefaultRuleGroupType as RuleGroupType,
+  DefaultRuleType as RuleType,
+} from "@react-querybuilder/core";
+
+export interface FieldDef {
+  name: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "enum";
+  operators: string[];
+  enumValues?: string[];
+}
+
+export interface OperatorDef {
+  rqbName: string;
+  celSyntax: string;
+  label: string;
+  valueRequired: boolean;
+}
+
+export type CursorContextKind =
+  | "field"
+  | "operator"
+  | "value"
+  | "combinator"
+  | "empty";
+
+export interface CursorContext {
+  kind: CursorContextKind;
+  fieldName?: string;
+  partial: string;
+  replaceRange: [number, number];
+}
+
+export interface HistoryEntry {
+  expression: string;
+  timestamp: number;
+  favorite: boolean;
+}
+
+export interface Suggestion {
+  type: CursorContextKind;
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export type TokenType =
+  | "field"
+  | "operator"
+  | "value"
+  | "combinator"
+  | "paren"
+  | "dot-call"
+  | "whitespace"
+  | "unknown";
+
+export interface Token {
+  type: TokenType;
+  value: string;
+  start: number;
+  end: number;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+}

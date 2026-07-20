@@ -1,4 +1,4 @@
-import type { SearchResultResolve } from "@fleetshift/common";
+import type { ResourceResult, SearchResultResolve } from "@fleetshift/common";
 import { createResourceApi } from "@fleetshift/common";
 import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
 import { Label } from "@patternfly/react-core";
@@ -35,6 +35,7 @@ const client = createResourceApi("-");
 
 export function useInventorySearch(): {
   search: (term: string) => Promise<SearchResultItem[]>;
+  filterSearch: (celFilter: string) => Promise<SearchResultItem[]>;
   loaded: boolean;
 } {
   const [extensions, loaded] =
@@ -53,6 +54,66 @@ export function useInventorySearch(): {
     }
     return map;
   }, [extensions]);
+
+  const mapResult = useCallback(
+    (result: ResourceResult, highlight?: string): SearchResultItem => {
+      const renderer = rendererMap.get(result.resourceType);
+      const id =
+        ((result.resource as Record<string, unknown>).uuid as string) ??
+        ((result.resource as Record<string, unknown>).uid as string) ??
+        result.resource.name;
+      const rawName =
+        result.resource.name.split("/").pop() ?? result.resource.name;
+
+      if (!renderer) {
+        return {
+          id,
+          title: highlight ? highlightText(highlight, rawName) : rawName,
+          description: result.resourceType,
+          category: "resources",
+          pathname: "",
+          icon: "",
+        };
+      }
+
+      let rendered;
+      try {
+        rendered = renderer.resolve(result);
+      } catch (err) {
+        console.error(err);
+        return {
+          id,
+          title: highlight ? highlightText(highlight, rawName) : rawName,
+          description: result.resourceType,
+          category: "resources",
+          pathname: "",
+          icon: "",
+        };
+      }
+
+      const title = rendered.title ?? rawName;
+      return {
+        id,
+        title: highlight ? highlightText(highlight, title) : title,
+        description: "",
+        descriptionNode: badgedDescription(
+          renderer.label,
+          rendered.description,
+        ),
+        category: "resources",
+        pathname: "",
+        icon: "",
+        IconComponent: renderer.icon,
+        pluginLink: {
+          scope: rendered.scope,
+          module: rendered.module,
+          to: rendered.to,
+          search: rendered.search,
+        },
+      };
+    },
+    [rendererMap],
+  );
 
   const search = useCallback(
     async (term: string): Promise<SearchResultItem[]> => {
@@ -75,78 +136,32 @@ export function useInventorySearch(): {
           ...clusterResponse.resources,
           ...k8sResponse.resources,
         ];
-
-        return allResults.map((result) => {
-          const renderer = rendererMap.get(result.resourceType);
-
-          const id =
-            ((result.resource as Record<string, unknown>).uuid as string) ??
-            ((result.resource as Record<string, unknown>).uid as string) ??
-            result.resource.name;
-          if (!renderer) {
-            return {
-              id,
-              title: highlightText(
-                term,
-                result.resource.name.split("/").pop() ?? result.resource.name,
-              ),
-              description: result.resourceType,
-              category: "resources",
-              pathname: "",
-              icon: "",
-            };
-          }
-
-          let rendered;
-          try {
-            rendered = renderer.resolve(result);
-          } catch (err) {
-            console.error(err);
-            return {
-              id,
-              title: highlightText(
-                term,
-                result.resource.name.split("/").pop() ?? result.resource.name,
-              ),
-              description: result.resourceType,
-              category: "resources",
-              pathname: "",
-              icon: "",
-            };
-          }
-
-          return {
-            id,
-            title: highlightText(
-              term,
-              rendered.title ??
-                result.resource.name.split("/").pop() ??
-                result.resource.name,
-            ),
-            description: "",
-            descriptionNode: badgedDescription(
-              renderer.label,
-              rendered.description,
-            ),
-            category: "resources",
-            pathname: "",
-            icon: "",
-            IconComponent: renderer.icon,
-            pluginLink: {
-              scope: rendered.scope,
-              module: rendered.module,
-              to: rendered.to,
-              search: rendered.search,
-            },
-          };
-        });
+        return allResults.map((r) => mapResult(r, term));
       } catch (error) {
         console.error(error);
         return [];
       }
     },
-    [rendererMap],
+    [mapResult],
   );
 
-  return { search, loaded };
+  const filterSearch = useCallback(
+    async (celFilter: string): Promise<SearchResultItem[]> => {
+      console.info("[filterSearch] CEL filter:", celFilter);
+      try {
+        const response = await client.search({
+          filter: celFilter,
+          pageSize: 20,
+        });
+        console.info("[filterSearch] results:", response.resources.length);
+        return response.resources.map((r) => mapResult(r));
+      } catch (error) {
+        console.error("[filterSearch] error:", error);
+        return [];
+      }
+    },
+    [mapResult],
+  );
+
+  return { search, filterSearch, loaded };
 }

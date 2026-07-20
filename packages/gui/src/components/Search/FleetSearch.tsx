@@ -2,6 +2,7 @@ import "./FleetSearch.scss";
 
 import { loadPfIcon, PluginLink } from "@fleetshift/common";
 import {
+  Button,
   Divider,
   Menu,
   MenuContent,
@@ -9,9 +10,12 @@ import {
   MenuItem,
   MenuList,
   SearchInput,
+  ToolbarItem,
+  Tooltip,
 } from "@patternfly/react-core";
 import { Popper } from "@patternfly/react-core/dist/esm/helpers/Popper/Popper";
-import { SearchIcon } from "@patternfly/react-icons";
+import { CodeIcon, SearchIcon } from "@patternfly/react-icons";
+import clsx from "clsx";
 import {
   ComponentType,
   forwardRef,
@@ -27,6 +31,7 @@ import {
 import { Link } from "react-router-dom";
 
 import { useInventorySearch } from "../../hooks/useInventorySearch";
+import AdvancedSearchBar from "./advanced/AdvancedSearchBar";
 import type { GroupedResults, SearchResultItem } from "./searchIndex";
 import { useSearch } from "./SearchProvider";
 
@@ -153,18 +158,27 @@ const EMPTY: GroupedResults = {};
 
 const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   const { query } = useSearch();
-  const { search: inventorySearch } = useInventorySearch();
+  const { search: inventorySearch, filterSearch } = useInventorySearch();
   const [searchValue, setSearchValue] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [results, setResults] = useState<GroupedResults>(EMPTY);
+  const [isAdvanced, setIsAdvanced] = useState(false);
+  const [lastFilter, setLastFilter] = useState("");
+  const [advancedResults, setAdvancedResults] = useState<SearchResultItem[]>(
+    [],
+  );
+  const [isAdvancedLoading, setIsAdvancedLoading] = useState(false);
   const toggleRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const blockCloseRef = useRef(false);
   const requestIdRef = useRef(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const advancedDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const total = totalCount(results);
+  const isMac = navigator.platform.startsWith("Mac");
+  const shortcutHint = isMac ? "⌘⇧F" : "Ctrl+Shift+F";
 
   const closeMenu = useCallback(() => {
     setIsOpen(false);
@@ -366,7 +380,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
 
   const toggle = (
     <SearchInput
-      placeholder="Search pages, clusters, settings..."
+      placeholder={`Search pages, clusters, settings... (${shortcutHint} for CEL filter)`}
       value={searchValue}
       onChange={handleChange}
       onClear={handleClear}
@@ -460,7 +474,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
               );
             });
           })()}
-          {total === 0 && searchValue && (
+          {total === 0 && searchValue && !isAdvanced && (
             <MenuItem isDisabled>No results found</MenuItem>
           )}
         </MenuList>
@@ -468,15 +482,102 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
     </Menu>
   );
 
+  const handleAdvancedToggle = useCallback(() => {
+    setIsAdvanced((prev) => !prev);
+    setLastFilter("");
+    setAdvancedResults([]);
+    setIsAdvancedLoading(false);
+    clearTimeout(advancedDebounceRef.current);
+    if (isOpen) closeMenu();
+  }, [isOpen, closeMenu]);
+
+  useEffect(() => {
+    const handleShortcut = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
+        e.preventDefault();
+        handleAdvancedToggle();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [handleAdvancedToggle]);
+
+  const handleAdvancedDeactivate = useCallback(() => {
+    setIsAdvanced(false);
+  }, []);
+
+  const handleAdvancedExecute = useCallback(
+    async (expr: string) => {
+      clearTimeout(advancedDebounceRef.current);
+      setIsAdvancedLoading(true);
+      setLastFilter(expr);
+      const items = await filterSearch(expr);
+      setAdvancedResults(items);
+      setIsAdvancedLoading(false);
+    },
+    [filterSearch],
+  );
+
+  const handleAdvancedExpressionChange = useCallback(
+    (expr: string) => {
+      clearTimeout(advancedDebounceRef.current);
+      if (!expr.trim()) {
+        setAdvancedResults([]);
+        setIsAdvancedLoading(false);
+        setLastFilter("");
+        return;
+      }
+      setIsAdvancedLoading(true);
+      advancedDebounceRef.current = setTimeout(async () => {
+        const items = await filterSearch(expr.trim());
+        setAdvancedResults(items);
+        setLastFilter(expr.trim());
+        setIsAdvancedLoading(false);
+      }, 400);
+    },
+    [filterSearch],
+  );
+
+  const advancedResultNodes =
+    advancedResults.length > 0 ? advancedResults.map(renderItem) : undefined;
+
   return (
-    <div ref={containerRef} className="ome-search">
-      <Popper
-        trigger={toggle}
-        popper={menu}
-        appendTo={containerRef.current || undefined}
-        isVisible={isOpen}
-      />
-    </div>
+    <ToolbarItem style={{ width: "100%" }}>
+      <div
+        ref={containerRef}
+        className={clsx("ome-search", isAdvanced && "ome-search--advanced")}
+      >
+        {isAdvanced ? (
+          <AdvancedSearchBar
+            onDeactivate={handleAdvancedDeactivate}
+            onExecute={handleAdvancedExecute}
+            onExpressionChange={handleAdvancedExpressionChange}
+            results={advancedResultNodes}
+            lastFilter={lastFilter}
+            isLoading={isAdvancedLoading}
+          />
+        ) : (
+          <Popper
+            trigger={toggle}
+            popper={menu}
+            appendTo={containerRef.current || undefined}
+            isVisible={isOpen}
+          />
+        )}
+        <Tooltip
+          content={isAdvanced ? "Simple search" : "Advanced filter (CEL)"}
+        >
+          <Button
+            variant="plain"
+            onClick={handleAdvancedToggle}
+            aria-label="Toggle advanced search"
+            className="ome-search__advanced-toggle"
+          >
+            <CodeIcon />
+          </Button>
+        </Tooltip>
+      </div>
+    </ToolbarItem>
   );
 };
 
