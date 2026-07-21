@@ -8,10 +8,10 @@ import (
 
 // runMembershipFilterTests locks the schema-free (dynamic) membership
 // truth table for `"k" in <json path>`. Schema-specialized lowering
-// (descriptorContainerKind + ResolveMembership SQL shape for known
-// message/map/list, scalar rejection, and open-Struct parity with this
-// dynamic path) is covered in backend query_filter_test.go; for
-// schema-conforming values those branches must match this table.
+// (querysql ResolveContext classification + ResolveJSONMembership SQL
+// shape for known list / open Struct, object→presence, and scalar
+// rejection) is covered in querysql and backend query_filter_test.go;
+// for schema-conforming values those branches must match this table.
 func runMembershipFilterTests(t *testing.T, factory Factory) {
 	t.Run("DynamicObjectKeyMembership", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)

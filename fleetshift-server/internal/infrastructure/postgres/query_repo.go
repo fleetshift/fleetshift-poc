@@ -33,10 +33,10 @@ type QueryRepo struct {
 	// since the override owns its own field resolution, if any.
 	Compiler querysql.CELSQLCompiler
 
-	// SchemaProvider is threaded into the default compiler's field
-	// resolver so resource.spec.*/resource.observation.* field paths
-	// can be validated against real descriptors when known, and is
-	// also used to scope QueryResources to activated types (see
+	// SchemaProvider is threaded into the default compiler so
+	// resource.spec.*/resource.observation.* field paths can be
+	// validated against real descriptors when known, and is also used
+	// to scope QueryResources to activated types (see
 	// [domain.ResolveQueryResourceTypeScope]). Nil is a valid,
 	// permissive default (no activation IN constraint).
 	SchemaProvider domain.QuerySchemaProvider
@@ -47,8 +47,9 @@ func (r *QueryRepo) compiler() querysql.CELSQLCompiler {
 		return r.Compiler
 	}
 	return querysql.Compiler{
-		Fields: queryFieldResolver{SchemaProvider: r.SchemaProvider},
-		Params: dollarParams{},
+		Fields:  queryFieldResolver{},
+		Params:  dollarParams{},
+		Schemas: r.SchemaProvider,
 	}
 }
 
@@ -80,7 +81,6 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 	if err != nil {
 		return domain.QueryResourcesPage{}, err
 	}
-	// This must come after filter compilation, so it can validate
 	if scope.Empty {
 		return domain.QueryResourcesPage{}, nil
 	}

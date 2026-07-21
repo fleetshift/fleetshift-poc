@@ -19,16 +19,11 @@ import (
 // shape: envelope name, envelope resourceType, and fields under
 // resource by their canonical JSON names. Top-level identity
 // components and platform-only body fields are rejected.
-type queryFieldResolver struct {
-	// SchemaProvider, if set, lets resource.spec.* and
-	// resource.observation.* paths be validated against a real
-	// protobuf descriptor when the filter's top-level resourceType
-	// guard resolves to a type with one registered. See
-	// [domain.QuerySchemaProvider]'s doc for the absence-of-schema
-	// fallback behavior when this is nil or has nothing registered for
-	// the guarded type.
-	SchemaProvider domain.QuerySchemaProvider
-}
+//
+// Schema validation for resource.spec.*/resource.observation.* is
+// owned by [querysql.ResolveContext] (via the compiler's Schemas);
+// this resolver only maps validated paths to Postgres JSONB SQL.
+type queryFieldResolver struct{}
 
 var _ querysql.FieldResolver = queryFieldResolver{}
 
@@ -159,7 +154,7 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 		}
 	case "spec":
 		if len(rest) > 0 {
-			names, err := r.validateSpecPath(ctx, rest)
+			names, err := ctx.ValidateSpecPath(rest)
 			if err != nil {
 				return querysql.SQLExpr{}, err
 			}
@@ -204,7 +199,7 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 		}
 	case "observation":
 		if len(rest) > 0 {
-			names, err := r.validateObservationPath(ctx, rest)
+			names, err := ctx.ValidateObservationPath(rest)
 			if err != nil {
 				return querysql.SQLExpr{}, err
 			}

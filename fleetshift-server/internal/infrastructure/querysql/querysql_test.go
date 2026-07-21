@@ -35,17 +35,8 @@ func (stubResolver) ResolvePresence(path querysql.FieldPath, _ querysql.ResolveC
 	return "HAS(" + path.String() + ")", nil
 }
 
-func (stubResolver) ResolveMembership(path querysql.FieldPath, key string, kind querysql.ContainerKind, ctx querysql.ResolveContext) (string, error) {
-	if kind == querysql.ContainerKindScalar {
-		return "", fmt.Errorf("filter: %w: membership requires a container field", domain.ErrInvalidArgument)
-	}
-	if kind == querysql.ContainerKindList {
-		return fmt.Sprintf("LIST_HAS(%s, %s)", path.String(), ctx.Bind(key)), nil
-	}
-	// Object and Unknown: presence-equivalent path+key for object parents
-	// so has(parent.key) and "key" in parent share stub SQL.
-	full := append(append([]string(nil), path.Segments...), key)
-	return "HAS(" + querysql.FieldPath{Segments: full}.String() + ")", nil
+func (stubResolver) ResolveJSONMembership(target querysql.JSONMembershipTarget, key string, _ querysql.ResolveContext) (string, error) {
+	return fmt.Sprintf("JSON_MEM(%d,%v,%q)", target.Root, target.Path, key), nil
 }
 
 func compile(t *testing.T, filter string) querysql.SQLPredicate {
@@ -233,8 +224,8 @@ func (f recordingResolver) ResolvePresence(path querysql.FieldPath, ctx querysql
 	return stubResolver{}.ResolvePresence(path, ctx)
 }
 
-func (f recordingResolver) ResolveMembership(path querysql.FieldPath, key string, kind querysql.ContainerKind, ctx querysql.ResolveContext) (string, error) {
-	return stubResolver{}.ResolveMembership(path, key, kind, ctx)
+func (f recordingResolver) ResolveJSONMembership(target querysql.JSONMembershipTarget, key string, ctx querysql.ResolveContext) (string, error) {
+	return stubResolver{}.ResolveJSONMembership(target, key, ctx)
 }
 
 // TestCompileFilter_ComparisonRequiresFieldAndLiteral proves

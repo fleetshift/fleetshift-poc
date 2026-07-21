@@ -478,7 +478,7 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 			SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 
 	// Spec itself is a google.protobuf.Timestamp (ProtoJSON string):
 	// nested protobuf fields like seconds must be rejected.
@@ -499,7 +499,7 @@ func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
 	schemas := staticQuerySchemas{
 		rt: {ResourceType: rt, APIVersion: "v1", SpecDescriptor: desc},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
 	if !strings.Contains(pred.SQL, "ri.spec") {
@@ -560,7 +560,7 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 			SpecDescriptor: specTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 
 	t.Run("JSON camelCase accepted", func(t *testing.T) {
 		for _, filter := range []string{
@@ -647,7 +647,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 			SpecDescriptor: nestedSpecTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
 	if !argsContain(pred.Args, "nested") || !argsContain(pred.Args, "value") {
@@ -688,7 +688,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 }
 
 func TestQueryFieldResolver_SpecPermissiveExactKeysWhenSchemaAbsent(t *testing.T) {
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}, Params: dollarParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: staticQuerySchemas{}}
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == 5`)
 	if !argsContain(pred.Args, "api_server_port") {
 		t.Errorf("Args = %v, want exact open-map key preserved (no camelCase rewrite)", pred.Args)
@@ -957,6 +957,8 @@ func TestQueryFieldResolver_PresenceAndMembershipSQLShape(t *testing.T) {
 	}
 }
 
+// TestDescriptorContainerKind covers [querysql.DescriptorContainerKind]
+// with the nested-spec fixture shared by membership SQL tests.
 func TestDescriptorContainerKind(t *testing.T) {
 	desc := nestedSpecTestDescriptor(t)
 	tests := []struct {
@@ -978,7 +980,7 @@ func TestDescriptorContainerKind(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := descriptorContainerKind(desc, tt.names)
+			got, err := querysql.DescriptorContainerKind(desc, tt.names)
 			if tt.wantErr {
 				if !errors.Is(err, domain.ErrInvalidArgument) {
 					t.Fatalf("err = %v, want ErrInvalidArgument", err)
@@ -1009,7 +1011,7 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 			InventoryObservationDescriptor: desc,
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
 
 	t.Run("known message uses object-key presence", func(t *testing.T) {
@@ -1093,4 +1095,53 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 			t.Errorf("Args diverged: with=%v free=%v", withSchema.Args, free.Args)
 		}
 	})
+}
+
+// TestQueryFieldResolver_MembershipSingleSchemaLookup locks that list /
+// dynamic / object membership reuse one schema fetch per compilation
+// (classification + presence validation share the compiler cache).
+func TestQueryFieldResolver_MembershipSingleSchemaLookup(t *testing.T) {
+	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	desc := nestedSpecTestDescriptor(t)
+	inner := staticQuerySchemas{
+		rt: {
+			ResourceType:                   rt,
+			APIVersion:                     "v1",
+			InventoryObservationDescriptor: desc,
+		},
+	}
+	counting := &countingQuerySchemas{inner: inner}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: counting}
+	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
+
+	_ = compileWithResolver(t, c, guard+`"k" in resource.observation.tags`)
+	if counting.gets != 1 {
+		t.Errorf("list membership schema gets = %d, want 1", counting.gets)
+	}
+
+	counting.gets = 0
+	_ = compileWithResolver(t, c, guard+`"k" in resource.observation.metadata.foo`)
+	if counting.gets != 1 {
+		t.Errorf("open Struct membership schema gets = %d, want 1", counting.gets)
+	}
+
+	counting.gets = 0
+	_ = compileWithResolver(t, c, guard+`"value" in resource.observation.nested`)
+	if counting.gets != 1 {
+		t.Errorf("object membership schema gets = %d, want 1", counting.gets)
+	}
+}
+
+type countingQuerySchemas struct {
+	inner staticQuerySchemas
+	gets  int
+}
+
+func (c *countingQuerySchemas) GetResourceQuerySchema(ctx context.Context, rt domain.ResourceType) (domain.ResourceQuerySchema, bool, error) {
+	c.gets++
+	return c.inner.GetResourceQuerySchema(ctx, rt)
+}
+
+func (c *countingQuerySchemas) ListResourceQuerySchemas(ctx context.Context) ([]domain.ResourceQuerySchema, error) {
+	return c.inner.ListResourceQuerySchemas(ctx)
 }

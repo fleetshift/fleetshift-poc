@@ -1,4 +1,4 @@
-package sqlite
+package querysql
 
 import (
 	"fmt"
@@ -6,53 +6,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
-
-// validateSpecPath checks names -- the parsed resource.spec.<path>
-// segments -- against r's schema provider when a top-level
-// resourceType == guard is present and a descriptor is registered
-// for that type. Without a guard (or without a descriptor), names are
-// returned unchanged for structural JSON extraction: schema validation
-// is optional, not a prerequisite for querying spec paths.
-//
-// When a descriptor is present, segments are matched against canonical
-// JSON field names only (see validateDescriptorPath). Without one,
-// every segment is preserved exactly -- no case conversion or
-// proto-name/JSON-name aliasing.
-func (r queryFieldResolver) validateSpecPath(ctx querysql.ResolveContext, names []string) ([]string, error) {
-	if r.SchemaProvider == nil || ctx.GuardedResourceType == nil {
-		return names, nil
-	}
-	rt := *ctx.GuardedResourceType
-	schema, ok, err := r.SchemaProvider.GetResourceQuerySchema(ctx.Context, rt)
-	if err != nil {
-		return nil, fmt.Errorf("filter: look up query schema for %q: %w", rt, err)
-	}
-	if !ok || schema.SpecDescriptor == nil {
-		return names, nil
-	}
-	return validateDescriptorPath(schema.SpecDescriptor, "resource.spec", names)
-}
-
-// validateObservationPath is validateSpecPath's counterpart for
-// resource.observation.<path>. InventoryObservationDescriptor is
-// often nil, so this usually returns names unchanged; when a guard
-// and descriptor are both present, field names are validated.
-func (r queryFieldResolver) validateObservationPath(ctx querysql.ResolveContext, names []string) ([]string, error) {
-	if r.SchemaProvider == nil || ctx.GuardedResourceType == nil {
-		return names, nil
-	}
-	rt := *ctx.GuardedResourceType
-	schema, ok, err := r.SchemaProvider.GetResourceQuerySchema(ctx.Context, rt)
-	if err != nil {
-		return nil, fmt.Errorf("filter: look up query schema for %q: %w", rt, err)
-	}
-	if !ok || schema.InventoryObservationDescriptor == nil {
-		return names, nil
-	}
-	return validateDescriptorPath(schema.InventoryObservationDescriptor, "resource.observation", names)
-}
 
 const (
 	structFullName protoreflect.FullName = "google.protobuf.Struct"
@@ -78,7 +32,7 @@ var protoJSONTerminalMessages = map[protoreflect.FullName]bool{
 	"google.protobuf.Empty":       true,
 }
 
-// validateDescriptorPath walks desc through names against the
+// ValidateDescriptorPath walks desc through names against the
 // canonical ProtoJSON-shaped view of the message:
 //
 //   - At a message node, a segment must match FieldDescriptor.JSONName
@@ -97,8 +51,8 @@ var protoJSONTerminalMessages = map[protoreflect.FullName]bool{
 //   - Terminal selection of a repeated or map field is still allowed.
 //
 // Select and string-index syntax are already flattened to the same
-// raw segments by querysql; this function never distinguishes them.
-func validateDescriptorPath(desc protoreflect.MessageDescriptor, root string, names []string) ([]string, error) {
+// raw segments by this package; this function never distinguishes them.
+func ValidateDescriptorPath(desc protoreflect.MessageDescriptor, root string, names []string) ([]string, error) {
 	cur := desc
 	resolved := make([]string, len(names))
 	for i := 0; i < len(names); {

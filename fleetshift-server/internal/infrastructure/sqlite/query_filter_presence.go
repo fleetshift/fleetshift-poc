@@ -43,7 +43,7 @@ func (r queryFieldResolver) resolveResourcePresence(segs []string, ctx querysql.
 		if len(rest) == 0 {
 			return "ri.spec IS NOT NULL", nil
 		}
-		names, err := r.validateSpecPath(ctx, rest)
+		names, err := ctx.ValidateSpecPath(rest)
 		if err != nil {
 			return "", err
 		}
@@ -52,7 +52,7 @@ func (r queryFieldResolver) resolveResourcePresence(segs []string, ctx querysql.
 		if len(rest) == 0 {
 			return "inv.observation IS NOT NULL", nil
 		}
-		names, err := r.validateObservationPath(ctx, rest)
+		names, err := ctx.ValidateObservationPath(rest)
 		if err != nil {
 			return "", err
 		}

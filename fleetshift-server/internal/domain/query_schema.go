@@ -11,8 +11,10 @@ import (
 
 // QuerySchemaProvider gives [QueryRepository] implementations
 // optional protobuf schema knowledge for type-specific CEL field
-// validation. The postgres/sqlite query field resolvers are the
-// current callers (they implement infrastructure/querysql.FieldResolver).
+// validation. The querysql Compiler (via ResolveContext) is the
+// current caller for path validation and container classification;
+// postgres/sqlite field resolvers consume validated paths and render
+// dialect SQL only.
 //
 // It is intentionally narrow and transport-agnostic: it knows nothing
 // about internal/transport's dynamic gRPC/HTTP registration, only the
@@ -24,11 +26,11 @@ import (
 // stays free of that dependency direction.
 //
 // Absence of a schema is an explicit, first-class outcome (the bool
-// return), not an error. Field resolvers treat "no schema registered
-// for this type" and "schema registered but its descriptor is nil"
-// both as "validate this path structurally only" (any well-formed
-// path is accepted with exact segment keys preserved — no case
-// conversion), rather than failing closed -- types without a
+// return), not an error. querysql's ResolveContext treats "no schema
+// registered for this type" and "schema registered but its descriptor
+// is nil" both as "validate this path structurally only" (any
+// well-formed path is accepted with exact segment keys preserved —
+// no case conversion), rather than failing closed -- types without a
 // SpecDescriptor (including inventory-only activations) validate
 // structurally only. Only a resolvable schema *with* a descriptor
 // triggers JSON-name field validation (ByJSONName only; no

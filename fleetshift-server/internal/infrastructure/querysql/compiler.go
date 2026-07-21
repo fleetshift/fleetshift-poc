@@ -214,11 +214,11 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 //     with TypeHintUnknown.
 //
 //  2. Container membership: `"key" in <field path>`. The container
-//     path and string operand stay separate; the resolver chooses
-//     object-key vs list-value lowering (or runtime JSON-shape
-//     dispatch) via [ContainerKindUnknown] plus its own path/schema
-//     knowledge. Non-string left literals and non-field right sides
-//     are rejected.
+//     path and string operand stay separate; querysql classifies the
+//     container ([ResolveContext.ClassifyResourceContainer]) and
+//     either delegates object-key membership to ResolvePresence or
+//     calls ResolveJSONMembership for list/unknown JSON containers.
+//     Non-string left literals and non-field right sides are rejected.
 func compileIn(args []ast.Expr, st *state) (string, error) {
 	if len(args) != 2 {
 		return "", unsupportedExprf("in")
@@ -239,7 +239,7 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 		if !pathOK {
 			return "", fmt.Errorf("filter: %w: container membership requires a field path on the right", domain.ErrInvalidArgument)
 		}
-		return st.resolveMembership(path, key, ContainerKindUnknown)
+		return st.resolveMembership(path, key)
 	}
 	if !left.isField {
 		return "", fmt.Errorf("filter: %w: \"in\" left side must be a field", domain.ErrInvalidArgument)

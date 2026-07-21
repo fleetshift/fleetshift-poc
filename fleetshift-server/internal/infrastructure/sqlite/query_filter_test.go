@@ -355,7 +355,7 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 			SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	// Spec itself is a google.protobuf.Timestamp (ProtoJSON string):
 	// nested protobuf fields like seconds must be rejected.
@@ -376,7 +376,7 @@ func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
 	schemas := staticQuerySchemas{
 		rt: {ResourceType: rt, APIVersion: "v1", SpecDescriptor: desc},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
 	if !strings.Contains(pred.SQL, "ri.spec") {
@@ -437,7 +437,7 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 			SpecDescriptor: specTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	t.Run("JSON camelCase accepted", func(t *testing.T) {
 		for _, filter := range []string{
@@ -520,7 +520,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 			SpecDescriptor: nestedSpecTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
 	if !argsContain(pred.Args, "nested") || !argsContain(pred.Args, "value") {
@@ -558,7 +558,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 }
 
 func TestQueryFieldResolver_SpecPermissiveExactKeysWhenSchemaAbsent(t *testing.T) {
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: staticQuerySchemas{}}
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == 5`)
 	if !argsContain(pred.Args, "api_server_port") {
 		t.Errorf("Args = %v, want exact open-map key preserved (no camelCase rewrite)", pred.Args)
@@ -656,44 +656,6 @@ func TestQueryFieldResolver_PresenceAndMembershipSQLShape(t *testing.T) {
 	}
 }
 
-func TestDescriptorContainerKind(t *testing.T) {
-	desc := nestedSpecTestDescriptor(t)
-	tests := []struct {
-		name    string
-		names   []string
-		want    querysql.ContainerKind
-		wantErr bool
-	}{
-		{name: "message field", names: []string{"nested"}, want: querysql.ContainerKindObject},
-		{name: "map field", names: []string{"labels"}, want: querysql.ContainerKindObject},
-		{name: "list of messages", names: []string{"items"}, want: querysql.ContainerKindList},
-		{name: "list of strings", names: []string{"tags"}, want: querysql.ContainerKindList},
-		{name: "scalar string", names: []string{"nested", "value"}, want: querysql.ContainerKindScalar},
-		{name: "Struct field itself", names: []string{"metadata"}, want: querysql.ContainerKindObject},
-		{name: "open Struct tail", names: []string{"metadata", "foo"}, want: querysql.ContainerKindUnknown},
-		{name: "map entry message", names: []string{"labels", "team"}, want: querysql.ContainerKindObject},
-		{name: "map entry scalar", names: []string{"labels", "team", "name"}, want: querysql.ContainerKindScalar},
-		{name: "unknown field", names: []string{"bogus"}, wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := descriptorContainerKind(desc, tt.names)
-			if tt.wantErr {
-				if !errors.Is(err, domain.ErrInvalidArgument) {
-					t.Fatalf("err = %v, want ErrInvalidArgument", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("kind = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 // TestQueryFieldResolver_SchemaSpecializedMembership locks descriptor-
 // backed membership lowering: known message/map → object-key presence,
 // known list → specialized list predicate, known scalar → reject, and
@@ -708,7 +670,7 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 			InventoryObservationDescriptor: desc,
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
 
 	t.Run("known message uses object-key presence", func(t *testing.T) {
