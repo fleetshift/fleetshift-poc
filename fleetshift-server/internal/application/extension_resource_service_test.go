@@ -23,8 +23,9 @@ const (
 )
 
 type extensionResourceHarness struct {
-	store domain.Store
-	svc   *application.ExtensionResourceService
+	store     domain.Store
+	svc       *application.ExtensionResourceService
+	inventory *application.InventoryReportService
 }
 
 func setupExtensionResourceService(t *testing.T) extensionResourceHarness {
@@ -79,8 +80,9 @@ func setupExtensionResourceService(t *testing.T) extensionResourceHarness {
 	}
 
 	return extensionResourceHarness{
-		store: store,
-		svc:   application.NewExtensionResourceService(store, createMRWf, deleteMRWf, nil, nil),
+		store:     store,
+		svc:       application.NewExtensionResourceService(store, createMRWf, deleteMRWf, nil, nil),
+		inventory: application.NewInventoryReportService(store),
 	}
 }
 
@@ -129,11 +131,10 @@ func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 		t.Fatalf("NewCondition: %v", err)
 	}
 	obs := json.RawMessage(`{"status":"ok"}`)
-	reporter := application.NewInventoryReporterAdapter(application.NewInventoryReportService(h.store))
-	if err := reporter.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
-		Reports: []domain.InventoryDeltaReport{{
+	if err := h.inventory.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
 			ResourceType:      deletePreflightResourceType,
-			Name:              name,
+			Name:              &name,
 			ReplaceConditions: []domain.Condition{ready},
 			Observation:       &obs,
 			ObservedAt:        fixed,
