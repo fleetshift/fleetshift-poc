@@ -3,7 +3,11 @@ import { usePluginNavigate } from "@fleetshift/common";
 import { Alert, Wizard, WizardStep } from "@patternfly/react-core";
 import { useCallback, useState } from "react";
 
-import { createKindCluster, type KindClusterSpec } from "./api";
+import {
+  createKindCluster,
+  type KindClusterSpec,
+  type KindNetworkingSpec,
+} from "./api";
 import ClusterDetailsStep from "./ClusterDetailsStep";
 import NetworkingStep from "./NetworkingStep";
 import NodesStep from "./NodesStep";
@@ -80,7 +84,7 @@ export default function CreateClusterWizard({
         spec.nodes = nodes;
       }
 
-      const networking: KindClusterSpec["networking"] = {};
+      const networking: KindNetworkingSpec = {};
       if (formData.apiServerPort > 0) {
         networking.apiServerPort = formData.apiServerPort;
       }
