@@ -2,37 +2,85 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
-type stubDeleteManagedResourceWorkflow struct {
-	started *bool
-	result  domain.ExtensionResourceView
+const deletePreflightManifestType domain.ManifestType = "api.kind.cluster"
+const deletePreflightTargetType domain.TargetType = "kind"
+
+type extensionResourceHarness struct {
+	store domain.Store
+	svc   *application.ExtensionResourceService
 }
 
-func (w *stubDeleteManagedResourceWorkflow) Start(
-	_ context.Context,
-	_ domain.DeleteManagedResourceInput,
-) (domain.Execution[domain.ExtensionResourceView], error) {
-	*w.started = true
-	return &immediateERExecution{val: w.result}, nil
+func setupExtensionResourceService(t *testing.T) extensionResourceHarness {
+	t.Helper()
+	store := newStore(t)
+	fixed := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
+
+	agent := &sqlite.RecordingDeliveryService{
+		Store: store,
+		Now:   func() time.Time { return fixed },
+	}
+	router := delivery.NewRoutingDeliveryService()
+	router.Register(deletePreflightTargetType, agent)
+
+	reg := &memworkflow.Registry{}
+	agent.Reporter = application.NewDeliveryReportService(store, reg)
+
+	orchWf, err := reg.RegisterOrchestration(domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	))
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+	createMRWf, err := reg.RegisterCreateManagedResource(&domain.CreateManagedResourceWorkflowSpec{
+		Store: store, Orchestration: orchWf, Now: func() time.Time { return fixed },
+	})
+	if err != nil {
+		t.Fatalf("RegisterCreateManagedResource: %v", err)
+	}
+	cleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(&domain.DeleteManagedResourceCleanupWorkflowSpec{
+		Store: store,
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
+	}
+	deleteMRWf, err := reg.RegisterDeleteManagedResource(&domain.DeleteManagedResourceWorkflowSpec{
+		Store: store, Orchestration: orchWf, Cleanup: cleanupWf, Now: func() time.Time { return fixed },
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResource: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := (&application.TargetService{Store: store}).Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:                    "kind-local",
+		Type:                  deletePreflightTargetType,
+		Name:                  "Kind",
+		AcceptedManifestTypes: []domain.ManifestType{deletePreflightManifestType},
+	})); err != nil {
+		t.Fatalf("Register target: %v", err)
+	}
+
+	return extensionResourceHarness{
+		store: store,
+		svc:   application.NewExtensionResourceService(store, createMRWf, deleteMRWf, nil, nil),
+	}
 }
 
-type immediateERExecution struct {
-	val domain.ExtensionResourceView
-}
-
-func (e *immediateERExecution) WorkflowID() string { return "stub-delete-mr" }
-func (e *immediateERExecution) AwaitResult(_ context.Context) (domain.ExtensionResourceView, error) {
-	return e.val, nil
-}
-
-func seedClusterTypeForDelete(t *testing.T, store domain.Store, rt domain.ResourceType, now time.Time) {
+func seedClusterType(t *testing.T, store domain.Store, rt domain.ResourceType, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := store.Begin(ctx)
@@ -44,7 +92,7 @@ func seedClusterTypeForDelete(t *testing.T, store domain.Store, rt domain.Resour
 	typeDef := domain.NewExtensionResourceType(
 		rt, "v1", "clusters", now,
 		domain.WithManagement(
-			domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
+			domain.NewRegisteredSelfTarget("kind-local", deletePreflightManifestType),
 			domain.Signature{},
 		),
 		domain.WithInventory(),
@@ -62,15 +110,15 @@ func seedClusterTypeForDelete(t *testing.T, store domain.Store, rt domain.Resour
 // exists but has no managed state (e.g. seeded only by inventory
 // reporting from a deployment-created kind cluster).
 func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
+	h := setupExtensionResourceService(t)
 	ctx := context.Background()
-	store := newStore(t)
 	fixed := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
 	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
 	name := domain.ResourceName("clusters/c1")
-	seedClusterTypeForDelete(t, store, rt, fixed)
+	seedClusterType(t, h.store, rt, fixed)
 
-	tx, err := store.Begin(ctx)
+	tx, err := h.store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
@@ -84,68 +132,42 @@ func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	started := false
-	svc := application.NewExtensionResourceService(
-		store,
-		nil,
-		&stubDeleteManagedResourceWorkflow{started: &started},
-		nil,
-		nil,
-	)
-
-	_, err = svc.Delete(ctx, rt, name)
+	_, err = h.svc.Delete(ctx, rt, name)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Delete err = %v, want ErrInvalidArgument", err)
 	}
-	if started {
-		t.Fatal("delete workflow should not start for inventory-only instance")
+	// Workflow path wraps as "mutate to deleting: …"; preflight must not.
+	if strings.Contains(err.Error(), "mutate to deleting") {
+		t.Fatalf("Delete reached workflow: %v", err)
 	}
 }
 
 func TestDeleteExtensionResource_StartsWorkflowWhenManaged(t *testing.T) {
-	ctx := context.Background()
-	store := newStore(t)
+	h := setupExtensionResourceService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	fixed := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
 	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
 	name := domain.ResourceName("clusters/c1")
-	seedClusterTypeForDelete(t, store, rt, fixed)
+	seedClusterType(t, h.store, rt, fixed)
 
-	tx, err := store.Begin(ctx)
+	if _, err := h.svc.Create(ctx, application.CreateExtensionResourceInput{
+		ResourceType: rt,
+		Name:         name,
+		Spec:         json.RawMessage(`{"name":"c1"}`),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	view, err := h.svc.Delete(ctx, rt, name)
 	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	fID := domain.FulfillmentID("f-managed")
-	if err := tx.Fulfillments().Create(ctx, domain.NewFulfillment(fID, domain.DeliveryAuth{}, nil, nil, fixed)); err != nil {
-		t.Fatalf("Create fulfillment: %v", err)
-	}
-	er := domain.NewExtensionResource(
-		domain.NewExtensionResourceUID(), rt, name, fixed,
-		domain.WithManagedState(fID),
-	)
-	if _, err := er.RecordIntent([]byte(`{"name":"c1"}`), fixed); err != nil {
-		t.Fatalf("RecordIntent: %v", err)
-	}
-	if err := tx.ExtensionResources().Create(ctx, er); err != nil {
-		t.Fatalf("Create extension resource: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	started := false
-	svc := application.NewExtensionResourceService(
-		store,
-		nil,
-		&stubDeleteManagedResourceWorkflow{started: &started},
-		nil,
-		nil,
-	)
-
-	if _, err := svc.Delete(ctx, rt, name); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if !started {
-		t.Fatal("delete workflow should start for managed instance")
+	if view.Fulfillment == nil {
+		t.Fatal("expected fulfillment on delete snapshot")
+	}
+	if view.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("Fulfillment.State = %q, want deleting", view.Fulfillment.State())
 	}
 }
