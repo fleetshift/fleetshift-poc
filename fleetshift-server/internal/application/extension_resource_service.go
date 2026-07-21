@@ -219,6 +219,21 @@ func (s *ExtensionResourceService) Delete(ctx context.Context, rt domain.Resourc
 			domain.ErrInvalidArgument, rt)
 	}
 
+	// Instance-level check before starting the durable workflow. Inventory
+	// reporting can create rows for managed+inventory types without managed
+	// state (e.g. a kind Cluster observed from a deployment delivery); those
+	// must fail here rather than retry forever in mr-mutate-to-deleting.
+	fullName := rt.FullName(name)
+	er, err := tx.ExtensionResources().Get(ctx, fullName)
+	if err != nil {
+		return domain.ExtensionResourceView{}, err
+	}
+	if er.Managed() == nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf(
+			"%w: extension resource %s has no managed state",
+			domain.ErrInvalidArgument, fullName)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf("commit read tx: %w", err)
 	}
