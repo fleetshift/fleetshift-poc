@@ -278,14 +278,14 @@ func chainedJSONB(column string, names []string, bind func(any) string) string {
 
 func jsonbListStringMembership(container, keyPlaceholder string) string {
 	// NULL container → SQL NULL (three-valued); non-array → NULL.
+	// Array string membership uses @> (contains the JSON string scalar)
+	// rather than jsonb_array_elements so each candidate pays one jsonb
+	// operator instead of expanding the array element-by-element.
 	return fmt.Sprintf(
 		`(CASE
 			WHEN %s IS NULL THEN NULL
 			WHEN jsonb_typeof(%s) <> 'array' THEN NULL
-			ELSE EXISTS (
-				SELECT 1 FROM jsonb_array_elements(%s) AS e(value)
-				WHERE e.value = to_jsonb(%s::text)
-			)
+			ELSE %s @> to_jsonb(%s::text)
 		END)`,
 		container, container, container, keyPlaceholder,
 	)
@@ -295,10 +295,7 @@ func jsonbDynamicMembership(container, keyPlaceholder string) string {
 	return fmt.Sprintf(
 		`(CASE jsonb_typeof(%s)
 			WHEN 'object' THEN %s ? %s
-			WHEN 'array' THEN EXISTS (
-				SELECT 1 FROM jsonb_array_elements(%s) AS e(value)
-				WHERE e.value = to_jsonb(%s::text)
-			)
+			WHEN 'array' THEN %s @> to_jsonb(%s::text)
 			ELSE NULL
 		END)`,
 		container, container, keyPlaceholder, container, keyPlaceholder,

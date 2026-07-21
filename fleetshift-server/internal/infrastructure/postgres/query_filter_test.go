@@ -936,6 +936,12 @@ func TestQueryFieldResolver_PresenceAndMembershipSQLShape(t *testing.T) {
 	if !strings.Contains(pred.SQL, "jsonb_typeof") {
 		t.Errorf("SQL = %q, want dynamic jsonb_typeof dispatch", pred.SQL)
 	}
+	if !strings.Contains(pred.SQL, "@> to_jsonb(") {
+		t.Errorf("SQL = %q, want array branch via @> to_jsonb", pred.SQL)
+	}
+	if strings.Contains(pred.SQL, "jsonb_array_elements") {
+		t.Errorf("SQL = %q, must not expand arrays with jsonb_array_elements", pred.SQL)
+	}
 
 	err := compileErr(t, `"x" in resource.pauseReason`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -1042,8 +1048,11 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 		if !strings.Contains(pred.SQL, "jsonb_typeof") || !strings.Contains(pred.SQL, "<> 'array'") {
 			t.Errorf("SQL = %q, want specialized list jsonb_typeof <> 'array'", pred.SQL)
 		}
-		if !strings.Contains(pred.SQL, "jsonb_array_elements") {
-			t.Errorf("SQL = %q, want jsonb_array_elements", pred.SQL)
+		if !strings.Contains(pred.SQL, "@> to_jsonb(") {
+			t.Errorf("SQL = %q, want @> to_jsonb string containment", pred.SQL)
+		}
+		if strings.Contains(pred.SQL, "jsonb_array_elements") {
+			t.Errorf("SQL = %q, must not expand arrays with jsonb_array_elements", pred.SQL)
 		}
 		if strings.Contains(pred.SQL, "WHEN 'object'") {
 			t.Errorf("SQL = %q, specialized list must not use dynamic object branch", pred.SQL)
@@ -1061,6 +1070,12 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 		pred := compileWithResolver(t, c, guard+`"k" in resource.observation.metadata.foo`)
 		if !strings.Contains(pred.SQL, "WHEN 'object'") || !strings.Contains(pred.SQL, "WHEN 'array'") {
 			t.Errorf("SQL = %q, want dynamic object/array CASE", pred.SQL)
+		}
+		if !strings.Contains(pred.SQL, "@> to_jsonb(") {
+			t.Errorf("SQL = %q, want array branch via @> to_jsonb", pred.SQL)
+		}
+		if strings.Contains(pred.SQL, "jsonb_array_elements") {
+			t.Errorf("SQL = %q, must not expand arrays with jsonb_array_elements", pred.SQL)
 		}
 	})
 

@@ -58,9 +58,40 @@ const (
 
 	qrbRounds       = 15
 	qrbWarmupRounds = 2
+
+	// qrbRolesListLen is the observation.roles array length on every
+	// node. List membership expands the array per candidate
+	// (json_each), so cost is roughly candidates × length. Keep this
+	// large enough that missing/late needles dominate early-match
+	// short-circuit cases. Kept in lockstep with postgres.
+	qrbRolesListLen = 32
+
+	// qrbRolesLateValue is the last element of every roles array —
+	// EXISTS must walk nearly the full array before matching.
+	qrbRolesLateValue = "bench-late"
+
+	// qrbRolesMissingValue is never seeded; used only in filters that
+	// force a full array expansion on every candidate with no match.
+	qrbRolesMissingValue = "bench-missing"
 )
 
 var qrbFixedTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+// qrbRolesFillerMiddle is the middle of every observation.roles array
+// (,"r00",…,"rN") between the primary role and qrbRolesLateValue.
+var qrbRolesFillerMiddle = func() string {
+	var b strings.Builder
+	for i := 0; i < qrbRolesListLen-2; i++ {
+		fmt.Fprintf(&b, `,"r%02d"`, i)
+	}
+	return b.String()
+}()
+
+// qrbRolesArrayJSON returns a JSON array of length qrbRolesListLen:
+// primary role first, fillers, then qrbRolesLateValue last.
+func qrbRolesArrayJSON(primary string) string {
+	return fmt.Sprintf(`[%q%s,%q]`, primary, qrbRolesFillerMiddle, qrbRolesLateValue)
+}
 
 func openQRBBenchDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -203,7 +234,9 @@ func seedQRBClusters(t *testing.T, db *sql.DB) {
 
 // seedQRBNodes mirrors the postgres corpus: numeric capacity.cpu,
 // ~2% rare bench-rare local-label + observation.tags.canary, and
-// observation.roles string arrays on every node.
+// qrbRolesListLen-element observation.roles arrays on every node
+// (primary role first, qrbRolesLateValue last) for list-membership
+// early/late/missing needle benches.
 func seedQRBNodes(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
@@ -228,14 +261,15 @@ func seedQRBNodes(t *testing.T, db *sql.DB) {
 				invLabels[i] = fmt.Sprintf(`{"node-role":%q}`, role)
 			}
 			cpu := idx%64 + 1
+			rolesJSON := qrbRolesArrayJSON(role)
 			if idx%50 == 0 {
 				observations[i] = fmt.Sprintf(
-					`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d},"roles":[%q],"tags":{"canary":true}}`,
-					cpu, max(cpu-2, 1), role)
+					`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d},"roles":%s,"tags":{"canary":true}}`,
+					cpu, max(cpu-2, 1), rolesJSON)
 			} else {
 				observations[i] = fmt.Sprintf(
-					`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d},"roles":[%q]}`,
-					cpu, max(cpu-2, 1), role)
+					`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d},"roles":%s}`,
+					cpu, max(cpu-2, 1), rolesJSON)
 			}
 			ready := "True"
 			if idx%20 == 0 {
@@ -423,7 +457,9 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 	// Presence / container membership: residual JSON probes. Common /
 	// rare / missing keys, type-guarded vs fleet-wide, dynamic
 	// object/list membership, and max page size. Corpus: ~2% of nodes
-	// carry bench-rare / tags.canary.
+	// carry bench-rare / tags.canary; every node has a
+	// qrbRolesListLen-element roles array (late value last) so list
+	// membership can stress candidates × array length.
 	explainQueryResources(t, db, "presence common extension label key",
 		`has(resource.labels.team)`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "presence common local-label key type-guarded (in)",
@@ -440,8 +476,22 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 	explainQueryResources(t, db, "presence dynamic object membership type-guarded",
 		fmt.Sprintf(`resourceType == "%s/%s" && "canary" in resource.observation.tags`, qrbNodeService, qrbNodeType),
 		"", defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "presence dynamic list membership type-guarded",
+	// List membership: early needle short-circuits after one element;
+	// late/missing needles expand ~qrbRolesListLen elements per candidate.
+	explainQueryResources(t, db, "presence dynamic list membership early-value type-guarded",
 		fmt.Sprintf(`resourceType == "%s/%s" && "worker" in resource.observation.roles`, qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence dynamic list membership late-value type-guarded",
+		fmt.Sprintf(`resourceType == "%s/%s" && %q in resource.observation.roles`, qrbNodeService, qrbNodeType, qrbRolesLateValue),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence dynamic list membership late-value fleet-wide",
+		fmt.Sprintf(`%q in resource.observation.roles`, qrbRolesLateValue),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence dynamic list membership missing-value type-guarded",
+		fmt.Sprintf(`resourceType == "%s/%s" && %q in resource.observation.roles`, qrbNodeService, qrbNodeType, qrbRolesMissingValue),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "presence dynamic list membership missing-value fleet-wide",
+		fmt.Sprintf(`%q in resource.observation.roles`, qrbRolesMissingValue),
 		"", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "presence common label key max page",
 		`has(resource.labels.team)`, "", maxQueryPageSize, nil)
@@ -618,11 +668,32 @@ func TestQueryResourcesBenchmark(t *testing.T) {
 				qrbNodeService, qrbNodeType),
 			PageSize: int32(defaultQueryPageSize),
 		}, false},
-		{"presence dynamic list membership type-guarded", domain.QueryResourcesRequest{
+		// List membership: early needle short-circuits; late/missing
+		// expand ~qrbRolesListLen elements per candidate (the unbounded
+		// cost of array membership).
+		{"presence dynamic list membership early-value type-guarded", domain.QueryResourcesRequest{
 			Filter: fmt.Sprintf(`resourceType == "%s/%s" && "worker" in resource.observation.roles`,
 				qrbNodeService, qrbNodeType),
 			PageSize: int32(defaultQueryPageSize),
 		}, false},
+		{"presence dynamic list membership late-value type-guarded", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && %q in resource.observation.roles`,
+				qrbNodeService, qrbNodeType, qrbRolesLateValue),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence dynamic list membership late-value fleet-wide", domain.QueryResourcesRequest{
+			Filter:   fmt.Sprintf(`%q in resource.observation.roles`, qrbRolesLateValue),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"presence dynamic list membership missing-value type-guarded", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && %q in resource.observation.roles`,
+				qrbNodeService, qrbNodeType, qrbRolesMissingValue),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		{"presence dynamic list membership missing-value fleet-wide", domain.QueryResourcesRequest{
+			Filter:   fmt.Sprintf(`%q in resource.observation.roles`, qrbRolesMissingValue),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
 		{"presence common label key max page", domain.QueryResourcesRequest{
 			Filter:   `has(resource.labels.team)`,
 			PageSize: int32(maxQueryPageSize),
