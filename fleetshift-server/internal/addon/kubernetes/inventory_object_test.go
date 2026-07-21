@@ -17,6 +17,79 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+func TestParseObjectScope(t *testing.T) {
+	t.Run("namespaced", func(t *testing.T) {
+		got, err := kubernetes.ParseObjectScope("namespaced")
+		if err != nil {
+			t.Fatalf("ParseObjectScope: %v", err)
+		}
+		if got != kubernetes.ObjectScopeNamespaced {
+			t.Fatalf("got %q, want namespaced", got)
+		}
+	})
+	t.Run("cluster", func(t *testing.T) {
+		got, err := kubernetes.ParseObjectScope("cluster")
+		if err != nil {
+			t.Fatalf("ParseObjectScope: %v", err)
+		}
+		if got != kubernetes.ObjectScopeCluster {
+			t.Fatalf("got %q, want cluster", got)
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		_, err := kubernetes.ParseObjectScope("")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("invalid", func(t *testing.T) {
+		_, err := kubernetes.ParseObjectScope("namespace")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+}
+
+func mustTestScopeNamespace(t *testing.T, scope kubernetes.ObjectScope, namespace string) kubernetes.ScopeNamespace {
+	t.Helper()
+	sn, err := kubernetes.NewScopeNamespace(scope, namespace)
+	if err != nil {
+		t.Fatalf("NewScopeNamespace: %v", err)
+	}
+	return sn
+}
+
+func TestNewScopeNamespace(t *testing.T) {
+	t.Run("namespaced", func(t *testing.T) {
+		if _, err := kubernetes.NewScopeNamespace(kubernetes.ObjectScopeNamespaced, "default"); err != nil {
+			t.Fatalf("NewScopeNamespace: %v", err)
+		}
+	})
+	t.Run("cluster", func(t *testing.T) {
+		if _, err := kubernetes.NewScopeNamespace(kubernetes.ObjectScopeCluster, ""); err != nil {
+			t.Fatalf("NewScopeNamespace: %v", err)
+		}
+	})
+	t.Run("rejects empty scope", func(t *testing.T) {
+		_, err := kubernetes.NewScopeNamespace("", "default")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("rejects namespaced without namespace", func(t *testing.T) {
+		_, err := kubernetes.NewScopeNamespace(kubernetes.ObjectScopeNamespaced, "")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("rejects cluster with namespace", func(t *testing.T) {
+		_, err := kubernetes.NewScopeNamespace(kubernetes.ObjectScopeCluster, "default")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+}
+
 func TestParseClusterResourceName(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		got, err := kubernetes.ParseClusterResourceName("clusters/c1")
@@ -53,51 +126,97 @@ func TestParseClusterResourceName(t *testing.T) {
 	})
 }
 
-func TestGVRKey(t *testing.T) {
+func TestGroupResourceKey(t *testing.T) {
 	tests := []struct {
-		name string
-		gvr  schema.GroupVersionResource
-		want string
+		name    string
+		gr      schema.GroupResource
+		want    string
+		wantErr bool
 	}{
-		{"CoreGroup", schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, "core~v1~pods"},
-		{"NamedGroup", schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, "apps~v1~deployments"},
-		{"DottedGroup", schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}, "route.openshift.io~v1~routes"},
+		{"CoreGroup", schema.GroupResource{Resource: "pods"}, "pods", false},
+		{"NamedGroup", schema.GroupResource{Group: "apps", Resource: "deployments"}, "deployments.apps", false},
+		{"DottedGroup", schema.GroupResource{Group: "route.openshift.io", Resource: "routes"}, "routes.route.openshift.io", false},
+		{"EmptyResource", schema.GroupResource{Group: "apps"}, "", true},
+		{"Subresource", schema.GroupResource{Resource: "pods/status"}, "", true},
+		{"DotInResource", schema.GroupResource{Resource: "foo.bar"}, "", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := kubernetes.GVRKey(tc.gvr); got != tc.want {
-				t.Errorf("GVRKey(%+v) = %q, want %q", tc.gvr, got, tc.want)
+			got, err := kubernetes.GroupResourceKey(tc.gr)
+			if tc.wantErr {
+				if !errors.Is(err, domain.ErrInvalidArgument) {
+					t.Fatalf("error = %v, want ErrInvalidArgument", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GroupResourceKey: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("GroupResourceKey(%+v) = %q, want %q", tc.gr, got, tc.want)
+			}
+			parsed, err := kubernetes.ParseGroupResourceKey(got)
+			if err != nil {
+				t.Fatalf("ParseGroupResourceKey: %v", err)
+			}
+			if parsed != tc.gr {
+				t.Fatalf("ParseGroupResourceKey = %+v, want %+v", parsed, tc.gr)
 			}
 		})
 	}
 }
 
+func TestParseGroupResourceKey_RejectsNonCanonical(t *testing.T) {
+	_, err := kubernetes.ParseGroupResourceKey("deployments.apps.")
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("error = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestObjectResourceName(t *testing.T) {
-	t.Run("BasicShape", func(t *testing.T) {
+	t.Run("NamespacedShape", func(t *testing.T) {
 		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "clusters/prod",
 			GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"),
 			UID:                 "0d12-uid",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
 		}
-		want := domain.ResourceName("clusters/prod/apiResources/apps~v1~deployments/objects/0d12-uid")
+		want := domain.ResourceName("clusters/prod/namespaces/default/apiResources/deployments.apps/objects/0d12-uid")
 		if name != want {
 			t.Fatalf("ObjectResourceName = %q, want %q", name, want)
 		}
 	})
 
-	t.Run("CoreGroupUsesCoreKey", func(t *testing.T) {
+	t.Run("ClusterScopedShape", func(t *testing.T) {
+		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeCluster, ""),
+			UID:                 "node-uid",
+		})
+		if err != nil {
+			t.Fatalf("ObjectResourceName: %v", err)
+		}
+		want := domain.ResourceName("clusters/prod/apiResources/nodes/objects/node-uid")
+		if name != want {
+			t.Fatalf("ObjectResourceName = %q, want %q", name, want)
+		}
+	})
+
+	t.Run("CoreNamespacedUsesResourceOnlyKey", func(t *testing.T) {
 		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "clusters/prod",
 			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "kube-system"),
 			UID:                 "8a91-uid",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
 		}
-		want := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/8a91-uid")
+		want := domain.ResourceName("clusters/prod/namespaces/kube-system/apiResources/pods/objects/8a91-uid")
 		if name != want {
 			t.Fatalf("ObjectResourceName = %q, want %q", name, want)
 		}
@@ -107,14 +226,13 @@ func TestObjectResourceName(t *testing.T) {
 		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "clusters/prod",
 			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"),
 			UID:                 "uid/with/slash",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
 		}
-		// If the UID's "/" were not encoded, this would parse as extra
-		// path segments and silently shift every segment after it.
-		want := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid%2Fwith%2Fslash")
+		want := domain.ResourceName("clusters/prod/namespaces/default/apiResources/pods/objects/uid%2Fwith%2Fslash")
 		if name != want {
 			t.Fatalf("ObjectResourceName = %q, want %q", name, want)
 		}
@@ -127,6 +245,7 @@ func TestObjectResourceName(t *testing.T) {
 		_, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "clusters/prod",
 			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"),
 		})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Fatalf("ObjectResourceName error = %v, want ErrInvalidArgument", err)
@@ -137,6 +256,18 @@ func TestObjectResourceName(t *testing.T) {
 		_, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "",
 			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"),
+			UID:                 "uid-1",
+		})
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("ObjectResourceName error = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("RejectsZeroScopeNamespace", func(t *testing.T) {
+		_, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 			UID:                 "uid-1",
 		})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -146,14 +277,14 @@ func TestObjectResourceName(t *testing.T) {
 }
 
 func TestObjectCollectionName(t *testing.T) {
-	t.Run("BasicShape", func(t *testing.T) {
-		got, err := kubernetes.ObjectCollectionName("clusters/prod", schema.GroupVersionResource{
+	t.Run("NamespacedShape", func(t *testing.T) {
+		got, err := kubernetes.ObjectCollectionName("clusters/prod", mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"), schema.GroupVersionResource{
 			Group: "apps", Version: "v1", Resource: "deployments",
 		})
 		if err != nil {
 			t.Fatalf("ObjectCollectionName: %v", err)
 		}
-		want := domain.CollectionName("clusters/prod/apiResources/apps~v1~deployments/objects")
+		want := domain.CollectionName("clusters/prod/namespaces/default/apiResources/deployments.apps/objects")
 		if got != want {
 			t.Fatalf("ObjectCollectionName = %q, want %q", got, want)
 		}
@@ -162,12 +293,15 @@ func TestObjectCollectionName(t *testing.T) {
 	t.Run("MatchesObjectResourceNameCollection", func(t *testing.T) {
 		gvr := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 		objName, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			ClusterResourceName: "clusters/prod", GVR: gvr, UID: "uid-1",
+			ClusterResourceName: "clusters/prod",
+			GVR:                 gvr,
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"),
+			UID:                 "uid-1",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
 		}
-		collection, err := kubernetes.ObjectCollectionName("clusters/prod", gvr)
+		collection, err := kubernetes.ObjectCollectionName("clusters/prod", mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"), gvr)
 		if err != nil {
 			t.Fatalf("ObjectCollectionName: %v", err)
 		}
@@ -178,7 +312,7 @@ func TestObjectCollectionName(t *testing.T) {
 	})
 
 	t.Run("RejectsNonFlatClusterResourceName", func(t *testing.T) {
-		_, err := kubernetes.ObjectCollectionName("clusters/prod/us-east-1", schema.GroupVersionResource{
+		_, err := kubernetes.ObjectCollectionName("clusters/prod/us-east-1", mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"), schema.GroupVersionResource{
 			Version: "v1", Resource: "pods",
 		})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -187,7 +321,7 @@ func TestObjectCollectionName(t *testing.T) {
 	})
 
 	t.Run("RejectsEmptyClusterResourceName", func(t *testing.T) {
-		_, err := kubernetes.ObjectCollectionName("", schema.GroupVersionResource{
+		_, err := kubernetes.ObjectCollectionName("", mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"), schema.GroupVersionResource{
 			Version: "v1", Resource: "pods",
 		})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -197,8 +331,11 @@ func TestObjectCollectionName(t *testing.T) {
 }
 
 func TestResourceNameCollectionIDs(t *testing.T) {
-	if kubernetes.TargetCollectionID != "clusters" {
-		t.Errorf("TargetCollectionID = %q, want %q", kubernetes.TargetCollectionID, "clusters")
+	if kubernetes.ClusterCollectionID != "clusters" {
+		t.Errorf("ClusterCollectionID = %q, want %q", kubernetes.ClusterCollectionID, "clusters")
+	}
+	if kubernetes.NamespaceCollectionID != "namespaces" {
+		t.Errorf("NamespaceCollectionID = %q, want %q", kubernetes.NamespaceCollectionID, "namespaces")
 	}
 	if kubernetes.APIResourceCollectionID != "apiResources" {
 		t.Errorf("APIResourceCollectionID = %q, want %q", kubernetes.APIResourceCollectionID, "apiResources")
@@ -277,8 +414,8 @@ func TestObjectObservation(t *testing.T) {
 	id := kubernetes.KubernetesObjectIdentity{
 		ClusterResourceName: "clusters/prod",
 		GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+		ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeNamespaced, "default"),
 		Kind:                "Deployment",
-		Namespace:           "default",
 		Name:                "nginx",
 		UID:                 "0d12-uid",
 	}
@@ -348,10 +485,6 @@ func TestObjectObservation(t *testing.T) {
 	})
 
 	t.Run("UnmarshalableExtractedDegradesToEmptyObject", func(t *testing.T) {
-		// A channel value can never reach here through the real
-		// extraction pipeline, but this pins down the fallback the
-		// doc comment promises: one malformed hook must not panic or
-		// silently corrupt the observation.
 		raw := kubernetes.ObjectObservation(id, newObj(), map[string]any{"bad": make(chan int)})
 		if string(raw) != "{}" {
 			t.Fatalf("ObjectObservation with unmarshalable extracted = %s, want {}", raw)
@@ -403,6 +536,7 @@ func TestObjectObservation(t *testing.T) {
 		raw := kubernetes.ObjectObservation(kubernetes.KubernetesObjectIdentity{
 			ClusterResourceName: "clusters/prod",
 			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+			ScopeNamespace:      mustTestScopeNamespace(t, kubernetes.ObjectScopeCluster, ""),
 			Kind:                "Node",
 			Name:                "node-1",
 			UID:                 "node-uid",
@@ -434,7 +568,7 @@ func TestObjectConditions(t *testing.T) {
 
 	t.Run("DropsNonStandardStatus", func(t *testing.T) {
 		got := kubernetes.ObjectConditions([]kubernetes.RawCondition{
-			{Type: "Health", Status: "Healthy"}, // some CRDs report free-form statuses instead of True/False/Unknown
+			{Type: "Health", Status: "Healthy"},
 			{Type: "Ready", Status: "True"},
 		}, observedAt)
 		if len(got) != 1 || got[0].Type() != "Ready" {

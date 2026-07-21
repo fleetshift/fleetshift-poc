@@ -17,7 +17,11 @@ import (
 
 func mustExtract(t *testing.T, r *unstructured.Unstructured, entry SchemaEntry, clusterResourceName domain.ResourceName) (InventoryObjectReport, inventoryNode) {
 	t.Helper()
-	report, node, err := ExtractObservedResource(r, entry, clusterResourceName)
+	scope := ObjectScopeNamespaced
+	if r.GetNamespace() == "" {
+		scope = ObjectScopeCluster
+	}
+	report, node, err := ExtractObservedResource(r, entry, clusterResourceName, scope)
 	if err != nil {
 		t.Fatalf("ExtractObservedResource: %v", err)
 	}
@@ -82,13 +86,12 @@ func TestExtractIdentityFields(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
 
 	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
-	wantName := "clusters/target-1/apiResources/apps~v1~deployments/objects/abc-123"
+	wantName := "clusters/target-1/namespaces/default/apiResources/deployments.apps/objects/abc-123"
 	if string(report.Name) != wantName {
 		t.Errorf("Name = %q, want %q", report.Name, wantName)
 	}
@@ -138,8 +141,7 @@ func TestExtractCreationTimestamp_InObservation(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -164,8 +166,7 @@ func TestExtractIdentityFields_CoreAPIGroup(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -180,7 +181,7 @@ func TestExtractIdentityFields_CoreAPIGroup(t *testing.T) {
 	if gvr["group"] != "" || gvr["version"] != "v1" || gvr["resource"] != "pods" {
 		t.Errorf("gvr = %#v, want core v1 pods", gvr)
 	}
-	wantName := "clusters/target-1/apiResources/core~v1~pods/objects/pod-uid"
+	wantName := "clusters/target-1/namespaces/kube-system/apiResources/pods/objects/pod-uid"
 	if string(report.Name) != wantName {
 		t.Errorf("Name = %q, want %q", report.Name, wantName)
 	}
@@ -217,8 +218,7 @@ func TestExtractConditions(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -293,8 +293,7 @@ func TestExtractConditions_ContractRules(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -331,8 +330,8 @@ func TestExtractObservedFields_NumberType(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+
 		Fields: []FieldExtraction{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 			{Name: "readyReplicas", JSONPath: ".status.readyReplicas", DataType: DataTypeNumber},
@@ -378,8 +377,8 @@ func TestExtractObservedFields_BytesType(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
-		Kind: "Node",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+
 		Fields: []FieldExtraction{
 			{Name: "memoryAllocatable", JSONPath: ".status.allocatable.memory", DataType: DataTypeBytes},
 		},
@@ -417,8 +416,8 @@ func TestExtractObservedFields_StringType(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "phase", JSONPath: ".status.phase"},
 		},
@@ -457,8 +456,8 @@ func TestExtractObservedFields_SliceType(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "containerImages", JSONPath: ".status.containerStatuses[*].image", DataType: DataTypeSlice},
 		},
@@ -504,8 +503,8 @@ func TestExtractObservedFields_BoolNativeNotString(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "hostNetwork", JSONPath: ".spec.hostNetwork"},
 		},
@@ -542,8 +541,8 @@ func TestExtractObservedFields_JSONPathNormalization(t *testing.T) {
 
 	// JSONPath with braces should also work
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "phase", JSONPath: "{.status.phase}"},
 		},
@@ -580,8 +579,8 @@ func TestExtractObservedFields_MissingFieldIsSkipped(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+
 		Fields: []FieldExtraction{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 			{Name: "readyReplicas", JSONPath: ".status.readyReplicas", DataType: DataTypeNumber},
@@ -622,8 +621,7 @@ func TestExtractAnnotations_StripsInternalKeys(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -661,8 +659,8 @@ func TestExtractObservedFields_MapStringType(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "nodeSelector", JSONPath: ".spec.nodeSelector", DataType: DataTypeMapString},
 		},
@@ -711,8 +709,7 @@ func TestExtractOwnerReferences_ControllerOwner(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
-		Kind: "ReplicaSet",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
 	}
 	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -751,8 +748,7 @@ func TestExtractOwnerReferences_MultipleOwnersSelectsController(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -784,8 +780,7 @@ func TestExtractOwnerReferences_NoController(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -810,8 +805,7 @@ func TestExtractGeneration(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -846,8 +840,7 @@ func TestExtractDeletionTimestamp(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -884,8 +877,8 @@ func TestExtractAnnotations_WithSizeCap(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:                schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind:               "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		ExtractAnnotations: true,
 		AnnotationSizeCap:  20,
 	}
@@ -934,8 +927,8 @@ func TestExtractAnnotations_DefaultSizeCap(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:                schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind:               "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		ExtractAnnotations: true,
 		// AnnotationSizeCap not set, should default to 64
 	}
@@ -979,8 +972,8 @@ func TestExtractAnnotations_Disabled(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:                schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind:               "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		ExtractAnnotations: false,
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
@@ -1016,8 +1009,8 @@ func TestComputeExtra_HookInvocation(t *testing.T) {
 
 	hookCalled := false
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		ComputeExtra: func(r *unstructured.Unstructured, fields map[string]any) {
 			hookCalled = true
 			fields["computedStatus"] = "computed-value"
@@ -1071,8 +1064,8 @@ func TestInventoryNode_Fields(t *testing.T) {
 	}
 
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+
 		Fields: []FieldExtraction{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 		},
@@ -1159,8 +1152,7 @@ func TestExtractObservedResource_PreservesGVR(t *testing.T) {
 
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 	entry := SchemaEntry{
-		GVR:  gvr,
-		Kind: "Deployment",
+		GVR: gvr,
 	}
 
 	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
@@ -1183,10 +1175,9 @@ func TestExtractObservedResource_EmptyUIDRejected(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, _, err := ExtractObservedResource(r, entry, testClusterResourceName("target-1"))
+	_, _, err := ExtractObservedResource(r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	if err == nil {
 		t.Fatal("expected error for empty UID")
 	}
@@ -1206,10 +1197,9 @@ func TestExtractObservedResource_RejectsNonFlatClusterResourceName(t *testing.T)
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, _, err := ExtractObservedResource(r, entry, domain.ResourceName("clusters/prod/us-east-1"))
+	_, _, err := ExtractObservedResource(r, entry, domain.ResourceName("clusters/prod/us-east-1"), ObjectScopeNamespaced)
 	if err == nil {
 		t.Fatal("expected error for non-flat cluster resource name")
 	}
@@ -1232,10 +1222,9 @@ func TestExtractObservedResource_EmptyClusterResourceNameRejected(t *testing.T) 
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, _, err := ExtractObservedResource(r, entry, domain.ResourceName(""))
+	_, _, err := ExtractObservedResource(r, entry, domain.ResourceName(""), ObjectScopeNamespaced)
 	if err == nil {
 		t.Fatal("expected error for empty cluster resource name")
 	}
@@ -1257,8 +1246,7 @@ func TestExtractObservedResource_ClusterScoped(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
-		Kind: "Node",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
 	}
 	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 
@@ -1283,7 +1271,7 @@ func TestExtractObservedResource_ClusterScoped(t *testing.T) {
 	if _, ok := meta["labels"]; ok {
 		t.Errorf("metadata.labels = %#v, want omitted", meta["labels"])
 	}
-	wantName := "clusters/target-1/apiResources/core~v1~nodes/objects/node-uid"
+	wantName := "clusters/target-1/apiResources/nodes/objects/node-uid"
 	if string(report.Name) != wantName {
 		t.Errorf("Name = %q, want %q", report.Name, wantName)
 	}
@@ -1304,8 +1292,7 @@ func TestExtractObservedResource_ObservedAtSet(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 	after := time.Now()
@@ -1353,8 +1340,7 @@ func TestExtractOwnerReferences_MalformedEntriesIgnored(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 	if node.OwnerUID != "rs-uid" {
@@ -1386,8 +1372,7 @@ func TestExtractOwnerReferences_LastControllerWins(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
 	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 	if node.OwnerUID != "second-controller" {
@@ -1410,8 +1395,7 @@ func TestExtractConditions_AbsentAndMalformed(t *testing.T) {
 			},
 		}
 		entry := SchemaEntry{
-			GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Kind: "Pod",
+			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		}
 		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 		if len(report.Conditions) != 0 {
@@ -1443,8 +1427,7 @@ func TestExtractConditions_AbsentAndMalformed(t *testing.T) {
 			},
 		}
 		entry := SchemaEntry{
-			GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Kind: "Pod",
+			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		}
 		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 		if len(report.Conditions) != 1 {
@@ -1475,8 +1458,7 @@ func TestExtractConditions_AbsentAndMalformed(t *testing.T) {
 			},
 		}
 		entry := SchemaEntry{
-			GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-			Kind: "Deployment",
+			GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		}
 		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
 		if len(report.Conditions) != 2 {
@@ -1506,8 +1488,8 @@ func TestExtractAnnotations_EmptyAndFullyFiltered(t *testing.T) {
 			},
 		}
 		entry := SchemaEntry{
-			GVR:                schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Kind:               "Pod",
+			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 			ExtractAnnotations: true,
 		}
 		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
@@ -1534,8 +1516,8 @@ func TestExtractAnnotations_EmptyAndFullyFiltered(t *testing.T) {
 			},
 		}
 		entry := SchemaEntry{
-			GVR:                schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			Kind:               "Pod",
+			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 			ExtractAnnotations: true,
 			AnnotationSizeCap:  20,
 		}
@@ -1568,8 +1550,8 @@ func TestExtractObservedFields_NumberCoercion(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "intField", JSONPath: ".spec.intField", DataType: DataTypeNumber},
 			{Name: "floatField", JSONPath: ".spec.floatField", DataType: DataTypeNumber},
@@ -1628,8 +1610,8 @@ func TestExtractObservedFields_BytesFailures(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
-		Kind: "Node",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+
 		Fields: []FieldExtraction{
 			{Name: "badQuantity", JSONPath: ".status.allocatable.memory", DataType: DataTypeBytes},
 			{Name: "nonString", JSONPath: ".status.allocatable.cpu", DataType: DataTypeBytes},
@@ -1669,8 +1651,8 @@ func TestExtractObservedFields_MapStringFailures(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "notAMap", JSONPath: ".spec.notAMap", DataType: DataTypeMapString},
 			{Name: "emptyMap", JSONPath: ".spec.emptyMap", DataType: DataTypeMapString},
@@ -1712,8 +1694,8 @@ func TestExtractObservedFields_InvalidJSONPathSkipped(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "bad", JSONPath: ".status.phase[", DataType: DataTypeString},
 			{Name: "phase", JSONPath: ".status.phase"},
@@ -1766,8 +1748,8 @@ func TestExtractObservedFields_EmptySliceSkipped(t *testing.T) {
 		},
 	}
 	entry := SchemaEntry{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+
 		Fields: []FieldExtraction{
 			{Name: "emptyList", JSONPath: ".spec.emptyList", DataType: DataTypeSlice},
 		},

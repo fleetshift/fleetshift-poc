@@ -28,20 +28,27 @@ import (
 // inventory node for selector matching.
 //
 // clusterResourceName is the managed cluster (clusters/{id}) used for
-// the object resource-name parent.
+// the object resource-name parent. scope is discovery-authoritative
+// and must agree with metadata.namespace; it is never inferred from
+// the object.
 func ExtractObservedResource(
 	r *unstructured.Unstructured,
 	entry SchemaEntry,
 	clusterResourceName domain.ResourceName,
+	scope ObjectScope,
 ) (InventoryObjectReport, inventoryNode, error) {
 	uid := string(r.GetUID())
 	observedAt := time.Now()
 
+	scopeNamespace, err := NewScopeNamespace(scope, r.GetNamespace())
+	if err != nil {
+		return InventoryObjectReport{}, inventoryNode{}, fmt.Errorf("extract observed resource: %w", err)
+	}
 	id := KubernetesObjectIdentity{
 		ClusterResourceName: clusterResourceName,
 		GVR:                 entry.GVR,
+		ScopeNamespace:      scopeNamespace,
 		Kind:                r.GetKind(),
-		Namespace:           r.GetNamespace(),
 		Name:                r.GetName(),
 		UID:                 uid,
 	}

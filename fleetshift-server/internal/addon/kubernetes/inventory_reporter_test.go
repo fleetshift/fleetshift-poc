@@ -47,8 +47,8 @@ func TestDirectInventoryReporter_ApplyDelta_MapsUpsertsAndDeletes(t *testing.T) 
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
 	now := time.Unix(1700000000, 0).UTC()
 	obs := json.RawMessage(`{"kind":"Pod"}`)
-	name := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-1")
-	delName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-gone")
+	name := domain.ResourceName("clusters/prod/apiResources/pods/objects/uid-1")
+	delName := domain.ResourceName("clusters/prod/apiResources/pods/objects/uid-gone")
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
 		Upserts: []kubernetes.InventoryObjectReport{{
@@ -96,7 +96,7 @@ func TestDirectInventoryReporter_ApplyDelta_MapsUpsertsAndDeletes(t *testing.T) 
 func TestDirectInventoryReporter_ApplyDelta_UpsertsOnly(t *testing.T) {
 	fake := &recordingInventoryReportBackend{}
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
-	name := domain.ResourceName("clusters/prod/apiResources/apps~v1~deployments/objects/uid-d1")
+	name := domain.ResourceName("clusters/prod/apiResources/deployments.apps/objects/uid-d1")
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
 		Upserts: []kubernetes.InventoryObjectReport{{Name: name}},
@@ -112,7 +112,7 @@ func TestDirectInventoryReporter_ApplyDelta_UpsertsOnly(t *testing.T) {
 func TestDirectInventoryReporter_ApplyDelta_DeletesOnly(t *testing.T) {
 	fake := &recordingInventoryReportBackend{}
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
-	delName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-x")
+	delName := domain.ResourceName("clusters/prod/apiResources/pods/objects/uid-x")
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
 		Deletes: []kubernetes.InventoryObjectReport{{
@@ -137,7 +137,7 @@ func TestDirectInventoryReporter_ApplyDelta_ForcesIsDeleteOnDeletes(t *testing.T
 	// so a mis-tagged delete entry cannot become an upsert.
 	fake := &recordingInventoryReportBackend{}
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
-	delName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-x")
+	delName := domain.ResourceName("clusters/prod/apiResources/pods/objects/uid-x")
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
 		Deletes: []kubernetes.InventoryObjectReport{{Name: delName}},
@@ -156,7 +156,7 @@ func TestDirectInventoryReporter_ApplyDelta_ForcesIsDeleteFalseOnUpserts(t *test
 	// clear it so a mis-tagged upsert cannot become a delete.
 	fake := &recordingInventoryReportBackend{}
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
-	name := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-1")
+	name := domain.ResourceName("clusters/prod/apiResources/pods/objects/uid-1")
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
 		Upserts: []kubernetes.InventoryObjectReport{{
@@ -183,9 +183,9 @@ func TestDirectInventoryReporter_ApplyDelta_PropagatesReplaceBatchError(t *testi
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
-		Upserts: []kubernetes.InventoryObjectReport{{Name: "clusters/prod/apiResources/core~v1~pods/objects/uid-1"}},
+		Upserts: []kubernetes.InventoryObjectReport{{Name: "clusters/prod/apiResources/pods/objects/uid-1"}},
 		Deletes: []kubernetes.InventoryObjectReport{{
-			Name:     "clusters/prod/apiResources/core~v1~pods/objects/uid-2",
+			Name:     "clusters/prod/apiResources/pods/objects/uid-2",
 			IsDelete: true,
 		}},
 	})

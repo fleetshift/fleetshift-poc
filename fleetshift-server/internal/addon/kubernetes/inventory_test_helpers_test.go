@@ -2,11 +2,13 @@ package kubernetes
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -172,7 +174,7 @@ func newHostWithReadyThenBlockDiscovery(t *testing.T, unblock <-chan struct{}) (
 					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 						GroupVersion: "v1",
 						APIResources: []metav1.APIResource{
-							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+							{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 						},
 					}}),
 					unblock: unblock,
@@ -180,7 +182,7 @@ func newHostWithReadyThenBlockDiscovery(t *testing.T, unblock <-chan struct{}) (
 				}, nil
 			},
 		},
-		nil,
+		slog.New(slog.DiscardHandler),
 	)
 	return host, &blocked
 }
@@ -219,4 +221,34 @@ func awaitIndexerIntentionalStop(t *testing.T, h *KubernetesInProcessIndexHost, 
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+}
+
+func mustScopeNamespace(t *testing.T, scope ObjectScope, namespace string) ScopeNamespace {
+	t.Helper()
+	sn, err := NewScopeNamespace(scope, namespace)
+	if err != nil {
+		t.Fatalf("NewScopeNamespace: %v", err)
+	}
+	return sn
+}
+
+func testDiscovered(gvr schema.GroupVersionResource, scope ObjectScope) DiscoveredAPIResource {
+	desc, err := NewDiscoveredAPIResource(gvr, scope)
+	if err != nil {
+		panic(err)
+	}
+	return desc
+}
+
+func testDiscoveredList(gvrs ...schema.GroupVersionResource) []DiscoveredAPIResource {
+	out := make([]DiscoveredAPIResource, 0, len(gvrs))
+	for _, gvr := range gvrs {
+		scope := ObjectScopeNamespaced
+		switch gvr.Resource {
+		case "nodes", "namespaces", "persistentvolumes", "customresourcedefinitions":
+			scope = ObjectScopeCluster
+		}
+		out = append(out, testDiscovered(gvr, scope))
+	}
+	return out
 }

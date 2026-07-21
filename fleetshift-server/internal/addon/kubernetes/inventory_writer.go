@@ -23,12 +23,22 @@ type edgeKey struct {
 }
 
 // gvrState is the writer's per-GVR process-generation state. ReportedUIDs
-// is the persistence acknowledgement baseline: it changes only after a
-// successful mixed ReplaceBatch. Generation fencing rejects late events
-// after RemoveGVR closes the generation.
+// maps Kubernetes UID to the exact [domain.ResourceName] last acknowledged
+// for that UID. It changes only after a successful mixed ReplaceBatch.
+// Generation fencing rejects late events after RemoveGVR closes the
+// generation. Retaining the exact name is required because namespaced
+// paths include the namespace segment and deletes must not re-infer scope.
 type gvrState struct {
 	Generation   uint64
-	ReportedUIDs map[string]struct{}
+	ReportedUIDs map[string]domain.ResourceName
+}
+
+// pendingDelete is one queued watch delete awaiting flush. Name is the
+// exact inventory resource name when known at queue time; when empty,
+// flush resolves it from ReportedUIDs.
+type pendingDelete struct {
+	GVR  schema.GroupVersionResource
+	Name domain.ResourceName
 }
 
 // pendingResync holds a failed LIST/resync mixed batch retained until it
@@ -46,7 +56,7 @@ type pendingResync struct {
 	// extracted LIST UIDs, plus previously reported UIDs that were
 	// still listed but failed extraction (preserved until a good
 	// extract or a true LIST omission).
-	currentUIDs map[string]struct{}
+	currentUIDs map[string]domain.ResourceName
 	ack         chan<- error
 }
 
@@ -95,7 +105,7 @@ type Writer struct {
 
 	// extractObserved, when non-nil, replaces [ExtractObservedResource]
 	// for flush/resync. Tests use this to simulate extract failures.
-	extractObserved func(*unstructured.Unstructured, SchemaEntry, domain.ResourceName) (InventoryObjectReport, inventoryNode, error)
+	extractObserved func(*unstructured.Unstructured, SchemaEntry, domain.ResourceName, ObjectScope) (InventoryObjectReport, inventoryNode, error)
 
 	// stopCh requests a shutdown flush under a caller-provided context.
 	// Buffered so Stop does not block if Run has already exited.
@@ -120,9 +130,6 @@ func NewWriter(
 ) *Writer {
 	if edgeSink == nil {
 		edgeSink = NoopEdgeSink{}
-	}
-	if logger == nil {
-		logger = slog.Default()
 	}
 	return &Writer{
 		clusterResourceName: clusterResourceName,
@@ -181,7 +188,8 @@ func (w *Writer) Run(ctx context.Context) {
 	// Pending batch state.
 	pendingUpserts := make(map[string]*unstructured.Unstructured) // UID -> resource
 	pendingUpsertGVR := make(map[string]schema.GroupVersionResource)
-	pendingDeletes := make(map[string]schema.GroupVersionResource) // UID -> GVR
+	pendingUpsertScope := make(map[string]ObjectScope)
+	pendingDeletes := make(map[string]pendingDelete) // UID -> delete identity
 
 	// Dedup: tracks UID -> last-sent resourceVersion.
 	sentVersions := make(map[string]string)
@@ -194,7 +202,7 @@ func (w *Writer) Run(ctx context.Context) {
 		// applyDeltaWithRetry already logs; a still-failing batch stays in
 		// pendingResync until process teardown drops it.
 		_ = w.retryPendingResyncs(flushCtx)
-		w.flush(flushCtx, pendingUpserts, pendingUpsertGVR, pendingDeletes, sentVersions)
+		w.flush(flushCtx, pendingUpserts, pendingUpsertGVR, pendingUpsertScope, pendingDeletes, sentVersions)
 		_ = w.retryDirtyEdges(flushCtx)
 	}
 
@@ -216,7 +224,7 @@ func (w *Writer) Run(ctx context.Context) {
 				continue
 			}
 			if dropPending {
-				dropPendingForGVR(pendingUpserts, pendingUpsertGVR, pendingDeletes, ev.GVR)
+				dropPendingForGVR(pendingUpserts, pendingUpsertGVR, pendingUpsertScope, pendingDeletes, ev.GVR)
 			}
 			uid := string(ev.Resource.GetUID())
 
@@ -229,12 +237,14 @@ func (w *Writer) Run(ctx context.Context) {
 				}
 				pendingUpserts[uid] = ev.Resource
 				pendingUpsertGVR[uid] = ev.GVR
+				pendingUpsertScope[uid] = ev.Scope
 
 			case EventDelete:
-				pendingDeletes[uid] = ev.GVR
+				pendingDeletes[uid] = w.queueDelete(ev.GVR, ev.Scope, ev.Resource)
 				// Remove any pending upsert for this UID — the delete wins.
 				delete(pendingUpserts, uid)
 				delete(pendingUpsertGVR, uid)
+				delete(pendingUpsertScope, uid)
 				// Clear sent version so a future add for this UID is not
 				// deduped against the deleted resource.
 				delete(sentVersions, uid)
@@ -252,24 +262,25 @@ func (w *Writer) Run(ctx context.Context) {
 				continue
 			}
 			if dropPending {
-				dropPendingForGVR(pendingUpserts, pendingUpsertGVR, pendingDeletes, rs.GVR)
+				dropPendingForGVR(pendingUpserts, pendingUpsertGVR, pendingUpsertScope, pendingDeletes, rs.GVR)
 			}
 			w.sendResync(ctx, rs)
 
 		case rm := <-w.removeCh:
 			// Drop any pending work for this GVR so a later flush cannot
 			// resurrect objects after the GVR generation is closed.
-			dropPendingForGVR(pendingUpserts, pendingUpsertGVR, pendingDeletes, rm.GVR)
+			dropPendingForGVR(pendingUpserts, pendingUpsertGVR, pendingUpsertScope, pendingDeletes, rm.GVR)
 			w.closeGeneration(ctx, rm.GVR, rm.Generation)
 
 		case <-batchTicker.C:
 			// Failure keeps the entry in pendingResync for the next tick;
 			// the returned error does not change Run's control flow.
 			_ = w.retryPendingResyncs(ctx)
-			if err := w.flush(ctx, pendingUpserts, pendingUpsertGVR, pendingDeletes, sentVersions); err == nil {
+			if err := w.flush(ctx, pendingUpserts, pendingUpsertGVR, pendingUpsertScope, pendingDeletes, sentVersions); err == nil {
 				pendingUpserts = make(map[string]*unstructured.Unstructured)
 				pendingUpsertGVR = make(map[string]schema.GroupVersionResource)
-				pendingDeletes = make(map[string]schema.GroupVersionResource)
+				pendingUpsertScope = make(map[string]ObjectScope)
+				pendingDeletes = make(map[string]pendingDelete)
 			}
 			// Retry edge deltas that failed after inventory/resync already
 			// committed; empty object flushes do not call flushEdges.
@@ -306,7 +317,7 @@ func (w *Writer) acceptGeneration(ctx context.Context, gvr schema.GroupVersionRe
 		if st == nil {
 			w.gvrStates[gvr] = &gvrState{
 				Generation:   0,
-				ReportedUIDs: make(map[string]struct{}),
+				ReportedUIDs: make(map[string]domain.ResourceName),
 			}
 		}
 		return true, false
@@ -314,7 +325,7 @@ func (w *Writer) acceptGeneration(ctx context.Context, gvr schema.GroupVersionRe
 	if st == nil {
 		w.gvrStates[gvr] = &gvrState{
 			Generation:   gen,
-			ReportedUIDs: make(map[string]struct{}),
+			ReportedUIDs: make(map[string]domain.ResourceName),
 		}
 		return true, false
 	}
@@ -327,7 +338,7 @@ func (w *Writer) acceptGeneration(ctx context.Context, gvr schema.GroupVersionRe
 		w.dropGVRMemory(gvr)
 		w.gvrStates[gvr] = &gvrState{
 			Generation:   gen,
-			ReportedUIDs: make(map[string]struct{}),
+			ReportedUIDs: make(map[string]domain.ResourceName),
 		}
 		if p, ok := w.pendingResync[gvr]; ok {
 			ackResync(p.ack, errResyncGenerationClosed)
@@ -345,17 +356,19 @@ func (w *Writer) acceptGeneration(ctx context.Context, gvr schema.GroupVersionRe
 func dropPendingForGVR(
 	upserts map[string]*unstructured.Unstructured,
 	upsertGVR map[string]schema.GroupVersionResource,
-	deletes map[string]schema.GroupVersionResource,
+	upsertScope map[string]ObjectScope,
+	deletes map[string]pendingDelete,
 	gvr schema.GroupVersionResource,
 ) {
 	for uid, pendingGVR := range upsertGVR {
 		if pendingGVR == gvr {
 			delete(upserts, uid)
 			delete(upsertGVR, uid)
+			delete(upsertScope, uid)
 		}
 	}
-	for uid, pendingGVR := range deletes {
-		if pendingGVR == gvr {
+	for uid, pending := range deletes {
+		if pending.GVR == gvr {
 			delete(deletes, uid)
 		}
 	}
@@ -414,7 +427,8 @@ func (w *Writer) flush(
 	ctx context.Context,
 	upserts map[string]*unstructured.Unstructured,
 	upsertGVR map[string]schema.GroupVersionResource,
-	deletes map[string]schema.GroupVersionResource,
+	upsertScope map[string]ObjectScope,
+	deletes map[string]pendingDelete,
 	sentVersions map[string]string,
 ) error {
 	if len(upserts) == 0 && len(deletes) == 0 {
@@ -423,7 +437,8 @@ func (w *Writer) flush(
 
 	var reports []InventoryObjectReport
 	newSentVersions := make(map[string]string)
-	upsertedUIDs := make(map[string]schema.GroupVersionResource)
+	upsertedNames := make(map[string]domain.ResourceName)
+	upsertedGVRs := make(map[string]schema.GroupVersionResource)
 	prevNodes := make(map[string]inventoryNode)
 	prevEdgeFuncs := make(map[string]func(NodeStore) []Edge)
 	hadPrevNode := make(map[string]bool)
@@ -437,8 +452,9 @@ func (w *Writer) flush(
 		}
 
 		gvr := upsertGVR[uid]
+		scope := upsertScope[uid]
 		entry := w.schemaEntry(gvr)
-		report, node, err := w.observeResource(r, entry)
+		report, node, err := w.observeResource(r, entry, scope)
 		if err != nil {
 			w.logger.Warn("skipping upsert; extraction failed",
 				"uid", uid,
@@ -449,7 +465,8 @@ func (w *Writer) flush(
 		node.GVR = gvr
 		reports = append(reports, report)
 		newSentVersions[uid] = rv
-		upsertedUIDs[uid] = gvr
+		upsertedNames[uid] = report.Name
+		upsertedGVRs[uid] = gvr
 
 		// Uncommitted edge-state update for diffEdges; restored on write
 		// failure so a retry does not lose a previously acknowledged node.
@@ -471,17 +488,24 @@ func (w *Writer) flush(
 
 	var deleteReports []InventoryObjectReport
 	deletedUIDs := make(map[string]schema.GroupVersionResource)
-	for uid, gvr := range deletes {
-		report, err := w.deleteReport(gvr, uid)
-		if err != nil {
-			w.logger.Warn("skipping delete; resource name construction failed",
+	for uid, pending := range deletes {
+		name := pending.Name
+		if name == "" {
+			if st := w.gvrStates[pending.GVR]; st != nil {
+				name = st.ReportedUIDs[uid]
+			}
+		}
+		if name == "" {
+			w.logger.Warn("skipping delete; no acknowledged or queued resource name",
 				"uid", uid,
-				"gvr", gvr.String(),
-				"error", err)
+				"gvr", pending.GVR.String())
 			continue
 		}
-		deleteReports = append(deleteReports, report)
-		deletedUIDs[uid] = gvr
+		deleteReports = append(deleteReports, InventoryObjectReport{
+			Name:     name,
+			IsDelete: true,
+		})
+		deletedUIDs[uid] = pending.GVR
 	}
 
 	if len(reports) == 0 && len(deleteReports) == 0 {
@@ -490,11 +514,11 @@ func (w *Writer) flush(
 
 	if w.reporter == nil {
 		if err := w.flushEdges(ctx); err != nil {
-			w.restoreUncommittedNodes(upsertedUIDs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
+			w.restoreUncommittedNodes(upsertedGVRs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
 			w.edgeDirty = false
 			return err
 		}
-		w.acknowledgeFlush(upsertedUIDs, deletedUIDs)
+		w.acknowledgeFlush(upsertedNames, upsertedGVRs, deletedUIDs)
 		maps.Copy(sentVersions, newSentVersions)
 		return nil
 	}
@@ -504,12 +528,12 @@ func (w *Writer) flush(
 		Deletes: deleteReports,
 	}
 	if err := w.applyDeltaWithRetry(ctx, delta); err != nil {
-		w.restoreUncommittedNodes(upsertedUIDs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
+		w.restoreUncommittedNodes(upsertedGVRs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
 		return err
 	}
 
 	if err := w.flushEdges(ctx); err != nil {
-		w.restoreUncommittedNodes(upsertedUIDs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
+		w.restoreUncommittedNodes(upsertedGVRs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
 		// Membership was rolled back; object pending will retry inventory
 		// and edges together. Clear dirty so the ticker does not flush
 		// edges against the restored (pre-batch) graph.
@@ -517,7 +541,7 @@ func (w *Writer) flush(
 		return err
 	}
 
-	w.acknowledgeFlush(upsertedUIDs, deletedUIDs)
+	w.acknowledgeFlush(upsertedNames, upsertedGVRs, deletedUIDs)
 	maps.Copy(sentVersions, newSentVersions)
 	return nil
 }
@@ -588,19 +612,22 @@ func (w *Writer) restoreUncommittedNodes(
 }
 
 // acknowledgeFlush advances ReportedUIDs after a successful watch flush:
-// upserted UIDs are added, deleted UIDs are removed. Call only after the
-// mixed ReplaceBatch (and any edge sink write) has succeeded.
+// upserted UIDs store their exact ResourceName, deleted UIDs are removed.
+// Call only after the mixed ReplaceBatch (and any edge sink write) has
+// succeeded.
 func (w *Writer) acknowledgeFlush(
-	upsertedUIDs map[string]schema.GroupVersionResource,
+	upsertedNames map[string]domain.ResourceName,
+	upsertedGVRs map[string]schema.GroupVersionResource,
 	deletedUIDs map[string]schema.GroupVersionResource,
 ) {
-	for uid, gvr := range upsertedUIDs {
+	for uid, name := range upsertedNames {
+		gvr := upsertedGVRs[uid]
 		st := w.gvrStates[gvr]
 		if st == nil {
-			st = &gvrState{ReportedUIDs: make(map[string]struct{})}
+			st = &gvrState{ReportedUIDs: make(map[string]domain.ResourceName)}
 			w.gvrStates[gvr] = st
 		}
-		st.ReportedUIDs[uid] = struct{}{}
+		st.ReportedUIDs[uid] = name
 	}
 	for uid, gvr := range deletedUIDs {
 		if st := w.gvrStates[gvr]; st != nil {
@@ -670,7 +697,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 	entry := w.schemaEntry(rs.GVR)
 
 	listedUIDs := make(map[string]struct{})
-	extractedUIDs := make(map[string]struct{})
+	extractedNames := make(map[string]domain.ResourceName)
 	var upserts []InventoryObjectReport
 	nextNodes := make(map[string]inventoryNode)
 	nextEdgeFuncs := make(map[string]func(NodeStore) []Edge)
@@ -680,7 +707,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		if uid != "" {
 			listedUIDs[uid] = struct{}{}
 		}
-		report, node, err := w.observeResource(r, entry)
+		report, node, err := w.observeResource(r, entry, rs.Scope)
 		if err != nil {
 			w.logger.Warn("skipping resync item; extraction failed",
 				"uid", uid,
@@ -690,7 +717,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		}
 		node.GVR = rs.GVR
 		upserts = append(upserts, report)
-		extractedUIDs[uid] = struct{}{}
+		extractedNames[uid] = report.Name
 		nextNodes[uid] = node
 		if entry.BuildEdges != nil {
 			nextEdgeFuncs[uid] = entry.BuildEdges(r, uid)
@@ -701,36 +728,31 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 	var deletes []InventoryObjectReport
 	var staleUIDs []string
 	if st != nil {
-		for uid := range st.ReportedUIDs {
+		for uid, name := range st.ReportedUIDs {
 			if _, exists := listedUIDs[uid]; exists {
 				continue
 			}
-			report, err := w.deleteReport(rs.GVR, uid)
-			if err != nil {
-				w.logger.Warn("skipping resync delete; resource name construction failed",
-					"uid", uid,
-					"gvr", rs.GVR.String(),
-					"error", err)
-				continue
-			}
-			deletes = append(deletes, report)
+			deletes = append(deletes, InventoryObjectReport{
+				Name:     name,
+				IsDelete: true,
+			})
 			staleUIDs = append(staleUIDs, uid)
 		}
 	}
 
 	// Post-success ReportedUIDs: extracted UIDs, plus listed-but-failed
-	// UIDs that were already reported (preserve prior inventory).
-	reportedAfter := maps.Clone(extractedUIDs)
+	// UIDs that were already reported (preserve prior inventory name).
+	reportedAfter := maps.Clone(extractedNames)
 	if reportedAfter == nil {
-		reportedAfter = make(map[string]struct{})
+		reportedAfter = make(map[string]domain.ResourceName)
 	}
 	if st != nil {
 		for uid := range listedUIDs {
-			if _, ok := extractedUIDs[uid]; ok {
+			if _, ok := extractedNames[uid]; ok {
 				continue
 			}
-			if _, wasReported := st.ReportedUIDs[uid]; wasReported {
-				reportedAfter[uid] = struct{}{}
+			if name, wasReported := st.ReportedUIDs[uid]; wasReported {
+				reportedAfter[uid] = name
 			}
 		}
 	}
@@ -765,12 +787,41 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 }
 
 // observeResource extracts a report+node, using [Writer.extractObserved]
-// when set (tests) and [ExtractObservedResource] otherwise.
-func (w *Writer) observeResource(r *unstructured.Unstructured, entry SchemaEntry) (InventoryObjectReport, inventoryNode, error) {
+// when set (tests) and [ExtractObservedResource] otherwise. Scope must
+// come from the discovery-bound event/resync; there is no schema fallback.
+func (w *Writer) observeResource(r *unstructured.Unstructured, entry SchemaEntry, scope ObjectScope) (InventoryObjectReport, inventoryNode, error) {
 	if w.extractObserved != nil {
-		return w.extractObserved(r, entry, w.clusterResourceName)
+		return w.extractObserved(r, entry, w.clusterResourceName, scope)
 	}
-	return ExtractObservedResource(r, entry, w.clusterResourceName)
+	return ExtractObservedResource(r, entry, w.clusterResourceName, scope)
+}
+
+// queueDelete builds a pending watch delete using the event's bound scope
+// and object metadata when possible, otherwise the acknowledged name.
+func (w *Writer) queueDelete(gvr schema.GroupVersionResource, scope ObjectScope, obj *unstructured.Unstructured) pendingDelete {
+	uid := ""
+	namespace := ""
+	if obj != nil {
+		uid = string(obj.GetUID())
+		namespace = obj.GetNamespace()
+	}
+	name := domain.ResourceName("")
+	if sn, snErr := NewScopeNamespace(scope, namespace); snErr == nil {
+		if n, nameErr := ObjectResourceName(KubernetesObjectIdentity{
+			ClusterResourceName: w.clusterResourceName,
+			GVR:                 gvr,
+			ScopeNamespace:      sn,
+			UID:                 uid,
+		}); nameErr == nil {
+			name = n
+		}
+	}
+	if name == "" {
+		if st := w.gvrStates[gvr]; st != nil {
+			name = st.ReportedUIDs[uid]
+		}
+	}
+	return pendingDelete{GVR: gvr, Name: name}
 }
 
 // applyResyncSuccess commits in-memory membership and ReportedUIDs for a
@@ -788,13 +839,13 @@ func (w *Writer) applyResyncSuccess(gvr schema.GroupVersionResource, pending *pe
 	if st == nil {
 		st = &gvrState{
 			Generation:   pending.generation,
-			ReportedUIDs: make(map[string]struct{}),
+			ReportedUIDs: make(map[string]domain.ResourceName),
 		}
 		w.gvrStates[gvr] = st
 	}
 	st.ReportedUIDs = maps.Clone(pending.currentUIDs)
 	if st.ReportedUIDs == nil {
-		st.ReportedUIDs = make(map[string]struct{})
+		st.ReportedUIDs = make(map[string]domain.ResourceName)
 	}
 }
 
@@ -834,23 +885,6 @@ func (w *Writer) schemaEntry(gvr schema.GroupVersionResource) SchemaEntry {
 		entry.GVR = gvr
 	}
 	return entry
-}
-
-// deleteReport builds an exact-name IsDelete [InventoryObjectReport]
-// for one previously reported UID.
-func (w *Writer) deleteReport(gvr schema.GroupVersionResource, uid string) (InventoryObjectReport, error) {
-	name, err := ObjectResourceName(KubernetesObjectIdentity{
-		ClusterResourceName: w.clusterResourceName,
-		GVR:                 gvr,
-		UID:                 uid,
-	})
-	if err != nil {
-		return InventoryObjectReport{}, err
-	}
-	return InventoryObjectReport{
-		Name:     name,
-		IsDelete: true,
-	}, nil
 }
 
 func (w *Writer) diffEdges() (adds, dels []Edge, newEdges map[edgeKey]Edge) {

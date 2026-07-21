@@ -1,11 +1,14 @@
 package kubernetes
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -103,24 +106,39 @@ func TestIsResourceAllowed_WildcardAllow_OverridesDefaultDeny(t *testing.T) {
 	}
 }
 
-func TestIsResourceAllowed_NilLoggerDefaults(t *testing.T) {
-	if !IsResourceAllowed("apps", "deployments", nil, nil, nil, nil) {
-		t.Error("nil logger must not panic; expected allowed with empty lists")
-	}
-}
-
-func TestSupportedResources_NilLoggerDefaults(t *testing.T) {
-	disc := newFakeDiscovery([]*metav1.APIResourceList{{
-		GroupVersion: "v1",
-		APIResources: []metav1.APIResource{
-			{Name: "pods", Verbs: metav1.Verbs{"list", "watch"}},
-		},
-	}})
-	result, err := SupportedResources(disc, nil)
-	if err != nil {
-		t.Fatalf("SupportedResources with nil logger: %v", err)
-	}
-	if _, ok := result[podsGVR()]; !ok {
-		t.Fatalf("expected pods in result, got %#v", result)
-	}
+func TestNewDiscoveredAPIResource(t *testing.T) {
+	t.Run("ok", func(t *testing.T) {
+		gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+		got, err := NewDiscoveredAPIResource(gvr, ObjectScopeNamespaced)
+		if err != nil {
+			t.Fatalf("NewDiscoveredAPIResource: %v", err)
+		}
+		if got.GVR != gvr || got.Scope != ObjectScopeNamespaced {
+			t.Fatalf("got %#v", got)
+		}
+	})
+	t.Run("empty GVR", func(t *testing.T) {
+		_, err := NewDiscoveredAPIResource(schema.GroupVersionResource{}, ObjectScopeNamespaced)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("subresource", func(t *testing.T) {
+		_, err := NewDiscoveredAPIResource(
+			schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods/status"},
+			ObjectScopeNamespaced,
+		)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("unknown scope", func(t *testing.T) {
+		_, err := NewDiscoveredAPIResource(
+			schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			ObjectScopeUnknown,
+		)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
 }

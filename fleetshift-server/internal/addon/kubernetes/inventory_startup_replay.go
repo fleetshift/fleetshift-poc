@@ -44,9 +44,6 @@ func ReplayPersistedIndexers(
 	runtime IndexingRuntime,
 	logger *slog.Logger,
 ) {
-	if logger == nil {
-		logger = slog.Default()
-	}
 	logger = logger.With("component", "kubernetes-index-startup-replay")
 
 	if runtime == nil || lister == nil {

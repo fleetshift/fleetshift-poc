@@ -1082,8 +1082,8 @@ func TestServiceEdges_ThroughExtraction(t *testing.T) {
 	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 
 	schemaEntries := map[schema.GroupVersionResource]SchemaEntry{
-		svcGVR: {GVR: svcGVR, Kind: "Service", BuildEdges: buildServiceEdges},
-		podGVR: {GVR: podGVR, Kind: "Pod"},
+		svcGVR: {GVR: svcGVR, BuildEdges: buildServiceEdges},
+		podGVR: {GVR: podGVR},
 	}
 
 	svc := &unstructured.Unstructured{Object: map[string]any{
@@ -1116,15 +1116,15 @@ func TestServiceEdges_ThroughExtraction(t *testing.T) {
 		},
 	}}
 
-	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], testClusterResourceName("t1"))
+	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], testClusterResourceName("t1"), ObjectScopeNamespaced)
 	if err != nil {
 		t.Fatalf("extract service: %v", err)
 	}
-	_, podNode1, err := ExtractObservedResource(matchingPod, schemaEntries[podGVR], testClusterResourceName("t1"))
+	_, podNode1, err := ExtractObservedResource(matchingPod, schemaEntries[podGVR], testClusterResourceName("t1"), ObjectScopeNamespaced)
 	if err != nil {
 		t.Fatalf("extract matching pod: %v", err)
 	}
-	_, podNode2, err := ExtractObservedResource(nonMatchingPod, schemaEntries[podGVR], testClusterResourceName("t1"))
+	_, podNode2, err := ExtractObservedResource(nonMatchingPod, schemaEntries[podGVR], testClusterResourceName("t1"), ObjectScopeNamespaced)
 	if err != nil {
 		t.Fatalf("extract non-matching pod: %v", err)
 	}
@@ -1157,8 +1157,8 @@ func TestServiceEdges_ThroughExtraction_NoMatch(t *testing.T) {
 	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 
 	schemaEntries := map[schema.GroupVersionResource]SchemaEntry{
-		svcGVR: {GVR: svcGVR, Kind: "Service", BuildEdges: buildServiceEdges},
-		podGVR: {GVR: podGVR, Kind: "Pod"},
+		svcGVR: {GVR: svcGVR, BuildEdges: buildServiceEdges},
+		podGVR: {GVR: podGVR},
 	}
 
 	svc := &unstructured.Unstructured{Object: map[string]any{
@@ -1181,11 +1181,11 @@ func TestServiceEdges_ThroughExtraction_NoMatch(t *testing.T) {
 		},
 	}}
 
-	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], testClusterResourceName("t1"))
+	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], testClusterResourceName("t1"), ObjectScopeNamespaced)
 	if err != nil {
 		t.Fatalf("extract service: %v", err)
 	}
-	_, podNode, err := ExtractObservedResource(pod, schemaEntries[podGVR], testClusterResourceName("t1"))
+	_, podNode, err := ExtractObservedResource(pod, schemaEntries[podGVR], testClusterResourceName("t1"), ObjectScopeNamespaced)
 	if err != nil {
 		t.Fatalf("extract pod: %v", err)
 	}
@@ -1267,8 +1267,6 @@ func TestDefaultKubernetesSchema_AllEntries(t *testing.T) {
 		{Group: "apps", Version: "v1", Resource: "replicasets"},
 		{Group: "batch", Version: "v1", Resource: "jobs"},
 		{Group: "batch", Version: "v1", Resource: "cronjobs"},
-		{Group: "", Version: "v1", Resource: "configmaps"},
-		{Group: "", Version: "v1", Resource: "secrets"},
 	}
 	if len(indexSchema.Entries) != len(want) {
 		t.Fatalf("Entries len = %d, want %d", len(indexSchema.Entries), len(want))
@@ -1281,9 +1279,6 @@ func TestDefaultKubernetesSchema_AllEntries(t *testing.T) {
 		}
 		if entry.GVR != gvr {
 			t.Errorf("entry GVR = %v, want %v", entry.GVR, gvr)
-		}
-		if entry.Kind == "" {
-			t.Errorf("entry for %v has empty Kind", gvr)
 		}
 	}
 
@@ -1321,7 +1316,7 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 				},
 			},
 		}}
-		report, node, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], testClusterResourceName("t1"))
+		report, node, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], testClusterResourceName("t1"), ObjectScopeNamespaced)
 		if err != nil {
 			t.Fatalf("extract pod: %v", err)
 		}
@@ -1354,7 +1349,7 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 				"nodeInfo": map[string]any{"kubeletVersion": "v1.29.0"},
 			},
 		}}
-		report, _, err := ExtractObservedResource(nodeObj, indexSchema.Entries[nodeGVR()], testClusterResourceName("t1"))
+		report, _, err := ExtractObservedResource(nodeObj, indexSchema.Entries[nodeGVR()], testClusterResourceName("t1"), ObjectScopeCluster)
 		if err != nil {
 			t.Fatalf("extract node: %v", err)
 		}
@@ -1383,11 +1378,11 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 				"labels":            map[string]any{"app": "web"},
 			},
 		}}
-		_, svcNode, err := ExtractObservedResource(svc, indexSchema.Entries[serviceGVR()], testClusterResourceName("t1"))
+		_, svcNode, err := ExtractObservedResource(svc, indexSchema.Entries[serviceGVR()], testClusterResourceName("t1"), ObjectScopeNamespaced)
 		if err != nil {
 			t.Fatalf("extract service: %v", err)
 		}
-		_, podNode, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], testClusterResourceName("t1"))
+		_, podNode, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], testClusterResourceName("t1"), ObjectScopeNamespaced)
 		if err != nil {
 			t.Fatalf("extract pod: %v", err)
 		}
@@ -1401,7 +1396,7 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 		}
 	})
 
-	t.Run("SecretHasNoExtractedFields", func(t *testing.T) {
+	t.Run("SecretBaseTierHasNoExtractedFields", func(t *testing.T) {
 		secret := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "v1", "kind": "Secret",
 			"metadata": map[string]any{
@@ -1410,8 +1405,12 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 			},
 			"data": map[string]any{"password": "c2VjcmV0"},
 		}}
-		gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-		report, _, err := ExtractObservedResource(secret, indexSchema.Entries[gvr], testClusterResourceName("t1"))
+		// Secrets are not in the default enriched schema; base-tier
+		// extraction still indexes identity without secret payload data.
+		entry := SchemaEntry{
+			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"},
+		}
+		report, _, err := ExtractObservedResource(secret, entry, testClusterResourceName("t1"), ObjectScopeNamespaced)
 		if err != nil {
 			t.Fatalf("extract secret: %v", err)
 		}

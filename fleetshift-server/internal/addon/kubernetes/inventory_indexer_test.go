@@ -60,7 +60,7 @@ func TestIndexerDelegate_Start_ReportsCollectionAndShutdownDoesNotDelete(t *test
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
@@ -79,7 +79,7 @@ func TestIndexerDelegate_Start_ReportsCollectionAndShutdownDoesNotDelete(t *test
 			edges,
 			IndexConfig{
 				Schema: IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-					gvr: {GVR: gvr, Kind: "Pod"},
+					gvr: {GVR: gvr},
 				}},
 				AllowList:     []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}},
 				BatchInterval: 100 * time.Millisecond,
@@ -132,8 +132,8 @@ func TestIndexerDelegate_Start_AllowListExcludesOtherGVRs(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				{Name: "services", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "services", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(pods, svcs, crdGVR)
@@ -146,8 +146,8 @@ func TestIndexerDelegate_Start_AllowListExcludesOtherGVRs(t *testing.T) {
 			NoopEdgeSink{},
 			IndexConfig{
 				Schema: IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-					pods: {GVR: pods, Kind: "Pod"},
-					svcs: {GVR: svcs, Kind: "Service"},
+					pods: {GVR: pods},
+					svcs: {GVR: svcs},
 				}},
 				AllowList:     []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}},
 				BatchInterval: 100 * time.Millisecond,

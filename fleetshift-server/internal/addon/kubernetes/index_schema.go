@@ -25,12 +25,10 @@ type FieldExtraction struct {
 	DataType DataType
 }
 
-// SchemaEntry describes how a single Kubernetes resource type is
-// indexed: which GVR to watch, which fields to extract, and whether
-// to extract status conditions.
+// SchemaEntry describes enrichment for one watched Kubernetes GVR:
+// field extractions, annotation extraction flags, and optional hooks.
 type SchemaEntry struct {
 	GVR                schema.GroupVersionResource
-	Kind               string
 	Fields             []FieldExtraction
 	ExtractAnnotations bool
 	AnnotationSizeCap  int

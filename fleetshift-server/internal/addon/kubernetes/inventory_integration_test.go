@@ -394,11 +394,11 @@ func Test_DefaultDenyList(t *testing.T) {
 
 	objs := listInventory(t, f.store)
 	deniedGVRs := map[string]bool{
-		"core~v1~events":                     true,
-		"events.k8s.io~v1~events":            true,
-		"coordination.k8s.io~v1~leases":      true,
-		"core~v1~endpoints":                  true,
-		"discovery.k8s.io~v1~endpointslices": true,
+		"events":                          true,
+		"events.events.k8s.io":            true,
+		"leases.coordination.k8s.io":      true,
+		"endpoints":                       true,
+		"endpointslices.discovery.k8s.io": true,
 	}
 
 	for _, obj := range objs {
@@ -1124,11 +1124,14 @@ func invGVRKey(inv *domain.InventoryResource) string {
 	}
 	gvrMap, _ := top["gvr"].(map[string]any)
 	group, _ := gvrMap["group"].(string)
-	version, _ := gvrMap["version"].(string)
 	resource, _ := gvrMap["resource"].(string)
-	return kubeaddon.GVRKey(schema.GroupVersionResource{
-		Group: group, Version: version, Resource: resource,
+	key, err := kubeaddon.GroupResourceKey(schema.GroupResource{
+		Group: group, Resource: resource,
 	})
+	if err != nil {
+		return ""
+	}
+	return key
 }
 
 func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, clusterResourceName domain.ResourceName) {
@@ -1143,16 +1146,21 @@ func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, clusterRe
 	group, _ := gvrMap["group"].(string)
 	version, _ := gvrMap["version"].(string)
 	resource, _ := gvrMap["resource"].(string)
+	scopeStr, _ := gvrMap["scope"].(string)
 	kind, _ := obs["kind"].(string)
 	namespace, _ := meta["namespace"].(string)
 	name, _ := meta["name"].(string)
 	uid, _ := meta["uid"].(string)
 	gvr := schema.GroupVersionResource{Group: group, Version: version, Resource: resource}
+	sn, err := kubeaddon.NewScopeNamespace(kubeaddon.ObjectScope(scopeStr), namespace)
+	if err != nil {
+		t.Fatalf("NewScopeNamespace: %v", err)
+	}
 	want, err := kubeaddon.ObjectResourceName(kubeaddon.KubernetesObjectIdentity{
 		ClusterResourceName: clusterResourceName,
 		GVR:                 gvr,
+		ScopeNamespace:      sn,
 		Kind:                kind,
-		Namespace:           namespace,
 		Name:                name,
 		UID:                 uid,
 	})

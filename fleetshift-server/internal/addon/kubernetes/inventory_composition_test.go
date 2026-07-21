@@ -131,10 +131,14 @@ func awaitStoreObjects(t *testing.T, store domain.Store, timeout time.Duration, 
 
 func mustNamedObjectName(t *testing.T, clusterID string, gvr schema.GroupVersionResource, namespace, name, uid string) domain.ResourceName {
 	t.Helper()
+	scope := ObjectScopeNamespaced
+	if namespace == "" {
+		scope = ObjectScopeCluster
+	}
 	rn, err := ObjectResourceName(KubernetesObjectIdentity{
 		ClusterResourceName: testClusterResourceName(clusterID),
 		GVR:                 gvr,
-		Namespace:           namespace,
+		ScopeNamespace:      mustScopeNamespace(t, scope, namespace),
 		Name:                name,
 		UID:                 uid,
 	})
@@ -261,7 +265,7 @@ func TestStopIndexer_LeavesInventory(t *testing.T) {
 
 	cfg := IndexConfig{
 		Schema: IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-			pods: {GVR: pods, Kind: "Pod"},
+			pods: {GVR: pods},
 		}},
 		AllowList:     []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}},
 		BatchInterval: 50 * time.Millisecond,
@@ -329,7 +333,7 @@ func TestEnsureIndexer_IndexesTarget(t *testing.T) {
 
 	cfg := IndexConfig{
 		Schema: IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-			pods: {GVR: pods, Kind: "Pod"},
+			pods: {GVR: pods},
 		}},
 		AllowList:     []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}},
 		BatchInterval: 50 * time.Millisecond,
@@ -364,8 +368,8 @@ func TestRemoveGVR_LeavesPersistedCollection(t *testing.T) {
 	cms := configmapsGVR()
 	reporter := newStoreBackedReporter(store)
 	schema := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-		pods: {GVR: pods, Kind: "Pod"},
-		cms:  {GVR: cms, Kind: "ConfigMap"},
+		pods: {GVR: pods},
+		cms:  {GVR: cms},
 	}}
 	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
 
@@ -375,8 +379,8 @@ func TestRemoveGVR_LeavesPersistedCollection(t *testing.T) {
 
 	pod := makePod("uid-pod", "web", "default", "1")
 	cm := makeConfigMap("uid-cm", "cfg", "default", "1")
-	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{pod}}
-	w.ResyncCh() <- ResyncEvent{GVR: cms, Resources: []*unstructured.Unstructured{cm}}
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{pod}}
+	w.ResyncCh() <- ResyncEvent{GVR: cms, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{cm}}
 
 	wantPod := mustNamedObjectName(t, "prod", pods, "default", "web", "uid-pod")
 	wantCM := mustNamedObjectName(t, "prod", cms, "default", "cfg", "uid-cm")
@@ -427,7 +431,7 @@ func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 	pods := podsGVR()
 	reporter := newStoreBackedReporter(store)
 	schema := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-		pods: {GVR: pods, Kind: "Pod"},
+		pods: {GVR: pods},
 	}}
 	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
 
@@ -437,7 +441,7 @@ func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 
 	pod1 := makePod("uid-1", "keep", "default", "1")
 	pod2 := makePod("uid-2", "drop", "default", "1")
-	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{pod1, pod2}}
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{pod1, pod2}}
 
 	wantKeep := mustNamedObjectName(t, "prod", pods, "default", "keep", "uid-1")
 	wantDrop := mustNamedObjectName(t, "prod", pods, "default", "drop", "uid-2")
@@ -454,7 +458,7 @@ func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 		return haveKeep && haveDrop
 	})
 
-	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{pod1}}
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{pod1}}
 	awaitStoreObjects(t, store, 3*time.Second, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objs {
 			if obj.Name() == wantDrop {
@@ -491,7 +495,7 @@ func TestWriter_PersistsKubeLabelsAsLocalLabels(t *testing.T) {
 	pods := podsGVR()
 	reporter := newStoreBackedReporter(store)
 	schema := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-		pods: {GVR: pods, Kind: "Pod"},
+		pods: {GVR: pods},
 	}}
 	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
 
@@ -505,7 +509,7 @@ func TestWriter_PersistsKubeLabelsAsLocalLabels(t *testing.T) {
 		"kubernetes.io/hostname": "node-1",
 	})
 	unlabeled := makePod("uid-plain", "plain", "default", "1")
-	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{labeled, unlabeled}}
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{labeled, unlabeled}}
 
 	wantLabeled := mustNamedObjectName(t, "prod", pods, "default", "web", "uid-labeled")
 	wantPlain := mustNamedObjectName(t, "prod", pods, "default", "plain", "uid-plain")
@@ -577,7 +581,7 @@ func TestWriter_PersistsKubeLabelsAsLocalLabels(t *testing.T) {
 
 	labeled.SetLabels(map[string]string{"app": "api", "tier": "frontend"})
 	labeled.SetResourceVersion("2")
-	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{labeled, unlabeled}}
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{labeled, unlabeled}}
 	awaitStoreObjects(t, store, 3*time.Second, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objs {
 			if obj.Name() != wantLabeled {
@@ -617,7 +621,7 @@ func TestStartupList_DoesNotDeleteDBOnlyRows(t *testing.T) {
 	pods := podsGVR()
 	reporter := newStoreBackedReporter(store)
 	schema := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-		pods: {GVR: pods, Kind: "Pod"},
+		pods: {GVR: pods},
 	}}
 
 	// Pre-seed a DB-only row as if an earlier process wrote it.
@@ -642,7 +646,7 @@ func TestStartupList_DoesNotDeleteDBOnlyRows(t *testing.T) {
 	go w.Run(runCtx)
 
 	live := makePod("uid-live", "live", "default", "1")
-	w.ResyncCh() <- ResyncEvent{GVR: pods, Resources: []*unstructured.Unstructured{live}}
+	w.ResyncCh() <- ResyncEvent{GVR: pods, Scope: ObjectScopeNamespaced, Resources: []*unstructured.Unstructured{live}}
 
 	wantLive := mustNamedObjectName(t, "prod", pods, "default", "live", "uid-live")
 	awaitStoreObjects(t, store, 3*time.Second, func(objs []*domain.ExtensionResource) bool {
@@ -675,7 +679,7 @@ func TestServeStyleComposition_EnsureIndexerIndexesTarget(t *testing.T) {
 
 	cfg := IndexConfig{
 		Schema: IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-			pods: {GVR: pods, Kind: "Pod"},
+			pods: {GVR: pods},
 		}},
 		AllowList:     []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}},
 		BatchInterval: 50 * time.Millisecond,
