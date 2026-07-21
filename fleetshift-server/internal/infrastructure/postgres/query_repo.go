@@ -80,6 +80,7 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 	if err != nil {
 		return domain.QueryResourcesPage{}, err
 	}
+	// This must come after filter compilation, so it can validate
 	if scope.Empty {
 		return domain.QueryResourcesPage{}, nil
 	}
