@@ -1,18 +1,13 @@
 import type { ClusterProviderWizardProps } from "@fleetshift/common";
-import {
-  buildSignedInputEnvelope,
-  usePluginNavigate,
-} from "@fleetshift/common";
+import { usePluginNavigate } from "@fleetshift/common";
 import { Alert, Wizard, WizardStep } from "@patternfly/react-core";
-import { getModule } from "@scalprum/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
-import { createDeployment } from "../management-plugin/api";
+import { createKindCluster, type KindClusterSpec } from "./api";
 import ClusterDetailsStep from "./ClusterDetailsStep";
 import NetworkingStep from "./NetworkingStep";
 import NodesStep from "./NodesStep";
 import ReviewStep from "./ReviewStep";
-import SettingsStep from "./SettingsStep";
 
 export interface NodeEntry {
   role: "control-plane" | "worker";
@@ -26,7 +21,6 @@ export interface ClusterFormData {
   podSubnet: string;
   serviceSubnet: string;
   nodes: NodeEntry[];
-  signDeployment: boolean;
 }
 
 const initialFormData: ClusterFormData = {
@@ -36,7 +30,6 @@ const initialFormData: ClusterFormData = {
   podSubnet: "",
   serviceSubnet: "",
   nodes: [{ role: "control-plane", image: "" }],
-  signDeployment: false,
 };
 
 export default function CreateClusterWizard({
@@ -44,26 +37,6 @@ export default function CreateClusterWizard({
   onSetupNext,
 }: ClusterProviderWizardProps) {
   const clusters = usePluginNavigate("core-plugin", "ClustersModule");
-  const [signingLoaded, setSigningLoaded] = useState(false);
-  const [enrolled, setEnrolled] = useState(false);
-  const signDeploymentRef = useRef<(bytes: Uint8Array) => Promise<string>>();
-  useEffect(() => {
-    Promise.all([
-      getModule("signing-plugin", "signingKeyApi", "getSigningKeyStatus"),
-      getModule("signing-plugin", "signingKeyApi", "signDeployment"),
-    ]).then(
-      ([getStatus, signFn]: [
-        () => Promise<{ enrolled: boolean }>,
-        (bytes: Uint8Array) => Promise<string>,
-      ]) => {
-        signDeploymentRef.current = signFn;
-        getStatus().then((s) => {
-          setEnrolled(s.enrolled);
-          setSigningLoaded(true);
-        });
-      },
-    );
-  }, []);
   const [formData, setFormData] = useState<ClusterFormData>(initialFormData);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,14 +66,12 @@ export default function CreateClusterWizard({
     setError(null);
 
     try {
-      const spec: Record<string, unknown> = {
-        name: formData.name.trim(),
-      };
+      const spec: KindClusterSpec = {};
 
       const nodes = formData.nodes
         .filter((n) => n.role)
         .map((n) => ({
-          role: n.role,
+          role: n.role as "control-plane" | "worker",
           ...(n.image || formData.nodeImage
             ? { image: n.image || formData.nodeImage }
             : {}),
@@ -109,7 +80,7 @@ export default function CreateClusterWizard({
         spec.nodes = nodes;
       }
 
-      const networking: Record<string, unknown> = {};
+      const networking: KindClusterSpec["networking"] = {};
       if (formData.apiServerPort > 0) {
         networking.apiServerPort = formData.apiServerPort;
       }
@@ -123,54 +94,7 @@ export default function CreateClusterWizard({
         spec.networking = networking;
       }
 
-      const specJson = JSON.stringify(spec);
-      const rawBase64 = btoa(specJson);
-
-      let userSignature: string | undefined;
-      let validUntil: string | undefined;
-      let expectedGeneration: number | undefined;
-
-      if (formData.signDeployment && enrolled) {
-        const validUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        validUntil = validUntilDate.toISOString();
-        expectedGeneration = 1;
-
-        const envelope = buildSignedInputEnvelope(
-          formData.name.trim(),
-          {
-            type: "inline",
-            manifests: [
-              {
-                manifestType: "api.kind.cluster",
-                content: JSON.parse(specJson),
-              },
-            ],
-          },
-          { type: "static", targets: ["kind-local"] },
-          validUntilDate,
-          [],
-          expectedGeneration,
-        );
-
-        const envelopeBytes = new TextEncoder().encode(envelope);
-        if (!signDeploymentRef.current)
-          throw new Error("Signing module not loaded");
-        userSignature = await signDeploymentRef.current(envelopeBytes);
-      }
-
-      await createDeployment({
-        deploymentId: formData.name.trim(),
-        deployment: {
-          manifestStrategy: {
-            type: "TYPE_INLINE",
-            manifests: [{ manifestType: "api.kind.cluster", raw: rawBase64 }],
-          },
-          placementStrategy: { type: "TYPE_STATIC", targetIds: ["kind-local"] },
-        },
-        userSignature,
-        validUntil,
-        expectedGeneration,
-      });
+      await createKindCluster(formData.name.trim(), spec);
 
       if (onSetupNext) {
         onSetupNext();
@@ -184,7 +108,7 @@ export default function CreateClusterWizard({
     } finally {
       setCreating(false);
     }
-  }, [formData, enrolled, onSetupNext, onClose, clusters]);
+  }, [formData, onSetupNext, onClose, clusters]);
 
   const isStep1Valid = formData.name.trim().length > 0;
 
@@ -223,15 +147,6 @@ export default function CreateClusterWizard({
 
         <WizardStep name="Nodes" id="nodes" isDisabled={creating}>
           <NodesStep formData={formData} onChange={updateField} />
-        </WizardStep>
-
-        <WizardStep name="Settings" id="settings" isDisabled={creating}>
-          <SettingsStep
-            formData={formData}
-            onChange={updateField}
-            signingLoaded={signingLoaded}
-            signingEnrolled={enrolled}
-          />
         </WizardStep>
 
         <WizardStep
