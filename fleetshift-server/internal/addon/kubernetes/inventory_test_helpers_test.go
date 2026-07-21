@@ -240,15 +240,6 @@ func testDiscovered(gvr schema.GroupVersionResource, scope ObjectScope) Discover
 	return desc
 }
 
-func testDiscoveredList(gvrs ...schema.GroupVersionResource) []DiscoveredAPIResource {
-	out := make([]DiscoveredAPIResource, 0, len(gvrs))
-	for _, gvr := range gvrs {
-		scope := ObjectScopeNamespaced
-		switch gvr.Resource {
-		case "nodes", "namespaces", "persistentvolumes", "customresourcedefinitions":
-			scope = ObjectScopeCluster
-		}
-		out = append(out, testDiscovered(gvr, scope))
-	}
-	return out
+func testDiscoveredList(descs ...DiscoveredAPIResource) []DiscoveredAPIResource {
+	return descs
 }

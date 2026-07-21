@@ -15,12 +15,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-func mustExtract(t *testing.T, r *unstructured.Unstructured, entry SchemaEntry, clusterResourceName domain.ResourceName) (InventoryObjectReport, inventoryNode) {
+func mustExtract(t *testing.T, r *unstructured.Unstructured, entry SchemaEntry, clusterResourceName domain.ResourceName, scope ObjectScope) (InventoryObjectReport, inventoryNode) {
 	t.Helper()
-	scope := ObjectScopeNamespaced
-	if r.GetNamespace() == "" {
-		scope = ObjectScopeCluster
-	}
 	report, node, err := ExtractObservedResource(r, entry, clusterResourceName, scope)
 	if err != nil {
 		t.Fatalf("ExtractObservedResource: %v", err)
@@ -89,7 +85,7 @@ func TestExtractIdentityFields(t *testing.T) {
 		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
 
-	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	wantName := "clusters/target-1/namespaces/default/apiResources/deployments.apps/objects/abc-123"
 	if string(report.Name) != wantName {
@@ -143,7 +139,7 @@ func TestExtractCreationTimestamp_InObservation(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	meta, _ := mustObservation(t, report)["metadata"].(map[string]any)
 	if meta["creationTimestamp"] != k8sCreationTime.Format(time.RFC3339) {
@@ -168,7 +164,7 @@ func TestExtractIdentityFields_CoreAPIGroup(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if len(report.Labels) != 0 {
 		t.Errorf("Labels = %#v, want empty when object has no metadata.labels", report.Labels)
@@ -220,7 +216,7 @@ func TestExtractConditions(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	conds := report.Conditions
 	if len(conds) != 2 {
@@ -295,7 +291,7 @@ func TestExtractConditions_ContractRules(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if len(report.Conditions) != 1 {
 		t.Fatalf("Conditions = %#v, want exactly one Ready after dropping empty type and nonstandard status", report.Conditions)
@@ -338,7 +334,7 @@ func TestExtractObservedFields_NumberType(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	replVal, ok := fields["replicas"]
@@ -384,7 +380,7 @@ func TestExtractObservedFields_BytesType(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeCluster)
 	fields := extractedFields(t, report)
 
 	memVal, ok := fields["memoryAllocatable"]
@@ -423,7 +419,7 @@ func TestExtractObservedFields_StringType(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	v, ok := fields["phase"]
@@ -463,7 +459,7 @@ func TestExtractObservedFields_SliceType(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	v, ok := fields["containerImages"]
@@ -510,7 +506,7 @@ func TestExtractObservedFields_BoolNativeNotString(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	v, ok := fields["hostNetwork"]
@@ -548,7 +544,7 @@ func TestExtractObservedFields_JSONPathNormalization(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	v, ok := fields["phase"]
@@ -587,7 +583,7 @@ func TestExtractObservedFields_MissingFieldIsSkipped(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	if _, ok := fields["replicas"]; !ok {
@@ -623,7 +619,7 @@ func TestExtractAnnotations_StripsInternalKeys(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if len(report.Labels) != 0 {
 		t.Errorf("Labels = %#v, want empty when object has no metadata.labels", report.Labels)
@@ -666,7 +662,7 @@ func TestExtractObservedFields_MapStringType(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	v, ok := fields["nodeSelector"]
@@ -711,7 +707,7 @@ func TestExtractOwnerReferences_ControllerOwner(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
 	}
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if node.OwnerUID != "deploy-uid" {
 		t.Errorf("OwnerUID = %q, want %q", node.OwnerUID, "deploy-uid")
@@ -750,7 +746,7 @@ func TestExtractOwnerReferences_MultipleOwnersSelectsController(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if node.OwnerUID != "rs-uid" {
 		t.Errorf("OwnerUID = %q, want %q (should select controller)", node.OwnerUID, "rs-uid")
@@ -782,7 +778,7 @@ func TestExtractOwnerReferences_NoController(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if node.OwnerUID != "" {
 		t.Errorf("OwnerUID = %q, want empty (no controller)", node.OwnerUID)
@@ -807,7 +803,7 @@ func TestExtractGeneration(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	meta, _ := mustObservation(t, report)["metadata"].(map[string]any)
 	gen, ok := meta["generation"]
@@ -842,7 +838,7 @@ func TestExtractDeletionTimestamp(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	meta, _ := mustObservation(t, report)["metadata"].(map[string]any)
 	dt, ok := meta["deletionTimestamp"]
@@ -882,7 +878,7 @@ func TestExtractAnnotations_WithSizeCap(t *testing.T) {
 		ExtractAnnotations: true,
 		AnnotationSizeCap:  20,
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	annotations, ok := fields["annotations"]
@@ -932,7 +928,7 @@ func TestExtractAnnotations_DefaultSizeCap(t *testing.T) {
 		ExtractAnnotations: true,
 		// AnnotationSizeCap not set, should default to 64
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	annotations, ok := fields["annotations"]
@@ -976,7 +972,7 @@ func TestExtractAnnotations_Disabled(t *testing.T) {
 
 		ExtractAnnotations: false,
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	fields := extractedFields(t, report)
 	if _, exists := fields["annotations"]; exists {
@@ -1017,7 +1013,7 @@ func TestComputeExtra_HookInvocation(t *testing.T) {
 		},
 	}
 
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if !hookCalled {
 		t.Error("ComputeExtra hook was not called")
@@ -1071,7 +1067,7 @@ func TestInventoryNode_Fields(t *testing.T) {
 		},
 	}
 
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if node.UID != "node-uid" {
 		t.Errorf("node.UID = %q, want %q", node.UID, "node-uid")
@@ -1125,7 +1121,7 @@ func TestExtractAnnotations_DoesNotMutateSource(t *testing.T) {
 		GVR:                schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"},
 		ExtractAnnotations: true,
 	}
-	mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	annotations := r.GetAnnotations()
 	if _, ok := annotations["kubectl.kubernetes.io/last-applied-configuration"]; !ok {
@@ -1155,7 +1151,7 @@ func TestExtractObservedResource_PreservesGVR(t *testing.T) {
 		GVR: gvr,
 	}
 
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 
 	if node.GVR != gvr {
 		t.Errorf("node.GVR = %v, want %v", node.GVR, gvr)
@@ -1289,7 +1285,7 @@ func TestExtractObservedResource_ClusterScoped(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
 	}
-	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeCluster)
 
 	if len(report.Labels) != 0 {
 		t.Errorf("Labels = %#v, want empty when object has no metadata.labels", report.Labels)
@@ -1335,7 +1331,7 @@ func TestExtractObservedResource_ObservedAtSet(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	after := time.Now()
 
 	if report.ObservedAt.Before(before) || report.ObservedAt.After(after) {
@@ -1383,7 +1379,7 @@ func TestExtractOwnerReferences_MalformedEntriesIgnored(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	if node.OwnerUID != "rs-uid" {
 		t.Errorf("OwnerUID = %q, want rs-uid (skip malformed entries, keep last valid controller)", node.OwnerUID)
 	}
@@ -1415,7 +1411,7 @@ func TestExtractOwnerReferences_LastControllerWins(t *testing.T) {
 	entry := SchemaEntry{
 		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 	}
-	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	_, node := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	if node.OwnerUID != "second-controller" {
 		t.Errorf("OwnerUID = %q, want second-controller (last controller wins)", node.OwnerUID)
 	}
@@ -1438,7 +1434,7 @@ func TestExtractConditions_AbsentAndMalformed(t *testing.T) {
 		entry := SchemaEntry{
 			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		}
-		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 		if len(report.Conditions) != 0 {
 			t.Fatalf("Conditions = %#v, want empty when status is absent", report.Conditions)
 		}
@@ -1470,7 +1466,7 @@ func TestExtractConditions_AbsentAndMalformed(t *testing.T) {
 		entry := SchemaEntry{
 			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		}
-		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 		if len(report.Conditions) != 1 {
 			t.Fatalf("Conditions = %#v, want one Ready after skipping non-map entry", report.Conditions)
 		}
@@ -1501,7 +1497,7 @@ func TestExtractConditions_AbsentAndMalformed(t *testing.T) {
 		entry := SchemaEntry{
 			GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		}
-		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 		if len(report.Conditions) != 2 {
 			t.Fatalf("Conditions len = %d, want 2", len(report.Conditions))
 		}
@@ -1533,7 +1529,7 @@ func TestExtractAnnotations_EmptyAndFullyFiltered(t *testing.T) {
 
 			ExtractAnnotations: true,
 		}
-		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 		if _, ok := extractedFields(t, report)["annotations"]; ok {
 			t.Error("extracted should omit annotations when the object has none")
 		}
@@ -1562,7 +1558,7 @@ func TestExtractAnnotations_EmptyAndFullyFiltered(t *testing.T) {
 			ExtractAnnotations: true,
 			AnnotationSizeCap:  20,
 		}
-		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+		report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 		if _, ok := extractedFields(t, report)["annotations"]; ok {
 			t.Error("extracted should omit annotations when every annotation is filtered out")
 		}
@@ -1602,7 +1598,7 @@ func TestExtractObservedFields_NumberCoercion(t *testing.T) {
 			{Name: "int64Field", JSONPath: ".spec.int64Field", DataType: DataTypeNumber},
 		},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	if fields["intField"].(float64) != 7 {
@@ -1659,7 +1655,7 @@ func TestExtractObservedFields_BytesFailures(t *testing.T) {
 			{Name: "good", JSONPath: ".status.allocatable.ephemeral", DataType: DataTypeBytes},
 		},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeCluster)
 	fields := extractedFields(t, report)
 
 	if _, ok := fields["badQuantity"]; ok {
@@ -1700,7 +1696,7 @@ func TestExtractObservedFields_MapStringFailures(t *testing.T) {
 			{Name: "mixedValues", JSONPath: ".spec.mixedValues", DataType: DataTypeMapString},
 		},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 
 	if _, ok := fields["notAMap"]; ok {
@@ -1742,7 +1738,7 @@ func TestExtractObservedFields_InvalidJSONPathSkipped(t *testing.T) {
 			{Name: "phase", JSONPath: ".status.phase"},
 		},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	fields := extractedFields(t, report)
 	if _, ok := fields["bad"]; ok {
 		t.Error("invalid JSONPath should be skipped")
@@ -1795,7 +1791,7 @@ func TestExtractObservedFields_EmptySliceSkipped(t *testing.T) {
 			{Name: "emptyList", JSONPath: ".spec.emptyList", DataType: DataTypeSlice},
 		},
 	}
-	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"))
+	report, _ := mustExtract(t, r, entry, testClusterResourceName("target-1"), ObjectScopeNamespaced)
 	if _, ok := extractedFields(t, report)["emptyList"]; ok {
 		t.Error("emptyList should be skipped when the JSONPath result flattens to nothing")
 	}

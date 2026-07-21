@@ -96,18 +96,12 @@ func makeResource(uid, name, rv string) *unstructured.Unstructured {
 	}
 }
 
-func mustObjectName(t *testing.T, clusterID, uid string, gvr schema.GroupVersionResource) domain.ResourceName {
+func mustObjectName(t *testing.T, clusterID, uid string, gvr schema.GroupVersionResource, scope ObjectScope, namespace string) domain.ResourceName {
 	t.Helper()
-	scope := ObjectScopeNamespaced
-	ns := "default"
-	if gvr.Resource == "nodes" || gvr.Resource == "persistentvolumes" || gvr.Resource == "namespaces" || gvr.Resource == "customresourcedefinitions" {
-		scope = ObjectScopeCluster
-		ns = ""
-	}
 	name, err := ObjectResourceName(KubernetesObjectIdentity{
 		ClusterResourceName: testClusterResourceName(clusterID),
 		GVR:                 gvr,
-		ScopeNamespace:      mustScopeNamespace(t, scope, ns),
+		ScopeNamespace:      mustScopeNamespace(t, scope, namespace),
 		UID:                 uid,
 	})
 	if err != nil {
@@ -212,7 +206,7 @@ func TestDelete_MapsToApplyDeltaDeletesWithObjectResourceName(t *testing.T) {
 		w.EventCh() <- ResourceEvent{Op: EventDelete, Resource: makeResource("uid-del", "deploy-del", "200"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 		advanceAndWait(250 * time.Millisecond)
 
-		wantName := mustObjectName(t, "target-1", "uid-del", testGVR)
+		wantName := mustObjectName(t, "target-1", "uid-del", testGVR, ObjectScopeNamespaced, "default")
 		deltas := mock.getDeltas()
 		var found bool
 		for _, d := range deltas {
@@ -246,7 +240,7 @@ func TestDelete_FallsBackToReportedNamesWhenTombstoneCannotName(t *testing.T) {
 			GVR: testGVR, Scope: ObjectScopeNamespaced,
 		}
 		advanceAndWait(250 * time.Millisecond)
-		wantName := mustObjectName(t, "target-1", "uid-keep", testGVR)
+		wantName := mustObjectName(t, "target-1", "uid-keep", testGVR, ObjectScopeNamespaced, "default")
 		if len(mock.getDeltas()) == 0 {
 			t.Fatal("precondition: expected upsert")
 		}
@@ -1342,7 +1336,7 @@ func TestFlushFailure_DeletesRetriedOnNextTick(t *testing.T) {
 		w.EventCh() <- ResourceEvent{Op: EventDelete, Resource: makeResource("uid-del", "deploy-del", "100"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 		advanceAndWait(9 * time.Second)
 
-		wantName := mustObjectName(t, "target-1", "uid-del", testGVR)
+		wantName := mustObjectName(t, "target-1", "uid-del", testGVR, ObjectScopeNamespaced, "default")
 		var found bool
 		for _, d := range mock.getDeltas() {
 			for _, ref := range d.delta.Deletes {
@@ -1768,8 +1762,8 @@ func TestResync_EmptySnapshotDeletesReportedNames(t *testing.T) {
 		if len(diff.delta.Deletes) != 2 {
 			t.Fatalf("empty LIST omission deletes = %d, want 2", len(diff.delta.Deletes))
 		}
-		want1 := mustObjectName(t, "target-1", "uid-1", testGVR)
-		want2 := mustObjectName(t, "target-1", "uid-2", testGVR)
+		want1 := mustObjectName(t, "target-1", "uid-1", testGVR, ObjectScopeNamespaced, "default")
+		want2 := mustObjectName(t, "target-1", "uid-2", testGVR, ObjectScopeNamespaced, "default")
 		got := make(map[domain.ResourceName]bool, len(diff.delta.Deletes))
 		for _, del := range diff.delta.Deletes {
 			if !del.IsDelete {
@@ -1797,7 +1791,7 @@ func TestFlush_UpsertAndDeleteDifferentUIDsSameBatch(t *testing.T) {
 		w.EventCh() <- ResourceEvent{Op: EventDelete, Resource: makeResource("uid-del", "deploy-del", "200"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 		advanceAndWait(250 * time.Millisecond)
 
-		wantDel := mustObjectName(t, "target-1", "uid-del", testGVR)
+		wantDel := mustObjectName(t, "target-1", "uid-del", testGVR, ObjectScopeNamespaced, "default")
 		var sawAdd, sawDel bool
 		for _, d := range mock.getDeltas() {
 			for _, u := range d.delta.Upserts {
@@ -1960,8 +1954,8 @@ func TestDelete_UsesEventGVRForResourceName(t *testing.T) {
 		w.EventCh() <- ResourceEvent{Op: EventDelete, Resource: cm, GVR: cmGVR, Scope: ObjectScopeNamespaced}
 		advanceAndWait(250 * time.Millisecond)
 
-		want := mustObjectName(t, "target-1", "uid-cm", cmGVR)
-		wrong := mustObjectName(t, "target-1", "uid-cm", testGVR)
+		want := mustObjectName(t, "target-1", "uid-cm", cmGVR, ObjectScopeNamespaced, "default")
+		wrong := mustObjectName(t, "target-1", "uid-cm", testGVR, ObjectScopeNamespaced, "default")
 		var found bool
 		for _, d := range mock.getDeltas() {
 			for _, ref := range d.delta.Deletes {
@@ -2003,7 +1997,7 @@ func TestInformerReconcile_RemoveGVR_DoesNotPersistDeletes(t *testing.T) {
 		mgr.stoppers[testGVR] = func() {}
 		mgr.stoppers[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}] = func() {}
 
-		mgr.Reconcile(ctx, testDiscoveredList(podsGVR()))
+		mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR(), ObjectScopeNamespaced)))
 		advanceAndWait(100 * time.Millisecond)
 
 		for _, d := range mock.getDeltas()[deltaCountBefore:] {
@@ -2476,11 +2470,11 @@ func TestResync_UsesReportedNamesNotUnackedNodes(t *testing.T) {
 		if len(diff.Deletes) != 1 {
 			t.Fatalf("ReportedNames-diff deletes = %d, want 1 (uid-ack only)", len(diff.Deletes))
 		}
-		wantAck := mustObjectName(t, "target-1", "uid-ack", testGVR)
+		wantAck := mustObjectName(t, "target-1", "uid-ack", testGVR, ObjectScopeNamespaced, "default")
 		if diff.Deletes[0].Name != wantAck || !diff.Deletes[0].IsDelete {
 			t.Fatalf("ReportedNames-diff deleted %+v, want IsDelete for %v", diff.Deletes[0], wantAck)
 		}
-		wantUnacked := mustObjectName(t, "target-1", "uid-unacked", testGVR)
+		wantUnacked := mustObjectName(t, "target-1", "uid-unacked", testGVR, ObjectScopeNamespaced, "default")
 		for _, d := range diff.Deletes {
 			if d.Name == wantUnacked {
 				t.Fatal("unacked uid must not be deleted by ReportedNames resync")

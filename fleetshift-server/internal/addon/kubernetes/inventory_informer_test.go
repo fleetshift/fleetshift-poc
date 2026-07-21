@@ -246,7 +246,7 @@ func TestInformerManager_Reconcile_StartNew(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	mgr.Reconcile(ctx, testDiscoveredList(podsGVR, svcsGVR))
+	mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR, ObjectScopeNamespaced), testDiscovered(svcsGVR, ObjectScopeNamespaced)))
 
 	// After reconcile, both GVRs should have stoppers.
 	if len(mgr.stoppers) != 2 {
@@ -287,7 +287,7 @@ func TestInformerManager_Reconcile_StopRemoved(t *testing.T) {
 	// Desired only includes pods; services should be stopped.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	mgr.Reconcile(ctx, testDiscoveredList(podsGVR))
+	mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR, ObjectScopeNamespaced)))
 
 	if !stopped {
 		t.Error("expected services informer to be stopped")
@@ -320,7 +320,7 @@ func TestInformerManager_Reconcile_SendsRemoveGVREvent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	mgr.Reconcile(ctx, testDiscoveredList(podsGVR))
+	mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR, ObjectScopeNamespaced)))
 
 	select {
 	case got := <-removeCh:

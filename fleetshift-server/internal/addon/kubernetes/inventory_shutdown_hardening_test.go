@@ -125,7 +125,7 @@ func TestInformerManager_StopAllAwaitsInformerGoroutines(t *testing.T) {
 		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
-		mgr.Reconcile(ctx, testDiscoveredList(gvr))
+		mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(gvr, ObjectScopeNamespaced)))
 		synctest.Wait()
 		if len(mgr.stoppers) != 1 {
 			t.Fatalf("stoppers = %d, want 1", len(mgr.stoppers))
