@@ -355,7 +355,7 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 			SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	// Spec itself is a google.protobuf.Timestamp (ProtoJSON string):
 	// nested protobuf fields like seconds must be rejected.
@@ -376,7 +376,7 @@ func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
 	schemas := staticQuerySchemas{
 		rt: {ResourceType: rt, APIVersion: "v1", SpecDescriptor: desc},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
 	if !strings.Contains(pred.SQL, "ri.spec") {
@@ -437,7 +437,7 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 			SpecDescriptor: specTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	t.Run("JSON camelCase accepted", func(t *testing.T) {
 		for _, filter := range []string{
@@ -478,6 +478,10 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 	})
 }
 
+// nestedSpecTestDescriptor has a singular nested message, a repeated
+// message field, a repeated string list, a string-to-message map, and
+// an open Struct. Repeated traversal fails closed; string-keyed map
+// traversal resumes JSON-name validation on the map value message.
 func nestedSpecTestDescriptor(t *testing.T) protoreflect.MessageDescriptor {
 	t.Helper()
 	const src = `
@@ -496,6 +500,8 @@ message NestedSpec {
   map<string, Item> labels = 3;
   map<int32, Item> by_id = 4;
   google.protobuf.Struct metadata = 5;
+  repeated string tags = 6;
+  repeated int32 counts = 7;
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
@@ -515,7 +521,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 			SpecDescriptor: nestedSpecTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
 	if !argsContain(pred.Args, "nested") || !argsContain(pred.Args, "value") {
@@ -553,7 +559,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 }
 
 func TestQueryFieldResolver_SpecPermissiveExactKeysWhenSchemaAbsent(t *testing.T) {
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}, Params: questionParams{}}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: staticQuerySchemas{}}
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == 5`)
 	if !argsContain(pred.Args, "api_server_port") {
 		t.Errorf("Args = %v, want exact open-map key preserved (no camelCase rewrite)", pred.Args)
@@ -634,4 +640,124 @@ func TestQueryFieldResolver_NestedInventoryPathsRejected(t *testing.T) {
 			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
 		}
 	}
+}
+
+func TestQueryFieldResolver_PresenceAndMembershipSQLShape(t *testing.T) {
+	pred := compile(t, `has(resource.labels.team)`)
+	if !strings.Contains(pred.SQL, "json_type(er.labels") {
+		t.Errorf("SQL = %q, want json_type for label key presence", pred.SQL)
+	}
+	pred = compile(t, `"k" in resource.observation.foo`)
+	if !strings.Contains(pred.SQL, "json_type(") || !strings.Contains(pred.SQL, "json_each(") {
+		t.Errorf("SQL = %q, want dynamic json_type/json_each dispatch", pred.SQL)
+	}
+	err := compileErr(t, `"x" in resource.pauseReason`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("scalar membership: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// TestQueryFieldResolver_SchemaSpecializedMembership locks descriptor-
+// backed membership lowering: known message/map → object-key presence,
+// known list → specialized list predicate, known scalar → reject, and
+// open Struct tails stay on the schema-free dynamic dispatcher.
+func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
+	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	desc := nestedSpecTestDescriptor(t)
+	schemas := staticQuerySchemas{
+		rt: {
+			ResourceType:                   rt,
+			APIVersion:                     "v1",
+			InventoryObservationDescriptor: desc,
+		},
+	}
+	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}, Schemas: schemas}
+	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
+
+	t.Run("known message uses object-key presence", func(t *testing.T) {
+		// Key must be a JSON field name on the typed message; unknown
+		// keys fail closed via the same path validation as has().
+		inPred := compileWithResolver(t, c, guard+`"value" in resource.observation.nested`)
+		hasPred := compileWithResolver(t, c, guard+`has(resource.observation.nested.value)`)
+		if inPred.SQL != hasPred.SQL {
+			t.Errorf("message membership SQL = %q, want same as has() %q", inPred.SQL, hasPred.SQL)
+		}
+		if strings.Contains(inPred.SQL, "WHEN 'object'") {
+			t.Errorf("SQL = %q, specialized object must not use dynamic CASE", inPred.SQL)
+		}
+		if !strings.Contains(inPred.SQL, "json_type(") {
+			t.Errorf("SQL = %q, want json_type path presence", inPred.SQL)
+		}
+		err := compileWithResolverErr(t, c, guard+`"k" in resource.observation.nested`)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("unknown message key: err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("known map uses object-key presence", func(t *testing.T) {
+		inPred := compileWithResolver(t, c, guard+`"k" in resource.observation.labels`)
+		hasPred := compileWithResolver(t, c, guard+`has(resource.observation.labels.k)`)
+		if inPred.SQL != hasPred.SQL {
+			t.Errorf("map membership SQL = %q, want same as has() %q", inPred.SQL, hasPred.SQL)
+		}
+		if strings.Contains(inPred.SQL, "WHEN 'object'") {
+			t.Errorf("SQL = %q, specialized map must not use dynamic CASE", inPred.SQL)
+		}
+	})
+
+	t.Run("known list uses specialized list membership", func(t *testing.T) {
+		pred := compileWithResolver(t, c, guard+`"k" in resource.observation.tags`)
+		if !strings.Contains(pred.SQL, "<> 'array'") {
+			t.Errorf("SQL = %q, want specialized list type <> 'array'", pred.SQL)
+		}
+		if !strings.Contains(pred.SQL, "json_each(") {
+			t.Errorf("SQL = %q, want json_each", pred.SQL)
+		}
+		if strings.Contains(pred.SQL, "WHEN 'object'") {
+			t.Errorf("SQL = %q, specialized list must not use dynamic object branch", pred.SQL)
+		}
+	})
+
+	t.Run("known scalar rejected", func(t *testing.T) {
+		err := compileWithResolverErr(t, c, guard+`"k" in resource.observation.nested.value`)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("non-string list rejected", func(t *testing.T) {
+		// repeated Item / repeated int32 must fail closed: list-membership
+		// SQL only compares JSON string scalars.
+		for _, filter := range []string{
+			guard + `"k" in resource.observation.items`,
+			guard + `"1" in resource.observation.counts`,
+		} {
+			err := compileWithResolverErr(t, c, filter)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
+		}
+	})
+
+	t.Run("open Struct uses dynamic dispatch", func(t *testing.T) {
+		pred := compileWithResolver(t, c, guard+`"k" in resource.observation.metadata.foo`)
+		if !strings.Contains(pred.SQL, "WHEN 'object'") || !strings.Contains(pred.SQL, "WHEN 'array'") {
+			t.Errorf("SQL = %q, want dynamic object/array CASE", pred.SQL)
+		}
+	})
+
+	t.Run("open Struct parity with schema-free", func(t *testing.T) {
+		filter := guard + `"k" in resource.observation.metadata.foo`
+		withSchema := compileWithResolver(t, c, filter)
+		free := compileWithResolver(t, querysql.Compiler{
+			Fields: queryFieldResolver{},
+			Params: questionParams{},
+		}, filter)
+		if withSchema.SQL != free.SQL {
+			t.Errorf("open Struct membership diverged from schema-free:\n with=%q\n free=%q", withSchema.SQL, free.SQL)
+		}
+		if fmt.Sprint(withSchema.Args) != fmt.Sprint(free.Args) {
+			t.Errorf("Args diverged: with=%v free=%v", withSchema.Args, free.Args)
+		}
+	})
 }

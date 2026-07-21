@@ -50,6 +50,8 @@ func Run(t *testing.T, factory Factory) {
 	t.Run("EnvelopeFieldFilters", func(t *testing.T) { runEnvelopeFieldFilterTests(t, factory) })
 	t.Run("ResourceFieldFilters", func(t *testing.T) { runResourceFieldFilterTests(t, factory) })
 	t.Run("SemanticFilterMatrix", func(t *testing.T) { runSemanticFilterTests(t, factory) })
+	t.Run("PresenceFilters", func(t *testing.T) { runPresenceFilterTests(t, factory) })
+	t.Run("MembershipFilters", func(t *testing.T) { runMembershipFilterTests(t, factory) })
 	t.Run("ResourceTypesConstraint", func(t *testing.T) { runNilSchemaProviderTypeScopeTests(t, factory) })
 	t.Run("CaseSensitivity", func(t *testing.T) { runCaseSensitivityFilterTests(t, factory) })
 	t.Run("InvalidFilters", func(t *testing.T) { runInvalidFilterTests(t, factory) })

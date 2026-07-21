@@ -94,11 +94,34 @@ func compileBool(e ast.Expr, st *state) (string, error) {
 		default:
 			return "", fmt.Errorf("filter: %w: unsupported function %q", domain.ErrInvalidArgument, c.FunctionName())
 		}
+	case ast.SelectKind:
+		// CEL has(a.b) expands to a test-only select, not a Call.
+		sel := e.AsSelect()
+		if !sel.IsTestOnly() {
+			return "", unsupportedExprf("boolean")
+		}
+		return compileHas(sel, st)
 	case ast.ComprehensionKind:
 		return "", fmt.Errorf("filter: %w: macros (exists/all/map/filter) are not supported", domain.ErrInvalidArgument)
 	default:
 		return "", unsupportedExprf("boolean")
 	}
+}
+
+// compileHas lowers CEL has(path) (a test-only select) to the
+// resolver's projection-faithful presence predicate. has(index) is
+// rejected by CEL macro expansion before this runs; nested has()
+// inside a value field path remains rejected by fieldPathFromExpr.
+func compileHas(sel ast.SelectExpr, st *state) (string, error) {
+	base, ok, err := fieldPathFromExpr(sel.Operand())
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("filter: %w: has() requires a field select", domain.ErrInvalidArgument)
+	}
+	path := FieldPath{Segments: append(append([]string(nil), base.Segments...), sel.FieldName())}
+	return st.resolvePresence(path)
 }
 
 func compileBinaryLogic(c ast.CallExpr, st *state, joiner string) (string, error) {
@@ -177,16 +200,25 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 	return fmt.Sprintf("%s %s %s", expr.SQL, cmp.sql, st.b.bind(lit)), nil
 }
 
-// compileIn handles `field in [literal, ...]` and
-// `timestamp(field) in [timestamp("..."), ...]`. An empty list
-// compiles to a constant-false predicate rather than an empty SQL
-// "IN ()", which Postgres rejects -- but the field is still resolved
-// (see below) rather than short-circuited away entirely. Like
-// compileComparison, the first list element's Go type becomes the
-// field's [TypeHint]; every subsequent element must match that hint
-// (heterogeneous lists are rejected as ErrInvalidArgument). An empty
-// list has no element to derive a hint from, so it resolves with
-// TypeHintUnknown.
+// compileIn handles two membership shapes:
+//
+//  1. Value-list membership: `field in [literal, ...]` and
+//     `timestamp(field) in [timestamp("..."), ...]`. An empty list
+//     compiles to a constant-false predicate rather than an empty SQL
+//     "IN ()", which Postgres rejects -- but the field is still
+//     resolved (see below) rather than short-circuited away entirely.
+//     The first list element's Go type becomes the field's
+//     [TypeHint]; every subsequent element must match that hint
+//     (heterogeneous lists are rejected as ErrInvalidArgument). An
+//     empty list has no element to derive a hint from, so it resolves
+//     with TypeHintUnknown.
+//
+//  2. Container membership: `"key" in <field path>`. The container
+//     path and string operand stay separate; querysql classifies the
+//     container ([ResolveContext.ClassifyResourceContainer]) and
+//     either delegates object-key membership to ResolvePresence or
+//     calls ResolveJSONMembership for list/unknown JSON containers.
+//     Non-string left literals and non-field right sides are rejected.
 func compileIn(args []ast.Expr, st *state) (string, error) {
 	if len(args) != 2 {
 		return "", unsupportedExprf("in")
@@ -194,6 +226,20 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 	left, err := classifyOperand(args[0])
 	if err != nil {
 		return "", err
+	}
+	if left.isLit {
+		key, ok := left.lit.(string)
+		if !ok {
+			return "", fmt.Errorf("filter: %w: container membership requires a string literal on the left", domain.ErrInvalidArgument)
+		}
+		path, pathOK, err := fieldPathFromExpr(args[1])
+		if err != nil {
+			return "", err
+		}
+		if !pathOK {
+			return "", fmt.Errorf("filter: %w: container membership requires a field path on the right", domain.ErrInvalidArgument)
+		}
+		return st.resolveMembership(path, key)
 	}
 	if !left.isField {
 		return "", fmt.Errorf("filter: %w: \"in\" left side must be a field", domain.ErrInvalidArgument)

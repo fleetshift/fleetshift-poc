@@ -42,7 +42,7 @@ Vendor-specific implementations of domain interfaces (e.g., postgres, memory).
 
 Shared, vendor-neutral infrastructure helpers may also live as siblings under `internal/infrastructure/` when more than one vendor package needs them. Today:
 
-- **`infrastructure/querysql`** — CEL-to-SQL filter compilation for QueryResources (AST lowering, `SQLExpr` / `FieldResolver` / `ParamBinder` contracts). Postgres and SQLite each supply a `FieldResolver`, a `ParamBinder` implementation (`$N` / `?N`), and all dialect SQL rendering (timestamps, dynamic JSON, known-string/collation helpers, persistence codecs for condition timestamps). They do not own the CEL subset.
+- **`infrastructure/querysql`** — CEL-to-SQL filter compilation for QueryResources (AST lowering, `SQLExpr` / `FieldResolver` / `ParamBinder` contracts, optional `Compiler.Schemas`, dialect-neutral ProtoJSON path validation and container-membership classification/orchestration on `ResolveContext`). Postgres and SQLite each supply a `FieldResolver`, a `ParamBinder` implementation (`$N` / `?N`), and dialect SQL rendering plus physical-column mapping (timestamps, dynamic JSON, list/unknown JSON membership via `ResolveJSONMembership`, known-string/collation helpers, persistence codecs for condition timestamps). They do not own the CEL subset, schema lookup, or object/scalar membership orchestration.
 
 ## Rules
 

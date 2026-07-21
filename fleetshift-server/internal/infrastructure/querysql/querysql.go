@@ -64,36 +64,44 @@
 //
 // # Package split
 //
-// This package owns only CEL AST lowering: boolean/logical structure,
-// comparison, "in", and startsWith handling, literal binding
-// (including [ParseCELTimestamp] for timestamp() string literals), and
-// resourceType guard detection (compiler.go). It does not know what
-// field paths actually mean — column names, JSON extraction,
-// label/condition map keys, schema-backed path validation, dialect
-// boolean/collation spelling, or timestamp/JSON SQL rendering are all
-// the concern of whatever [FieldResolver] the caller supplies (see
-// field_resolver.go for that contract and the postgres/sqlite
-// packages' query_filter.go + query_expr_*.go for this project's
-// backend implementations). This split exists because querysql's
-// supported CEL subset is a QueryResources-wide contract — any storage
-// backend would parse and validate filters the same way — while the
-// row shape a field path resolves to is backend-specific.
+// This package owns CEL AST lowering: boolean/logical structure,
+// comparison, "in" (value-list and container membership
+// orchestration), startsWith, has()/presence, literal binding
+// (including [ParseCELTimestamp] for timestamp() string literals),
+// and resourceType guard detection (compiler.go). It also owns
+// dialect-neutral ProtoJSON path validation and container
+// classification ([ValidateDescriptorPath], ResolveContext's
+// ValidateSpecPath / ValidateObservationPath /
+// ClassifyResourceContainer), wired through an optional
+// [Compiler.Schemas]. Column names, JSON extraction SQL,
+// label/condition map keys, dialect boolean/collation spelling,
+// projection-faithful presence predicates, list/unknown JSON
+// membership SQL, and timestamp/JSON SQL rendering remain the concern
+// of whatever [FieldResolver] the caller supplies (see
+// field_resolver.go and the postgres/sqlite packages' query_filter.go
+// + query_expr_*.go). This split exists because querysql's supported
+// CEL subset and schema-shaped classification are QueryResources-wide
+// contracts — any storage backend would parse and classify filters
+// the same way — while the row shape a field path resolves to is
+// backend-specific.
 //
 // Parameter placeholder style is likewise a dialect concern, owned
 // by the caller's [ParamBinder] (see param_binder.go). [Compiler.Params]
 // is required; there is no default binder.
 //
 // Supported filter shape: see compiler.go for the supported operators
-// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith, timestamp) and
-// field-path syntax (identifiers, dotted selects, and string-keyed
-// index expressions). Timestamp response fields remain ProtoJSON
-// strings (direct comparison uses the canonical spelling);
+// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith, has, timestamp)
+// and field-path syntax (identifiers, dotted selects, and
+// string-keyed index expressions). Timestamp response fields remain
+// ProtoJSON strings (direct comparison uses the canonical spelling);
 // chronological / instant comparisons use timestamp() on both sides
-// and may wrap any string-valued path. Anything else -- unsupported
-// operators, arithmetic, regex, endsWith/contains/matches, and
-// exists/all/map/filter/has macros -- fails closed with
-// [domain.ErrInvalidArgument], as does any field path a configured
-// [FieldResolver] doesn't recognize.
+// and may wrap any string-valued path. Presence uses CEL has(select)
+// (not has(index)); container membership uses `"key" in <field path>`
+// alongside the existing `field in [literals]` value-list form.
+// Anything else -- unsupported operators, arithmetic, regex,
+// endsWith/contains/matches, and exists/all/map/filter macros --
+// fails closed with [domain.ErrInvalidArgument], as does any field
+// path a configured [FieldResolver] doesn't recognize.
 package querysql
 
 import (
@@ -137,9 +145,9 @@ type SQLPredicate struct {
 }
 
 // Compiler is the only [CELSQLCompiler] implementation. It is safe
-// for concurrent use as long as Fields and Params are (or are
-// nil/immutable). CompileFilter shares a package-level *cel.Env (see
-// filterCELEnv) whose declarations never change, so concurrent
+// for concurrent use as long as Fields, Params, and Schemas are (or
+// are nil/immutable). CompileFilter shares a package-level *cel.Env
+// (see filterCELEnv) whose declarations never change, so concurrent
 // Compile calls are safe once that env has been initialized.
 type Compiler struct {
 	// Fields resolves the field paths a filter references (envelope
@@ -157,6 +165,15 @@ type Compiler struct {
 	// descriptive error. Each storage backend supplies its own
 	// ParamBinder (Postgres $N, SQLite ?N).
 	Params ParamBinder
+
+	// Schemas, when set, lets ResolveContext validate
+	// resource.spec.*/resource.observation.* paths and classify
+	// containers against real protobuf descriptors when the filter's
+	// top-level resourceType guard resolves to a registered type.
+	// Nil is a valid permissive default (structural acceptance only).
+	// Lookups are lazy and reused for the duration of one
+	// CompileFilter call; they are not cached across compilations.
+	Schemas domain.QuerySchemaProvider
 }
 
 var _ CELSQLCompiler = Compiler{}
@@ -200,11 +217,16 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 	}
 
 	root := checked.NativeRep().Expr()
+	var rs *resolveSchema
+	if c.Schemas != nil {
+		rs = &resolveSchema{provider: c.Schemas}
+	}
 	st := &state{
 		ctx:    ctx,
 		fields: c.Fields,
 		guard:  hasResourceTypeGuard(root),
 		b:      &builder{params: params},
+		schema: rs,
 	}
 
 	sql, err := compileBool(root, st)
@@ -255,7 +277,7 @@ func (b *builder) bind(v any) string {
 }
 
 // state threads the per-compilation context through compileBool and
-// the configured FieldResolver: ctx/guard become part of every
+// the configured FieldResolver: ctx/guard/schema become part of every
 // [ResolveContext], and b provides parameter binding both to the
 // compiler itself (literal comparison values) and, via
 // [ResolveContext.Bind], to the resolver (e.g. label/condition map
@@ -266,8 +288,9 @@ type state struct {
 	// guard is the resourceType literal from a top-level `&&`
 	// conjunct `resourceType == "..."`, or nil if there is none. See
 	// hasResourceTypeGuard.
-	guard *domain.ResourceType
-	b     *builder
+	guard  *domain.ResourceType
+	b      *builder
+	schema *resolveSchema
 }
 
 // resolve looks up path's SQL expression through st.fields, building
@@ -276,9 +299,28 @@ func (st *state) resolve(path FieldPath, hint TypeHint) (SQLExpr, error) {
 	if st.fields == nil {
 		return SQLExpr{}, fmt.Errorf("filter: %w: field %q: no field resolver configured", domain.ErrInvalidArgument, path)
 	}
-	return st.fields.Resolve(path, hint, ResolveContext{
+	return st.fields.Resolve(path, hint, st.resolveContext())
+}
+
+func (st *state) resolvePresence(path FieldPath) (string, error) {
+	if st.fields == nil {
+		return "", fmt.Errorf("filter: %w: field %q: no field resolver configured", domain.ErrInvalidArgument, path)
+	}
+	return st.fields.ResolvePresence(path, st.resolveContext())
+}
+
+func (st *state) resolveMembership(path FieldPath, key string) (string, error) {
+	if st.fields == nil {
+		return "", fmt.Errorf("filter: %w: field %q: no field resolver configured", domain.ErrInvalidArgument, path)
+	}
+	return resolveContainerMembership(st.fields, path, key, st.resolveContext())
+}
+
+func (st *state) resolveContext() ResolveContext {
+	return ResolveContext{
 		Context:             st.ctx,
 		GuardedResourceType: st.guard,
 		Bind:                st.b.bind,
-	})
+		schema:              st.schema,
+	}
 }

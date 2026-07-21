@@ -23,12 +23,20 @@ import (
 
 // stubResolver resolves every field path to its dotted string form as
 // bare (uncast, uncasted) SQL text, regardless of hint. It exists
-// purely so this package's own AND/OR/NOT/comparison/in tests can
+// purely so this package's own AND/OR/NOT/comparison/in/has tests can
 // compile a filter without depending on any real row shape.
 type stubResolver struct{}
 
 func (stubResolver) Resolve(path querysql.FieldPath, _ querysql.TypeHint, _ querysql.ResolveContext) (querysql.SQLExpr, error) {
 	return querysql.SQLExpr{SQL: path.String()}, nil
+}
+
+func (stubResolver) ResolvePresence(path querysql.FieldPath, _ querysql.ResolveContext) (string, error) {
+	return "HAS(" + path.String() + ")", nil
+}
+
+func (stubResolver) ResolveJSONMembership(target querysql.JSONMembershipTarget, key string, _ querysql.ResolveContext) (string, error) {
+	return fmt.Sprintf("JSON_MEM(%d,%v,%q)", target.Root, target.Path, key), nil
 }
 
 func compile(t *testing.T, filter string) querysql.SQLPredicate {
@@ -212,6 +220,14 @@ func (f recordingResolver) Resolve(path querysql.FieldPath, hint querysql.TypeHi
 	return f(path, hint, ctx)
 }
 
+func (f recordingResolver) ResolvePresence(path querysql.FieldPath, ctx querysql.ResolveContext) (string, error) {
+	return stubResolver{}.ResolvePresence(path, ctx)
+}
+
+func (f recordingResolver) ResolveJSONMembership(target querysql.JSONMembershipTarget, key string, ctx querysql.ResolveContext) (string, error) {
+	return stubResolver{}.ResolveJSONMembership(target, key, ctx)
+}
+
 // TestCompileFilter_ComparisonRequiresFieldAndLiteral proves
 // literal-vs-literal and field-vs-field comparisons are rejected:
 // neither carries a queryable field on exactly one side, so neither
@@ -267,12 +283,95 @@ func TestCompileFilter_UnsupportedMacro(t *testing.T) {
 	for _, filter := range []string{
 		`["a", "b"].exists(x, x == "a")`,
 		`["a", "b"].all(x, x == "a")`,
-		`has(resource.spec)`,
 	} {
 		err := compileErr(t, filter)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
 		}
+	}
+}
+
+// TestCompileFilter_HasAndContainerInDisambiguation locks the supported
+// has()/in compile contract from the CEL has() plan: valid has(select),
+// invalid has(index), value-list in vs container-key in, and reject
+// shapes that must not become string search.
+func TestCompileFilter_HasAndContainerInDisambiguation(t *testing.T) {
+	accept := []struct {
+		name   string
+		filter string
+	}{
+		{"has select map key", `has(resource.labels.team)`},
+		{"has select container", `has(resource.spec)`},
+		{"has select nested", `has(resource.conditions.Ready.status)`},
+		{"has select observation", `has(resource.observation)`},
+		{"has select pauseReason", `has(resource.pauseReason)`},
+		{"container key in labels", `"team" in resource.labels`},
+		{"container key in conditions", `"Ready" in resource.conditions`},
+		{"nested key in condition object", `"status" in resource.conditions.Ready`},
+		{"root key in resource", `"spec" in resource`},
+		{"root pauseReason in resource", `"pauseReason" in resource`},
+		{"dynamic nested in observation", `"k" in resource.observation.foo`},
+		{"value list membership unchanged", `resource.labels.team in ["a", "b"]`},
+		{"envelope value list unchanged", `resourceType in ["a/T", "b/U"]`},
+		{"timestamp value list unchanged", `timestamp(resource.localUpdateTime) in [timestamp("2026-06-01T12:00:00Z")]`},
+	}
+	for _, tt := range accept {
+		t.Run("accept/"+tt.name, func(t *testing.T) {
+			pred := compile(t, tt.filter)
+			if pred.SQL == "" {
+				t.Errorf("SQL is empty for %q", tt.filter)
+			}
+		})
+	}
+
+	reject := []string{
+		`has(resource.labels["team"])`,
+		`resource.spec == has(resource.observation)`,
+		`1 in resource.labels`,
+		`true in resource.labels`,
+		`"team" in ["team"]`,
+	}
+	for _, filter := range reject {
+		t.Run("reject/"+filter, func(t *testing.T) {
+			err := compileErr(t, filter)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("err = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
+}
+
+// TestCompileFilter_HasAndContainerInPathEquivalence proves that for an
+// object-valued parent, has(parent.key) and "key" in parent compile to
+// the same presence/membership SQL under the stub resolver (same path
+// segments + same operand).
+func TestCompileFilter_HasAndContainerInPathEquivalence(t *testing.T) {
+	pairs := []struct {
+		name string
+		has  string
+		in   string
+	}{
+		{"labels key", `has(resource.labels.team)`, `"team" in resource.labels`},
+		{"condition subfield", `has(resource.conditions.Ready.status)`, `"status" in resource.conditions.Ready`},
+		{"root spec", `has(resource.spec)`, `"spec" in resource`},
+		{"root pauseReason", `has(resource.pauseReason)`, `"pauseReason" in resource`},
+	}
+	for _, tt := range pairs {
+		t.Run(tt.name, func(t *testing.T) {
+			hasPred := compile(t, tt.has)
+			inPred := compile(t, tt.in)
+			if hasPred.SQL != inPred.SQL {
+				t.Errorf("SQL mismatch:\n  has: %s\n  in:  %s", hasPred.SQL, inPred.SQL)
+			}
+			if len(hasPred.Args) != len(inPred.Args) {
+				t.Fatalf("Args len has=%d in=%d", len(hasPred.Args), len(inPred.Args))
+			}
+			for i := range hasPred.Args {
+				if hasPred.Args[i] != inPred.Args[i] {
+					t.Errorf("Args[%d]: has=%v in=%v", i, hasPred.Args[i], inPred.Args[i])
+				}
+			}
+		})
 	}
 }
 

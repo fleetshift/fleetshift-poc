@@ -85,20 +85,20 @@ type SQLExpr struct {
 }
 
 // ResolveContext carries the per-compilation state a [FieldResolver]
-// needs beyond the field path and type hint themselves.
+// needs beyond the field path and type hint themselves, plus
+// dialect-neutral schema operations owned by this package.
 type ResolveContext struct {
 	// Context is QueryResources' call context, threaded through for
-	// resolvers that need it (e.g. to call a
-	// [domain.QuerySchemaProvider] while validating a type-specific
-	// path).
+	// resolvers and schema lookups.
 	Context context.Context
 
 	// GuardedResourceType is the resourceType literal from the
 	// filter's top-level `resourceType == "..."` conjunct (see
 	// hasResourceTypeGuard's doc), or nil if the filter has none.
-	// When non-nil, resolvers may optionally validate type-shaped
-	// paths (resource.spec.*/resource.observation.*) against that
-	// type's schema. A guard is not required to compile those paths.
+	// When non-nil, [ValidateSpecPath] / [ValidateObservationPath] /
+	// [ClassifyResourceContainer] may validate type-shaped paths
+	// against that type's schema. A guard is not required to compile
+	// those paths.
 	GuardedResourceType *domain.ResourceType
 
 	// Bind registers v as a SQL bind parameter and returns the
@@ -109,16 +109,46 @@ type ResolveContext struct {
 	// it into SQL text directly, so a key containing SQL
 	// metacharacters can never become part of the query text itself.
 	Bind func(v any) string
+
+	// schema is the per-compilation lazy lookup cell (nil when the
+	// compiler has no SchemaProvider). Copied ResolveContexts share
+	// the same *resolveSchema.
+	schema *resolveSchema
 }
 
 // FieldResolver maps a CEL field path to a SQL expression. This
 // package's compiler owns CEL AST lowering -- boolean/comparison
-// structure, literals, in, startsWith, parameter binding,
-// resourceType guard detection -- and knows about field paths only
-// generically; a FieldResolver owns the actual row shape a path reads
-// from (column names, JSON extraction, schema-backed path
-// validation). The postgres and sqlite packages each supply a
-// QueryResources FieldResolver for their row shapes.
+// structure, literals, in, startsWith, has / presence, container
+// membership orchestration, parameter binding, resourceType guard
+// detection, and dialect-neutral ProtoJSON schema validation /
+// container classification -- and knows about field paths only
+// generically. A FieldResolver owns the actual row shape a path reads
+// from (column names, JSON extraction, projection-faithful presence,
+// and list/unknown JSON membership SQL). The postgres and sqlite
+// packages each supply a QueryResources FieldResolver for their row
+// shapes.
+//
+// Presence and container membership are first-class operations, not
+// "SQL IS NOT NULL" over [Resolve]'s value expression: ProtoJSON
+// default omission means a non-NULL storage column can still be
+// absent from the projected response body.
+//
+// Object-key container membership is orchestrated in this package and
+// always lowered through [ResolvePresence] of path+key when both
+// spellings are supported. Dialects only render list and runtime
+// object/array dispatch via [ResolveJSONMembership].
 type FieldResolver interface {
 	Resolve(path FieldPath, hint TypeHint, ctx ResolveContext) (SQLExpr, error)
+
+	// ResolvePresence compiles a CEL has(path) / test-only select into
+	// a SQL boolean predicate that is true iff path is present on the
+	// projected ProtoJSON resource body for reachable writer shapes.
+	ResolvePresence(path FieldPath, ctx ResolveContext) (sql string, err error)
+
+	// ResolveJSONMembership compiles list or runtime-dispatch
+	// container membership for a classified spec/observation JSON
+	// target. target.Kind is [ContainerKindList] or
+	// [ContainerKindUnknown] only; Object/Scalar membership never
+	// reaches this method.
+	ResolveJSONMembership(target JSONMembershipTarget, key string, ctx ResolveContext) (sql string, err error)
 }
