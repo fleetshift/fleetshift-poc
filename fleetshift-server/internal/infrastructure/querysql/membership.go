@@ -155,8 +155,10 @@ func classifyDescriptorContainer(
 }
 
 // DescriptorContainerKind walks to the field named by names and returns
-// Object for message/map/Struct, List for repeated, Scalar otherwise.
-// When the walk cannot classify (open Struct tail mid-path), returns Unknown.
+// Object for message/map/Struct, List for repeated string, Scalar
+// otherwise. Repeated non-string fields fail closed (list-membership
+// SQL only matches JSON string elements). When the walk cannot
+// classify (open Struct tail mid-path), returns Unknown.
 func DescriptorContainerKind(desc protoreflect.MessageDescriptor, names []string) (ContainerKind, error) {
 	if len(names) == 0 {
 		return ContainerKindObject, nil
@@ -179,6 +181,11 @@ func DescriptorContainerKind(desc protoreflect.MessageDescriptor, names []string
 		if fd.IsList() {
 			if !last {
 				return ContainerKindUnknown, fmt.Errorf("filter: %w: cannot traverse list field %q", domain.ErrInvalidArgument, name)
+			}
+			// Container membership SQL compares a string literal against
+			// JSON string elements only (see docs/query-resources-cel-filters.md).
+			if fd.Kind() != protoreflect.StringKind {
+				return ContainerKindUnknown, fmt.Errorf("filter: %w: non-string list elements are not supported", domain.ErrInvalidArgument)
 			}
 			return ContainerKindList, nil
 		}

@@ -184,6 +184,27 @@ func TestCompileFilter_MembershipOrchestration(t *testing.T) {
 		}
 	})
 
+	t.Run("non-string list fails without presence or json membership", func(t *testing.T) {
+		for _, filter := range []string{
+			guard + `"k" in resource.observation.items`,
+			guard + `"1" in resource.observation.counts`,
+			guard + `"true" in resource.observation.flags`,
+		} {
+			rec := &membershipRecorder{}
+			c := querysql.Compiler{Fields: rec, Params: dollarTestParams{}, Schemas: schemas}
+			_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
+			if len(rec.presencePaths) != 0 {
+				t.Errorf("filter %q: presence called: %v", filter, rec.presencePaths)
+			}
+			if len(rec.jsonTargets) != 0 {
+				t.Errorf("filter %q: json membership called: %v", filter, rec.jsonTargets)
+			}
+		}
+	})
+
 	t.Run("object membership matches equivalent has presence path", func(t *testing.T) {
 		recIn := &membershipRecorder{}
 		recHas := &membershipRecorder{}

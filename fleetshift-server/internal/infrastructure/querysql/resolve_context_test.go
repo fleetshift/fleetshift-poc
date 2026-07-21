@@ -82,6 +82,8 @@ message NestedSpec {
   google.protobuf.Struct metadata = 5;
   repeated string tags = 6;
   google.protobuf.Timestamp when = 7;
+  repeated int32 counts = 8;
+  repeated bool flags = 9;
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
@@ -255,7 +257,10 @@ func TestResolveContext_ClassifyResourceContainer(t *testing.T) {
 		{name: "spec root object", segs: []string{"spec"}, want: ContainerKindObject},
 		{name: "known message", segs: []string{"spec", "nested"}, want: ContainerKindObject},
 		{name: "known map", segs: []string{"spec", "labels"}, want: ContainerKindObject},
-		{name: "known list", segs: []string{"spec", "tags"}, want: ContainerKindList},
+		{name: "known string list", segs: []string{"spec", "tags"}, want: ContainerKindList},
+		{name: "message list rejected", segs: []string{"spec", "items"}, wantErr: true},
+		{name: "int list rejected", segs: []string{"spec", "counts"}, wantErr: true},
+		{name: "bool list rejected", segs: []string{"spec", "flags"}, wantErr: true},
 		{name: "scalar string", segs: []string{"spec", "nested", "value"}, want: ContainerKindScalar},
 		{name: "timestamp terminal scalar", segs: []string{"spec", "when"}, want: ContainerKindScalar},
 		{name: "open Struct unknown", segs: []string{"spec", "metadata", "foo"}, want: ContainerKindUnknown},

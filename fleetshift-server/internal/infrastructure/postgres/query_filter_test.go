@@ -628,6 +628,7 @@ message NestedSpec {
   map<int32, Item> by_id = 4;
   google.protobuf.Struct metadata = 5;
   repeated string tags = 6;
+  repeated int32 counts = 7;
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
@@ -969,7 +970,8 @@ func TestDescriptorContainerKind(t *testing.T) {
 	}{
 		{name: "message field", names: []string{"nested"}, want: querysql.ContainerKindObject},
 		{name: "map field", names: []string{"labels"}, want: querysql.ContainerKindObject},
-		{name: "list of messages", names: []string{"items"}, want: querysql.ContainerKindList},
+		{name: "list of messages", names: []string{"items"}, wantErr: true},
+		{name: "list of ints", names: []string{"counts"}, wantErr: true},
 		{name: "list of strings", names: []string{"tags"}, want: querysql.ContainerKindList},
 		{name: "scalar string", names: []string{"nested", "value"}, want: querysql.ContainerKindScalar},
 		{name: "Struct field itself", names: []string{"metadata"}, want: querysql.ContainerKindObject},
@@ -1065,6 +1067,20 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 		err := compileWithResolverErr(t, c, guard+`"k" in resource.observation.nested.value`)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("non-string list rejected", func(t *testing.T) {
+		// repeated Item / repeated int32 must fail closed: list-membership
+		// SQL only compares JSON string scalars.
+		for _, filter := range []string{
+			guard + `"k" in resource.observation.items`,
+			guard + `"1" in resource.observation.counts`,
+		} {
+			err := compileWithResolverErr(t, c, filter)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
 		}
 	})
 

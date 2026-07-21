@@ -501,6 +501,7 @@ message NestedSpec {
   map<int32, Item> by_id = 4;
   google.protobuf.Struct metadata = 5;
   repeated string tags = 6;
+  repeated int32 counts = 7;
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
@@ -721,6 +722,20 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 		err := compileWithResolverErr(t, c, guard+`"k" in resource.observation.nested.value`)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("non-string list rejected", func(t *testing.T) {
+		// repeated Item / repeated int32 must fail closed: list-membership
+		// SQL only compares JSON string scalars.
+		for _, filter := range []string{
+			guard + `"k" in resource.observation.items`,
+			guard + `"1" in resource.observation.counts`,
+		} {
+			err := compileWithResolverErr(t, c, filter)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
 		}
 	})
 

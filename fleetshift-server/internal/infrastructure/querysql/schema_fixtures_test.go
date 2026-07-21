@@ -62,6 +62,8 @@ message NestedSpec {
   google.protobuf.Struct metadata = 5;
   repeated string tags = 6;
   google.protobuf.Timestamp when = 7;
+  repeated int32 counts = 8;
+  repeated bool flags = 9;
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
