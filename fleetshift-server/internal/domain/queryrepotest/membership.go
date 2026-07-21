@@ -43,6 +43,22 @@ func runMembershipFilterTests(t *testing.T, factory Factory) {
 		assertResultNames(t, queryAll(t, tx, scope+`"1" in resource.observation.foo`))
 	})
 
+	t.Run("NestedOnlyListOccurrencesDoNotMatch", func(t *testing.T) {
+		// "k" appears only inside nested array/object elements, never as
+		// a top-level string element. CEL list membership (and both
+		// store lowerings) must not treat nested occurrences as hits —
+		// including Postgres @> containment, which must not deep-match.
+		tx, fx := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		replaceInventory(t, tx, fx, nil,
+			json.RawMessage(`{"foo":[["k"], {"value":"k"}]}`), nil)
+
+		scope := fmt.Sprintf(`resourceType == %q && `, string(fx.InventoryType))
+		assertResultNames(t, queryAll(t, tx, scope+`"k" in resource.observation.foo`))
+		assertResultNames(t, queryAll(t, tx, scope+`"value" in resource.observation.foo`))
+	})
+
 	t.Run("InvalidContainerShapesAreSQLNull", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
