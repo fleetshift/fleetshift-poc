@@ -219,10 +219,11 @@ func (s *ExtensionResourceService) Delete(ctx context.Context, rt domain.Resourc
 			domain.ErrInvalidArgument, rt)
 	}
 
-	// Instance-level check before starting the durable workflow. Inventory
-	// reporting can create rows for managed+inventory types without managed
-	// state (e.g. a kind Cluster observed from a deployment delivery); those
-	// must fail here rather than retry forever in mr-mutate-to-deleting.
+	// Instance-level check before starting the durable workflow. For types
+	// that are both managed and inventory-capable, inventory reporting can
+	// resolve-or-create a row without managed state — for example after a
+	// custom Deployment materializes a resource the addon also manages.
+	// Those must fail here rather than retry forever in mr-mutate-to-deleting.
 	fullName := rt.FullName(name)
 	er, err := tx.ExtensionResources().Get(ctx, fullName)
 	if err != nil {

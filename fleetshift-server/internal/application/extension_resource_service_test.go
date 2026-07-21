@@ -15,8 +15,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
-const deletePreflightManifestType domain.ManifestType = "api.kind.cluster"
-const deletePreflightTargetType domain.TargetType = "kind"
+const (
+	deletePreflightResourceType domain.ResourceType = "test.fleetshift.io/Widget"
+	deletePreflightManifestType domain.ManifestType = "api.test.widget"
+	deletePreflightTargetType   domain.TargetType   = "test"
+	deletePreflightTargetID     domain.TargetID     = "addon-local"
+)
 
 type extensionResourceHarness struct {
 	store domain.Store
@@ -66,9 +70,9 @@ func setupExtensionResourceService(t *testing.T) extensionResourceHarness {
 
 	ctx := context.Background()
 	if err := (&application.TargetService{Store: store}).Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-		ID:                    "kind-local",
+		ID:                    deletePreflightTargetID,
 		Type:                  deletePreflightTargetType,
-		Name:                  "Kind",
+		Name:                  "Test Addon",
 		AcceptedManifestTypes: []domain.ManifestType{deletePreflightManifestType},
 	})); err != nil {
 		t.Fatalf("Register target: %v", err)
@@ -80,7 +84,7 @@ func setupExtensionResourceService(t *testing.T) extensionResourceHarness {
 	}
 }
 
-func seedClusterType(t *testing.T, store domain.Store, rt domain.ResourceType, now time.Time) {
+func seedManagedPlusInventoryTypeForDelete(t *testing.T, store domain.Store, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := store.Begin(ctx)
@@ -90,9 +94,9 @@ func seedClusterType(t *testing.T, store domain.Store, rt domain.ResourceType, n
 	defer tx.Rollback()
 
 	typeDef := domain.NewExtensionResourceType(
-		rt, "v1", "clusters", now,
+		deletePreflightResourceType, "v1", "widgets", now,
 		domain.WithManagement(
-			domain.NewRegisteredSelfTarget("kind-local", deletePreflightManifestType),
+			domain.NewRegisteredSelfTarget(deletePreflightTargetID, deletePreflightManifestType),
 			domain.Signature{},
 		),
 		domain.WithInventory(),
@@ -106,38 +110,31 @@ func seedClusterType(t *testing.T, store domain.Store, rt domain.ResourceType, n
 }
 
 // TestDeleteExtensionResource_RejectsInventoryOnlyInstance ensures Delete
-// fails before starting the delete workflow when the extension resource
-// exists but has no managed state — the shape kind inventory reporting
-// creates when a deployment (not a managed Cluster) delivers a cluster.
+// fails before starting the delete workflow when an instance of a
+// managed+inventory type exists without managed state. That happens when
+// inventory reporting resolve-or-creates a row for a resource that was
+// never created through the managed-resource API (for example, a custom
+// Deployment that materializes the same type the addon also manages).
 func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 	h := setupExtensionResourceService(t)
 	ctx := context.Background()
 	fixed := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
-	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
-	name := domain.ResourceName("clusters/c1")
-	seedClusterType(t, h.store, rt, fixed)
+	name := domain.ResourceName("widgets/w1")
+	seedManagedPlusInventoryTypeForDelete(t, h.store, fixed)
 
-	// Same application path the kind InventoryWatcher uses: report a
-	// cluster inventory delta through InventoryReporterAdapter. That
-	// resolve-or-creates an inventory-only extension resource row.
 	ready, err := domain.NewCondition(
-		"Ready", domain.ConditionTrue, "APIServerAvailable", "cluster API is reachable", fixed)
+		"Ready", domain.ConditionTrue, "Available", "ready", fixed)
 	if err != nil {
-		t.Fatalf("NewCondition Ready: %v", err)
+		t.Fatalf("NewCondition: %v", err)
 	}
-	apiCond, err := domain.NewCondition(
-		"APIServerAvailable", domain.ConditionTrue, "APIServerAvailable", "cluster API is reachable", fixed)
-	if err != nil {
-		t.Fatalf("NewCondition APIServerAvailable: %v", err)
-	}
-	obs := json.RawMessage(`{"apiServerAvailable":true}`)
+	obs := json.RawMessage(`{"status":"ok"}`)
 	reporter := application.NewInventoryReporterAdapter(application.NewInventoryReportService(h.store))
 	if err := reporter.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
 		Reports: []domain.InventoryDeltaReport{{
-			ResourceType:      rt,
+			ResourceType:      deletePreflightResourceType,
 			Name:              name,
-			ReplaceConditions: []domain.Condition{ready, apiCond},
+			ReplaceConditions: []domain.Condition{ready},
 			Observation:       &obs,
 			ObservedAt:        fixed,
 		}},
@@ -145,7 +142,7 @@ func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 		t.Fatalf("ApplyDeltaBatch: %v", err)
 	}
 
-	_, err = h.svc.Delete(ctx, rt, name)
+	_, err = h.svc.Delete(ctx, deletePreflightResourceType, name)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Delete err = %v, want ErrInvalidArgument", err)
 	}
@@ -161,19 +158,18 @@ func TestDeleteExtensionResource_StartsWorkflowWhenManaged(t *testing.T) {
 	defer cancel()
 	fixed := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
-	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
-	name := domain.ResourceName("clusters/c1")
-	seedClusterType(t, h.store, rt, fixed)
+	name := domain.ResourceName("widgets/w1")
+	seedManagedPlusInventoryTypeForDelete(t, h.store, fixed)
 
 	if _, err := h.svc.Create(ctx, application.CreateExtensionResourceInput{
-		ResourceType: rt,
+		ResourceType: deletePreflightResourceType,
 		Name:         name,
-		Spec:         json.RawMessage(`{"name":"c1"}`),
+		Spec:         json.RawMessage(`{"name":"w1"}`),
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	view, err := h.svc.Delete(ctx, rt, name)
+	view, err := h.svc.Delete(ctx, deletePreflightResourceType, name)
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
