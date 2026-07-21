@@ -419,12 +419,12 @@ func TestRemoveGVR_LeavesPersistedCollection(t *testing.T) {
 	}
 }
 
-// TestResync_RemovesAbsentReportedUIDsFromStore verifies a same-process
+// TestResync_RemovesAbsentReportedNamesFromStore verifies a same-process
 // LIST/resync deletes store rows for UIDs previously acknowledged in
-// ReportedUIDs but absent from the LIST, without requiring a watch
+// ReportedNames but absent from the LIST, without requiring a watch
 // DELETE event. This is process-generation omission reconciliation, not
 // durable DB collection wipe of unknown rows.
-func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
+func TestResync_RemovesAbsentReportedNamesFromStore(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedObjectType(t, store)
 
@@ -480,7 +480,7 @@ func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 		}
 	}
 	if !foundKeep {
-		t.Fatal("sibling object must survive ReportedUIDs-diff resync")
+		t.Fatal("sibling object must survive ReportedNames-diff resync")
 	}
 }
 

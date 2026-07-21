@@ -1646,11 +1646,11 @@ func TestWriter_flushEdges_NoopSkipsDiffEvenWithEdgeFuncs(t *testing.T) {
 	}
 }
 
-// TestResync_EmptySnapshotDeletesReportedUIDs verifies a later empty
+// TestResync_EmptySnapshotDeletesReportedNames verifies a later empty
 // LIST emits IsDelete only for UIDs acknowledged in this generation's
-// ReportedUIDs (same-process omission reconciliation — not a DB
+// ReportedNames (same-process omission reconciliation — not a DB
 // collection wipe of unknown rows).
-func TestResync_EmptySnapshotDeletesReportedUIDs(t *testing.T) {
+func TestResync_EmptySnapshotDeletesReportedNames(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mock := &recordingReporter{}
 		w := newTestWriter(mock, nil, nil, 10*time.Second)
@@ -1684,7 +1684,7 @@ func TestResync_EmptySnapshotDeletesReportedUIDs(t *testing.T) {
 
 		deltas := mock.getDeltas()
 		if len(deltas) != 2 {
-			t.Fatalf("expected ReportedUIDs-diff ApplyDelta after seed resync, got %d deltas", len(deltas))
+			t.Fatalf("expected ReportedNames-diff ApplyDelta after seed resync, got %d deltas", len(deltas))
 		}
 		diff := deltas[1]
 		if len(diff.delta.Upserts) != 0 {
@@ -2213,7 +2213,7 @@ func TestResync_SkipsExtractionFailure(t *testing.T) {
 
 // TestResync_ListedExtractFailureDoesNotDelete verifies a previously
 // reported UID that is still present in the LIST but fails extraction
-// is not treated as omitted: no IsDelete, ReportedUIDs and currentNodes
+// is not treated as omitted: no IsDelete, ReportedNames and currentNodes
 // keep the prior entry.
 func TestResync_ListedExtractFailureDoesNotDelete(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -2283,8 +2283,8 @@ func TestResync_ListedExtractFailureDoesNotDelete(t *testing.T) {
 		if st == nil {
 			t.Fatal("expected gvr state")
 		}
-		if _, ok := st.ReportedUIDs["uid-keep"]; !ok {
-			t.Fatal("ReportedUIDs must preserve uid-keep after listed extract failure")
+		if _, ok := st.ReportedNames["uid-keep"]; !ok {
+			t.Fatal("ReportedNames must preserve uid-keep after listed extract failure")
 		}
 		if _, ok := w.currentNodes["uid-keep"]; !ok {
 			t.Fatal("currentNodes must preserve uid-keep after listed extract failure")
@@ -2352,9 +2352,9 @@ func TestWriter_RejectsClosedGenerationEvents(t *testing.T) {
 	})
 }
 
-func TestResync_UsesReportedUIDsNotUnackedNodes(t *testing.T) {
+func TestResync_UsesReportedNamesNotUnackedNodes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// ReportedUIDs advances only after a successful write. A pending
+		// ReportedNames advances only after a successful write. A pending
 		// watch upsert that has not been acknowledged must not appear in
 		// the baseline a later resync would delete against.
 		mock := &recordingReporter{}
@@ -2381,11 +2381,11 @@ func TestResync_UsesReportedUIDsNotUnackedNodes(t *testing.T) {
 		if st == nil {
 			t.Fatal("expected gvrState after seed resync")
 		}
-		if _, ok := st.ReportedUIDs["uid-ack"]; !ok {
-			t.Fatal("ReportedUIDs missing acknowledged uid-ack")
+		if _, ok := st.ReportedNames["uid-ack"]; !ok {
+			t.Fatal("ReportedNames missing acknowledged uid-ack")
 		}
-		if _, ok := st.ReportedUIDs["uid-unacked"]; ok {
-			t.Fatal("unflushed upsert must not add uid-unacked to ReportedUIDs")
+		if _, ok := st.ReportedNames["uid-unacked"]; ok {
+			t.Fatal("unflushed upsert must not add uid-unacked to ReportedNames")
 		}
 
 		// Empty resync must delete only acknowledged absences (uid-ack),
@@ -2395,20 +2395,20 @@ func TestResync_UsesReportedUIDsNotUnackedNodes(t *testing.T) {
 
 		deltas := mock.getDeltas()
 		if len(deltas) < 2 {
-			t.Fatalf("ApplyDelta calls = %d, want >= 2 (seed + ReportedUIDs diff)", len(deltas))
+			t.Fatalf("ApplyDelta calls = %d, want >= 2 (seed + ReportedNames diff)", len(deltas))
 		}
 		diff := deltas[len(deltas)-1].delta
 		if len(diff.Deletes) != 1 {
-			t.Fatalf("ReportedUIDs-diff deletes = %d, want 1 (uid-ack only)", len(diff.Deletes))
+			t.Fatalf("ReportedNames-diff deletes = %d, want 1 (uid-ack only)", len(diff.Deletes))
 		}
 		wantAck := mustObjectName(t, "target-1", "uid-ack", testGVR)
 		if diff.Deletes[0].Name != wantAck || !diff.Deletes[0].IsDelete {
-			t.Fatalf("ReportedUIDs-diff deleted %+v, want IsDelete for %v", diff.Deletes[0], wantAck)
+			t.Fatalf("ReportedNames-diff deleted %+v, want IsDelete for %v", diff.Deletes[0], wantAck)
 		}
 		wantUnacked := mustObjectName(t, "target-1", "uid-unacked", testGVR)
 		for _, d := range diff.Deletes {
 			if d.Name == wantUnacked {
-				t.Fatal("unacked uid must not be deleted by ReportedUIDs resync")
+				t.Fatal("unacked uid must not be deleted by ReportedNames resync")
 			}
 		}
 
@@ -2475,8 +2475,8 @@ func TestResync_RetainsFailedWriteAndRetriesWithoutSecondResync(t *testing.T) {
 		if st == nil {
 			t.Fatal("expected gvrState after successful retained resync")
 		}
-		if _, ok := st.ReportedUIDs["uid-r1"]; !ok {
-			t.Fatal("ReportedUIDs must include uid-r1 only after successful write")
+		if _, ok := st.ReportedNames["uid-r1"]; !ok {
+			t.Fatal("ReportedNames must include uid-r1 only after successful write")
 		}
 	})
 }
@@ -2621,11 +2621,11 @@ func TestWriter_FastReAddAdoptsNewerGeneration(t *testing.T) {
 		if st == nil || st.Generation != 2 {
 			t.Fatalf("expected gen 2 state after fast re-add, got %+v", st)
 		}
-		if _, ok := st.ReportedUIDs["uid-new"]; !ok {
-			t.Fatal("gen-2 upsert must be acknowledged in ReportedUIDs")
+		if _, ok := st.ReportedNames["uid-new"]; !ok {
+			t.Fatal("gen-2 upsert must be acknowledged in ReportedNames")
 		}
-		if _, ok := st.ReportedUIDs["uid-old"]; ok {
-			t.Fatal("fast re-add must drop prior generation ReportedUIDs")
+		if _, ok := st.ReportedNames["uid-old"]; ok {
+			t.Fatal("fast re-add must drop prior generation ReportedNames")
 		}
 
 		// Late gen-1 event must be rejected after gen-2 is open.
@@ -2690,8 +2690,8 @@ func TestWriter_FastReAddDropsPendingUpsertsFromPriorGeneration(t *testing.T) {
 		if st := w.gvrStates[testGVR]; st == nil || st.Generation != 2 {
 			t.Fatalf("expected gen 2 state, got %+v", st)
 		}
-		if _, ok := w.gvrStates[testGVR].ReportedUIDs["uid-old"]; ok {
-			t.Fatal("gen-1 UID must not appear in gen-2 ReportedUIDs")
+		if _, ok := w.gvrStates[testGVR].ReportedNames["uid-old"]; ok {
+			t.Fatal("gen-1 UID must not appear in gen-2 ReportedNames")
 		}
 	})
 }
@@ -2850,8 +2850,8 @@ func TestFlush_FailureRestoresUncommittedNodes(t *testing.T) {
 		t.Fatal("flush failure must restore/clear uncommitted edgeFuncs entry")
 	}
 	if st := w.gvrStates[testGVR]; st != nil {
-		if _, ok := st.ReportedUIDs["uid-1"]; ok {
-			t.Fatal("ReportedUIDs must not advance after flush failure")
+		if _, ok := st.ReportedNames["uid-1"]; ok {
+			t.Fatal("ReportedNames must not advance after flush failure")
 		}
 	}
 	if len(sent) != 0 {

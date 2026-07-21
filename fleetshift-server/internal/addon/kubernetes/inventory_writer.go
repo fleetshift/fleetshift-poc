@@ -22,20 +22,20 @@ type edgeKey struct {
 	EdgeType  EdgeType
 }
 
-// gvrState is the writer's per-GVR process-generation state. ReportedUIDs
+// gvrState is the writer's per-GVR process-generation state. ReportedNames
 // maps Kubernetes UID to the exact [domain.ResourceName] last acknowledged
 // for that UID. It changes only after a successful mixed ReplaceBatch.
 // Generation fencing rejects late events after RemoveGVR closes the
 // generation. Retaining the exact name is required because namespaced
 // paths include the namespace segment and deletes must not re-infer scope.
 type gvrState struct {
-	Generation   uint64
-	ReportedUIDs map[string]domain.ResourceName
+	Generation    uint64
+	ReportedNames map[string]domain.ResourceName
 }
 
 // pendingDelete is one queued watch delete awaiting flush.
 // Name is the exact inventory resource name resolved at queue time from
-// the event (scope + metadata) or, failing that, from ReportedUIDs.
+// the event (scope + metadata) or, failing that, from ReportedNames.
 // Flush skips the delete when Name is still empty.
 type pendingDelete struct {
 	GVR  schema.GroupVersionResource
@@ -53,12 +53,12 @@ type pendingResync struct {
 	nextNodes     map[string]inventoryNode
 	nextEdgeFuncs map[string]func(NodeStore) []Edge
 	staleUIDs     []string
-	// currentUIDs is the post-success ReportedUIDs set: successfully
+	// currentNames is the post-success ReportedNames set: successfully
 	// extracted LIST UIDs, plus previously reported UIDs that were
 	// still listed but failed extraction (preserved until a good
 	// extract or a true LIST omission).
-	currentUIDs map[string]domain.ResourceName
-	ack         chan<- error
+	currentNames map[string]domain.ResourceName
+	ack          chan<- error
 }
 
 // errResyncGenerationClosed is sent on ResyncEvent.Ack when the GVR
@@ -250,7 +250,7 @@ func (w *Writer) Run(ctx context.Context) {
 				// deduped against the deleted resource.
 				delete(sentVersions, uid)
 				// Drop local edge state immediately so topology tracks the
-				// watch tombstone; ReportedUIDs still waits for flush
+				// watch tombstone; ReportedNames still waits for flush
 				// success before removing the UID.
 				delete(w.currentNodes, uid)
 				delete(w.edgeFuncs, uid)
@@ -317,16 +317,16 @@ func (w *Writer) acceptGeneration(ctx context.Context, gvr schema.GroupVersionRe
 	if gen == 0 {
 		if st == nil {
 			w.gvrStates[gvr] = &gvrState{
-				Generation:   0,
-				ReportedUIDs: make(map[string]domain.ResourceName),
+				Generation:    0,
+				ReportedNames: make(map[string]domain.ResourceName),
 			}
 		}
 		return true, false
 	}
 	if st == nil {
 		w.gvrStates[gvr] = &gvrState{
-			Generation:   gen,
-			ReportedUIDs: make(map[string]domain.ResourceName),
+			Generation:    gen,
+			ReportedNames: make(map[string]domain.ResourceName),
 		}
 		return true, false
 	}
@@ -338,8 +338,8 @@ func (w *Writer) acceptGeneration(ctx context.Context, gvr schema.GroupVersionRe
 		// matching RemoveGVR for the old one; adopt the new baseline.
 		w.dropGVRMemory(gvr)
 		w.gvrStates[gvr] = &gvrState{
-			Generation:   gen,
-			ReportedUIDs: make(map[string]domain.ResourceName),
+			Generation:    gen,
+			ReportedNames: make(map[string]domain.ResourceName),
 		}
 		if p, ok := w.pendingResync[gvr]; ok {
 			ackResync(p.ack, errResyncGenerationClosed)
@@ -422,7 +422,7 @@ func (w *Writer) dropGVRMemory(gvr schema.GroupVersionResource) {
 
 // flush sends the accumulated batch as a single ApplyDelta call. It applies
 // dedup by skipping upserts whose resourceVersion has not changed.
-// Returns error if the write fails; ReportedUIDs / sentVersions advance
+// Returns error if the write fails; ReportedNames / sentVersions advance
 // only on success.
 func (w *Writer) flush(
 	ctx context.Context,
@@ -490,12 +490,12 @@ func (w *Writer) flush(
 	var deleteReports []InventoryObjectReport
 	deletedUIDs := make(map[string]schema.GroupVersionResource)
 	for uid, pending := range deletes {
-		// Name is normally filled by queueDelete; keep a ReportedUIDs
+		// Name is normally filled by queueDelete; keep a ReportedNames
 		// fallback for empty Names that somehow reach flush.
 		name := pending.Name
 		if name == "" {
 			if st := w.gvrStates[pending.GVR]; st != nil {
-				name = st.ReportedUIDs[uid]
+				name = st.ReportedNames[uid]
 			}
 		}
 		if name == "" {
@@ -614,7 +614,7 @@ func (w *Writer) restoreUncommittedNodes(
 	}
 }
 
-// acknowledgeFlush advances ReportedUIDs after a successful watch flush:
+// acknowledgeFlush advances ReportedNames after a successful watch flush:
 // upserted UIDs store their exact ResourceName, deleted UIDs are removed.
 // Call only after the mixed ReplaceBatch (and any edge sink write) has
 // succeeded.
@@ -627,14 +627,14 @@ func (w *Writer) acknowledgeFlush(
 		gvr := upsertedGVRs[uid]
 		st := w.gvrStates[gvr]
 		if st == nil {
-			st = &gvrState{ReportedUIDs: make(map[string]domain.ResourceName)}
+			st = &gvrState{ReportedNames: make(map[string]domain.ResourceName)}
 			w.gvrStates[gvr] = st
 		}
-		st.ReportedUIDs[uid] = name
+		st.ReportedNames[uid] = name
 	}
 	for uid, gvr := range deletedUIDs {
 		if st := w.gvrStates[gvr]; st != nil {
-			delete(st.ReportedUIDs, uid)
+			delete(st.ReportedNames, uid)
 		}
 	}
 }
@@ -686,12 +686,12 @@ func (w *Writer) applyDeltaWithRetry(ctx context.Context, delta InventoryDeltaRe
 }
 
 // sendResync upserts the LIST snapshot and deletes only UIDs in this
-// generation's ReportedUIDs that are absent from the LIST. That is
+// generation's ReportedNames that are absent from the LIST. That is
 // same-process omission reconciliation; it does not discover
 // database-only rows from an earlier process. LIST presence is tracked
 // separately from extraction success so a listed object that fails
 // extract is not treated as omitted (no IsDelete; prior report/node
-// preserved). ReportedUIDs and in-memory membership update only after
+// preserved). ReportedNames and in-memory membership update only after
 // the write succeeds. On failure the mixed batch is retained and
 // retried until success or generation end; ResyncEvent.Ack is signaled
 // only then so the informer does not start WATCH from an uncommitted
@@ -731,7 +731,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 	var deletes []InventoryObjectReport
 	var staleUIDs []string
 	if st != nil {
-		for uid, name := range st.ReportedUIDs {
+		for uid, name := range st.ReportedNames {
 			if _, exists := listedUIDs[uid]; exists {
 				continue
 			}
@@ -743,7 +743,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		}
 	}
 
-	// Post-success ReportedUIDs: extracted UIDs, plus listed-but-failed
+	// Post-success ReportedNames: extracted UIDs, plus listed-but-failed
 	// UIDs that were already reported (preserve prior inventory name).
 	reportedAfter := maps.Clone(extractedNames)
 	if reportedAfter == nil {
@@ -754,7 +754,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 			if _, ok := extractedNames[uid]; ok {
 				continue
 			}
-			if name, wasReported := st.ReportedUIDs[uid]; wasReported {
+			if name, wasReported := st.ReportedNames[uid]; wasReported {
 				reportedAfter[uid] = name
 			}
 		}
@@ -772,12 +772,12 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		nextNodes:     nextNodes,
 		nextEdgeFuncs: nextEdgeFuncs,
 		staleUIDs:     staleUIDs,
-		currentUIDs:   reportedAfter,
+		currentNames:  reportedAfter,
 		ack:           rs.Ack,
 	}
 
 	if err := w.applyDeltaWithRetry(ctx, pending.delta); err != nil {
-		// Retain for ticker retry; do not advance ReportedUIDs or ack yet.
+		// Retain for ticker retry; do not advance ReportedNames or ack yet.
 		w.pendingResync[rs.GVR] = pending
 		return
 	}
@@ -801,7 +801,7 @@ func (w *Writer) observeResource(r *unstructured.Unstructured, entry SchemaEntry
 
 // queueDelete builds a [pendingDelete] with the exact inventory name when
 // it can be formed from the event's bound scope and object metadata, or
-// from the last acknowledged name in ReportedUIDs.
+// from the last acknowledged name in ReportedNames.
 func (w *Writer) queueDelete(gvr schema.GroupVersionResource, scope ObjectScope, obj *unstructured.Unstructured) pendingDelete {
 	uid := ""
 	namespace := ""
@@ -822,13 +822,13 @@ func (w *Writer) queueDelete(gvr schema.GroupVersionResource, scope ObjectScope,
 	}
 	if name == "" {
 		if st := w.gvrStates[gvr]; st != nil {
-			name = st.ReportedUIDs[uid]
+			name = st.ReportedNames[uid]
 		}
 	}
 	return pendingDelete{GVR: gvr, Name: name}
 }
 
-// applyResyncSuccess commits in-memory membership and ReportedUIDs for a
+// applyResyncSuccess commits in-memory membership and ReportedNames for a
 // successful LIST/resync write. Call only after ApplyDelta succeeds (or
 // when there is no reporter).
 func (w *Writer) applyResyncSuccess(gvr schema.GroupVersionResource, pending *pendingResync) {
@@ -842,19 +842,19 @@ func (w *Writer) applyResyncSuccess(gvr schema.GroupVersionResource, pending *pe
 	st := w.gvrStates[gvr]
 	if st == nil {
 		st = &gvrState{
-			Generation:   pending.generation,
-			ReportedUIDs: make(map[string]domain.ResourceName),
+			Generation:    pending.generation,
+			ReportedNames: make(map[string]domain.ResourceName),
 		}
 		w.gvrStates[gvr] = st
 	}
-	st.ReportedUIDs = maps.Clone(pending.currentUIDs)
-	if st.ReportedUIDs == nil {
-		st.ReportedUIDs = make(map[string]domain.ResourceName)
+	st.ReportedNames = maps.Clone(pending.currentNames)
+	if st.ReportedNames == nil {
+		st.ReportedNames = make(map[string]domain.ResourceName)
 	}
 }
 
 // retryPendingResyncs retries retained LIST writes. Membership /
-// ReportedUIDs advance only on success. RemoveGVR / generation close
+// ReportedNames advance only on success. RemoveGVR / generation close
 // drops pending entries without synthesizing deletes and nacks waiters.
 func (w *Writer) retryPendingResyncs(ctx context.Context) error {
 	var firstErr error

@@ -199,7 +199,7 @@ func TestListAndResync_SkipsDisallowedNamespaces(t *testing.T) {
 
 // TestListAndResync_DropsStaleLocalIndexWithoutEventDelete verifies LIST
 // clears disappeared UIDs from the in-memory resourceIndex only. Persist
-// deletes for those absences are the writer's ReportedUIDs-diff job via
+// deletes for those absences are the writer's ReportedNames-diff job via
 // ResyncEvent, not per-UID EventDelete from the informer.
 func TestListAndResync_DropsStaleLocalIndexWithoutEventDelete(t *testing.T) {
 	gvr := podsGVR()

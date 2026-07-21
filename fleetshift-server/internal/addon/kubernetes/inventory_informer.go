@@ -84,7 +84,7 @@ const (
 // GenericInformer performs LIST+WATCH for a single GVR and sends events to
 // channels. It tracks only UID -> resourceVersion for minimal memory usage.
 // WatchResourceVersion is the cursor used to resume a clean watch disconnect;
-// it is distinct from the writer's ReportedUIDs persistence baseline.
+// it is distinct from the writer's ReportedNames persistence baseline.
 // scope is bound from discovery when the informer generation starts and is
 // copied onto every emitted event.
 type GenericInformer struct {
@@ -155,7 +155,7 @@ func NewInformerGeneration(
 // acknowledged by the writer before WATCH starts from that cursor.
 // Clean watch terminations resume WATCH from WatchResourceVersion
 // without LIST. Expired or unsafe watch endings force another LIST
-// (writer reconciles omissions against ReportedUIDs for this generation).
+// (writer reconciles omissions against ReportedNames for this generation).
 func (i *GenericInformer) Run(ctx context.Context) {
 	needList := true
 	for {
@@ -217,7 +217,7 @@ func newUnstructured(kind, uid string) *unstructured.Unstructured {
 // persistence ack before returning so Run does not start WATCH until the
 // LIST write has succeeded (or the generation/context ends). Stale local
 // index UIDs are dropped without EventDelete; omission deletes are the
-// writer's ReportedUIDs diff on ResyncEvent.
+// writer's ReportedNames diff on ResyncEvent.
 func (i *GenericInformer) listAndResync(ctx context.Context) error {
 	newResourceIndex := make(map[string]string)
 	var allResources []*unstructured.Unstructured
@@ -277,7 +277,7 @@ func (i *GenericInformer) listAndResync(ctx context.Context) error {
 	// Drop UIDs that disappeared from the LIST from the local index only.
 	// Do not emit EventDelete for them: the ResyncEvent below becomes an
 	// ApplyDelta that upserts the LIST and, when the writer already has
-	// ReportedUIDs for this GVR generation, deletes only those absent from
+	// ReportedNames for this GVR generation, deletes only those absent from
 	// the LIST (a first LIST has none, so upserts only). Per-UID deletes
 	// here would only duplicate that reconciliation. Watch tombstones
 	// still use EventDelete.
