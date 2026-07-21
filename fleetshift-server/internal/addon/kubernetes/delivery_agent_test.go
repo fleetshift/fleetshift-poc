@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -136,7 +137,7 @@ func TestAgent_Deliver_SucceedsWhenIndexerEnsureFails(t *testing.T) {
 		nil,
 		nil,
 		failingIndexerClients{},
-		nil,
+		slog.New(slog.DiscardHandler),
 	)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{

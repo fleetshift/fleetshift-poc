@@ -350,14 +350,32 @@ There are no separate platform resync/collection-delete/subtree-delete methods o
 
 In-process, a direct adapter always reports under `kubernetes.fleetshift.io/Object` and maps both upserts and deletes into one platform replacement batch. In the external model, a transport adapter would implement the same report shape.
 
-Object identity uses:
+Object identity uses one generic type and scope-dependent resource-name patterns:
 
 ```text
 ResourceType: kubernetes.fleetshift.io/Object
-ResourceName: clusters/{clusterResourceID}/apiResources/{gvrKey}/objects/{uid}
+
+# Namespaced (discovery APIResource.Namespaced=true)
+ResourceName: clusters/{clusterResourceID}/namespaces/{namespace}/apiResources/{groupResourceKey}/objects/{uid}
+
+# Cluster-scoped (discovery APIResource.Namespaced=false)
+ResourceName: clusters/{clusterResourceID}/apiResources/{groupResourceKey}/objects/{uid}
 ```
 
-where `gvrKey` is `{groupKey}~{version}~{resource}` (`groupKey` is `core` for the core API group), and `clusterResourceID` is the ID segment of the managed cluster resource name.
+where:
+
+- `clusterResourceID` is the ID segment of the managed cluster resource name
+- `groupResourceKey` is the versionless GroupResource encoding `{resource}` (core) or `{resource}.{group}` (named group)
+- discovery's `APIResource.Namespaced` is the sole authority for scope / path-pattern selection; `metadata.namespace` must agree and is never used to invent scope
+- the leaf remains the Kubernetes UID for now (logical leaf = `metadata.name` is deferred)
+
+Examples:
+
+```text
+clusters/prod/namespaces/default/apiResources/deployments.apps/objects/0d12-uid
+clusters/prod/apiResources/nodes/objects/node-uid
+clusters/prod/apiResources/namespaces/objects/default
+```
 
 ## Two-tier extraction
 
@@ -369,7 +387,7 @@ Every watched resource gets the following projected into the inventory report, w
 
 | Projection | Source |
 | --- | --- |
-| Resource name | `clusters/{clusterResourceID}/apiResources/{gvrKey}/objects/{uid}` |
+| Resource name | namespaced: `clusters/{cluster}/namespaces/{ns}/apiResources/{groupResourceKey}/objects/{uid}`; cluster-scoped omits `namespaces/{ns}` |
 | Labels | Kubernetes `metadata.labels` (complete latest set; empty map clears) |
 | Conditions | Kubernetes `status.conditions` projected to FleetShift conditions (True/False/Unknown only; empty type dropped; missing transition time falls back to observed-at) |
 | Observation GVR | group, version, resource, scope |
@@ -423,7 +441,7 @@ Two-tier extraction converts an unstructured Kubernetes resource into an invento
 
 ### Default schema
 
-The default schema provides enriched extraction for core Kubernetes resource types: workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs), pods, services, nodes, namespaces, storage (PVCs, PVs), and configuration (ConfigMaps, Secrets). For most types, key status fields and replica counts are extracted. Nodes and pods include compute-extra hooks for computed properties (node roles, pod status). Pods, services, and PVCs include build-edges hooks for type-specific edges (`runsOn`, `attachedTo`, `selects`). ConfigMaps and Secrets are indexed for identity and labels only — no enriched fields are extracted; Secret payload data is not stored.
+The default schema provides enriched extraction for core Kubernetes resource types: workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs), pods, services, nodes, namespaces, and storage (PVCs, PVs). For most types, key status fields and replica counts are extracted. Nodes and pods include compute-extra hooks for computed properties (node roles, pod status). Pods, services, and PVCs include build-edges hooks for type-specific edges (`runsOn`, `attachedTo`, `selects`). ConfigMaps and Secrets are watched via discovery like other types and receive base-tier extraction only (identity/labels/conditions/metadata) — they have no default enriched schema entry, and Secret payload data is not stored.
 
 All other resources discovered on the cluster receive base extraction only — identity, labels, conditions, observation metadata — without enriched fields.
 
@@ -435,7 +453,7 @@ The two-tier model and allow/deny configuration address the core extensibility g
 
 Where that config lives matters. Storing index filters or schema on target properties is a poor fit today: Kind and GCP HCP rebuild target properties on every delivery (full replace, not merge), so operator-set indexing config would be wiped on the next reconcile. An addon-level config (applied to every kubernetes target, similar to the GCP HCP addon config file pattern) avoids that clobber; per-target overrides likely need a different durable mechanism than the properties map. Also consider whether CEL should be used in addition to JSONPath (platform already utilizes CEL), or whether we should completely replace JSONPath with CEL.
 
-If enriched schema becomes runtime-configurable, the platform needs extraction guardrails for sensitive built-ins. The compiled default schema intentionally extracts no fields from Secrets and ConfigMaps. A configurable schema must not allow callers to pull `data` (or equivalent) into observation — for example by denying custom field extraction on those types, or by an explicit trust/authorization model that makes such extraction safe.
+If enriched schema becomes runtime-configurable, the platform needs extraction guardrails for sensitive built-ins. ConfigMaps and Secrets have no default enriched schema entry today (base tier only). A configurable schema must not allow callers to pull `data` (or equivalent) into observation — for example by denying custom field extraction on those types, or by an explicit trust/authorization model that makes such extraction safe.
 
 ### Edge querying / persistence
 
@@ -475,7 +493,15 @@ On a same-generation Kind Deliver (cluster already owned; no recreate), `ensureC
 
 ### Logical object naming and incarnation
 
-Shipped identity uses a UID leaf under a GVR key (`…/apiResources/{gvrKey}/objects/{uid}`). A separate design explores moving to logical names keyed by cluster + GroupResource + scope + namespace + name, with Kubernetes UID as source incarnation rather than the path leaf, replace-incarnation on UID change at the same logical name, discovery as scope authority, and a virtual Namespace hierarchy parent. That product shift — including how hard-delete / replace-if-still-current fences persist across retries and writer restart — remains open. Prefer resolving it as one umbrella decision (with the logical-object-naming design as the detailed contract) rather than landing UID-leaf semantics as permanent.
+Shipped identity uses discovery scope, namespace ancestry, and versionless GroupResource keys, with a Kubernetes UID leaf. Switching the leaf to `metadata.name` (and rotating `ExtensionResourceUID` on Kubernetes UID change for the same logical address) is deferred. Prefer resolving the remaining work as one umbrella decision rather than treating the UID leaf as permanent.
+
+Open follow-ups from that design that are intentionally not implemented yet:
+
+- leaf change UID → `metadata.name`, with dual writer indexes and pending coalescing by canonical name
+- atomic source-incarnation-fenced replace / fenced create-if-absent when a new Kubernetes UID occupies an existing logical name
+- full discovery completeness / retain-last-accepted / scope-flip quarantine lifecycle (partial discovery must not drop owned watchers; complete scope flips must fence without silent path renames)
+- preferred-version handoff and same-GroupResource multi-version scope-conflict handling
+- whether `apiResources/{groupResourceKey}` parents are real, virtual, or structural-only
 
 ### Informer startup serialization at scale
 

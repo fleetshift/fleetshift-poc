@@ -166,7 +166,7 @@ type managedIndexer struct {
 // NewKubernetesInProcessIndexHost creates a host that implements
 // [IndexingRuntime]. ctx must outlive individual request contexts; it
 // governs every indexer the host starts. clients is required (use
-// [DefaultIndexerClients] in production). logger may be nil.
+// [DefaultIndexerClients] in production). logger must be non-nil.
 func NewKubernetesInProcessIndexHost(
 	ctx context.Context,
 	vault domain.Vault,
@@ -174,9 +174,6 @@ func NewKubernetesInProcessIndexHost(
 	clients IndexerClients,
 	logger *slog.Logger,
 ) *KubernetesInProcessIndexHost {
-	if logger == nil {
-		logger = slog.Default()
-	}
 	if clients == nil {
 		clients = DefaultIndexerClients{}
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -16,68 +17,167 @@ import (
 // ObjectResourceType is the single [domain.ResourceType] used to
 // report every watched Kubernetes object, regardless of GVR or kind.
 // One generic type means new CRDs and API versions never require
-// registering a new FleetShift resource type; GVR, kind, namespace,
-// and name are instead carried in the object's resource name and
-// observation payload. Built from [AddonID] rather than a
-// separate literal, so its service-name prefix can never drift from
+// registering a new FleetShift resource type. Object identity is split
+// across the resource name (cluster, optional namespace, versionless
+// group-resource, UID) and the observation payload (apiVersion, kind,
+// metadata.name, and related fields). Built from [AddonID] rather than
+// a separate literal, so its service-name prefix can never drift from
 // the addon-ownership rule the platform validates against.
 const ObjectResourceType domain.ResourceType = domain.ResourceType(AddonID) + "/Object"
 
 // Resource-name path collection IDs for Kubernetes object inventory.
-// Together they form:
+// Namespaced objects use:
 //
-//	{TargetCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}
+//	{ClusterCollectionID}/{clusterResourceID}/{NamespaceCollectionID}/{namespace}/{APIResourceCollectionID}/{groupResourceKey}/{ObjectCollectionID}/{uid}
+//
+// Cluster-scoped objects omit the namespace branch:
+//
+//	{ClusterCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{groupResourceKey}/{ObjectCollectionID}/{uid}
 //
 // where clusterResourceID is [KubernetesObjectIdentity.ClusterResourceName].ID().
 // ObjectCollectionID is also the schema CollectionID in [InventorySchema].
 const (
-	TargetCollectionID      domain.CollectionID = "clusters"
+	// ClusterCollectionID is the managed-cluster parent collection ("clusters").
+	ClusterCollectionID domain.CollectionID = "clusters"
+	// NamespaceCollectionID is the Kubernetes namespace branch ("namespaces").
+	NamespaceCollectionID domain.CollectionID = "namespaces"
+	// APIResourceCollectionID is the versionless group-resource branch ("apiResources").
 	APIResourceCollectionID domain.CollectionID = "apiResources"
-	ObjectCollectionID      domain.CollectionID = "objects"
+	// ObjectCollectionID is the object leaf collection ("objects").
+	ObjectCollectionID domain.CollectionID = "objects"
 )
+
+// ObjectScope is the discovery-authoritative scope of a Kubernetes
+// API resource. It selects the namespaced vs cluster-scoped resource
+// name pattern and must never be inferred from metadata.namespace.
+type ObjectScope string
+
+const (
+	// ObjectScopeUnknown is the fail-closed zero value. It is never a
+	// valid scope for name construction or event processing.
+	ObjectScopeUnknown ObjectScope = ""
+	// ObjectScopeNamespaced means discovery reported APIResource.Namespaced=true.
+	ObjectScopeNamespaced ObjectScope = "namespaced"
+	// ObjectScopeCluster means discovery reported APIResource.Namespaced=false.
+	ObjectScopeCluster ObjectScope = "cluster"
+)
+
+// ParseObjectScope parses a discovery scope spelling ("namespaced" or
+// "cluster"). Empty and unknown values are rejected. Callers must not
+// invent scope from object metadata.
+func ParseObjectScope(s string) (ObjectScope, error) {
+	switch ObjectScope(s) {
+	case ObjectScopeNamespaced, ObjectScopeCluster:
+		return ObjectScope(s), nil
+	case ObjectScopeUnknown:
+		return "", fmt.Errorf("%w: object scope is required", domain.ErrInvalidArgument)
+	default:
+		return "", fmt.Errorf("%w: invalid object scope %q", domain.ErrInvalidArgument, s)
+	}
+}
+
+// ScopeNamespace is a discovery [ObjectScope] bound to the object
+// namespace that is legal under that scope. Namespaced scope requires a
+// non-empty namespace; cluster scope requires an empty namespace.
+// Construct only via [NewScopeNamespace].
+type ScopeNamespace struct {
+	scope     ObjectScope
+	namespace string
+}
+
+// NewScopeNamespace returns a concrete [ScopeNamespace].
+// scope must be [ObjectScopeNamespaced] or [ObjectScopeCluster];
+// namespace must be non-empty for namespaced scope and empty for cluster scope.
+func NewScopeNamespace(scope ObjectScope, namespace string) (ScopeNamespace, error) {
+	scope, err := ParseObjectScope(string(scope))
+	if err != nil {
+		return ScopeNamespace{}, err
+	}
+	switch scope {
+	case ObjectScopeNamespaced:
+		if namespace == "" {
+			return ScopeNamespace{}, fmt.Errorf("%w: namespaced object requires a non-empty namespace", domain.ErrInvalidArgument)
+		}
+		return ScopeNamespace{scope: scope, namespace: namespace}, nil
+	case ObjectScopeCluster:
+		if namespace != "" {
+			return ScopeNamespace{}, fmt.Errorf("%w: cluster-scoped object must have an empty namespace, got %q", domain.ErrInvalidArgument, namespace)
+		}
+		return ScopeNamespace{scope: scope, namespace: ""}, nil
+	default:
+		return ScopeNamespace{}, fmt.Errorf("%w: invalid object scope %q", domain.ErrInvalidArgument, scope)
+	}
+}
 
 // KubernetesObjectIdentity carries the fields needed to compute a
 // watched Kubernetes object's [domain.ResourceName] and observation
 // payload. Both are derived from the same identity so they never
 // disagree about which object they describe.
-//
-// ClusterResourceName is the managed cluster resource (e.g.
-// "clusters/c1") whose ID becomes the object-name parent segment.
 type KubernetesObjectIdentity struct {
+	// ClusterResourceName is the managed cluster (e.g. "clusters/c1")
+	// whose ID becomes the object-name parent segment.
 	ClusterResourceName domain.ResourceName
-	GVR                 schema.GroupVersionResource
-	Kind                string
-	Namespace           string
-	Name                string
-	UID                 string
+	// GVR is the API resource the object was watched through. Only the
+	// group/resource pair is used for naming; version is observation-only.
+	GVR schema.GroupVersionResource
+	// ScopeNamespace is the discovery scope bound to metadata.namespace.
+	// Construct via [NewScopeNamespace]; the zero value is rejected by naming.
+	ScopeNamespace ScopeNamespace
+	// Kind is the object's Kubernetes kind (observation metadata).
+	Kind string
+	// Name is the object's metadata.name (observation metadata; not a name path segment).
+	Name string
+	// UID is the object's metadata.uid and the inventory resource-name leaf.
+	UID string
 }
 
-// objectScope reports "namespaced" or "cluster" for namespace. Scope
-// is fully determined by namespace presence, so it is derived here
-// rather than carried as a separate field on
-// [KubernetesObjectIdentity]: a namespaced object always has a
-// namespace, and a cluster-scoped object never does.
-func objectScope(namespace string) string {
-	if namespace == "" {
-		return "cluster"
+// GroupResourceKey returns the canonical versionless key for gr:
+// "{resource}" for the core API group and "{resource}.{group}" for a
+// named group. This matches schema.GroupResource.String() and is used
+// for the [APIResourceCollectionID] resource-name segment. API version
+// is intentionally omitted so a preferred-version change does not
+// rename inventory rows.
+func GroupResourceKey(gr schema.GroupResource) (string, error) {
+	if gr.Resource == "" {
+		return "", fmt.Errorf("%w: group resource key requires a non-empty resource", domain.ErrInvalidArgument)
 	}
-	return "namespaced"
+	if strings.Contains(gr.Resource, "/") {
+		return "", fmt.Errorf("%w: group resource key rejects subresource %q", domain.ErrInvalidArgument, gr.Resource)
+	}
+	if strings.Contains(gr.Resource, ".") {
+		return "", fmt.Errorf("%w: group resource key rejects '.' in resource %q", domain.ErrInvalidArgument, gr.Resource)
+	}
+	key := gr.String()
+	if _, err := ParseGroupResourceKey(key); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
-// GVRKey returns a stable, slash-free key for gvr:
-// "{groupKey}~{version}~{resource}", where groupKey is "core" for the
-// core API group and the raw group otherwise. This is used for the
-// [APIResourceCollectionID] resource-name segment. Neither the raw
-// "group/version/resource" form nor a dotted "group.version.resource"
-// form work as a single resource-name segment: "/" cannot appear
-// inside one segment, and groups already contain dots, which would
-// make a dotted key ambiguous to split back apart.
-func GVRKey(gvr schema.GroupVersionResource) string {
-	groupKey := gvr.Group
-	if groupKey == "" {
-		groupKey = "core"
+// ParseGroupResourceKey parses a [GroupResourceKey] spelling and
+// requires a canonical round-trip (rejects trailing dots and other
+// non-canonical forms).
+func ParseGroupResourceKey(key string) (schema.GroupResource, error) {
+	if key == "" {
+		return schema.GroupResource{}, fmt.Errorf("%w: empty group resource key", domain.ErrInvalidArgument)
 	}
-	return groupKey + "~" + gvr.Version + "~" + gvr.Resource
+	if strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") {
+		return schema.GroupResource{}, fmt.Errorf("%w: non-canonical group resource key %q", domain.ErrInvalidArgument, key)
+	}
+	gr := schema.ParseGroupResource(key)
+	if gr.Resource == "" {
+		return schema.GroupResource{}, fmt.Errorf("%w: group resource key %q has empty resource", domain.ErrInvalidArgument, key)
+	}
+	if strings.Contains(gr.Resource, "/") {
+		return schema.GroupResource{}, fmt.Errorf("%w: group resource key rejects subresource %q", domain.ErrInvalidArgument, gr.Resource)
+	}
+	if strings.Contains(gr.Resource, ".") {
+		return schema.GroupResource{}, fmt.Errorf("%w: group resource key rejects '.' in resource %q", domain.ErrInvalidArgument, gr.Resource)
+	}
+	if gr.String() != key {
+		return schema.GroupResource{}, fmt.Errorf("%w: non-canonical group resource key %q", domain.ErrInvalidArgument, key)
+	}
+	return gr, nil
 }
 
 // encodeResourceNameSegment makes s safe to use as one dynamic segment
@@ -85,59 +185,72 @@ func GVRKey(gvr schema.GroupVersionResource) string {
 // IDs are not restricted from containing "/", so a value like
 // "prod/us-east-1" would otherwise silently insert an extra path
 // segment and shift everything after it. url.PathEscape is
-// deterministic and collision-free, and leaves "~" -- the [GVRKey]
-// separator -- untouched.
+// deterministic and collision-free.
 func encodeResourceNameSegment(s string) string {
 	return url.PathEscape(s)
 }
 
 // ObjectResourceName returns the canonical Kubernetes object resource
-// name:
-// "{TargetCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}".
-// clusterResourceID is taken from [KubernetesObjectIdentity.ClusterResourceName].ID()
-// so object parents match the managed cluster resource (e.g. clusters/c1). Every dynamic
-// segment is path-encoded before being joined, and the result is built
-// with [domain.ParseResourceName] rather than cast from a raw string, so
-// a malformed identity (e.g. an empty UID) fails here instead of
-// producing an invalid name downstream. Scoping by cluster and GVR
-// gives same-process resync a natural collection boundary; keying the
-// leaf by UID rather than namespace/name means deleting and recreating
-// an object under the same namespace/name is correctly treated as a new
-// incarnation rather than an overwrite.
+// name. The leaf is always the object UID so delete/recreate under the
+// same namespace/name is a new inventory row. Requires a non-zero
+// [ScopeNamespace] and a flat [ClusterCollectionID] parent.
+//
+//	namespaced: clusters/{cluster}/namespaces/{ns}/apiResources/{grKey}/objects/{uid}
+//	cluster:    clusters/{cluster}/apiResources/{grKey}/objects/{uid}
 func ObjectResourceName(id KubernetesObjectIdentity) (domain.ResourceName, error) {
 	if err := requireClusterResourceName(id.ClusterResourceName); err != nil {
-		return "", fmt.Errorf("kubernetes object resource name (cluster %q, gvr %q, uid %q): %w",
-			id.ClusterResourceName, GVRKey(id.GVR), id.UID, err)
+		return "", fmt.Errorf("kubernetes object resource name (cluster %q, uid %q): %w",
+			id.ClusterResourceName, id.UID, err)
+	}
+	if id.ScopeNamespace == (ScopeNamespace{}) {
+		return "", fmt.Errorf("kubernetes object resource name (cluster %q, uid %q): %w: object scope is required",
+			id.ClusterResourceName, id.UID, domain.ErrInvalidArgument)
+	}
+	grKey, err := GroupResourceKey(id.GVR.GroupResource())
+	if err != nil {
+		return "", fmt.Errorf("kubernetes object resource name (cluster %q, uid %q): %w",
+			id.ClusterResourceName, id.UID, err)
 	}
 	clusterID := encodeResourceNameSegment(string(id.ClusterResourceName.ID()))
-	name, err := domain.ParseResourceName(
-		string(TargetCollectionID) + "/" + clusterID +
-			"/" + string(APIResourceCollectionID) + "/" + encodeResourceNameSegment(GVRKey(id.GVR)) +
-			"/" + string(ObjectCollectionID) + "/" + encodeResourceNameSegment(id.UID),
-	)
+	path := string(ClusterCollectionID) + "/" + clusterID
+	if id.ScopeNamespace.scope == ObjectScopeNamespaced {
+		path += "/" + string(NamespaceCollectionID) + "/" + encodeResourceNameSegment(id.ScopeNamespace.namespace)
+	}
+	path += "/" + string(APIResourceCollectionID) + "/" + encodeResourceNameSegment(grKey) +
+		"/" + string(ObjectCollectionID) + "/" + encodeResourceNameSegment(id.UID)
+	name, err := domain.ParseResourceName(path)
 	if err != nil {
-		return "", fmt.Errorf("kubernetes object resource name (cluster %q, gvr %q, uid %q): %w",
-			id.ClusterResourceName, GVRKey(id.GVR), id.UID, err)
+		return "", fmt.Errorf("kubernetes object resource name (cluster %q, gr %q, uid %q): %w",
+			id.ClusterResourceName, grKey, id.UID, err)
 	}
 	return name, nil
 }
 
-// ObjectCollectionName returns the exact inventory collection for
-// clusterResourceName + gvr:
-// "{TargetCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}".
-// This matches [ObjectResourceName]'s parent collection.
-func ObjectCollectionName(clusterResourceName domain.ResourceName, gvr schema.GroupVersionResource) (domain.CollectionName, error) {
+// ObjectCollectionName returns the parent collection of
+// [ObjectResourceName] for clusterResourceName + scopeNamespace + gvr
+// (everything except the UID leaf). Requires a non-zero [ScopeNamespace].
+func ObjectCollectionName(clusterResourceName domain.ResourceName, scopeNamespace ScopeNamespace, gvr schema.GroupVersionResource) (domain.CollectionName, error) {
 	if err := requireClusterResourceName(clusterResourceName); err != nil {
-		return "", fmt.Errorf("kubernetes object collection name (cluster %q, gvr %q): %w", clusterResourceName, GVRKey(gvr), err)
+		return "", fmt.Errorf("kubernetes object collection name (cluster %q): %w", clusterResourceName, err)
+	}
+	if scopeNamespace == (ScopeNamespace{}) {
+		return "", fmt.Errorf("kubernetes object collection name (cluster %q): %w: object scope is required",
+			clusterResourceName, domain.ErrInvalidArgument)
+	}
+	grKey, err := GroupResourceKey(gvr.GroupResource())
+	if err != nil {
+		return "", fmt.Errorf("kubernetes object collection name (cluster %q): %w", clusterResourceName, err)
 	}
 	clusterID := encodeResourceNameSegment(string(clusterResourceName.ID()))
-	name, err := domain.ParseCollectionName(
-		string(TargetCollectionID) + "/" + clusterID +
-			"/" + string(APIResourceCollectionID) + "/" + encodeResourceNameSegment(GVRKey(gvr)) +
-			"/" + string(ObjectCollectionID),
-	)
+	path := string(ClusterCollectionID) + "/" + clusterID
+	if scopeNamespace.scope == ObjectScopeNamespaced {
+		path += "/" + string(NamespaceCollectionID) + "/" + encodeResourceNameSegment(scopeNamespace.namespace)
+	}
+	path += "/" + string(APIResourceCollectionID) + "/" + encodeResourceNameSegment(grKey) +
+		"/" + string(ObjectCollectionID)
+	name, err := domain.ParseCollectionName(path)
 	if err != nil {
-		return "", fmt.Errorf("kubernetes object collection name (cluster %q, gvr %q): %w", clusterResourceName, GVRKey(gvr), err)
+		return "", fmt.Errorf("kubernetes object collection name (cluster %q, gr %q): %w", clusterResourceName, grKey, err)
 	}
 	return name, nil
 }
@@ -159,12 +272,12 @@ func ParseClusterResourceName(s string) (domain.ResourceName, error) {
 }
 
 // requireClusterResourceName checks the kubernetes-specific constraint that
-// name is under [TargetCollectionID] (flat clusters/{id}). It trusts
+// name is under [ClusterCollectionID] (flat clusters/{id}). It trusts
 // structural resource-name validity to whoever produced the typed value
 // ([domain.ParseResourceName] / [ParseClusterResourceName]).
 func requireClusterResourceName(name domain.ResourceName) error {
-	if name.Collection() != domain.CollectionName(TargetCollectionID) {
-		return fmt.Errorf("%w: cluster resource name %q must be under %q", domain.ErrInvalidArgument, name, TargetCollectionID)
+	if name.Collection() != domain.CollectionName(ClusterCollectionID) {
+		return fmt.Errorf("%w: cluster resource name %q must be under %q", domain.ErrInvalidArgument, name, ClusterCollectionID)
 	}
 	return nil
 }
@@ -188,12 +301,12 @@ func ObjectLabels(obj *unstructured.Unstructured) map[string]string {
 
 // ObjectObservation returns the base observation payload for id: the
 // Kubernetes API identity it was watched through (group/version/
-// resource/scope, taken from id since obj's own apiVersion/kind
-// strings don't carry resource plural or scope), the object's own
-// apiVersion/kind/metadata as observed, and extracted (the
-// schema-hook-computed enrichment for this object's kind, or an empty
-// object when none applies). extracted is passed through opaquely;
-// this function does not interpret it.
+// resource from id.GVR and scope from id.ScopeNamespace — obj's own
+// apiVersion/kind strings don't carry resource plural or scope), the
+// object's own apiVersion/kind/metadata as observed, and extracted
+// (schema-hook enrichment, or an empty object when none applies).
+// extracted is passed through opaquely; this function does not
+// interpret it.
 //
 // metadata.labels are omitted here: they are projected into
 // [ObjectLabels] / resource.localLabels instead, matching how
@@ -220,7 +333,7 @@ func ObjectObservation(id KubernetesObjectIdentity, obj *unstructured.Unstructur
 			"group":    id.GVR.Group,
 			"version":  id.GVR.Version,
 			"resource": id.GVR.Resource,
-			"scope":    objectScope(id.Namespace),
+			"scope":    string(id.ScopeNamespace.scope),
 		},
 		"apiVersion": obj.GetAPIVersion(),
 		"kind":       obj.GetKind(),

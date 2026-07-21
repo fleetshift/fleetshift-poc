@@ -32,7 +32,7 @@ func TestGenericInformer_SendEventUnblocksOnCancel(t *testing.T) {
 		// Unbuffered channel: send blocks until a receiver exists or ctx cancels.
 		eventCh := make(chan ResourceEvent)
 		resyncCh := make(chan ResyncEvent, 1)
-		inf := NewInformer(nil, podsGVR(), eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(nil, podsGVR(), ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan bool, 1)
@@ -60,7 +60,7 @@ func TestGenericInformer_SendResyncUnblocksOnCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		eventCh := make(chan ResourceEvent, 1)
 		resyncCh := make(chan ResyncEvent) // unbuffered
-		inf := NewInformer(nil, podsGVR(), eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(nil, podsGVR(), ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan bool, 1)
@@ -89,7 +89,7 @@ func TestGenericInformer_ListAndResyncRespectsCancelDuringSend(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent) // unbuffered: blocks on first send
 		resyncCh := make(chan ResyncEvent, 1)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		errCh := make(chan error, 1)
@@ -114,7 +114,7 @@ func TestInformerManager_StopAllAwaitsInformerGoroutines(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr)
@@ -125,7 +125,7 @@ func TestInformerManager_StopAllAwaitsInformerGoroutines(t *testing.T) {
 		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
-		mgr.Reconcile(ctx, []schema.GroupVersionResource{gvr})
+		mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(gvr, ObjectScopeNamespaced)))
 		synctest.Wait()
 		if len(mgr.stoppers) != 1 {
 			t.Fatalf("stoppers = %d, want 1", len(mgr.stoppers))
@@ -149,7 +149,7 @@ func TestInformerManager_StopAllAwaitsCRDInformer(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(podsGVR(), crdGVR)
@@ -201,7 +201,7 @@ func TestDiscoverAndReconcile_SkipsWhenContextCanceled(t *testing.T) {
 	disc.fakeDiscoveryWithPreferred = newFakeDiscovery([]*metav1.APIResourceList{{
 		GroupVersion: "v1",
 		APIResources: []metav1.APIResource{
-			{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+			{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 		},
 	}})
 	mgr := NewInformerManager(nil, &disc, make(chan ResourceEvent, 1), make(chan ResyncEvent, 1), nil, nil, slog.Default())
@@ -244,7 +244,7 @@ func TestWriter_StopUsesProvidedFlushContext(t *testing.T) {
 			w.Run(runCtx)
 		}()
 
-		w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR}
+		w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 		synctest.Wait()
 
 		flushCtx, flushCancel := context.WithTimeout(context.Background(), time.Second)
@@ -285,7 +285,7 @@ func TestWriter_ShutdownFlushInheritsContextDeadline(t *testing.T) {
 			w.Run(runCtx)
 		}()
 
-		w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR}
+		w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 		synctest.Wait()
 		runCancel()
 		synctest.Wait()
@@ -305,7 +305,7 @@ func TestIndexerDelegate_DoneClosesOnlyAfterWriterFlush(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
@@ -344,7 +344,7 @@ func TestIndexerDelegate_DoneClosesOnlyAfterWriterFlush(t *testing.T) {
 			NoopEdgeSink{},
 			IndexConfig{
 				Schema: IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-					gvr: {GVR: gvr, Kind: "Pod"},
+					gvr: {GVR: gvr},
 				}},
 				AllowList:     []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}},
 				BatchInterval: time.Hour, // keep EventAdd pending until shutdown flush
@@ -401,7 +401,7 @@ func TestWatch_SendUnblocksOnCancel(t *testing.T) {
 		resyncCh := make(chan ResyncEvent, 1)
 		stopAck := ackAllResyncs(resyncCh)
 		defer stopAck()
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -443,7 +443,7 @@ func TestInformerManager_StopAllUnblocksFullEventBuffer(t *testing.T) {
 		defer stopAck()
 		mgr := NewInformerManager(dyn, newFakeDiscovery(nil), eventCh, resyncCh, nil, nil, slog.Default())
 
-		informer := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		informer := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		informerCtx, cancel := context.WithCancel(context.Background())
 		mgr.stoppers[gvr] = cancel
 		mgr.startInformer(informer, informerCtx)
@@ -490,7 +490,7 @@ func TestWriter_StopDeliversFlushContextWhileRunActive(t *testing.T) {
 			w.Run(runCtx)
 		}()
 
-		w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR}
+		w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 		synctest.Wait()
 
 		flushCtx := context.WithValue(context.Background(), shutdownFlushMarker{}, true)
@@ -549,7 +549,7 @@ func TestShutdownSequence_InformerTimeoutStillStopsWriter(t *testing.T) {
 		w.Run(writerCtx)
 	}()
 
-	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR, Scope: ObjectScopeNamespaced}
 	time.Sleep(20 * time.Millisecond)
 
 	mgr := NewInformerManager(nil, newFakeDiscovery(nil), make(chan ResourceEvent, 1), make(chan ResyncEvent, 1), nil, nil, slog.Default())

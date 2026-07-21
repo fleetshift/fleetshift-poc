@@ -52,15 +52,15 @@ func TestSupportedResources_WatchableOnly(t *testing.T) {
 		{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				{Name: "bindings", Verbs: metav1.Verbs{"create"}}, // not watchable
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "bindings", Namespaced: false, Verbs: metav1.Verbs{"create"}}, // not watchable
 			},
 		},
 		{
 			GroupVersion: "apps/v1",
 			APIResources: []metav1.APIResource{
-				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "watch", "create"}},
-				{Name: "controllerrevisions", Verbs: metav1.Verbs{"get", "list"}}, // not watchable
+				{Name: "deployments", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create"}},
+				{Name: "controllerrevisions", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}, // not watchable
 			},
 		},
 	})
@@ -79,9 +79,43 @@ func TestSupportedResources_WatchableOnly(t *testing.T) {
 		t.Fatalf("expected %d GVRs, got %d: %v", len(expected), len(result), result)
 	}
 	for gvr := range expected {
-		if _, ok := result[gvr]; !ok {
+		desc, ok := result[gvr]
+		if !ok {
 			t.Errorf("expected GVR %s not found in result", gvr)
+			continue
 		}
+		if desc.Scope != ObjectScopeNamespaced {
+			t.Errorf("GVR %s scope = %q, want namespaced", gvr, desc.Scope)
+		}
+	}
+}
+
+func TestSupportedResources_ClusterScopedWatchable(t *testing.T) {
+	disc := newFakeDiscovery([]*metav1.APIResourceList{
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{
+				{Name: "nodes", Namespaced: false, Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
+			},
+		},
+	})
+
+	result, err := SupportedResources(disc, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	nodes := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
+	pods := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	if desc, ok := result[nodes]; !ok {
+		t.Fatal("expected nodes in result")
+	} else if desc.Scope != ObjectScopeCluster {
+		t.Fatalf("nodes scope = %q, want cluster", desc.Scope)
+	}
+	if desc, ok := result[pods]; !ok {
+		t.Fatal("expected pods in result")
+	} else if desc.Scope != ObjectScopeNamespaced {
+		t.Fatalf("pods scope = %q, want namespaced", desc.Scope)
 	}
 }
 
@@ -102,8 +136,8 @@ func TestSupportedResources_NoWatchVerb(t *testing.T) {
 		{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "bindings", Verbs: metav1.Verbs{"create"}},
-				{Name: "componentstatuses", Verbs: metav1.Verbs{"get", "list"}},
+				{Name: "bindings", Namespaced: false, Verbs: metav1.Verbs{"create"}},
+				{Name: "componentstatuses", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}},
 			},
 		},
 	})
@@ -199,8 +233,8 @@ func TestInformerManager_Reconcile_StartNew(t *testing.T) {
 		{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				{Name: "services", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "services", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		},
 	})
@@ -212,7 +246,7 @@ func TestInformerManager_Reconcile_StartNew(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	mgr.Reconcile(ctx, []schema.GroupVersionResource{podsGVR, svcsGVR})
+	mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR, ObjectScopeNamespaced), testDiscovered(svcsGVR, ObjectScopeNamespaced)))
 
 	// After reconcile, both GVRs should have stoppers.
 	if len(mgr.stoppers) != 2 {
@@ -238,7 +272,7 @@ func TestInformerManager_Reconcile_StopRemoved(t *testing.T) {
 		{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		},
 	})
@@ -253,7 +287,7 @@ func TestInformerManager_Reconcile_StopRemoved(t *testing.T) {
 	// Desired only includes pods; services should be stopped.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	mgr.Reconcile(ctx, []schema.GroupVersionResource{podsGVR})
+	mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR, ObjectScopeNamespaced)))
 
 	if !stopped {
 		t.Error("expected services informer to be stopped")
@@ -286,7 +320,7 @@ func TestInformerManager_Reconcile_SendsRemoveGVREvent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	mgr.Reconcile(ctx, []schema.GroupVersionResource{podsGVR})
+	mgr.Reconcile(ctx, testDiscoveredList(testDiscovered(podsGVR, ObjectScopeNamespaced)))
 
 	select {
 	case got := <-removeCh:
@@ -377,7 +411,7 @@ func TestGenericInformer_ClusterScopedPassesThroughNamespaceFilter(t *testing.T)
 	stopAck := ackAllResyncs(resyncCh)
 	defer stopAck()
 
-	informer := NewInformer(dynClient, nodesGVR, eventCh, resyncCh, nsFilter, slog.Default())
+	informer := NewInformer(dynClient, nodesGVR, ObjectScopeCluster, eventCh, resyncCh, nsFilter, slog.Default())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	go informer.Run(ctx)
@@ -399,34 +433,38 @@ func TestGenericInformer_ClusterScopedPassesThroughNamespaceFilter(t *testing.T)
 // --- FilterSupportedResources tests ---
 
 func TestFilterSupportedResources_DefaultDenyApplied(t *testing.T) {
-	supported := map[schema.GroupVersionResource]struct{}{
-		{Group: "", Version: "v1", Resource: "pods"}:                           {},
-		{Group: "", Version: "v1", Resource: "events"}:                         {},
-		{Group: "apps", Version: "v1", Resource: "deployments"}:                {},
-		{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}:      {},
-		{Group: "events.k8s.io", Version: "v1", Resource: "events"}:            {},
-		{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}: {},
+	pod := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	events := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}
+	deploy := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	leases := schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}
+	evK8s := schema.GroupVersionResource{Group: "events.k8s.io", Version: "v1", Resource: "events"}
+	eps := schema.GroupVersionResource{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}
+	supported := map[schema.GroupVersionResource]DiscoveredAPIResource{
+		pod:    testDiscovered(pod, ObjectScopeNamespaced),
+		events: testDiscovered(events, ObjectScopeNamespaced),
+		deploy: testDiscovered(deploy, ObjectScopeNamespaced),
+		leases: testDiscovered(leases, ObjectScopeNamespaced),
+		evK8s:  testDiscovered(evK8s, ObjectScopeNamespaced),
+		eps:    testDiscovered(eps, ObjectScopeNamespaced),
 	}
 
 	result := FilterSupportedResources(supported, nil, nil, slog.Default())
 
-	// Should only contain pods and deployments. Events, leases, endpointslices
-	// are in DefaultDenyList.
 	resultMap := make(map[schema.GroupVersionResource]struct{})
-	for _, gvr := range result {
-		resultMap[gvr] = struct{}{}
+	for _, desc := range result {
+		resultMap[desc.GVR] = struct{}{}
 	}
 
-	if _, ok := resultMap[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}]; !ok {
+	if _, ok := resultMap[pod]; !ok {
 		t.Error("expected pods to pass filter")
 	}
-	if _, ok := resultMap[schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}]; !ok {
+	if _, ok := resultMap[deploy]; !ok {
 		t.Error("expected deployments to pass filter")
 	}
-	if _, ok := resultMap[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}]; ok {
+	if _, ok := resultMap[events]; ok {
 		t.Error("expected core events to be denied")
 	}
-	if _, ok := resultMap[schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}]; ok {
+	if _, ok := resultMap[leases]; ok {
 		t.Error("expected leases to be denied")
 	}
 	if len(result) != 2 {
@@ -435,23 +473,24 @@ func TestFilterSupportedResources_DefaultDenyApplied(t *testing.T) {
 }
 
 func TestFilterSupportedResources_UserDenyMergedWithDefault(t *testing.T) {
-	supported := map[schema.GroupVersionResource]struct{}{
-		{Group: "", Version: "v1", Resource: "pods"}:            {},
-		{Group: "", Version: "v1", Resource: "secrets"}:         {},
-		{Group: "apps", Version: "v1", Resource: "deployments"}: {},
+	pod := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	secrets := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	deploy := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	supported := map[schema.GroupVersionResource]DiscoveredAPIResource{
+		pod:     testDiscovered(pod, ObjectScopeNamespaced),
+		secrets: testDiscovered(secrets, ObjectScopeNamespaced),
+		deploy:  testDiscovered(deploy, ObjectScopeNamespaced),
 	}
 
-	// User denies secrets in addition to default deny list.
 	userDeny := []Resource{{ApiGroups: []string{""}, Resources: []string{"secrets"}}}
-
 	result := FilterSupportedResources(supported, userDeny, nil, slog.Default())
 
 	resultMap := make(map[schema.GroupVersionResource]struct{})
-	for _, gvr := range result {
-		resultMap[gvr] = struct{}{}
+	for _, desc := range result {
+		resultMap[desc.GVR] = struct{}{}
 	}
 
-	if _, ok := resultMap[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}]; ok {
+	if _, ok := resultMap[secrets]; ok {
 		t.Error("expected secrets to be denied by user deny list")
 	}
 	if len(result) != 2 {
@@ -460,21 +499,22 @@ func TestFilterSupportedResources_UserDenyMergedWithDefault(t *testing.T) {
 }
 
 func TestFilterSupportedResources_AllowListRestricts(t *testing.T) {
-	supported := map[schema.GroupVersionResource]struct{}{
-		{Group: "", Version: "v1", Resource: "pods"}:            {},
-		{Group: "", Version: "v1", Resource: "configmaps"}:      {},
-		{Group: "apps", Version: "v1", Resource: "deployments"}: {},
+	pod := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	cms := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	deploy := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	supported := map[schema.GroupVersionResource]DiscoveredAPIResource{
+		pod:    testDiscovered(pod, ObjectScopeNamespaced),
+		cms:    testDiscovered(cms, ObjectScopeNamespaced),
+		deploy: testDiscovered(deploy, ObjectScopeNamespaced),
 	}
 
-	// Only allow pods.
 	allow := []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}}
-
 	result := FilterSupportedResources(supported, nil, allow, slog.Default())
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(result))
 	}
-	if result[0].Resource != "pods" {
-		t.Errorf("expected pods, got %s", result[0].Resource)
+	if result[0].GVR.Resource != "pods" {
+		t.Errorf("expected pods, got %s", result[0].GVR.Resource)
 	}
 }

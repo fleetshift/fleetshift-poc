@@ -11,8 +11,8 @@ func TestIndexSchema_GVRs(t *testing.T) {
 	deploy := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 
 	s := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
-		pod:    {GVR: pod, Kind: "Pod"},
-		deploy: {GVR: deploy, Kind: "Deployment"},
+		pod:    {GVR: pod},
+		deploy: {GVR: deploy},
 	}}
 
 	got := s.GVRs()

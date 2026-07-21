@@ -69,11 +69,8 @@ func RetryLocalEnvelope(ctx context.Context, deadline time.Duration, fn func(con
 		if IsPermanentEnsureError(lastErr) {
 			return lastErr
 		}
-		if err := deadlineCtx.Err(); err != nil {
-			if lastErr != nil {
-				return lastErr
-			}
-			return err
+		if deadlineCtx.Err() != nil {
+			return lastErr
 		}
 
 		sleep := min(fullJitter(backoff), localEnsureBackoffCap)
@@ -81,10 +78,7 @@ func RetryLocalEnvelope(ctx context.Context, deadline time.Duration, fn func(con
 		select {
 		case <-deadlineCtx.Done():
 			timer.Stop()
-			if lastErr != nil {
-				return lastErr
-			}
-			return deadlineCtx.Err()
+			return lastErr
 		case <-timer.C:
 		}
 		next := min(time.Duration(float64(backoff)*localEnsureBackoffFactor), localEnsureBackoffCap)

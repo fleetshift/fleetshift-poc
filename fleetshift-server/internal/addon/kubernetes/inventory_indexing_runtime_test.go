@@ -37,7 +37,7 @@ func (f fakeIndexerClients) Discovery(cfg *rest.Config) (discovery.DiscoveryInte
 	return newFakeDiscovery([]*metav1.APIResourceList{{
 		GroupVersion: "v1",
 		APIResources: []metav1.APIResource{
-			{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+			{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 		},
 	}}), nil
 }
@@ -162,7 +162,7 @@ func TestIndexingRuntime_FingerprintReplace(t *testing.T) {
 			return newFakeDiscovery([]*metav1.APIResourceList{{
 				GroupVersion: "v1",
 				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 				},
 			}}), nil
 		},
@@ -239,7 +239,7 @@ func TestIndexingRuntime_StopAllSuppressesRestart(t *testing.T) {
 					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 						GroupVersion: "v1",
 						APIResources: []metav1.APIResource{
-							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+							{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 						},
 					}}),
 					unblock: unblock,
@@ -306,7 +306,7 @@ func TestIndexingRuntime_IntentionalStopNoRestart(t *testing.T) {
 				return newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 					},
 				}}), nil
 			},
@@ -356,7 +356,7 @@ func TestIndexingRuntime_UnexpectedExitWithoutSecretRefDoesNotRestart(t *testing
 				return newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 					},
 				}}), nil
 			},
@@ -440,7 +440,7 @@ func TestIndexingRuntime_UnexpectedExitRestartsFromVault(t *testing.T) {
 				return newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 					},
 				}}), nil
 			},
@@ -511,7 +511,7 @@ func TestIndexingRuntime_UnexpectedExitSkipsRestartWhenVaultMissing(t *testing.T
 				return newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 					},
 				}}), nil
 			},
@@ -562,7 +562,7 @@ func TestIndexingRuntime_UnexpectedExitRestartBudgetExhausted(t *testing.T) {
 				return newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 					},
 				}}), nil
 			},
@@ -650,7 +650,7 @@ func TestResolveSecret(t *testing.T) {
 					return newFakeDiscovery(nil), nil
 				},
 			},
-			nil,
+			slog.New(slog.DiscardHandler),
 		)
 		if _, err := h.resolveSecret(context.Background(), "missing"); err == nil {
 			t.Fatal("expected vault get error")
@@ -669,7 +669,7 @@ func TestResolveSecret(t *testing.T) {
 					return newFakeDiscovery(nil), nil
 				},
 			},
-			nil,
+			slog.New(slog.DiscardHandler),
 		)
 		if _, err := h.resolveSecret(context.Background(), "empty"); err == nil {
 			t.Fatal("expected empty vault secret error")
@@ -688,7 +688,7 @@ func TestResolveSecret(t *testing.T) {
 					return newFakeDiscovery(nil), nil
 				},
 			},
-			nil,
+			slog.New(slog.DiscardHandler),
 		)
 		got, err := h.resolveSecret(context.Background(), "ok")
 		if err != nil {
@@ -763,7 +763,7 @@ func TestIndexingRuntime_FingerprintReplaceOnClusterResourceName(t *testing.T) {
 			return newFakeDiscovery([]*metav1.APIResourceList{{
 				GroupVersion: "v1",
 				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 				},
 			}}), nil
 		},
@@ -825,7 +825,7 @@ func TestCheckDiscoveryReadiness_HardErrorAndEmptyFilter(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "events", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "events", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		err := checkDiscoveryReadiness(disc, IndexConfig{}, logger)
@@ -856,7 +856,7 @@ func TestIndexingRuntime_StopDuringReadiness(t *testing.T) {
 					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 						GroupVersion: "v1",
 						APIResources: []metav1.APIResource{
-							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+							{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 						},
 					}}),
 					unblock: unblock,
@@ -912,7 +912,7 @@ func TestIndexingRuntime_JoinInFlightEnsureIndexer(t *testing.T) {
 					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 						GroupVersion: "v1",
 						APIResources: []metav1.APIResource{
-							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+							{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 						},
 					}}),
 					unblock: unblock,
@@ -961,7 +961,7 @@ func TestIndexingRuntime_StopAllDuringClientBuild_DoesNotHangOnMissingDone(t *te
 				return newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 					},
 				}}), nil
 			},

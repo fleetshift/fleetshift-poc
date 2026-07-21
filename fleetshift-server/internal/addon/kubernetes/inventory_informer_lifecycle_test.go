@@ -143,7 +143,7 @@ func TestListAndResync_EmitsAddsAndResync(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 	gotResync := ackNextResync(resyncCh)
 	if err := inf.listAndResync(context.Background()); err != nil {
@@ -155,6 +155,9 @@ func TestListAndResync_EmitsAddsAndResync(t *testing.T) {
 		if ev.Op != EventAdd || ev.Resource.GetUID() != "uid-1" {
 			t.Fatalf("unexpected event: %+v", ev)
 		}
+		if ev.Scope != ObjectScopeNamespaced {
+			t.Fatalf("event.Scope = %q, want namespaced", ev.Scope)
+		}
 	default:
 		t.Fatal("expected EventAdd")
 	}
@@ -162,8 +165,49 @@ func TestListAndResync_EmitsAddsAndResync(t *testing.T) {
 	if rs.GVR != gvr || len(rs.Resources) != 1 {
 		t.Fatalf("unexpected resync: %+v", rs)
 	}
+	if rs.Scope != ObjectScopeNamespaced {
+		t.Fatalf("resync.Scope = %q, want namespaced", rs.Scope)
+	}
 	if inf.resourceIndex["uid-1"] != "10" {
 		t.Fatalf("resourceIndex = %#v", inf.resourceIndex)
+	}
+}
+
+func TestListAndResync_EmitsBoundClusterScope(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
+	dyn := newFakeDynamicClient(gvr)
+	node := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Node",
+		"metadata": map[string]any{
+			"uid":             "node-uid",
+			"name":            "worker-1",
+			"resourceVersion": "1",
+		},
+	}}
+	if _, err := dyn.Resource(gvr).Create(context.Background(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	eventCh := make(chan ResourceEvent, 10)
+	resyncCh := make(chan ResyncEvent, 10)
+	inf := NewInformer(dyn, gvr, ObjectScopeCluster, eventCh, resyncCh, nil, slog.Default())
+
+	gotResync := ackNextResync(resyncCh)
+	if err := inf.listAndResync(context.Background()); err != nil {
+		t.Fatalf("listAndResync: %v", err)
+	}
+	select {
+	case ev := <-eventCh:
+		if ev.Scope != ObjectScopeCluster {
+			t.Fatalf("event.Scope = %q, want cluster", ev.Scope)
+		}
+	default:
+		t.Fatal("expected EventAdd")
+	}
+	rs := <-gotResync
+	if rs.Scope != ObjectScopeCluster {
+		t.Fatalf("resync.Scope = %q, want cluster", rs.Scope)
 	}
 }
 
@@ -181,7 +225,7 @@ func TestListAndResync_SkipsDisallowedNamespaces(t *testing.T) {
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
 	filter := mustNamespaceFilter(t, NamespaceFilterConfig{IncludePatterns: []string{"prod-*"}})
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, filter, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, filter, slog.Default())
 
 	gotResync := ackNextResync(resyncCh)
 	if err := inf.listAndResync(context.Background()); err != nil {
@@ -199,14 +243,14 @@ func TestListAndResync_SkipsDisallowedNamespaces(t *testing.T) {
 
 // TestListAndResync_DropsStaleLocalIndexWithoutEventDelete verifies LIST
 // clears disappeared UIDs from the in-memory resourceIndex only. Persist
-// deletes for those absences are the writer's ReportedUIDs-diff job via
+// deletes for those absences are the writer's ReportedNames-diff job via
 // ResyncEvent, not per-UID EventDelete from the informer.
 func TestListAndResync_DropsStaleLocalIndexWithoutEventDelete(t *testing.T) {
 	gvr := podsGVR()
 	dyn := newFakeDynamicClient(gvr)
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 	inf.resourceIndex = map[string]string{"stale-uid": "1"}
 
 	gotResync := ackNextResync(resyncCh)
@@ -240,7 +284,7 @@ func TestListAndResync_ListError(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 	err := inf.listAndResync(context.Background())
 	if err == nil {
@@ -279,7 +323,7 @@ func TestListAndResync_Pagination(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 	gotResync := ackNextResync(resyncCh)
 	if err := inf.listAndResync(context.Background()); err != nil {
@@ -321,7 +365,7 @@ func TestListAndResync_PaginationIgnoresRemainingItemCountAlone(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 	_ = ackNextResync(resyncCh)
 	if err := inf.listAndResync(context.Background()); err != nil {
@@ -346,7 +390,7 @@ func TestWatch_AddUpdateDelete(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -405,7 +449,7 @@ func TestWatch_NamespaceFilter(t *testing.T) {
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
 		filter := mustNamespaceFilter(t, NamespaceFilterConfig{IncludePatterns: []string{"prod-*"}})
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, filter, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, filter, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -448,7 +492,7 @@ func TestWatch_ErrorEndsWatch(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		done := make(chan struct{})
@@ -479,7 +523,7 @@ func TestWatch_ExpiredStatusNeedsList(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		done := make(chan struct{})
@@ -512,7 +556,7 @@ func TestWatch_StartExpiredNeedsList(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 	inf.watchResourceVersion = "1"
 	outcome := inf.watch(context.Background())
 	if outcome != watchOutcomeNeedList {
@@ -539,7 +583,7 @@ func TestWatch_AllowWatchBookmarks(t *testing.T) {
 		return true, nil, apierrors.NewResourceExpired("inspect only")
 	})
 
-	inf := NewInformer(dyn, gvr, make(chan ResourceEvent, 1), make(chan ResyncEvent, 1), nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, make(chan ResourceEvent, 1), make(chan ResyncEvent, 1), nil, slog.Default())
 	inf.watchResourceVersion = "7"
 	_ = inf.watch(context.Background())
 	if watchRV != "7" {
@@ -561,7 +605,7 @@ func TestWatch_BookmarkAdvancesCursorWithoutEnding(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -602,7 +646,7 @@ func TestWatch_UnexpectedTypeEndsWatch(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		done := make(chan struct{})
@@ -630,7 +674,7 @@ func TestWatch_StartErrorIncrementsRetries(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 10)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 	inf.watchResourceVersion = "1"
 	inf.watch(context.Background())
 	if inf.retries != 1 {
@@ -649,7 +693,7 @@ func TestWatch_ChannelClosedEndsWatch(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		done := make(chan struct{})
@@ -684,7 +728,7 @@ func TestGenericInformer_Run_ShutdownDoesNotEmitDeletes(t *testing.T) {
 		resyncCh := make(chan ResyncEvent, 10)
 		stopAck := ackAllResyncs(resyncCh)
 		defer stopAck()
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -733,8 +777,8 @@ func TestDiscoverAndReconcile_StartsAllowedInformers(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				{Name: "secrets", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "secrets", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"})
@@ -789,7 +833,7 @@ func TestRunContinuous_InitialReconcileThenCancel(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
@@ -825,7 +869,7 @@ func TestRunContinuous_CRDEventTriggersReconcile(t *testing.T) {
 		disc.fakeDiscoveryWithPreferred = newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
@@ -890,7 +934,7 @@ func TestSupportedResources_PartialErrorStillReturnsWatchable(t *testing.T) {
 		fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"list", "watch"}},
 			},
 		}}),
 		err: errors.New("partial discovery failure"),
@@ -927,7 +971,7 @@ func TestWatch_NonUnstructuredObjectsIgnored(t *testing.T) {
 		})
 
 		eventCh := make(chan ResourceEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, make(chan ResyncEvent, 10), nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, make(chan ResyncEvent, 10), nil, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -973,7 +1017,7 @@ func TestWatch_NamespaceFilterOnModifyAndDelete(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		filter := mustNamespaceFilter(t, NamespaceFilterConfig{IncludePatterns: []string{"prod-*"}})
-		inf := NewInformer(dyn, gvr, eventCh, make(chan ResyncEvent, 10), filter, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, make(chan ResyncEvent, 10), filter, slog.Default())
 		inf.watchResourceVersion = "1"
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1012,7 +1056,7 @@ func TestGenericInformer_Run_BackoffThenCancel(t *testing.T) {
 		})
 
 		eventCh := make(chan ResourceEvent, 10)
-		inf := NewInformer(dyn, gvr, eventCh, make(chan ResyncEvent, 10), nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, make(chan ResyncEvent, 10), nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -1053,7 +1097,7 @@ func TestGenericInformer_Run_WaitsForWriteAckBeforeWatch(t *testing.T) {
 
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 1)
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -1104,7 +1148,7 @@ func TestListAndResync_NackPreventsReturnUntilRelistPath(t *testing.T) {
 	dyn := newFakeDynamicClient(gvr)
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 1)
-	inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1136,7 +1180,7 @@ func TestListAndResync_TagsGeneration(t *testing.T) {
 
 	eventCh := make(chan ResourceEvent, 10)
 	resyncCh := make(chan ResyncEvent, 1)
-	inf := NewInformerGeneration(dyn, gvr, 9, eventCh, resyncCh, nil, slog.Default())
+	inf := NewInformerGeneration(dyn, gvr, ObjectScopeNamespaced, 9, eventCh, resyncCh, nil, slog.Default())
 	gotResync := ackNextResync(resyncCh)
 	if err := inf.listAndResync(context.Background()); err != nil {
 		t.Fatalf("listAndResync: %v", err)
@@ -1177,7 +1221,7 @@ func TestGenericInformer_Run_CleanDisconnectResumesWithoutList(t *testing.T) {
 		resyncCh := make(chan ResyncEvent, 10)
 		stopAck := ackAllResyncs(resyncCh)
 		defer stopAck()
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -1234,7 +1278,7 @@ func TestGenericInformer_Run_ExpiredWatchForcesRelist(t *testing.T) {
 		resyncCh := make(chan ResyncEvent, 10)
 		stopAck := ackAllResyncs(resyncCh)
 		defer stopAck()
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -1288,7 +1332,7 @@ func TestGenericInformer_Run_BackoffThenSucceed(t *testing.T) {
 		resyncCh := make(chan ResyncEvent, 10)
 		stopAck := ackAllResyncs(resyncCh)
 		defer stopAck()
-		inf := NewInformer(dyn, gvr, eventCh, resyncCh, nil, slog.Default())
+		inf := NewInformer(dyn, gvr, ObjectScopeNamespaced, eventCh, resyncCh, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -1314,7 +1358,7 @@ func TestRunContinuous_ImmediateReconcileAfterThrottleWindow(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
@@ -1365,7 +1409,7 @@ func TestRunContinuous_ThrottleTimerFires(t *testing.T) {
 		disc := newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
@@ -1406,7 +1450,7 @@ func TestRunContinuous_DuplicateCRDEventsWhilePending(t *testing.T) {
 		disc.fakeDiscoveryWithPreferred = newFakeDiscovery([]*metav1.APIResourceList{{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)

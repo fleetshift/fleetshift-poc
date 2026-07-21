@@ -25,21 +25,22 @@ type FieldExtraction struct {
 	DataType DataType
 }
 
-// SchemaEntry describes how a single Kubernetes resource type is
-// indexed: which GVR to watch, which fields to extract, and whether
-// to extract status conditions.
+// SchemaEntry describes optional enrichment for one watched Kubernetes
+// GVR: field extractions, annotation extraction flags, and hooks.
+// Watching itself is driven by discovery (+ allow/deny), not by presence
+// in the schema; missing entries still inventory the object with base
+// observation fields only.
 type SchemaEntry struct {
 	GVR                schema.GroupVersionResource
-	Kind               string
 	Fields             []FieldExtraction
 	ExtractAnnotations bool
-	AnnotationSizeCap  int
+	AnnotationSizeCap  int // max annotation value length when ExtractAnnotations is set; 0 means use the default cap
 	ComputeExtra       func(r *unstructured.Unstructured, fields map[string]any)
 	BuildEdges         func(r *unstructured.Unstructured, uid string) func(ns NodeStore) []Edge
 }
 
-// IndexSchema is the complete set of resource types to index,
-// keyed by GVR.
+// IndexSchema is optional per-GVR enrichment configuration keyed by GVR.
+// It is not the allow-list of what to watch; discovery selects watches.
 type IndexSchema struct {
 	Entries map[schema.GroupVersionResource]SchemaEntry
 }

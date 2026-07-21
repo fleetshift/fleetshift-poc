@@ -36,7 +36,7 @@ type TargetLister interface {
 // EnsureIndexer. Per-target failures are logged and skipped. It does not
 // poll or re-list afterward; targets that appear only after the list
 // returns are not started by this call. Callers that must not block
-// listen should invoke it from a goroutine.
+// listen should invoke it from a goroutine. logger must be non-nil.
 func ReplayPersistedIndexers(
 	ctx context.Context,
 	lister TargetLister,
@@ -44,9 +44,6 @@ func ReplayPersistedIndexers(
 	runtime IndexingRuntime,
 	logger *slog.Logger,
 ) {
-	if logger == nil {
-		logger = slog.Default()
-	}
 	logger = logger.With("component", "kubernetes-index-startup-replay")
 
 	if runtime == nil || lister == nil {

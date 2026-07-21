@@ -125,8 +125,16 @@ func TestDirectInventoryReportBackend_RoundTrip(t *testing.T) {
 	backend := newDirectInventoryReportBackend(reports)
 
 	podsGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	sn, err := kubernetesaddon.NewScopeNamespace(kubernetesaddon.ObjectScopeNamespaced, "default")
+	if err != nil {
+		t.Fatalf("NewScopeNamespace: %v", err)
+	}
 	pod1, err := kubernetesaddon.ObjectResourceName(kubernetesaddon.KubernetesObjectIdentity{
-		ClusterResourceName: "clusters/prod", GVR: podsGVR, Namespace: "default", Name: "web-1", UID: "uid-pod-1",
+		ClusterResourceName: "clusters/prod",
+		GVR:                 podsGVR,
+		ScopeNamespace:      sn,
+		Name:                "web-1",
+		UID:                 "uid-pod-1",
 	})
 	if err != nil {
 		t.Fatalf("ObjectResourceName: %v", err)

@@ -23,8 +23,7 @@ func DefaultKubernetesSchema() IndexSchema {
 // and their extraction rules.
 var defaultEntries = []SchemaEntry{
 	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		Kind: "Pod",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		Fields: []FieldExtraction{
 			{Name: "phase", JSONPath: ".status.phase"},
 			{Name: "podIP", JSONPath: ".status.podIP"},
@@ -37,8 +36,7 @@ var defaultEntries = []SchemaEntry{
 		BuildEdges:   buildPodEdges,
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
-		Kind: "Service",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
 		Fields: []FieldExtraction{
 			{Name: "type", JSONPath: ".spec.type"},
 			{Name: "clusterIP", JSONPath: ".spec.clusterIP"},
@@ -47,15 +45,13 @@ var defaultEntries = []SchemaEntry{
 		BuildEdges: buildServiceEdges,
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"},
-		Kind: "Namespace",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"},
 		Fields: []FieldExtraction{
 			{Name: "phase", JSONPath: ".status.phase"},
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
-		Kind: "Node",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
 		Fields: []FieldExtraction{
 			{Name: "kubeletVersion", JSONPath: ".status.nodeInfo.kubeletVersion"},
 			{Name: "osImage", JSONPath: ".status.nodeInfo.osImage"},
@@ -68,8 +64,7 @@ var defaultEntries = []SchemaEntry{
 		ComputeExtra: computeNodeRoles,
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
-		Kind: "PersistentVolumeClaim",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
 		Fields: []FieldExtraction{
 			{Name: "storageClassName", JSONPath: ".spec.storageClassName"},
 			{Name: "phase", JSONPath: ".status.phase"},
@@ -79,8 +74,7 @@ var defaultEntries = []SchemaEntry{
 		BuildEdges: buildPVCEdges,
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumes"},
-		Kind: "PersistentVolume",
+		GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumes"},
 		Fields: []FieldExtraction{
 			{Name: "storageClassName", JSONPath: ".spec.storageClassName"},
 			{Name: "phase", JSONPath: ".status.phase"},
@@ -90,8 +84,7 @@ var defaultEntries = []SchemaEntry{
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		Kind: "Deployment",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		Fields: []FieldExtraction{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 			{Name: "readyReplicas", JSONPath: ".status.readyReplicas", DataType: DataTypeNumber},
@@ -100,32 +93,28 @@ var defaultEntries = []SchemaEntry{
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
-		Kind: "StatefulSet",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
 		Fields: []FieldExtraction{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 			{Name: "readyReplicas", JSONPath: ".status.readyReplicas", DataType: DataTypeNumber},
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"},
-		Kind: "DaemonSet",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"},
 		Fields: []FieldExtraction{
 			{Name: "desiredNumberScheduled", JSONPath: ".status.desiredNumberScheduled", DataType: DataTypeNumber},
 			{Name: "numberReady", JSONPath: ".status.numberReady", DataType: DataTypeNumber},
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
-		Kind: "ReplicaSet",
+		GVR: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
 		Fields: []FieldExtraction{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 			{Name: "readyReplicas", JSONPath: ".status.readyReplicas", DataType: DataTypeNumber},
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"},
-		Kind: "Job",
+		GVR: schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"},
 		Fields: []FieldExtraction{
 			{Name: "active", JSONPath: ".status.active", DataType: DataTypeNumber},
 			{Name: "failed", JSONPath: ".status.failed", DataType: DataTypeNumber},
@@ -133,20 +122,11 @@ var defaultEntries = []SchemaEntry{
 		},
 	},
 	{
-		GVR:  schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "cronjobs"},
-		Kind: "CronJob",
+		GVR: schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "cronjobs"},
 		Fields: []FieldExtraction{
 			{Name: "lastScheduleTime", JSONPath: ".status.lastScheduleTime"},
 			{Name: "schedule", JSONPath: ".spec.schedule"},
 		},
-	},
-	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"},
-		Kind: "ConfigMap",
-	},
-	{
-		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"},
-		Kind: "Secret",
 	},
 }
 
