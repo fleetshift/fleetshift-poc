@@ -72,6 +72,9 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 	if err != nil {
 		return domain.QueryResourcesPage{}, err
 	}
+	if scope.Empty {
+		return domain.QueryResourcesPage{}, nil
+	}
 
 	// Compile before honoring an empty activation scope so invalid
 	// filters (deprecated paths, unsupported operators) still fail
@@ -79,9 +82,6 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 	predicate, err := r.compiler().CompileFilter(ctx, querysql.CompileFilterInput{Filter: req.Filter})
 	if err != nil {
 		return domain.QueryResourcesPage{}, err
-	}
-	if scope.Empty {
-		return domain.QueryResourcesPage{}, nil
 	}
 
 	limit := clampQueryPageSize(req.PageSize)
