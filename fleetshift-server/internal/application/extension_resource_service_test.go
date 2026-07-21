@@ -107,8 +107,8 @@ func seedClusterType(t *testing.T, store domain.Store, rt domain.ResourceType, n
 
 // TestDeleteExtensionResource_RejectsInventoryOnlyInstance ensures Delete
 // fails before starting the delete workflow when the extension resource
-// exists but has no managed state (e.g. seeded only by inventory
-// reporting from a deployment-created kind cluster).
+// exists but has no managed state — the shape kind inventory reporting
+// creates when a deployment (not a managed Cluster) delivers a cluster.
 func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 	h := setupExtensionResourceService(t)
 	ctx := context.Background()
@@ -118,18 +118,31 @@ func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 	name := domain.ResourceName("clusters/c1")
 	seedClusterType(t, h.store, rt, fixed)
 
-	tx, err := h.store.Begin(ctx)
+	// Same application path the kind InventoryWatcher uses: report a
+	// cluster inventory delta through InventoryReporterAdapter. That
+	// resolve-or-creates an inventory-only extension resource row.
+	ready, err := domain.NewCondition(
+		"Ready", domain.ConditionTrue, "APIServerAvailable", "cluster API is reachable", fixed)
 	if err != nil {
-		t.Fatalf("begin: %v", err)
+		t.Fatalf("NewCondition Ready: %v", err)
 	}
-	// Inventory-only instance: same shape inventory reporting creates
-	// when a deployment delivers a kind cluster.
-	er := domain.NewExtensionResource(domain.NewExtensionResourceUID(), rt, name, fixed)
-	if err := tx.ExtensionResources().Create(ctx, er); err != nil {
-		t.Fatalf("Create extension resource: %v", err)
+	apiCond, err := domain.NewCondition(
+		"APIServerAvailable", domain.ConditionTrue, "APIServerAvailable", "cluster API is reachable", fixed)
+	if err != nil {
+		t.Fatalf("NewCondition APIServerAvailable: %v", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
+	obs := json.RawMessage(`{"apiServerAvailable":true}`)
+	reporter := application.NewInventoryReporterAdapter(application.NewInventoryReportService(h.store))
+	if err := reporter.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
+		Reports: []domain.InventoryDeltaReport{{
+			ResourceType:      rt,
+			Name:              name,
+			ReplaceConditions: []domain.Condition{ready, apiCond},
+			Observation:       &obs,
+			ObservedAt:        fixed,
+		}},
+	}); err != nil {
+		t.Fatalf("ApplyDeltaBatch: %v", err)
 	}
 
 	_, err = h.svc.Delete(ctx, rt, name)
