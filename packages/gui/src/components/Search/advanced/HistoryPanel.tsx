@@ -1,5 +1,6 @@
 import { MenuGroup, MenuItem, MenuItemAction } from "@patternfly/react-core";
 import { TimesIcon } from "@patternfly/react-icons";
+import { useEffect, useRef } from "react";
 
 import type { HistoryEntry } from "./types";
 
@@ -8,6 +9,8 @@ interface HistoryPanelProps {
   onSelect: (expression: string) => void;
   onToggleFavorite: (expression: string) => void;
   onRemove: (expression: string) => void;
+  focusedIndex?: number;
+  indexOffset?: number;
 }
 
 function formatTimestamp(ts: number): string {
@@ -33,14 +36,20 @@ function HistoryItem({
   onSelect,
   onToggleFavorite,
   onRemove,
+  isFocused,
+  itemRef,
 }: {
   entry: HistoryEntry;
   onSelect: (expr: string) => void;
   onToggleFavorite: (expr: string) => void;
   onRemove: (expr: string) => void;
+  isFocused?: boolean;
+  itemRef?: (el: HTMLElement | null) => void;
 }) {
   return (
     <MenuItem
+      ref={itemRef}
+      isFocused={isFocused}
       onClick={() => onSelect(entry.expression)}
       description={formatTimestamp(entry.timestamp)}
       actions={
@@ -71,38 +80,65 @@ export default function HistoryPanel({
   onSelect,
   onToggleFavorite,
   onRemove,
+  focusedIndex,
+  indexOffset = 0,
 }: HistoryPanelProps) {
+  const itemRefs = useRef<Map<number, HTMLElement>>(new Map());
+
+  useEffect(() => {
+    if (focusedIndex == null) return;
+    const el = itemRefs.current.get(focusedIndex);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [focusedIndex]);
+
   if (entries.length === 0) return null;
 
   const favorites = entries.filter((e) => e.favorite);
   const recent = entries.filter((e) => !e.favorite).slice(0, 10);
+  const recentOffset = indexOffset + favorites.length;
 
   return (
     <>
       {favorites.length > 0 && (
         <MenuGroup label="Favorites">
-          {favorites.map((entry) => (
-            <HistoryItem
-              key={entry.expression}
-              entry={entry}
-              onSelect={onSelect}
-              onToggleFavorite={onToggleFavorite}
-              onRemove={onRemove}
-            />
-          ))}
+          {favorites.map((entry, i) => {
+            const globalIdx = indexOffset + i;
+            return (
+              <HistoryItem
+                key={entry.expression}
+                entry={entry}
+                onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
+                onRemove={onRemove}
+                isFocused={focusedIndex === globalIdx}
+                itemRef={(el: HTMLElement | null) => {
+                  if (el) itemRefs.current.set(globalIdx, el);
+                  else itemRefs.current.delete(globalIdx);
+                }}
+              />
+            );
+          })}
         </MenuGroup>
       )}
       {recent.length > 0 && (
         <MenuGroup label="Recent">
-          {recent.map((entry) => (
-            <HistoryItem
-              key={entry.expression}
-              entry={entry}
-              onSelect={onSelect}
-              onToggleFavorite={onToggleFavorite}
-              onRemove={onRemove}
-            />
-          ))}
+          {recent.map((entry, i) => {
+            const globalIdx = recentOffset + i;
+            return (
+              <HistoryItem
+                key={entry.expression}
+                entry={entry}
+                onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
+                onRemove={onRemove}
+                isFocused={focusedIndex === globalIdx}
+                itemRef={(el: HTMLElement | null) => {
+                  if (el) itemRefs.current.set(globalIdx, el);
+                  else itemRefs.current.delete(globalIdx);
+                }}
+              />
+            );
+          })}
         </MenuGroup>
       )}
     </>

@@ -18,12 +18,14 @@ export function getCursorContext(
 
   if (currentToken && currentToken.type !== "whitespace") {
     const partial = expression.slice(currentToken.start, cursorPos);
-    const replaceRange: [number, number] = [
-      currentToken.start,
-      currentToken.end,
-    ];
+    let replaceRange: [number, number] = [currentToken.start, currentToken.end];
 
     if (currentToken.type === "field") {
+      const lastDot = partial.lastIndexOf(".");
+      if (lastDot !== -1) {
+        replaceRange = [currentToken.start + lastDot + 1, currentToken.end];
+      }
+
       const beforeField = findPrevMeaningful(meaningful, currentToken.start);
       if (
         !beforeField ||

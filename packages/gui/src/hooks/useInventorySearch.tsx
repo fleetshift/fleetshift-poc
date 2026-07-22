@@ -110,6 +110,7 @@ export function useInventorySearch(): {
           to: rendered.to,
           search: rendered.search,
         },
+        navigable: rendered.navigable,
       };
     },
     [rendererMap],
@@ -117,6 +118,7 @@ export function useInventorySearch(): {
 
   const search = useCallback(
     async (term: string): Promise<SearchResultItem[]> => {
+      if (!loaded) return [];
       try {
         const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         const clusterFilter = [
@@ -142,11 +144,12 @@ export function useInventorySearch(): {
         return [];
       }
     },
-    [mapResult],
+    [mapResult, loaded],
   );
 
   const filterSearch = useCallback(
     async (celFilter: string): Promise<SearchResultItem[]> => {
+      if (!loaded) return [];
       console.info("[filterSearch] CEL filter:", celFilter);
       try {
         const response = await client.search({
@@ -160,7 +163,7 @@ export function useInventorySearch(): {
         return [];
       }
     },
-    [mapResult],
+    [mapResult, loaded],
   );
 
   return { search, filterSearch, loaded };

@@ -4,6 +4,7 @@ import { loadPfIcon, PluginLink } from "@fleetshift/common";
 import {
   Button,
   Divider,
+  Label,
   Menu,
   MenuContent,
   MenuGroup,
@@ -317,13 +318,25 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
     }
 
     if (item.pluginLink) {
+      const isNavigable = item.navigable !== false;
       return (
         <MenuItem
           key={item.id}
           icon={
             <ResultIcon name={item.icon} IconComponent={item.IconComponent} />
           }
-          description={item.descriptionNode ?? item.description}
+          description={
+            isNavigable ? (
+              (item.descriptionNode ?? item.description)
+            ) : (
+              <span className="pf-v6-u-text-color-subtle">
+                {item.descriptionNode ?? item.description}
+                <Label isCompact color="grey" className="pf-v6-u-ml-sm">
+                  Cluster
+                </Label>
+              </span>
+            )
+          }
           component={getPluginLinkComponent(item.pluginLink)}
           onClick={clearSearch}
         >

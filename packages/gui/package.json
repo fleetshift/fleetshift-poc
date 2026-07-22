@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "rspack build",
-    "test": "vitest run --root ../.. packages/gui/"
+    "test": "vitest run --root ../.. packages/gui/",
+    "test:ct": "playwright test -c playwright-ct.config.ts"
   },
   "dependencies": {
     "@dnd-kit/react": "^0.3.2",
@@ -37,6 +38,7 @@
     "@types/react-dom": "^19.1.0",
     "css-loader": "^7.1.4",
     "sass": "^1.97.3",
-    "sass-loader": "^16.0.7"
+    "sass-loader": "^16.0.7",
+    "zod": "^4.4.3"
   }
 }

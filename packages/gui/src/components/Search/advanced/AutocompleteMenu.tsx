@@ -13,9 +13,11 @@ interface AutocompleteMenuProps {
 
 const TYPE_LABELS: Record<string, string> = {
   field: "Fields",
+  path: "Fields",
   operator: "Operators",
   value: "Values",
   combinator: "Logic",
+  semantic: "Did you mean?",
 };
 
 export default function AutocompleteMenu({
@@ -90,9 +92,15 @@ export default function AutocompleteMenu({
                 isFocused={index === selectedIndex}
                 onClick={() => handleItemClick(index)}
                 onMouseEnter={() => onIndexChange(index)}
-                description={suggestion.description}
+                description={
+                  suggestion.celPreview ? (
+                    <code>{suggestion.celPreview}</code>
+                  ) : (
+                    suggestion.description
+                  )
+                }
               >
-                <code>{suggestion.label}</code>
+                {suggestion.label}
               </MenuItem>
             ))}
           </MenuGroup>

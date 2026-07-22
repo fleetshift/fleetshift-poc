@@ -9,6 +9,7 @@ export interface SearchResultRender {
   search?: string;
   title?: string;
   description: ReactNode;
+  navigable?: boolean;
 }
 
 export type InventoryResource = ResourceResult;

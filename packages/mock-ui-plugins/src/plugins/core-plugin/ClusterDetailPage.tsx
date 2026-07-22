@@ -42,7 +42,7 @@ import {
 } from "@patternfly/react-core";
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 
 import {
   buildAddonBasePath,
@@ -293,7 +293,15 @@ export default function ClusterDetailPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string | number>("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") ?? "overview";
+  const setActiveTab = useCallback(
+    (key: string | number) => {
+      const tab = String(key);
+      setSearchParams(tab === "overview" ? {} : { tab }, { replace: true });
+    },
+    [setSearchParams],
+  );
   const [actionsOpen, setActionsOpen] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);

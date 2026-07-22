@@ -3,15 +3,52 @@
   position: relative;
 }
 
+// Color-coded input: mirror overlay with colored tokens on top of transparent input text
+.ome-search__input-wrapper {
+  position: relative;
+}
+
+.ome-search__input--colored {
+  input {
+    color: transparent !important;
+    caret-color: var(--pf-t--global--text--color--regular);
+  }
+}
+
+.ome-search__input-mirror {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  overflow: hidden;
+
+  // transparent border matches the form-control border width so text aligns
+  border: var(--pf-v6-c-form-control--BorderWidth, 1px) solid transparent;
+}
+
+.ome-search__input-mirror-scroll {
+  white-space: pre;
+}
+
 .ome-search__autocomplete {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
   z-index: var(--pf-t--global--z-index--lg);
-  max-height: 300px;
-  overflow-y: auto;
   box-shadow: var(--pf-t--global--box-shadow--lg);
+  display: flex;
+  flex-direction: column;
+
+  // base pf-c-menu hides overflow
+  overflow: auto !important;
+  
+  .pf-v6-c-menu__content {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
 
   code {
     font-family: var(--pf-t--global--font--family--mono);
@@ -58,7 +95,14 @@
   }
 }
 
-// CEL preview in menu footer
+// CEL preview pinned at top of menu
+.ome-search__cel-preview-header {
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+  border-bottom: var(--pf-t--global--border--width--regular) solid
+    var(--pf-t--global--border--color--default);
+  flex-shrink: 0;
+}
+
 .ome-search__cel-preview {
   display: flex;
   align-items: center;

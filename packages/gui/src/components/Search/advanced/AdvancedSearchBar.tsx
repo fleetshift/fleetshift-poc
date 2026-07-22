@@ -4,7 +4,6 @@ import {
   Divider,
   Menu,
   MenuContent,
-  MenuFooter,
   MenuGroup,
   MenuItem,
   MenuList,
@@ -15,6 +14,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -22,8 +22,34 @@ import {
 import AutocompleteMenu from "./AutocompleteMenu";
 import CelPreview from "./CelPreview";
 import HistoryPanel from "./HistoryPanel";
+import { tokenize } from "./tokenizer";
 import type { Suggestion } from "./types";
 import { useAdvancedSearch } from "./useAdvancedSearch";
+import { useTypingPlaceholder } from "./useTypingPlaceholder";
+
+const TOKEN_CLASSES: Record<string, string> = {
+  field: "ome-search__cel-token--field",
+  operator: "ome-search__cel-token--operator",
+  value: "ome-search__cel-token--value",
+  combinator: "ome-search__cel-token--combinator",
+  "dot-call": "ome-search__cel-token--operator",
+  paren: "ome-search__cel-token--paren",
+};
+
+const PLACEHOLDER_HINTS = [
+  "clusters",
+  "running pods",
+  'resource.observation.kind == "Pod"',
+  "kube-system namespace",
+  'resource.conditions.Ready.status == "False"',
+  "degraded resources",
+  'resource.observation.metadata.namespace == "kube-system"',
+  "RBAC roles",
+  'resource.observation.kind in ["DaemonSet", "Deployment"]',
+  "workload deployments",
+  'resource.conditions.Available.status == "True"',
+  "available services",
+];
 
 interface AdvancedSearchBarProps {
   onDeactivate: () => void;
@@ -58,9 +84,31 @@ export default function AdvancedSearchBar({
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [menuVisible, setMenuVisible] = useState(false);
+  const placeholder = useTypingPlaceholder(PLACEHOLDER_HINTS, "Try: ");
+  const [inputScrollLeft, setInputScrollLeft] = useState(0);
+  const inputTokens = useMemo(() => {
+    const tokens = tokenize(expression);
+    while (tokens.length > 0 && tokens[tokens.length - 1].type === "whitespace")
+      tokens.pop();
+    return tokens;
+  }, [expression]);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const pendingCursorRef = useRef<number | null>(null);
+
+  const mirrorRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node || !inputRef.current) return;
+    const cs = getComputedStyle(inputRef.current);
+    node.style.font = cs.font;
+    node.style.letterSpacing = cs.letterSpacing;
+    node.style.paddingLeft = cs.paddingLeft;
+    node.style.paddingRight = cs.paddingRight;
+  }, []);
+
+  const handleInputScroll = useCallback(() => {
+    setInputScrollLeft(inputRef.current?.scrollLeft ?? 0);
+  }, []);
 
   const handleChange = useCallback(
     (_e: unknown, value: string) => {
@@ -84,45 +132,69 @@ export default function AdvancedSearchBar({
     [acceptSuggestion],
   );
 
+  const handleHistorySelect = useCallback(
+    (expr: string) => {
+      loadExpression(expr);
+      setMenuVisible(true);
+      onExpressionChange?.(expr);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [loadExpression, onExpressionChange],
+  );
+
+  const showSuggestions = suggestions.length > 0;
+  const showHistory = !expression.trim() && history.length > 0;
+
+  const flatHistory = useMemo(() => {
+    if (!showHistory) return [];
+    const favorites = history.filter((e) => e.favorite);
+    const recent = history.filter((e) => !e.favorite).slice(0, 10);
+    return [...favorites, ...recent];
+  }, [history, showHistory]);
+
+  const navigableCount = suggestions.length + flatHistory.length;
+
   const handleKeyDown = useCallback(
     (ev: React.KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        if (menuVisible) {
-          setMenuVisible(false);
-        } else {
-          onDeactivate();
-        }
-        ev.preventDefault();
-        return;
-      }
-
       if (ev.key === "Enter") {
-        setMenuVisible(false);
-        const result = execute();
-        if (result) onExecute(result);
         ev.preventDefault();
+        if (
+          menuVisible &&
+          selectedIndex >= suggestions.length &&
+          flatHistory.length > 0
+        ) {
+          const historyIdx = selectedIndex - suggestions.length;
+          const expr = flatHistory[historyIdx].expression;
+          loadExpression(expr);
+          onExpressionChange?.(expr);
+          onExecute(expr);
+        } else {
+          const result = execute();
+          if (result) onExecute(result);
+        }
         return;
       }
 
-      if (ev.key === "Tab" && suggestions.length > 0 && menuVisible) {
+      if (ev.key === "Tab" && menuVisible && navigableCount > 0) {
         ev.preventDefault();
-        handleSelect(suggestions[selectedIndex]);
+        if (selectedIndex < suggestions.length) {
+          handleSelect(suggestions[selectedIndex]);
+        } else {
+          const historyIdx = selectedIndex - suggestions.length;
+          handleHistorySelect(flatHistory[historyIdx].expression);
+        }
         return;
       }
 
-      if (ev.key === "ArrowDown" && menuVisible) {
+      if (ev.key === "ArrowDown" && menuVisible && navigableCount > 0) {
         ev.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < suggestions.length - 1 ? prev + 1 : 0,
-        );
+        setSelectedIndex((prev) => (prev < navigableCount - 1 ? prev + 1 : 0));
         return;
       }
 
-      if (ev.key === "ArrowUp" && menuVisible) {
+      if (ev.key === "ArrowUp" && menuVisible && navigableCount > 0) {
         ev.preventDefault();
-        setSelectedIndex((prev) =>
-          prev > 0 ? prev - 1 : suggestions.length - 1,
-        );
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : navigableCount - 1));
         return;
       }
     },
@@ -131,15 +203,49 @@ export default function AdvancedSearchBar({
       suggestions,
       selectedIndex,
       handleSelect,
+      handleHistorySelect,
+      flatHistory,
+      navigableCount,
       execute,
-      onDeactivate,
       onExecute,
+      loadExpression,
+      onExpressionChange,
     ],
   );
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+    setMenuVisible(true);
+
+    const el = inputRef.current;
+    const onScroll = () => handleInputScroll();
+    el?.addEventListener("scroll", onScroll);
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) {
+        setMenuVisible(false);
+      }
+    };
+
+    const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMenuVisible((prev) => {
+          if (prev) return false;
+          onDeactivate();
+          return false;
+        });
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleGlobalEsc);
+    return () => {
+      el?.removeEventListener("scroll", onScroll);
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleGlobalEsc);
+    };
+  }, [onDeactivate, handleInputScroll]);
 
   useEffect(() => {
     if (pendingCursorRef.current !== null) {
@@ -155,53 +261,78 @@ export default function AdvancedSearchBar({
     }
   }, [expression]);
 
+  useEffect(() => {
+    const recalc = () => {
+      if (!menuRef.current) return;
+      const { top } = menuRef.current.getBoundingClientRect();
+      if (top === 0) return;
+      menuRef.current.style.maxHeight = `${window.innerHeight - top - 4}px`;
+    };
+    window.addEventListener("resize", recalc);
+    recalc();
+    return () => window.removeEventListener("resize", recalc);
+  }, [expression, suggestions]);
+
   const handleClick = useCallback(() => {
     const pos = inputRef.current?.selectionStart ?? expression.length;
     setCursorPos(pos);
     setMenuVisible(true);
   }, [expression.length, setCursorPos]);
 
-  const handleBlur = useCallback((e: React.FocusEvent) => {
-    if (menuRef.current?.contains(e.relatedTarget as Node)) return;
-    setTimeout(() => setMenuVisible(false), 150);
+  const handleResultClick = useCallback(() => {
+    setMenuVisible(false);
   }, []);
 
-  const handleHistorySelect = useCallback(
-    (expr: string) => {
-      loadExpression(expr);
-      setMenuVisible(false);
-      onExpressionChange?.(expr);
-      requestAnimationFrame(() => inputRef.current?.focus());
-    },
-    [loadExpression, onExpressionChange],
-  );
-
-  const showSuggestions = menuVisible && suggestions.length > 0;
-  const showHistory = menuVisible && !expression.trim() && history.length > 0;
   const showPreview = expression.trim().length > 0;
   const hasResults = !!results;
   const hasEmptyResults = !isLoading && lastFilter && !results;
   const showDropdown =
-    showSuggestions ||
-    showHistory ||
-    hasResults ||
-    hasEmptyResults ||
-    isLoading;
+    menuVisible &&
+    (showSuggestions ||
+      showHistory ||
+      showPreview ||
+      hasResults ||
+      hasEmptyResults ||
+      isLoading);
 
   return (
-    <div className="ome-search__advanced-bar">
-      <TextInput
-        ref={inputRef}
-        value={expression}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onClick={handleClick}
-        onBlur={handleBlur}
-        placeholder="CEL filter — Tab to accept hint, Enter to search"
-        aria-label="Advanced CEL search"
-      />
+    <div ref={wrapperRef} className="ome-search__advanced-bar">
+      <div className="ome-search__input-wrapper">
+        <TextInput
+          ref={inputRef}
+          value={expression}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onClick={handleClick}
+          placeholder={placeholder}
+          aria-label="Advanced CEL search"
+          className="ome-search__input--colored"
+        />
+        {expression && (
+          <div className="ome-search__input-mirror" aria-hidden="true">
+            {/* eslint-disable no-restricted-syntax -- dynamic scroll sync + font sync with input */}
+            <div
+              ref={mirrorRef}
+              className="ome-search__input-mirror-scroll"
+              style={{ transform: `translateX(-${inputScrollLeft}px)` }}
+            >
+              {/* eslint-enable no-restricted-syntax */}
+              {inputTokens.map((token, i) => (
+                <span key={i} className={TOKEN_CLASSES[token.type] ?? ""}>
+                  {token.value}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
       {showDropdown && (
         <Menu ref={menuRef} className="ome-search__autocomplete">
+          {showPreview && (
+            <div className="ome-search__cel-preview-header">
+              <CelPreview expression={expression} validation={validation} />
+            </div>
+          )}
           <MenuContent>
             <MenuList>
               {showSuggestions && (
@@ -218,6 +349,8 @@ export default function AdvancedSearchBar({
                   onSelect={handleHistorySelect}
                   onToggleFavorite={toggleFavorite}
                   onRemove={removeHistory}
+                  focusedIndex={selectedIndex}
+                  indexOffset={suggestions.length}
                 />
               )}
               {(showSuggestions || showHistory) &&
@@ -227,7 +360,11 @@ export default function AdvancedSearchBar({
                   <Spinner size="sm" /> Searching...
                 </MenuItem>
               )}
-              {hasResults && <MenuGroup label="Results">{results}</MenuGroup>}
+              {hasResults && (
+                <MenuGroup label="Results" onClick={handleResultClick}>
+                  {results}
+                </MenuGroup>
+              )}
               {hasEmptyResults && (
                 <MenuItem isDisabled>
                   No resources matched
@@ -238,11 +375,6 @@ export default function AdvancedSearchBar({
               )}
             </MenuList>
           </MenuContent>
-          {showPreview && (
-            <MenuFooter>
-              <CelPreview expression={expression} validation={validation} />
-            </MenuFooter>
-          )}
         </Menu>
       )}
     </div>

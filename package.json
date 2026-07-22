@@ -34,6 +34,8 @@
     "dompurify": "^3.4.11"
   },
   "devDependencies": {
+    "@playwright/experimental-ct-react": "^1.61.1",
+    "@playwright/test": "^1.61.1",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "eslint": "^10.0.2",

@@ -39,10 +39,22 @@ export interface HistoryEntry {
 }
 
 export interface Suggestion {
-  type: CursorContextKind;
+  type: CursorContextKind | "path" | "semantic";
   value: string;
   label: string;
   description?: string;
+  cursorOffset?: number;
+  celPreview?: string;
+}
+
+export interface FieldNode {
+  segment: string;
+  path: string;
+  label: string;
+  description?: string;
+  children?: FieldNode[];
+  type?: "string" | "number" | "boolean";
+  enumValues?: string[];
 }
 
 export type TokenType =

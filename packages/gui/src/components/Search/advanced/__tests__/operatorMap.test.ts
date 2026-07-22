@@ -40,7 +40,7 @@ describe("operatorMap", () => {
 
   it("returns operators for numeric field", () => {
     const replicas = getStaticFields().find(
-      (f) => f.name === "resource.spec.replicas",
+      (f) => f.name === "resource.observation.extracted.replicas",
     )!;
     const ops = getOperatorsForField(replicas);
     const names = ops.map((op) => op.rqbName);

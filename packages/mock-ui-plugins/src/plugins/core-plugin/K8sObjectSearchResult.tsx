@@ -3,6 +3,21 @@ import type { InventoryResource, SearchResultRender } from "@fleetshift/common";
 const CANONICAL_RE =
   /\/\/kubernetes\.fleetshift\.io\/clusters\/([^/]+)\/apiResources\/([^/]+)\/objects\/([^/]+)/;
 
+const KIND_TO_TAB: Record<string, string> = {
+  DaemonSet: "pods",
+  Deployment: "pods",
+  ReplicaSet: "pods",
+  StatefulSet: "pods",
+  Job: "pods",
+  ConfigMap: "namespaces",
+  Secret: "namespaces",
+  Service: "namespaces",
+  ServiceAccount: "namespaces",
+  NetworkPolicy: "namespaces",
+  Role: "namespaces",
+  RoleBinding: "namespaces",
+};
+
 export function resolveK8sObject(
   resource: InventoryResource,
 ): SearchResultRender {
@@ -55,8 +70,10 @@ export function resolveK8sObject(
         scope: "core-plugin",
         module: "ClustersModule",
         to: clusterId,
+        search: KIND_TO_TAB[kind] ? `?tab=${KIND_TO_TAB[kind]}` : undefined,
         title,
         description: `${namespaceSuffix}${kind}`,
+        navigable: false,
       };
   }
 }
