@@ -69,20 +69,6 @@ export default function ReviewStep({ formData }: ReviewStepProps) {
               ))}
             </DescriptionListDescription>
           </DescriptionListGroup>
-
-          <DescriptionListGroup>
-            <DescriptionListTerm>Signed</DescriptionListTerm>
-            <DescriptionListDescription>
-              {formData.signDeployment ? "Yes" : "No"}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
-
-          <DescriptionListGroup>
-            <DescriptionListTerm>Placement</DescriptionListTerm>
-            <DescriptionListDescription>
-              All targets (kind-local)
-            </DescriptionListDescription>
-          </DescriptionListGroup>
         </DescriptionList>
       </StackItem>
     </Stack>
