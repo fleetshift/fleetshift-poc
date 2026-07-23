@@ -76,6 +76,14 @@ tasks:
       - go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/
       - go test -race -count=1 ./internal/addon/kubernetes/
 
+  test:stress:
+    desc: "Stress test orchestration loop (env: STRESS_RATE, STRESS_DURATION, STRESS_DEPLOYMENTS, STRESS_ACK_DELAY_MIN/MAX, STRESS_COMPLETION_DELAY_MIN/MAX, STRESS_FAILURE_RATE, STRESS_POSTGRES_MAX_CONNS, STRESS_WORKFLOW_POLLERS)"
+    dir: fleetshift-server
+    cmds:
+      - cmd: systemctl --user restart podman.socket 2>/dev/null || true
+        silent: true
+      - go test -tags stress -count=1 -run TestStress -v -timeout 0 ./internal/application/
+
   protogen:
     desc: Generate protobuf and gRPC code (skips if unchanged)
     preconditions:

@@ -2,8 +2,9 @@
 // that faithfully reproduces the concurrency and serialization semantics
 // of a durable workflow engine:
 //
-//   - Activities are dispatched to goroutines with a fresh
-//     [context.Background] context (not the workflow context).
+//   - Activities are dispatched to goroutines with a context derived
+//     from [context.Background] (not the workflow context), cancelled
+//     when the workflow context ends to prevent goroutine leaks.
 //   - Activity inputs and outputs go through a JSON round-trip,
 //     matching what durable engines do when persisting activity state.
 //   - Signals are JSON-serialized on send and deserialized on receive,
@@ -530,24 +531,45 @@ func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error
 	return nil, lastErr
 }
 
-// runOnce dispatches a single activity attempt in a goroutine with a
-// fresh [context.Background] and blocks until it completes or the
-// workflow context is cancelled.
+// runOnce dispatches a single activity attempt in a goroutine and
+// blocks until it completes or the workflow context is cancelled.
+//
+// The activity receives a context derived from [context.Background]
+// (not the workflow context) but linked to the workflow context's
+// lifetime via [context.AfterFunc]: when the workflow context is
+// cancelled the activity context is cancelled too. This ensures that
+// goroutines blocked on I/O (e.g. waiting for a database connection
+// from an exhausted pool) are released promptly instead of leaking
+// indefinitely.
+//
+// On normal completion the deferred cancel is disarmed so the activity
+// context stays valid. This matters when the activity starts a child
+// workflow that inherits the activity context (e.g. StartOrchestration
+// passes the activity context to the child workflow's Start method).
 func (r *baseRecord) runOnce(activity domain.Activity[any, any], in any) (any, error) {
 	type actResult struct {
 		out any
 		err error
 	}
+	// Derive from Background (activities must not inherit workflow
+	// values/deadlines) but cancel when the workflow context ends so
+	// the goroutine does not leak.
+	actCtx, actCancel := context.WithCancel(context.Background())
+	stop := context.AfterFunc(r.ctx, actCancel)
+
 	ch := make(chan actResult, 1)
 	go func() {
-		out, err := activity.Run(context.Background(), in)
+		out, err := activity.Run(actCtx, in)
 		ch <- actResult{out, err}
 	}()
 
 	select {
 	case res := <-ch:
+		stop() // disarm: keep actCtx alive for child workflows
 		return res.out, res.err
 	case <-r.ctx.Done():
+		// AfterFunc will (or already did) call actCancel, releasing
+		// any goroutine blocked on the activity context.
 		return nil, r.ctx.Err()
 	}
 }
