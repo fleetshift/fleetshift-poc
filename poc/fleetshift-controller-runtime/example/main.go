@@ -62,7 +62,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controllers.DeliveryReconciler{Reporter: fake}).SetupWithManager(mcMgr); err != nil {
+	if err := (&controllers.DeliveryReconciler{}).SetupWithManager(mcMgr); err != nil {
 		logger.Error(err, "controller")
 		os.Exit(1)
 	}
