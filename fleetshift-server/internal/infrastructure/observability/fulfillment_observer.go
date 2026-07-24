@@ -107,6 +107,15 @@ func (p *fulfillmentRunProbe) ReconciliationRestarting(generation domain.Generat
 	)
 }
 
+func (p *fulfillmentRunProbe) RetryDelayStarted(delay time.Duration) {
+	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
+		return
+	}
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "retry delay started",
+		slog.Duration("delay", delay),
+	)
+}
+
 func (p *fulfillmentRunProbe) ContinueAsNewTriggered() {
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return

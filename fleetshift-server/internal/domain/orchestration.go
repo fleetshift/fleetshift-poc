@@ -161,6 +161,16 @@ type OrchestrationWorkflowSpec struct {
 	// duplicate deliveries and compounding goroutine scheduling
 	// pressure.
 	AckRetryInterval time.Duration
+
+	// RetryDelay is how long the orchestration waits before
+	// restarting via ContinueAsNew after a non-terminal pipeline
+	// error. This prevents tight retry loops when the error is
+	// deterministic for the current pool state — for example, a
+	// target referenced by static placement that has not been
+	// registered yet. The durable sleep gives external processes
+	// (e.g. a provisioning delivery) time to register the target
+	// before the next attempt reloads the pool. Zero defaults to 5 s.
+	RetryDelay time.Duration
 }
 
 // OrchestrationWorkflowOption configures optional fields on
@@ -192,6 +202,12 @@ func WithNow(fn func() time.Time) OrchestrationWorkflowOption {
 // before redispatching unacked deliveries.
 func WithAckRetryInterval(d time.Duration) OrchestrationWorkflowOption {
 	return func(s *OrchestrationWorkflowSpec) { s.AckRetryInterval = d }
+}
+
+// WithRetryDelay sets how long the orchestration sleeps before
+// restarting via ContinueAsNew after a non-terminal pipeline error.
+func WithRetryDelay(d time.Duration) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) { s.RetryDelay = d }
 }
 
 // NewOrchestrationWorkflowSpec creates an [OrchestrationWorkflowSpec]
@@ -235,6 +251,13 @@ func (s *OrchestrationWorkflowSpec) ackRetryInterval() time.Duration {
 		return s.AckRetryInterval
 	}
 	return 30 * time.Second
+}
+
+func (s *OrchestrationWorkflowSpec) retryDelay() time.Duration {
+	if s.RetryDelay > 0 {
+		return s.RetryDelay
+	}
+	return 5 * time.Second
 }
 
 func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-fulfillment" }
@@ -867,13 +890,20 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 	}
 }
 
-// releaseLockAndContinue releases the orchestration lock and returns a
-// [ContinueAsNew] error to restart with a fresh history.
+// releaseLockAndContinue sleeps for [RetryDelay], releases the
+// orchestration lock, and returns a [ContinueAsNew] error to restart
+// with a fresh history. The sleep prevents tight retry loops when the
+// error is deterministic for the current pool state (e.g. a target
+// that has not been registered yet).
 func (s *OrchestrationWorkflowSpec) releaseLockAndContinue(
 	record Record,
 	fulfillmentID FulfillmentID,
 	probe FulfillmentRunProbe,
 ) error {
+	probe.RetryDelayStarted(s.retryDelay())
+	if err := record.Sleep(s.retryDelay()); err != nil {
+		probe.Error(err)
+	}
 	if _, err := RunActivity(record, s.ReleaseLock(), fulfillmentID); err != nil {
 		probe.Error(err)
 	}
