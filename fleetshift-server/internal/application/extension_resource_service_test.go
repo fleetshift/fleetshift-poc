@@ -119,7 +119,8 @@ func seedManagedPlusInventoryTypeForDelete(t *testing.T, store domain.Store, now
 // Deployment that materializes the same type the addon also manages).
 func TestDeleteExtensionResource_RejectsInventoryOnlyInstance(t *testing.T) {
 	h := setupExtensionResourceService(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	fixed := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
 	name := domain.ResourceName("widgets/w1")
