@@ -40,6 +40,7 @@ import {
   TabTitleText,
   Title,
 } from "@patternfly/react-core";
+import { PauseCircleIcon } from "@patternfly/react-icons";
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -453,7 +454,12 @@ export default function ClusterDetailPage() {
         title={clusterName}
         subtitle={`Created ${formatTime(result.resource.createTime)}`}
         label={
-          <Label color={sl.color} isCompact className="pf-v6-u-mr-sm">
+          <Label
+            color={sl.color}
+            isCompact
+            className="pf-v6-u-mr-sm"
+            icon={state === "PAUSED_AUTH" ? <PauseCircleIcon /> : undefined}
+          >
             {sl.text}
             {result.resource.reconciling ? " (reconciling)" : ""}
           </Label>

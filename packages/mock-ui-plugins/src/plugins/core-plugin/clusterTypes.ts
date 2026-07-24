@@ -114,6 +114,7 @@ export function buildAddonBasePath(service: string): string {
 export function deriveClusterState(
   resource: ClusterResource,
 ): string | undefined {
+  if (resource.pauseReason) return "PAUSED_AUTH";
   if (resource.state) return resource.state;
   const ready = resource.conditions?.Ready;
   if (ready?.status === "True") return "RUNNING";
