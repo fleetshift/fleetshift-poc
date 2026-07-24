@@ -31,7 +31,8 @@ task test:all               # unit tests for all modules
 
 ```bash
 task protogen               # regenerate protobuf and gRPC stubs
-task image:build            # build server container images
+task image:build            # build server + web container images
+task image:aio              # build all-in-one image from local server-local + web
 task image:push             # push to DEV_REGISTRY
 ```
 

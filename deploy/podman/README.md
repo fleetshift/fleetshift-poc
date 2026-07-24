@@ -54,7 +54,7 @@ At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`
 
 ## All-in-one image
 
-Published CI image `quay.io/stolostron/fleetshift:latest` bundles the server (from `fleetshift-server-local`, including a container runtime CLI for kind), baked-in UI assets, and defaults to serving the UI. It is assembled on a schedule from `fleetshift-server-local:latest` and `fleetshift-web:latest`, so it can lag component merges by a few hours.
+Published image `quay.io/stolostron/fleetshift:latest` bundles the server (from `fleetshift-server-local`, including a container runtime CLI for kind), baked-in UI assets, and defaults to serving the UI. Build it from this monorepo with `task image:aio`: that builds `Dockerfile` / `Dockerfile.local` / `fleetshift-ui/Dockerfile.web`, then assembles via `Dockerfile.fleetshift` without duplicating those Dockerfiles. A thin reassemble from already-published component tags is still possible by passing `--build-arg SERVER_IMAGE=...` and `--build-arg WEB_IMAGE=...`.
 
 API + UI (runs as non-root by default):
 
