@@ -1,5 +1,24 @@
-# Assembles the all-in-one FleetShift image from published component images.
-# Used by the openshift/release periodic that publishes quay.io/stolostron/fleetshift.
+# Assembles the all-in-one FleetShift image from component images.
+# Does not duplicate Dockerfile / Dockerfile.local / fleetshift-ui/Dockerfile.web —
+# build those first, then assemble.
+#
+# From-source (monorepo; preferred):
+#   task image:aio
+#
+# Or manually:
+#   podman build -t fleetshift-server -t quay.io/stolostron/fleetshift-server:latest .
+#   podman build -f Dockerfile.local -t quay.io/stolostron/fleetshift-server-local:latest .
+#   podman build -f fleetshift-ui/Dockerfile.web -t quay.io/stolostron/fleetshift-web:latest fleetshift-ui
+#   podman build -f Dockerfile.fleetshift \
+#     --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest \
+#     --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest \
+#     -t quay.io/stolostron/fleetshift:latest .
+#
+# Thin reassemble from published tags (openshift/release periodic, etc.):
+#   podman build -f Dockerfile.fleetshift \
+#     --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest \
+#     --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest \
+#     -t quay.io/stolostron/fleetshift:latest .
 #
 # Base is fleetshift-server-local so the kind library can shell out to a
 # container runtime CLI (podman) against a mounted host socket. For kind,
@@ -9,8 +28,11 @@
 # The entrypoint optionally renders GCP HCP config when the caller expresses
 # intent (GCPHCP_GATEWAY_URL, GCPHCP_CONFIG, or GCPHCP_ENABLED=true). The
 # default addon list remains kind,kubernetes until that intent is present.
-FROM quay.io/stolostron/fleetshift-server-local:latest
-COPY --from=quay.io/stolostron/fleetshift-web:latest /srv/web /srv/web
+ARG SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest
+ARG WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest
+FROM ${SERVER_IMAGE}
+ARG WEB_IMAGE
+COPY --from=${WEB_IMAGE} /srv/web /srv/web
 COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
 COPY deploy/scripts/fleetshift-aio-entrypoint.sh /usr/local/bin/fleetshift-aio-entrypoint.sh
 RUN chmod +x /usr/local/bin/render-gcphcp-config.sh /usr/local/bin/fleetshift-aio-entrypoint.sh \

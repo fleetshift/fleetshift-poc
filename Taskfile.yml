@@ -86,7 +86,7 @@ tasks:
       - buf generate --path proto/fleetshift
 
   image:build:
-    desc: Build fleetshift container images
+    desc: Build fleetshift container images (server, server-local, web)
     cmds:
       - >-
         podman build
@@ -99,6 +99,23 @@ tasks:
         -t quay.io/stolostron/fleetshift-server-local:{{.IMAGE_TAG}}
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}}{{end}}
         .
+      - >-
+        podman build -f fleetshift-ui/Dockerfile.web
+        -t quay.io/stolostron/fleetshift-web:{{.IMAGE_TAG}}
+        {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-web:{{.IMAGE_TAG}}{{end}}
+        fleetshift-ui
+
+  image:aio:
+    desc: Build all-in-one image from locally built server-local + web
+    deps: [image:build]
+    cmds:
+      - >-
+        podman build {{.CLI_ARGS}} -f Dockerfile.fleetshift
+        --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:{{.IMAGE_TAG}}
+        --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:{{.IMAGE_TAG}}
+        -t quay.io/stolostron/fleetshift:{{.IMAGE_TAG}}
+        {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift:{{.IMAGE_TAG}}{{end}}
+        .
 
   image:push:
     desc: Push images to DEV_REGISTRY (never pushes to stolostron)
@@ -108,3 +125,4 @@ tasks:
     cmds:
       - podman push {{.DEV_REGISTRY}}/fleetshift-server:{{.IMAGE_TAG}}
       - podman push {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}}
+      - podman push {{.DEV_REGISTRY}}/fleetshift-web:{{.IMAGE_TAG}}
