@@ -1,0 +1,52 @@
+{
+  "name": "@fleetshift/mock-ui-plugins",
+  "description": "Rspack Module Federation remote plugins — built and served by the Go backend.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf dist node_modules/.cache && rspack build",
+    "build:ci": "rm -rf dist node_modules/.cache && for name in overview management core signing routing gcphcp kind setup configuration virtualization addon-demo settings; do echo \"--- $name ---\" && rspack build --config-name $name || exit 1; done",
+    "watch": "rspack build --watch"
+  },
+  "dependencies": {
+    "@fleetshift/common": "*",
+    "@orama/orama": "^3.1.18",
+    "@patternfly/react-charts": "^8.5.1",
+    "@patternfly/react-code-editor": "^6.5.1",
+    "@patternfly/react-component-groups": "^6.5.0",
+    "@patternfly/react-core": "^6.5.1",
+    "@patternfly/react-data-view": "^6.6.0-prerelease.1",
+    "@patternfly/react-icons": "^6.5.1",
+    "@patternfly/react-log-viewer": "^6.4.0",
+    "@patternfly/react-table": "^6.5.1",
+    "@patternfly/widgetized-dashboard": "^1.0.0-prerelease.6",
+    "@scalprum/core": "^0.10.0",
+    "@scalprum/react-core": "^0.13.0",
+    "@types/leaflet": "^1.9.21",
+    "clsx": "^2.1.1",
+    "immutable": "^5.1.5",
+    "leaflet": "^1.9.4",
+    "lodash": "^4.17.23",
+    "motion": "^12.0.0",
+    "oidc-client-ts": "^3.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^7.13.1",
+    "victory": "^37.3.6"
+  },
+  "devDependencies": {
+    "@module-federation/enhanced": "^2.0.1",
+    "@openshift/dynamic-plugin-sdk": "^8.0.0",
+    "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",
+    "@rspack/cli": "^2.0.8",
+    "@rspack/core": "^2.0.8",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "css-loader": "^7.1.4",
+    "sass": "^1.97.3",
+    "sass-loader": "^16.0.7",
+    "style-loader": "^4.0.0"
+  }
+}

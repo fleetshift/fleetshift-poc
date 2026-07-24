@@ -1,0 +1,564 @@
+// FleetShift UI — Module Groups Architecture
+// Source of truth: docs/module-groups.md, packages/build-utils/src/extensions/
+//
+// How plugins declare module groups for nested navigation,
+// how the build validates group references (same-plugin only),
+// how the backend generates nested navLayout, and how the shell
+// renders expandable nav sections and hierarchical search.
+//
+// Generic model: groups are containers, modules reference them,
+// extensions nest under modules. Specific plugins (settings, core)
+// are examples in descriptions only.
+
+// ─────────────────────────────────────────────
+//  Specification
+// ─────────────────────────────────────────────
+
+specification {
+
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+      color primary
+    }
+  }
+
+  element component {
+    style {
+      shape rectangle
+      color secondary
+    }
+  }
+
+  element store {
+    style {
+      shape storage
+      color amber
+    }
+  }
+
+  element external {
+    style {
+      shape rectangle
+      color gray
+    }
+  }
+
+  relationship produces {
+    color green
+    line solid
+  }
+
+  relationship consumes {
+    color amber
+    line solid
+  }
+
+  relationship validates {
+    color red
+    line dashed
+  }
+
+  relationship groups {
+    color indigo
+    line solid
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Model
+// ─────────────────────────────────────────────
+
+model {
+
+  // ── Actors ──────────────────────────────────
+
+  pluginDev = actor 'Plugin Developer' {
+    description 'Declares module groups and assigns modules to them within a single plugin.'
+  }
+
+  admin = actor 'User / Admin' {
+    description 'Reorders nav items via Settings page. Existing capability extended for groups.'
+  }
+
+  endUser = actor 'End User' {
+    description 'Navigates expandable nav sections, uses hierarchical search, follows breadcrumbs.'
+  }
+
+  // ── Plugin Extension Model ──────────────────
+
+  pluginModel = system 'Plugin Extension Model' {
+    description '''
+      Extended with module groups. A plugin can declare groups
+      to organize its own modules into expandable nav sections.
+      Groups are plugin-scoped — no cross-plugin page injection.
+      Extensions (tabs, panels, providers) remain the cross-plugin
+      composition mechanism.
+    '''
+
+    moduleGroups = component 'Module Groups' {
+      description '''
+        New extension type: fleetshift.module-group.
+        Declares a navigational container for related modules.
+        Properties: id, label, description, keywords.
+        No component — groups are not routable. If a group needs
+        a landing page, it should be an explicit first child module.
+
+        A group owns a URL namespace: /{groupId}/.
+        Navigating to /{groupId} redirects to the first child module.
+
+        Groups are plugin-scoped. A plugin defines its own groups
+        and only its own modules can reference them. Community
+        plugins cannot add pages to another plugin's group.
+      '''
+    }
+
+    modules = component 'Modules' {
+      description '''
+        fleetshift.module — gains optional group field.
+        When group is set, the module nests under that group:
+        route becomes /{groupId}/{moduleId}, nav renders as
+        a child item under the group's NavExpandable.
+
+        When group is omitted, behavior is unchanged:
+        top-level nav item at /{pluginKey}/{moduleId}.
+
+        Module ids must be unique within their group.
+        The group field references a fleetshift.module-group id
+        in the same plugin — cross-plugin references are rejected.
+      '''
+    }
+
+    extensions = component 'Extensions' {
+      description '''
+        Unchanged. Extensions register against extensionPoints
+        declared on modules. They nest under their parent module
+        in search results. With groups, the search hierarchy
+        becomes: group → module → extension.
+
+        Cross-plugin extension contribution is preserved —
+        any plugin can extend any module's extensionPoints.
+      '''
+    }
+  }
+
+  // ── Build-Time Layer ────────────────────────
+
+  buildTime = system 'Build-Time Validation' {
+    description '''
+      Extended validation for module groups. FleetshiftPlugin
+      validates group references at build time — the group must
+      exist in the same plugin's extensions array.
+    '''
+
+    builders = component 'Extension Builders' {
+      description '''
+        New builder: createModuleGroup() returns
+        FleetshiftExtension<"fleetshift.module-group", ModuleGroupExtras>.
+
+        Existing createModule() accepts optional group?: string.
+        ModuleGroupExtras: Record<string, never> (no extra properties).
+        All builders produce FleetshiftExtension with type tags.
+      '''
+      technology 'TypeScript'
+    }
+
+    fleetshiftPlugin = component 'FleetshiftPlugin' {
+      description '''
+        Extended validation in validateExtensionSet():
+
+        1. Group ID format: /^[a-z][a-z0-9-]*$/ (URL-safe).
+        2. Group reference exists: if a module declares group: "foo",
+           a fleetshift.module-group with id "foo" must exist in the
+           same extensions array. Build fails otherwise.
+        3. No cross-plugin groups: enforced structurally — the group
+           and its modules are in the same FleetshiftPlugin instance.
+        4. Unique module ids within group: two modules in the same
+           group cannot share an id.
+        5. Group id uniqueness: no two groups in one plugin share an id.
+
+        After validation, delegates to DynamicRemotePlugin unchanged.
+      '''
+      technology 'Rspack Plugin'
+    }
+
+    manifest = store 'Plugin Manifest' {
+      description '''
+        plugin-manifest.json — now includes fleetshift.module-group
+        entries alongside fleetshift.module entries. Module entries
+        may include a group property referencing a group id.
+        Manifest format is additive — ungrouped plugins produce
+        identical manifests to before.
+      '''
+    }
+  }
+
+  // ── Runtime: Go Backend ─────────────────────
+
+  goBackend = system 'Go Backend' {
+    description '''
+      Reads manifests including module-group extensions.
+      Generates nested navLayout with group entries containing
+      child page references. Routes are flat — grouping is
+      navigational, not structural.
+    '''
+
+    manifestReader = component 'Manifest Reader' {
+      description '''
+        Parses plugin-manifest.json. Extracts fleetshift.module-group
+        and fleetshift.module extensions. Builds a group-to-modules
+        map from module group properties.
+      '''
+    }
+
+    routeGenerator = component 'Route & Nav Generator' {
+      description '''
+        Generates routes and navLayout.
+
+        Routes: grouped modules get /{groupId}/{moduleId} paths.
+        Ungrouped modules keep /{pluginKey}/{moduleId}.
+        /{groupId} redirects to first child module.
+        Routes registered longest-path-first to prevent prefix shadowing.
+
+        navLayout: emits nested entries:
+        { type: "group", groupId, label, pluginKey, children: [
+          { type: "page", pageId }
+        ]}
+        Ungrouped modules remain as top-level { type: "page" }.
+
+        pluginPages: flat list of all modules (unchanged).
+        Grouping is a nav concern, not a routing concern.
+      '''
+    }
+
+    uiConfig = component 'UI Config API' {
+      description '''
+        /api/v1/ui-config — returns nested navLayout alongside
+        flat pluginPages. The shell uses navLayout for nav rendering
+        and pluginPages for route registration.
+      '''
+      technology 'REST'
+    }
+  }
+
+  // ── Runtime: Shell (GUI) ────────────────────
+
+  shell = system 'Shell (GUI)' {
+    description '''
+      Renders expandable nav sections from nested navLayout.
+      Indexes module groups for hierarchical search.
+      Composes breadcrumbs from the group → module → extension chain.
+    '''
+
+    navRenderer = component 'Navigation Renderer' {
+      description '''
+        AppNav — updated to handle nested navLayout entries.
+
+        For { type: "group" }: renders PF NavExpandable.
+        The group header is a button (expand/collapse), not a link.
+        isExpanded is true when any child module is the active route.
+
+        For { type: "page" } inside a group: renders NavItem
+        as a child of the NavExpandable.
+
+        For { type: "page" } at top level: renders NavItem
+        directly (unchanged behavior).
+
+        navSection ("main" / "bottom") applies at the group level.
+        All modules in a group inherit the section.
+      '''
+      technology 'React / PatternFly'
+    }
+
+    router = component 'Router' {
+      description '''
+        Registers routes from pluginPages (flat, unchanged).
+        Routes registered longest-path-first to prevent prefix shadowing.
+        Adds redirect for each group: /{groupId} → /{groupId}/{firstChildId}.
+      '''
+      technology 'React Router'
+    }
+
+    searchEngine = component 'Search Engine' {
+      description '''
+        Extended index building:
+
+        Phase 0 (new) — Group scan:
+        Iterates fleetshift.module-group extensions. Inserts each
+        as category "nav-group" with route to first child.
+        Stores group metadata for breadcrumb composition.
+
+        Phase 1 — Module scan (updated):
+        Grouped modules get group field set on their search entry.
+        Route resolves to /{groupId}/{moduleId}.
+
+        Phase 2 — Extension scan (unchanged):
+        Extensions inherit the group field from their parent module.
+
+        Result grouping renders groups as collapsible headers
+        with child modules indented beneath. Clicking a group
+        navigates to its first child module.
+      '''
+      technology 'Orama'
+    }
+
+    breadcrumbs = component 'Breadcrumbs (future)' {
+      description '''
+        Not yet implemented. Will derive breadcrumb chain from
+        navLayout and current route:
+
+        /{groupId}/{moduleId} → Group Label > Module Label
+        /{pluginKey}/{moduleId} → Module Label (no parent)
+      '''
+      technology 'React / PatternFly'
+    }
+  }
+
+  // ── Nav Reorder (existing) ────────────────────
+
+  navReorder = system 'Nav Reorder' {
+    description '''
+      Existing capability extended for groups. Users reorder nav
+      items via Settings page. Groups appear as atomic draggable
+      items — moving a group moves all its children. Reordering
+      is top-level only (groups and ungrouped pages).
+
+      getNavPages() returns groups alongside pages so the
+      NavOrderEditor treats them identically.
+    '''
+
+    navOrderStore = store 'Nav Order (IndexedDB)' {
+      description '''
+        IndexedDB nav-order store. Flat string[] of entry IDs.
+        Groups use their groupId, pages use pageId.
+        orderByIds() sorts navLayout entries by saved order.
+      '''
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  //  Relationships
+  // ─────────────────────────────────────────────
+
+  // Developer → Build
+  pluginDev -> buildTime.builders 'declares groups and modules'
+
+  // Plugin model relationships
+  pluginModel.moduleGroups -[groups]-> pluginModel.modules 'modules reference group by id (same plugin only)'
+  pluginModel.modules -> pluginModel.extensions 'extensionPoints → type string match'
+
+  // Plugin model → Build
+  pluginModel.moduleGroups -> buildTime.builders 'createModuleGroup()'
+  pluginModel.modules -> buildTime.builders 'createModule({ group })'
+  pluginModel.extensions -> buildTime.builders 'createClusterProvider(), etc.'
+
+  // Build-time flow
+  buildTime.builders -[produces]-> buildTime.fleetshiftPlugin 'FleetshiftExtension[]'
+  buildTime.fleetshiftPlugin -[validates]-> buildTime.builders 'validates group references, unique ids'
+  buildTime.fleetshiftPlugin -[produces]-> buildTime.manifest 'plugin-manifest.json with groups'
+
+  // Manifest → Backend
+  goBackend.manifestReader -[consumes]-> buildTime.manifest 'reads at startup'
+  goBackend.manifestReader -> goBackend.routeGenerator 'groups + modules + extensions'
+  goBackend.routeGenerator -> goBackend.uiConfig 'nested navLayout, flat pluginPages'
+
+  // Backend → Shell
+  shell.navRenderer -[consumes]-> goBackend.uiConfig 'reads nested navLayout'
+  shell.router -[consumes]-> goBackend.uiConfig 'reads pluginPages + group redirects'
+  shell.searchEngine -[consumes]-> goBackend.uiConfig 'reads groups, modules, extensions'
+
+  // Shell internals
+  shell.navRenderer -> shell.router 'NavItem links to routes'
+  shell.searchEngine -> shell.breadcrumbs 'group → module → extension chain'
+  shell.breadcrumbs -[consumes]-> goBackend.uiConfig 'derives hierarchy from navLayout'
+
+  // Users
+  endUser -> shell.navRenderer 'expands/collapses groups, clicks modules'
+  endUser -> shell.searchEngine 'searches, sees hierarchical results'
+  endUser -> shell.breadcrumbs 'follows breadcrumb navigation'
+
+  // Nav reorder (existing, extended for groups)
+  admin -> navReorder 'reorders groups and modules via settings'
+  navReorder.navOrderStore -> shell.navRenderer 'overrides default navLayout'
+  navReorder.navOrderStore -> shell.searchEngine 'search follows active layout'
+}
+
+// ─────────────────────────────────────────────
+//  Views
+// ─────────────────────────────────────────────
+
+views {
+
+  // ── Landscape ───────────────────────────────
+
+  view index {
+    title 'Module Groups — Landscape'
+    description '''
+      End-to-end: plugin developers declare module groups and assign
+      modules to them. Build validates same-plugin scoping. Backend
+      generates nested navLayout. Shell renders expandable nav sections,
+      hierarchical search, and breadcrumbs.
+    '''
+
+    include
+      pluginDev,
+      endUser,
+      admin,
+      pluginModel,
+      buildTime,
+      goBackend,
+      shell,
+      navReorder
+
+    style pluginModel {
+      color green
+    }
+    style buildTime {
+      color red
+    }
+    style goBackend {
+      color primary
+    }
+    style shell {
+      color secondary
+    }
+    style navReorder {
+      color muted
+    }
+  }
+
+  // ── Group Scoping ──────────────────────────
+
+  view groupScopingView of pluginModel {
+    title 'Module Groups — Plugin-Scoped Grouping'
+    description '''
+      Groups are plugin-scoped: a plugin defines its own groups
+      and only its own modules can reference them. Cross-plugin
+      page injection is not allowed. Extensions remain the
+      cross-plugin composition mechanism — any plugin can extend
+      any module's extensionPoints regardless of grouping.
+
+      Example: settings-plugin declares group "settings" and
+      assigns its Navigation, Authentication, Extensions modules.
+      No other plugin can add a module to the "settings" group.
+      But any plugin can register extensions against extensionPoints
+      declared on those modules.
+    '''
+
+    include
+      *,
+      buildTime.fleetshiftPlugin,
+      buildTime.builders
+
+    style moduleGroups {
+      color indigo
+    }
+    style modules {
+      color primary
+    }
+    style extensions {
+      color green
+    }
+  }
+
+  // ── Build-Time Validation ──────────────────
+
+  view buildView of buildTime {
+    title 'Module Groups — Build-Time Validation'
+    description '''
+      FleetshiftPlugin validates group references at build time:
+      group must exist in the same extensions array, ids are URL-safe,
+      module ids are unique within their group. Structurally enforces
+      same-plugin scoping — the group and its modules are in one
+      FleetshiftPlugin instance. After validation, delegates to
+      DynamicRemotePlugin unchanged.
+    '''
+
+    include
+      *,
+      pluginDev,
+      pluginModel.moduleGroups,
+      pluginModel.modules,
+      goBackend.manifestReader
+
+    style builders {
+      color green
+    }
+    style fleetshiftPlugin {
+      color red
+    }
+  }
+
+  // ── Navigation Rendering ───────────────────
+
+  view navView of shell.navRenderer {
+    title 'Module Groups — Navigation Rendering'
+    description '''
+      Shell reads nested navLayout from backend. Group entries
+      render as PF NavExpandable (button header, not link).
+      Child modules render as NavItem within the expandable.
+      Groups auto-expand when a child is the active route.
+      navSection (main/bottom) applies at the group level.
+
+      Admin overrides (future) replace the default navLayout
+      with a customized version — nav renderer is agnostic
+      to the source.
+    '''
+
+    include
+      *,
+      goBackend.uiConfig,
+      shell.router,
+      endUser,
+      navReorder.navOrderStore
+
+    style navRenderer {
+      color primary
+    }
+    style router {
+      color green
+    }
+  }
+
+  // ── Search Hierarchy ───────────────────────
+
+  view searchView of shell.searchEngine {
+    title 'Module Groups — Hierarchical Search'
+    description '''
+      Search index extends with a group scan phase:
+      fleetshift.module-group entries become "nav-group" category.
+      Grouped modules carry a group field linking to their parent group.
+      Extensions inherit the group from their parent module.
+
+      Result rendering: groups are collapsible section headers,
+      modules indent beneath, extensions indent further.
+      Clicking a group navigates to its first child module.
+
+      Breadcrumbs derive the group → module → extension chain
+      from navLayout metadata.
+    '''
+
+    include
+      *,
+      goBackend.uiConfig,
+      shell.breadcrumbs,
+      endUser,
+      pluginModel.moduleGroups,
+      pluginModel.modules,
+      pluginModel.extensions
+
+    style searchEngine {
+      color indigo
+    }
+    style breadcrumbs {
+      color green
+    }
+  }
+}

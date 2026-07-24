@@ -1,0 +1,43 @@
+name: E2E Tests
+
+# Disabled — e2e tests depend on mock servers that are no longer valid.
+# Re-enable when e2e infrastructure is updated for the Go backend.
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Build mock plugins
+        run: npm run build --workspace=packages/mock-ui-plugins
+
+      - name: Start servers
+        run: |
+          npm run dev &
+
+      - name: Wait for servers
+        run: npx wait-on http://localhost:4000/api/v1/clusters http://localhost:8001 http://localhost:3000 --timeout 120000
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: packages/e2e/playwright-report/
+          retention-days: 14

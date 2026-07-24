@@ -1,0 +1,51 @@
+.ome-gcphcp-terminal {
+  height: 400px;
+  overflow-y: auto;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: var(--pf-t--global--font--family--mono);
+  font-size: var(--pf-t--global--font--size--sm);
+  padding: var(--pf-t--global--spacer--sm) 0;
+  border-radius: var(--pf-t--global--border--radius--small);
+  border: 1px solid #30363d;
+
+  &__line {
+    display: flex;
+    padding: 1px var(--pf-t--global--spacer--sm);
+
+    &:hover {
+      background: #161b22;
+    }
+  }
+
+  &__line-number {
+    min-width: 4ch;
+    text-align: right;
+    color: #484f58;
+    user-select: none;
+    padding-right: var(--pf-t--global--spacer--md);
+    flex-shrink: 0;
+  }
+
+  &__line-text {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  &__highlight {
+    background: #e3b341;
+    color: #0d1117;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+  &__empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #484f58;
+    font-style: italic;
+  }
+}

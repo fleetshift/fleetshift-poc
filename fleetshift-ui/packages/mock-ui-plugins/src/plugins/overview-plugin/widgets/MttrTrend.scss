@@ -1,0 +1,11 @@
+.ome-overview-mttr {
+  height: 250px;
+  width: 100%;
+
+  svg {
+    text, tspan {
+      fill: var(--pf-t--global--text--color--regular) !important;
+    }
+  }
+}
+

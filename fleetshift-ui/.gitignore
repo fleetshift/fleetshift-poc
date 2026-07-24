@@ -1,0 +1,12 @@
+node_modules
+dist
+.cache
+reference
+test-results
+playwright-report
+getting-started
+.env
+web
+.DS_Store
+.mf
+packages/common/src/generated/pf-icons.json

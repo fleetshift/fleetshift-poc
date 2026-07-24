@@ -1,0 +1,44 @@
+{
+  "name": "@fleetshift/gui",
+  "description": "React SPA shell — composable dashboard with Module Federation and Scalprum plugin loading.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rspack build",
+    "test": "vitest run --root ../.. packages/gui/",
+    "test:ct": "playwright test -c playwright-ct.config.ts"
+  },
+  "dependencies": {
+    "@dnd-kit/react": "^0.3.2",
+    "@fleetshift/common": "*",
+    "@module-federation/enhanced": "^2.0.1",
+    "@openshift/dynamic-plugin-sdk": "^8.0.0",
+    "@orama/orama": "^3.1.18",
+    "@patternfly/patternfly": "^6.5.1",
+    "@patternfly/react-charts": "^8.5.1",
+    "@patternfly/react-core": "^6.5.1",
+    "@patternfly/react-icons": "^6.5.1",
+    "@patternfly/react-table": "^6.5.1",
+    "@react-querybuilder/core": "^8.20.2",
+    "@scalprum/core": "^0.10.0",
+    "@scalprum/react-core": "^0.13.0",
+    "clsx": "^2.1.1",
+    "motion": "^12.0.0",
+    "oidc-client-ts": "^3.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-oidc-context": "^3.3.0",
+    "react-router-dom": "^7.13.1"
+  },
+  "devDependencies": {
+    "@rspack/cli": "^2.0.8",
+    "@rspack/core": "^2.0.8",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "css-loader": "^7.1.4",
+    "sass": "^1.97.3",
+    "sass-loader": "^16.0.7",
+    "zod": "^4.4.3"
+  }
+}

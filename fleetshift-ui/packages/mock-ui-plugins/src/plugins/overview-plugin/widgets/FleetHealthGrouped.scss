@@ -1,0 +1,26 @@
+.ome-overview-fleet-grouped-wrap {
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+}
+
+.ome-overview-fleet-grouped-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pf-t--global--spacer--sm);
+
+  &__name {
+    font-weight: var(--pf-t--global--font--weight--heading--bold);
+    color: var(--pf-t--global--text--color--regular);
+  }
+
+  &__stats {
+    display: flex;
+    align-items: center;
+    gap: var(--pf-t--global--spacer--sm);
+  }
+
+  &__total {
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+  }
+}

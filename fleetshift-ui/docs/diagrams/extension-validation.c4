@@ -1,0 +1,527 @@
+// FleetShift UI — Extension Validation Architecture
+// Source of truth: docs/extension-validation.md, packages/build-utils/src/extensions/
+//
+// Two-sided trust boundary for ALL extension types:
+//
+// 1. Self-validation — extension proves readiness via isValidExtension
+//    CodeRef (mandatory on all types). Checks backend health,
+//    credentials, config.
+//
+// 2. Provider-side validation — extension point owner validates incoming
+//    extensions via required validate CodeRef on ExtensionPointDeclaration.
+//    Checks structural contract (resolved card, wizard, icon components).
+//
+// Build-time enforcement ensures CodeRefs exist. Runtime hook calls both
+// validation functions before surfacing extensions. Invalid extensions
+// are rejected and logged with source (self vs provider).
+//
+// All extension types require validation — no exemptions.
+// The shell does not hardcode per-type checks; extensions and
+// extension point owners provide their own validation functions.
+
+// ─────────────────────────────────────────────
+//  Specification
+// ─────────────────────────────────────────────
+
+specification {
+
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+      color primary
+    }
+  }
+
+  element component {
+    style {
+      shape rectangle
+      color secondary
+    }
+  }
+
+  element store {
+    style {
+      shape storage
+      color amber
+    }
+  }
+
+  element external {
+    style {
+      shape rectangle
+      color gray
+    }
+  }
+
+  relationship produces {
+    color green
+    line solid
+  }
+
+  relationship consumes {
+    color amber
+    line solid
+  }
+
+  relationship validates {
+    color red
+    line dashed
+  }
+
+  relationship rejects {
+    color red
+    line solid
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Model
+// ─────────────────────────────────────────────
+
+model {
+
+  // ── Actors ──────────────────────────────────
+
+  pluginDev = actor 'Plugin Developer' {
+    description '''
+      Authors plugins with extensions. Must provide an
+      isValidExtension CodeRef on every extension (all types).
+      Extension point declarations must include a validate
+      CodeRef. Build fails if either is missing.
+    '''
+  }
+
+  endUser = actor 'End User' {
+    description '''
+      Interacts with the shell UI. Only sees extensions that pass
+      both self-validation and provider validation. Invalid
+      extensions are silently excluded from search, nav, and
+      rendering.
+    '''
+  }
+
+  // ── Build-Time Layer ────────────────────────
+
+  buildTime = system 'Build-Time Validation' {
+    description '''
+      Extended to enforce isValidExtension CodeRef on ALL extension
+      types and validate CodeRef on ALL extension point declarations.
+      Existing validation (IDs, labels, CodeRef format, exposedModules
+      mapping) is unchanged. New checks are additive.
+    '''
+
+    builders = component 'Extension Builders' {
+      description '''
+        All builders (createModule, createModuleGroup, createSetup,
+        createClusterProvider, createOnboardingAction) require
+        isValidExtension via BaseExtensionProperties. TypeScript
+        enforces at compile time. createModule also requires
+        validate on ExtensionPointDeclaration entries.
+      '''
+      technology 'TypeScript'
+    }
+
+    validationCheck = component 'Validation CodeRef Check' {
+      description '''
+        NEW. Added to the shared base property validator for all
+        extension types, and to validateModuleProperties() for
+        extension point declarations.
+
+        For extensions: validateCodeRef(props.isValidExtension).
+        For extension points: validateCodeRef(ep.validate).
+
+        Build error if:
+        • isValidExtension is missing on any extension
+        • validate is missing on any extensionPoint declaration
+        • Not a valid CodeRef object
+        • $codeRef does not match ModuleName.exportName
+
+        The existing extractCodeRefs + exposedModules check in
+        validateExtensionSet() automatically validates that
+        the referenced modules are exposed.
+      '''
+      technology 'TypeScript'
+    }
+
+    fleetshiftPlugin = component 'FleetshiftPlugin' {
+      description '''
+        Enhanced: calls validateExtensionSet() with new checks,
+        AND hoists extensionPoint validate CodeRefs into a
+        top-level _validators property on module extensions.
+        This lets Scalprum auto-resolve validators alongside
+        other top-level CodeRefs — no manual getExposedModule.
+        Build fails on any isValidExtension/validate error.
+      '''
+      technology 'Rspack Plugin'
+    }
+
+    manifest = store 'Plugin Manifest' {
+      description '''
+        plugin-manifest.json — all extension entries now include
+        an isValidExtension property with an encoded CodeRef:
+        { "$codeRef": "ValidationModule.isValid" }
+
+        Module extensions with extensionPoints include:
+        1. validate CodeRef on each declaration
+        2. Build-generated _validators property hoisting
+           validate CodeRefs to the top level, keyed by
+           extension point type — Scalprum resolves these
+
+        exposedModules must be served by the backend for
+        edge-case direct module loading via getExposedModule.
+      '''
+    }
+  }
+
+  // ── Runtime: Validation Layer ───────────────
+
+  validationLayer = system 'Runtime Validation' {
+    description '''
+      NEW system. Sits between the Scalprum plugin runtime and
+      the shell's extension consumers. Validates ALL extensions
+      before they reach search, nav, or rendering.
+      Invalid extensions are rejected with logged reasons.
+    '''
+
+    validationHook = component 'useValidatedExtensions Hook' {
+      description '''
+        NEW. React hook wrapping useResolvedExtensions.
+
+        Signature: useValidatedExtensions<T>(predicate) =>
+          [validated: T[], loaded: boolean, rejections[]]
+
+        Discovery: walks resolved module extensions to find which
+        module declares the extension point for the queried type.
+        Reads the _validators property (hoisted at build time)
+        to get the already-resolved validate function. No manual
+        getExposedModule needed — Scalprum resolves it.
+
+        Two-pass flow:
+        Pass 1 (provider): calls validate(extension) synchronously
+          — boolean, reasons logged inside. Wired internally so
+          the developer cannot skip or fake validation.
+        Pass 2 (self): calls isValidExtension() on survivors — async
+        Both must pass. Provider runs first — filters broken
+        manifests before loading extension code.
+        Rejections carry source: "self" | "provider".
+      '''
+      technology 'React Hook'
+    }
+
+    validationStore = store 'Validation Results' {
+      description '''
+        NEW. Scalprum shared store exposed by the shell,
+        accessible cross-MF via useValidationResults hook
+        (re-exported from @fleetshift/common). No React
+        context provider needed — no additional singletons.
+
+        Populated by useValidatedExtensions. Consumed by
+        the /debug page and any plugin that needs validation
+        visibility.
+
+        Shape: { rejections: ValidationRejection[] }
+      '''
+    }
+
+    extensionValidator = component 'Self-Validation Function' {
+      description '''
+        Plugin-provided async function exposed as a CodeRef.
+        Declared on the extension via isValidExtension.
+        Signature: () => Promise<{ valid: boolean; reason?: string }>
+
+        Typically checks:
+        • Backend service reachability
+        • Required configuration or credentials
+        • Feature flag state
+        • API version compatibility
+
+        Resolved by Scalprum at runtime, same as component,
+        card, or wizard CodeRefs.
+      '''
+      technology 'TypeScript (extension-provided)'
+    }
+
+    providerValidator = component 'Provider Validation Function' {
+      description '''
+        Extension-point-owner-provided synchronous predicate
+        exposed as a CodeRef. Declared on ExtensionPointDeclaration
+        via validate (required).
+        Signature: (extension) => boolean
+        Honors the useResolvedExtensions ExtensionPredicate
+        contract. Rejection reasons logged inside via console.warn
+        — the hook only sees true/false.
+
+        Typically checks:
+        • Extension type matches expected type
+        • Required CodeRefs resolved to functions/components
+        • Structural contract conformance (card, wizard, icon)
+
+        Runs before self-validation — filters broken manifests
+        before loading extension-provided code.
+      '''
+      technology 'TypeScript (provider-provided)'
+    }
+  }
+
+  // ── Runtime: Shell (GUI) ────────────────────
+
+  shell = system 'Shell (GUI)' {
+    description '''
+      Extension consumers updated to use useValidatedExtensions
+      instead of direct useResolvedExtensions for rendering and
+      nav. Search indexes from backend metadata without
+      extension resolution. Only validated extensions reach
+      rendering or nav.
+    '''
+
+    searchEngine = component 'Search Engine' {
+      description '''
+        SearchProvider.tsx — builds the Orama index from
+        backend plugin registry metadata (title, description,
+        keywords). No extension resolution or chunk loading
+        at index time.
+
+        CodeRefs (icons, components) resolved lazily only
+        when displaying search result hits. Validation does
+        not gate indexing — it runs at render time when the
+        consuming page resolves extensions.
+      '''
+      technology 'Orama'
+    }
+
+    debugPage = component 'Debug Page' {
+      description '''
+        Extended with a new "Extension Validation" panel.
+        Reads from ValidationResults store.
+
+        Shows:
+        • Count: N validated, M rejected
+        • Per rejection: extension ID, type, plugin, reason
+        • Per validated: extension ID, type, plugin, checkmark
+      '''
+      technology 'React / PatternFly'
+    }
+
+    extensionRenderer = component 'Extension Renderer' {
+      description '''
+        Unchanged directly. Receives only validated extensions
+        from the validation layer. Components like PluginPage
+        render whatever extensions they receive — validation
+        is upstream.
+      '''
+      technology 'React'
+    }
+  }
+
+  // ── Externals ───────────────────────────────
+
+  scalprumRuntime = external 'Scalprum Runtime' {
+    description '''
+      Resolves CodeRefs including the new isValidExtension CodeRef.
+      The validation hook consumes the resolved function reference
+      and calls it. Scalprum itself is unaware of validation semantics.
+    '''
+  }
+
+  pluginBackend = external 'Plugin Backend Services' {
+    description '''
+      Backend services that extensions validate against.
+      Examples: /api/v1/integrations/gcp/status, credential stores.
+      The shell does not know about these — the extension's
+      isValidExtension function encapsulates the check.
+    '''
+  }
+
+  // ─────────────────────────────────────────────
+  //  Relationships
+  // ─────────────────────────────────────────────
+
+  // Developer → Build
+  pluginDev -> buildTime.builders 'declares extensions with isValidExtension CodeRef'
+
+  // Build-time flow
+  buildTime.builders -[produces]-> buildTime.fleetshiftPlugin 'FleetshiftExtension[]'
+  buildTime.builders -> buildTime.validationCheck 'per-type property validation'
+  buildTime.validationCheck -[validates]-> buildTime.builders 'checks isValidExtension CodeRef presence + format'
+  buildTime.fleetshiftPlugin -[validates]-> buildTime.validationCheck 'validateExtensionSet() calls per-type validators'
+  buildTime.fleetshiftPlugin -[produces]-> buildTime.manifest 'plugin-manifest.json with isValidExtension CodeRefs'
+
+  // Scalprum resolves CodeRefs
+  scalprumRuntime -> buildTime.manifest 'loads MF entry, resolves CodeRefs'
+  scalprumRuntime -> validationLayer.validationHook 'useResolvedExtensions provides resolved extensions'
+
+  // Validation flow (NEW)
+  validationLayer.validationHook -[consumes]-> scalprumRuntime 'gets resolved extensions with isValidExtension'
+
+  // Pass 1: provider-side validation (structural)
+  validationLayer.validationHook -> validationLayer.providerValidator 'Pass 1: calls extensionPoint.validate(props)'
+  validationLayer.providerValidator -[validates]-> validationLayer.extensionValidator 'filters broken manifests before self-validation'
+
+  // Pass 2: self-validation (runtime readiness)
+  validationLayer.validationHook -> validationLayer.extensionValidator 'Pass 2: calls isValidExtension() on survivors'
+  validationLayer.extensionValidator -> pluginBackend 'checks backend health, credentials, config'
+
+  validationLayer.validationHook -[produces]-> validationLayer.validationStore 'records results + rejections (with source: self|provider)'
+
+  // Validation → Shell consumers
+  shell.searchEngine -> buildTime.manifest 'indexes from backend metadata (no chunk loading)'
+  shell.debugPage -[consumes]-> validationLayer.validationStore 'reads validation results + rejections'
+  shell.extensionRenderer -[consumes]-> validationLayer.validationHook 'receives only validated extensions'
+
+  // Users
+  endUser -> shell.searchEngine 'searches — metadata-indexed, CodeRefs resolved lazily'
+  endUser -> shell.extensionRenderer 'navigates — only interacts with validated extensions'
+  endUser -> shell.debugPage 'developer: inspects validation status'
+}
+
+// ─────────────────────────────────────────────
+//  Views
+// ─────────────────────────────────────────────
+
+views {
+
+  // ── Landscape ───────────────────────────────
+
+  view index {
+    title 'Extension Validation — Landscape'
+    description '''
+      End-to-end: plugin developers declare extensions with isValidExtension
+      CodeRefs. Extension point owners declare validate CodeRefs (required).
+      Build validates CodeRef presence. At runtime, the validation hook runs
+      two passes: provider validation first (synchronous boolean predicate),
+      then self-validation (async readiness check with cache). Only extensions
+      passing both reach search, nav, and rendering. Rejections logged with
+      source to console and /debug.
+    '''
+
+    include
+      pluginDev,
+      endUser,
+      buildTime,
+      validationLayer,
+      shell,
+      scalprumRuntime,
+      pluginBackend
+
+    style buildTime {
+      color red
+    }
+    style validationLayer {
+      color amber
+    }
+    style shell {
+      color secondary
+    }
+    style scalprumRuntime {
+      color muted
+    }
+    style pluginBackend {
+      color gray
+    }
+  }
+
+  // ── Build-Time Enforcement ──────────────────
+
+  view buildView of buildTime {
+    title 'Extension Validation — Build-Time Enforcement'
+    description '''
+      FleetshiftPlugin validates that ALL extensions include
+      isValidExtension CodeRefs and ALL extension point declarations
+      include validate CodeRefs. The shared base validator and
+      per-type validators gain CodeRef checks. The existing
+      extractCodeRefs + exposedModules check ensures the referenced
+      modules are exposed.
+    '''
+
+    include
+      *,
+      pluginDev
+
+    style builders {
+      color green
+    }
+    style validationCheck {
+      color red
+    }
+    style fleetshiftPlugin {
+      color red
+    }
+  }
+
+  // ── Runtime Validation Flow ─────────────────
+
+  view validationView of validationLayer {
+    title 'Extension Validation — Runtime Validation Flow'
+    description '''
+      The useValidatedExtensions hook orchestrates two-pass validation:
+
+      Pass 1 (provider validation — structural, synchronous):
+      1. Gets all resolved extensions via useResolvedExtensions
+      2. For each: looks up the extension point declaration
+      3. Calls validate(extension) synchronously — boolean return,
+         reasons logged inside via console.warn
+      4. false/threw → reject with source: "provider"
+      Filters broken manifests before loading extension code.
+
+      Pass 2 (self-validation — runtime readiness):
+      5. For survivors: checks SelfValidationCache
+      6. Cache miss: calls isValidExtension() — async, no args
+      7. Success cached. Failure not cached (retried next call)
+
+      Finalization:
+      7. Collects all rejections with reasons and source
+      8. Logs rejections to console
+      9. Populates the validation store for /debug page
+    '''
+
+    include
+      *,
+      scalprumRuntime,
+      pluginBackend,
+      shell.searchEngine,
+      shell.debugPage
+
+    style validationHook {
+      color primary
+    }
+    style extensionValidator {
+      color green
+    }
+    style validationStore {
+      color amber
+    }
+  }
+
+  // ── Search Integration ──────────────────────
+
+  view searchView {
+    title 'Extension Validation — Search Impact'
+    description '''
+      SearchProvider builds the Orama index from backend plugin
+      registry metadata (title, description, keywords) — no
+      extension resolution, no chunk loading, no validation at
+      index time.
+
+      CodeRefs (icons, components) are resolved lazily only
+      when displaying search result hits. Validation runs at
+      the consuming page level when extensions are resolved
+      for rendering, not during search indexing.
+    '''
+
+    include
+      shell.searchEngine,
+      buildTime.manifest,
+      endUser
+
+    style shell.searchEngine {
+      color indigo
+    }
+  }
+}

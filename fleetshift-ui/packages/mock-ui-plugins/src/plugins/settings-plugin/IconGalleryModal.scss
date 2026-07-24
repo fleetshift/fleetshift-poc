@@ -1,0 +1,59 @@
+.ome-settings-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: var(--pf-t--global--spacer--xs);
+  max-width: 400px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: var(--pf-t--global--spacer--sm);
+}
+
+.ome-settings-icon-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+
+  &:hover {
+    border-color: var(--pf-t--global--border--color--hover);
+    background-color: var(--pf-t--global--background--color--primary--hover);
+  }
+
+  &--selected {
+    border-color: var(--pf-t--global--color--brand--default);
+    background-color: var(--pf-t--global--background--color--primary--clicked);
+    outline: 2px solid var(--pf-t--global--color--brand--default);
+    outline-offset: -2px;
+  }
+}
+
+.ome-settings-icon-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--sm);
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+  margin-bottom: var(--pf-t--global--spacer--md);
+  border: 1px solid var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small);
+
+  &__icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+  }
+
+  &__name {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+  }
+}

@@ -1,0 +1,447 @@
+// FleetShift UI — Feature Contract Architecture
+// Source of truth: docs/feature-contracts.md, packages/build-utils/src/extensions/
+//
+// How plugins declare capabilities via typed extension builders,
+// how the shell discovers and renders them, and how the Go backend
+// reads manifests for navigation and routing.
+//
+// The model is generic: modules are the primary unit, extensionPoints
+// are the linking mechanism, and any extension type can register against
+// them. Specific types (cluster-provider, setup) are examples, not
+// first-class architectural concepts.
+
+// ─────────────────────────────────────────────
+//  Specification
+// ─────────────────────────────────────────────
+
+specification {
+
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+      color primary
+    }
+  }
+
+  element component {
+    style {
+      shape rectangle
+      color secondary
+    }
+  }
+
+  element store {
+    style {
+      shape storage
+      color amber
+    }
+  }
+
+  element external {
+    style {
+      shape rectangle
+      color gray
+    }
+  }
+
+  relationship produces {
+    color green
+    line solid
+  }
+
+  relationship consumes {
+    color amber
+    line solid
+  }
+
+  relationship validates {
+    color red
+    line dashed
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Model
+// ─────────────────────────────────────────────
+
+model {
+
+  // ── Actors ──────────────────────────────────
+
+  pluginDev = actor 'Plugin Developer' {
+    description 'Authors plugins using typed builder functions. Declares extensions in webpack config.'
+  }
+
+  endUser = actor 'End User' {
+    description 'Interacts with the shell UI — navigates pages, uses search, runs wizards.'
+  }
+
+  // ── Build-Time Layer ────────────────────────
+
+  buildTime = system 'Build-Time Validation' {
+    description '''
+      Webpack build pipeline. Plugins declare extensions via typed builders.
+      FleetshiftPlugin validates all extensions at compile time before
+      delegating to the SDK's DynamicRemotePlugin for Module Federation output.
+    '''
+
+    builders = component 'Extension Builders' {
+      description '''
+        Typed factory functions: createModule(), createSetup(),
+        createClusterProvider(), or any builder wrapping FleetshiftExtension.
+        Each returns a FleetshiftExtension<TType, TExtra> with the correct
+        type tag and validated properties.
+
+        The TType parameter accepts any string — built-in types get
+        domain-specific validation, custom types get base validation
+        (id, label). This is how addons define new extension types.
+
+        Builder functions are convenience wrappers. The underlying
+        FleetshiftExtension type is the contract.
+      '''
+      technology 'TypeScript'
+    }
+
+    fleetshiftPlugin = component 'FleetshiftPlugin' {
+      description '''
+        Webpack plugin wrapper. Receives extensions[] + pluginMetadata
+        (including exposedModules). Runs validateExtensionSet() in the
+        constructor — fails the build on:
+        • Invalid IDs, labels, CodeRef format
+        • CodeRef referencing a module not in exposedModules
+        • Duplicate extension IDs within a plugin
+        • Invalid requires entries on setup extensions
+        • Null or non-object properties
+
+        Then delegates to DynamicRemotePlugin for MF output.
+        The plugin is the enforcement boundary — invalid extensions
+        never make it to a manifest.
+      '''
+      technology 'Webpack Plugin'
+    }
+
+    sdkPlugin = component 'DynamicRemotePlugin' {
+      description '''
+        OpenShift Dynamic Plugin SDK webpack plugin.
+        Generates Module Federation container entry and plugin-manifest.json.
+        FleetshiftPlugin delegates to this after validation passes.
+      '''
+      technology '@openshift/dynamic-plugin-sdk-webpack'
+    }
+
+    manifest = store 'Plugin Manifest' {
+      description '''
+        plugin-manifest.json — generated per plugin at build time.
+        Contains the extension array (types + properties with CodeRefs),
+        plugin metadata (name, version), and exposed module references.
+        Served as a static asset alongside the MF entry script.
+      '''
+    }
+  }
+
+  // ── Plugin Extension Model ──────────────────
+
+  pluginModel = system 'Plugin Extension Model' {
+    description '''
+      The conceptual model plugins use to declare capabilities.
+      Modules are pages. Modules can declare extensionPoints.
+      Extensions register against extensionPoints by type string.
+      All extensions share base properties (id, label, description,
+      keywords, search customization). Domain-specific properties
+      are layered on top per type.
+    '''
+
+    modules = component 'Modules' {
+      description '''
+        The primary unit. A module is a routable page in the shell.
+        Declares id, label, component CodeRef, description, keywords.
+
+        A module may also declare extensionPoints — named slots that
+        advertise a type string. Other plugins register extensions
+        against that type string to contribute content to the module.
+
+        Example: "Clusters" module declares extensionPoint
+        "providers" with type "fleetshift.cluster-provider".
+      '''
+    }
+
+    extensionPoints = component 'Extension Points' {
+      description '''
+        Declared on modules: Record<name, { type, description }>.
+        The type string is the contract — any extension with a matching
+        type becomes a child of the declaring module.
+
+        Extension points are the generic linking mechanism. The shell
+        uses them to compose navigation trees, search groupings, and
+        route hierarchies. No hard-coded knowledge of specific types.
+      '''
+    }
+
+    extensions = component 'Extensions' {
+      description '''
+        Any extension registering against an extensionPoint.
+        Shares base properties with modules (id, label, description,
+        keywords, searchResult, searchIcon). Adds domain-specific
+        properties per type — icon/card/wizard for cluster providers,
+        path/requires/requiresAuth for setup steps, etc.
+
+        Extensions are contributed by any plugin, not just the one
+        declaring the extensionPoint. This is the cross-plugin
+        composition model.
+      '''
+    }
+  }
+
+  // ── Runtime: Go Backend ─────────────────────
+
+  goBackend = system 'Go Backend' {
+    description '''
+      Reads plugin manifests at startup. Generates navigation layout,
+      route configuration, and UI config from extension metadata.
+      Serves the shell SPA and proxies plugin assets.
+    '''
+
+    manifestReader = component 'Manifest Reader' {
+      description '''
+        Parses plugin-manifest.json files. Extracts all extension types.
+        The backend reads extension metadata generically — it does not
+        contain per-type business logic beyond route generation.
+      '''
+    }
+
+    routeGenerator = component 'Route & Nav Generator' {
+      description '''
+        Generates page slugs from module labels (lowercase, hyphenated).
+        Composes global feature IDs as {pluginKey}.{extensionId}.
+        Builds the nav layout tree and route config served to the shell.
+      '''
+    }
+
+    uiConfig = component 'UI Config API' {
+      description '''
+        /api/v1/ui-config endpoint. Returns the full plugin registry,
+        navigation layout, available routes, and user configuration.
+        The shell bootstraps from this response.
+      '''
+      technology 'REST'
+    }
+  }
+
+  // ── Runtime: Shell (GUI) ────────────────────
+
+  shell = system 'Shell (GUI)' {
+    description '''
+      React 18 SPA. Bootstraps from UI config, initializes Scalprum plugin
+      runtime, loads plugin MF entries on demand. Renders navigation, search,
+      and plugin content. Consumes the extension model generically.
+    '''
+
+    scalprumRuntime = component 'Scalprum Runtime' {
+      description '''
+        Plugin loader and registry. Fetches plugin manifests,
+        initializes Module Federation containers, resolves CodeRefs
+        to actual React components via getExposedModule().
+        Shared dependencies (React, PF, router) are MF singletons.
+      '''
+      technology 'Scalprum / Module Federation'
+    }
+
+    searchEngine = component 'Search Engine' {
+      description '''
+        Indexes modules and their extensions for full-text search.
+        Uses extensionPoints to build parent-child groupings —
+        entirely generic, no per-type logic. Plugin-provided
+        searchResult and searchIcon CodeRefs customize rendering.
+        See: search.c4 for the detailed search architecture.
+      '''
+      technology 'Orama'
+    }
+
+    extensionRenderer = component 'Extension Renderer' {
+      description '''
+        Resolves CodeRefs and renders plugin components.
+        ScalprumComponent loads the MF module by name
+        (must match exposedModules key exactly — no ./ prefix).
+        Handles page routing, setup wizard step ordering (topological
+        sort on requires), and provider selection pages.
+      '''
+      technology 'React'
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  //  Relationships
+  // ─────────────────────────────────────────────
+
+  // Developer → Build
+  pluginDev -> buildTime.builders 'declares extensions with typed builders'
+
+  // Plugin model → Build
+  pluginModel.modules -> buildTime.builders 'createModule()'
+  pluginModel.extensions -> buildTime.builders 'createSetup(), createClusterProvider(), custom builders'
+  pluginModel.modules -> pluginModel.extensionPoints 'declares extensionPoints with type strings'
+  pluginModel.extensionPoints -> pluginModel.extensions 'type string match → parent-child link'
+
+  // Build-time flow
+  buildTime.builders -[produces]-> buildTime.fleetshiftPlugin 'FleetshiftExtension[]'
+  buildTime.fleetshiftPlugin -[validates]-> buildTime.builders 'validates CodeRefs, IDs, requires'
+  buildTime.fleetshiftPlugin -> buildTime.sdkPlugin 'delegates after validation'
+  buildTime.sdkPlugin -[produces]-> buildTime.manifest 'generates plugin-manifest.json + MF entry'
+
+  // Manifest → Backend
+  goBackend.manifestReader -> buildTime.manifest 'reads at startup'
+  goBackend.manifestReader -> goBackend.routeGenerator 'extracted extensions'
+  goBackend.routeGenerator -> goBackend.uiConfig 'nav layout, routes, feature IDs'
+
+  // Backend → Shell
+  shell.scalprumRuntime -[consumes]-> goBackend.uiConfig 'bootstraps plugin registry'
+  shell.scalprumRuntime -> buildTime.manifest 'fetches MF entry scripts'
+
+  // Shell internals
+  shell.scalprumRuntime -> shell.searchEngine 'feeds extension metadata'
+  shell.scalprumRuntime -> shell.extensionRenderer 'resolves CodeRefs to components'
+
+  // User → Shell
+  endUser -> shell.searchEngine 'searches for features'
+  endUser -> shell.extensionRenderer 'navigates to pages, runs wizards'
+}
+
+// ─────────────────────────────────────────────
+//  Views
+// ─────────────────────────────────────────────
+
+views {
+
+  // ── Landscape ───────────────────────────────
+
+  view index {
+    title 'Feature Contract — Landscape'
+    description '''
+      End-to-end flow: plugin developers declare modules and extensions
+      via typed builders. The build validates and generates manifests.
+      The Go backend reads manifests for navigation. The shell renders
+      plugin content and indexes everything for search.
+    '''
+
+    include
+      pluginDev,
+      endUser,
+      pluginModel,
+      buildTime,
+      goBackend,
+      shell
+
+    style pluginModel {
+      color green
+    }
+    style buildTime {
+      color red
+    }
+    style goBackend {
+      color primary
+    }
+    style shell {
+      color secondary
+    }
+  }
+
+  // ── Extension Model ─────────────────────────
+
+  view extensionModelView of pluginModel {
+    title 'Feature Contract — Extension Model'
+    description '''
+      The generic extension model. Modules are pages with optional
+      extensionPoints. Extensions register against extensionPoints
+      by type string. The type string is the only coupling —
+      modules and extensions can live in different plugins.
+
+      This model drives navigation (backend), search grouping (shell),
+      and component rendering (shell) without any per-type logic
+      in the platform.
+    '''
+
+    include
+      *,
+      buildTime.builders,
+      shell.searchEngine,
+      shell.extensionRenderer
+
+    style modules {
+      color primary
+    }
+    style extensionPoints {
+      color red
+    }
+    style extensions {
+      color green
+    }
+  }
+
+  // ── Build-Time Validation ───────────────────
+
+  view buildView of buildTime {
+    title 'Feature Contract — Build-Time Validation'
+    description '''
+      FleetshiftPlugin wraps DynamicRemotePlugin with extension validation.
+      Typed builders enforce correct properties at the TypeScript level.
+      The plugin constructor validates cross-extension constraints
+      (duplicate IDs, CodeRef→exposedModules) and fails the webpack build
+      on any error. Only after validation passes does it delegate to the
+      SDK plugin for Module Federation output.
+    '''
+
+    include
+      *,
+      pluginDev,
+      goBackend.manifestReader,
+      pluginModel.modules,
+      pluginModel.extensions
+
+    style builders {
+      color green
+    }
+    style fleetshiftPlugin {
+      color red
+    }
+    style sdkPlugin {
+      color muted
+    }
+  }
+
+  // ── Runtime ─────────────────────────────────
+
+  view runtimeView of shell {
+    title 'Feature Contract — Runtime'
+    description '''
+      The shell bootstraps from the Go backend's UI config.
+      Scalprum loads plugin MF entries, resolves CodeRefs to React
+      components, and feeds extension metadata into the search engine.
+      The extension renderer handles page routing, setup wizard ordering,
+      and provider selection — all driven by the generic extension model.
+    '''
+
+    include
+      *,
+      endUser,
+      goBackend,
+      buildTime.manifest,
+      pluginModel
+
+    style scalprumRuntime {
+      color primary
+    }
+    style searchEngine {
+      color indigo
+    }
+    style extensionRenderer {
+      color green
+    }
+  }
+}

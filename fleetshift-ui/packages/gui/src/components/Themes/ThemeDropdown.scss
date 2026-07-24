@@ -1,0 +1,14 @@
+.ome-theme-dropdown {
+  min-width: 240px;
+  z-index: var(--pf-t--global--z-index--2xl);
+
+  &__section {
+    &:not(:last-child) {
+      margin-bottom: var(--pf-t--global--spacer--md);
+    }
+
+    .pf-v6-c-title {
+      margin-bottom: var(--pf-t--global--spacer--xs);
+    }
+  }
+}

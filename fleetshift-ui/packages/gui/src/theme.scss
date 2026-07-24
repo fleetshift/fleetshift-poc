@@ -1,0 +1,31 @@
+// FleetShift global theme — inspired by OpenShift console design patterns
+
+.ome-app {
+  .pf-v6-c-card {
+    border-radius: var(--pf-t--global--border--radius--medium);
+    box-shadow: none;
+    border: var(--pf-t--global--border--width--regular) solid
+      var(--pf-t--global--border--color--default);
+  }
+
+  .pf-v6-c-page__main-container {
+    height: 100%;
+  }
+}
+
+// Masthead logo — invert for dark mode visibility
+.ome-masthead-logo {
+  height: 36px;
+  transition: filter 0.3s ease;
+
+  .pf-v6-theme-dark & {
+    filter: brightness(0) invert(1);
+  }
+}
+
+// OIDC config error banner
+.ome-oidc-error {
+  padding: 2rem;
+  color: var(--pf-t--global--color--status--danger--default);
+}
+

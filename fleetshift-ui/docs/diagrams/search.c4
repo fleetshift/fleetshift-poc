@@ -1,0 +1,419 @@
+// FleetShift UI — Search Architecture
+// Source of truth: packages/gui/src/components/Search/
+//
+// How global search leverages the feature contract to automatically
+// index plugin capabilities, build parent-child groupings, resolve
+// routes, and render results with plugin-provided components.
+//
+// Search knows about modules and their extensionPoints — nothing else.
+// Extension types (cluster-provider, setup, or any future type) are
+// discovered generically by matching their type string against
+// extensionPoint declarations. The diagram reflects this: no specific
+// extension type is called out.
+
+// ─────────────────────────────────────────────
+//  Specification
+// ─────────────────────────────────────────────
+
+specification {
+
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+      color primary
+    }
+  }
+
+  element component {
+    style {
+      shape rectangle
+      color secondary
+    }
+  }
+
+  element store {
+    style {
+      shape storage
+      color amber
+    }
+  }
+
+  element external {
+    style {
+      shape rectangle
+      color gray
+    }
+  }
+
+  relationship dataFlow {
+    color green
+    line solid
+  }
+
+  relationship resolves {
+    color amber
+    line solid
+  }
+
+  relationship queries {
+    color indigo
+    line dashed
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Model
+// ─────────────────────────────────────────────
+
+model {
+
+  // ── Actors ──────────────────────────────────
+
+  user = actor 'End User' {
+    description 'Types a query into the global search bar. Navigates to results.'
+  }
+
+  // ── Feature Contract (upstream) ─────────────
+
+  featureContract = system 'Feature Contract' {
+    description '''
+      The extension metadata declared by plugins at build time.
+      Search is a pure consumer of this contract — it reads extension
+      properties but never writes to the plugin registry.
+      See: feature-contract.c4
+    '''
+
+    modules = component 'Modules (fleetshift.module)' {
+      description '''
+        The primary units of search. Each module declares id, label,
+        description, keywords, and a component CodeRef. Modules are
+        the top-level search entries — the parent nodes in the result tree.
+
+        A module may also declare extensionPoints: named slots that
+        advertise a type string other extensions can register against.
+        Search uses these to discover parent-child relationships.
+      '''
+    }
+
+    extensionPoints = component 'Extension Points' {
+      description '''
+        Declared on modules via extensionPoints: Record<name, { type, description }>.
+        Each extension point advertises a type string (e.g. "fleetshift.cluster-provider").
+
+        Search builds a typeToFeatureId map from these declarations:
+        type string → global feature ID of the declaring module.
+        Any extension whose type matches becomes a child of that module in search.
+
+        This is the generic linking mechanism — search does not know about
+        specific extension types. It only knows: "this type string belongs
+        to this module's extension point."
+      '''
+    }
+
+    extensions = component 'Extensions (any type)' {
+      description '''
+        Extensions registered by any plugin with any type string.
+        If the type matches an extensionPoint declared by a module,
+        the extension becomes a child of that module in search results.
+
+        Each extension carries base properties (id, label, description,
+        keywords) and optionally searchResult / searchIcon CodeRefs
+        for custom rendering. The to property provides a relative
+        navigation target composed with the parent module's base path.
+
+        Examples: fleetshift.cluster-provider, fleetshift.setup,
+        or any addon-defined type — search treats them all the same.
+      '''
+    }
+
+    navPages = component 'Navigation Pages' {
+      description '''
+        Page list from the Go backend UI config (pluginPages).
+        Maps module labels to routes and plugin keys.
+        Used to resolve base paths and compose global feature IDs
+        as {pluginKey}.{extensionId}.
+      '''
+    }
+  }
+
+  // ── Search System ───────────────────────────
+
+  searchSystem = system 'Search System' {
+    description '''
+      Client-side search engine built into the shell.
+      Bootstraps from the plugin registry, builds a full-text index,
+      and renders grouped results with plugin-provided custom components.
+      Entirely generic — knows about modules and extensionPoints,
+      not specific extension types.
+    '''
+
+    searchProvider = component 'SearchProvider' {
+      description '''
+        React context provider. On mount, waits for all extensions
+        to resolve via the SDK (useResolvedExtensions), reads pluginPages
+        from AppConfig, and orchestrates index building. Exposes a
+        query() function to consumers.
+
+        Key data structures:
+        • typeToFeatureId — maps extension type strings to global feature IDs
+          (built from module extensionPoint declarations)
+        • featureParentRef — maps feature IDs to parent SearchResultItems
+        • componentMapRef — maps entry IDs to resolved searchResult components
+        • iconMapRef — maps entry IDs to resolved searchIcon components
+      '''
+      technology 'React Context'
+    }
+
+    indexBuilder = component 'Index Builder' {
+      description '''
+        Runs once when all extensions are resolved. Two-phase process:
+
+        Phase 1 — Module scan:
+        Iterates fleetshift.module extensions. For each module:
+        • Resolves its route via pluginPages (label → page → basePath)
+        • Composes global feature ID: {pluginKey}.{extensionId}
+        • Inserts into Orama with title, description, keywords
+        • Registers each extensionPoint type → feature ID in typeToFeatureId
+        • Stores the parent SearchResultItem in featureParentRef
+
+        Phase 2 — Extension scan:
+        Iterates ALL other resolved extensions. For each:
+        • Looks up its type in typeToFeatureId → finds parent module
+        • Composes route: parent basePath + extension to (pathname and/or search params)
+        • Inserts into Orama with feature field linking to parent
+        • Stores resolved searchResult / searchIcon components in ref maps
+
+        The extension scan is type-agnostic: any extension whose type
+        matches an extensionPoint becomes a child. No per-type logic.
+      '''
+    }
+
+    oramaIndex = store 'Orama Index' {
+      description '''
+        Full-text search database (Orama). Schema: title, description,
+        category, pathname, icon, status, meta, feature.
+
+        The feature field links child entries to their parent module's
+        global feature ID. Entries without a feature field are top-level.
+
+        Queried with fuzzy matching (threshold 0.5, tolerance 1.5).
+        Boost weights: title 10×, description 3×, meta 2×.
+        Results capped at 5 per category.
+      '''
+    }
+
+    resultGrouper = component 'Result Grouper' {
+      description '''
+        Post-query processing in the query() callback.
+
+        1. Attaches custom Component and IconComponent from ref maps
+           (searchResult / searchIcon CodeRefs resolved by Scalprum).
+        2. For child results (entries with a feature field), looks up
+           the parent in featureParentRef. If the parent wasn't in
+           the raw search results, injects it at the top of the category
+           so the tree structure is always complete.
+        3. Returns GroupedResults: Record<category, SearchResultItem[]>.
+      '''
+    }
+
+    fleetSearch = component 'FleetSearch UI' {
+      description '''
+        Search input + dropdown menu (PatternFly SearchInput + Popper).
+        Renders results grouped by category (Pages, Clusters, Settings).
+
+        Within each category, entries sharing a feature field are
+        rendered as a tree: parent module with indented children beneath.
+        This tree is the visual expression of the extensionPoint graph.
+
+        Highlights matching text in title and description.
+        Custom searchResult components override the default MenuItem.
+        Custom searchIcon components override the default category icon.
+        All results are accessible links (react-router Link).
+      '''
+      technology 'React / PatternFly'
+    }
+  }
+
+  // ── Scalprum Runtime ────────────────────────
+
+  scalprumRuntime = external 'Scalprum Runtime' {
+    description '''
+      useResolvedExtensions() resolves CodeRefs in extension properties
+      to live React components. Search consumes the resolved extensions —
+      searchResult and searchIcon CodeRefs become component references
+      stored in the SearchProvider ref maps.
+    '''
+  }
+
+  // ─────────────────────────────────────────────
+  //  Relationships
+  // ─────────────────────────────────────────────
+
+  // Feature contract → Search
+  searchSystem.searchProvider -[dataFlow]-> featureContract.modules 'useResolvedExtensions(isModuleExtension)'
+  searchSystem.searchProvider -[dataFlow]-> featureContract.extensions 'useResolvedExtensions() for all extension types'
+  searchSystem.searchProvider -[dataFlow]-> featureContract.navPages 'useAppConfig().pluginPages'
+
+  // Module → ExtensionPoints → Extensions (the generic linking)
+  featureContract.modules -> featureContract.extensionPoints 'declares extensionPoints with type strings'
+  featureContract.extensionPoints -> featureContract.extensions 'type string matches → parent-child link'
+
+  // Scalprum resolves CodeRefs
+  scalprumRuntime -[resolves]-> featureContract.modules 'resolves component, searchResult CodeRefs'
+  scalprumRuntime -[resolves]-> featureContract.extensions 'resolves searchResult, searchIcon CodeRefs'
+
+  // Index building flow
+  searchSystem.searchProvider -> searchSystem.indexBuilder 'triggers when all extensions are loaded'
+  searchSystem.indexBuilder -> featureContract.extensionPoints 'builds typeToFeatureId map'
+  searchSystem.indexBuilder -> featureContract.navPages 'resolves base paths, composes feature IDs'
+  searchSystem.indexBuilder -> searchSystem.oramaIndex 'insertEntry() for each module and extension'
+
+  // Query flow
+  user -> searchSystem.fleetSearch 'types search query'
+  searchSystem.fleetSearch -[queries]-> searchSystem.searchProvider 'query(term)'
+  searchSystem.searchProvider -[queries]-> searchSystem.oramaIndex 'search(db, { term, boost })'
+  searchSystem.oramaIndex -> searchSystem.resultGrouper 'raw hits'
+  searchSystem.resultGrouper -> searchSystem.fleetSearch 'GroupedResults with parent-child tree'
+}
+
+// ─────────────────────────────────────────────
+//  Views
+// ─────────────────────────────────────────────
+
+views {
+
+  // ── Landscape ───────────────────────────────
+
+  view index {
+    title 'Search — Landscape'
+    description '''
+      End-to-end: plugins declare modules with extensionPoints at build time.
+      At runtime, the shell resolves all extensions via Scalprum, the search
+      system indexes them, and the user gets grouped results where extension
+      children appear under their parent module.
+    '''
+
+    include
+      user,
+      featureContract,
+      searchSystem,
+      scalprumRuntime
+
+    style featureContract {
+      color green
+    }
+    style searchSystem {
+      color primary
+    }
+    style scalprumRuntime {
+      color muted
+    }
+  }
+
+  // ── Extension Point Linking ─────────────────
+
+  view extensionPointView of featureContract {
+    title 'Search — Extension Point Linking'
+    description '''
+      The generic mechanism that powers search grouping.
+      Modules declare extensionPoints, each with a type string.
+      Extensions from any plugin match against these type strings.
+      Search discovers the relationship at index time via typeToFeatureId —
+      it never hard-codes knowledge of specific extension types.
+
+      Example: the "Clusters" module declares an extensionPoint
+      with type "fleetshift.cluster-provider". Any plugin registering a
+      fleetshift.cluster-provider extension automatically appears as a
+      child of "Clusters" in search results.
+    '''
+
+    include
+      *,
+      searchSystem.indexBuilder,
+      searchSystem.searchProvider
+
+    style modules {
+      color primary
+    }
+    style extensionPoints {
+      color red
+    }
+    style extensions {
+      color green
+    }
+    style navPages {
+      color muted
+    }
+  }
+
+  // ── Index Build ─────────────────────────────
+
+  view indexBuildView of searchSystem.indexBuilder {
+    title 'Search — Index Build Flow'
+    description '''
+      Two-phase index building:
+
+      Phase 1: scan modules → insert entries, register extensionPoint
+      type strings in typeToFeatureId map.
+
+      Phase 2: scan all other extensions → look up type in typeToFeatureId
+      to find parent → compose route (parent basePath + to pathname/search) →
+      insert with feature field linking to parent.
+
+      The extension scan is fully generic. Adding a new extension type
+      requires no changes to search — just declare an extensionPoint
+      on a module and register extensions against its type string.
+    '''
+
+    include
+      *,
+      searchSystem.searchProvider,
+      searchSystem.oramaIndex,
+      featureContract.modules,
+      featureContract.extensionPoints,
+      featureContract.extensions,
+      featureContract.navPages
+
+    style indexBuilder {
+      color red
+    }
+    style oramaIndex {
+      color amber
+    }
+  }
+
+  // ── Query & Grouping ────────────────────────
+
+  view queryView of searchSystem.resultGrouper {
+    title 'Search — Query & Result Grouping'
+    description '''
+      User types a query → FleetSearch calls query() → Orama returns
+      ranked hits → ResultGrouper attaches plugin-provided custom
+      components (searchResult, searchIcon) and injects missing parent
+      modules so the tree is always complete → FleetSearch renders the
+      tree with children indented under their parent module.
+    '''
+
+    include
+      *,
+      user,
+      searchSystem.fleetSearch,
+      searchSystem.searchProvider,
+      searchSystem.oramaIndex,
+      scalprumRuntime
+
+    style resultGrouper {
+      color indigo
+    }
+    style fleetSearch {
+      color green
+    }
+  }
+}

@@ -1,0 +1,48 @@
+# Frontend builder — produces /srv/web with all static assets.
+#
+# Used as an init container in the compose stack:
+#   command: ["cp", "-a", "/srv/web/.", "/output/"]
+
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest
+
+USER 0
+WORKDIR /build
+
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
+# Copy package manifests for layer caching
+COPY package*.json ./
+COPY packages/common/package.json packages/common/
+COPY packages/build-utils/package.json packages/build-utils/
+COPY packages/gui/package.json packages/gui/
+COPY packages/mock-ui-plugins/package.json packages/mock-ui-plugins/
+
+# Copy root tsconfig
+COPY tsconfig.json ./
+
+# Copy all source
+COPY packages/common/ packages/common/
+COPY packages/build-utils/ packages/build-utils/
+COPY packages/gui/ packages/gui/
+COPY packages/mock-ui-plugins/ packages/mock-ui-plugins/
+COPY scripts/merge-web.mjs scripts/merge-web.mjs
+COPY scripts/generate-plugin-registry.mjs scripts/generate-plugin-registry.mjs
+COPY scripts/generate-icons.mjs scripts/generate-icons.mjs
+
+# Install + build in one RUN so node_modules cache mount is available throughout
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/build/node_modules \
+    npm install --include-workspace-root \
+    -w packages/common \
+    -w packages/build-utils \
+    -w packages/gui \
+    -w packages/mock-ui-plugins \
+    && npm run generate:icons \
+    && npm run build -w packages/common \
+    && npm run build:ci -w packages/mock-ui-plugins \
+    && node scripts/generate-plugin-registry.mjs \
+    && npm run build -w packages/gui \
+    && node scripts/merge-web.mjs \
+    && cp -a web/. /srv/web/
+
+CMD ["cp", "-a", "/srv/web/.", "/output/"]

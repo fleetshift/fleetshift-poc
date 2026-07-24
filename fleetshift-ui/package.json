@@ -1,0 +1,55 @@
+{
+  "name": "fleetshift-user-interface",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:watch": "node scripts/dev.mjs --watch",
+    "generate:icons": "node scripts/generate-icons.mjs",
+    "build:all": "npm run generate:icons && npm run build -w packages/common && npm run build:plugins && node scripts/generate-plugin-registry.mjs && npm run build -w packages/gui && node scripts/merge-web.mjs",
+    "build:plugins": "if [ \"$CI\" = true ]; then npm run build:ci -w packages/mock-ui-plugins; else npm run build -w packages/mock-ui-plugins; fi",
+    "lint": "eslint packages/ && stylelint 'packages/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+    "lint:fix": "eslint packages/ --fix && stylelint 'packages/**/*.{css,scss}' --fix --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+    "lint:css": "stylelint 'packages/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+    "test": "vitest run",
+    "test:e2e": "npm test --workspace=packages/e2e",
+    "lint-staged": "lint-staged",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "**/*.{ts,tsx}": "eslint --fix",
+    "**/*.{css,scss}": "stylelint --fix"
+  },
+  "overrides": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@rspack/core": "2.0.8",
+    "uuid": "^11.1.1",
+    "undici": "^7.28.0",
+    "form-data": "^4.0.6",
+    "dompurify": "^3.4.11"
+  },
+  "devDependencies": {
+    "@playwright/experimental-ct-react": "^1.61.1",
+    "@playwright/test": "^1.61.1",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-simple-import-sort": "^13.0.0",
+    "fake-indexeddb": "^6.2.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.1",
+    "stylelint": "^17.13.0",
+    "stylelint-config-standard-scss": "^17.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

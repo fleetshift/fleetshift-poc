@@ -1,0 +1,19 @@
+.ome-overview-checklist {
+  margin: var(--pf-t--global--spacer--sm);
+  margin-bottom: 0;
+
+  &__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pf-t--global--spacer--sm);
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: var(--pf-t--global--spacer--sm);
+  }
+}

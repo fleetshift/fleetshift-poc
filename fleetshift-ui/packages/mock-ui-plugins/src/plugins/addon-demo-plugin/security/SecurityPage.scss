@@ -1,0 +1,190 @@
+.ome-addon-security__severity-badges {
+  display: inline-flex;
+  gap: var(--pf-t--global--spacer--xs);
+  flex-wrap: wrap;
+}
+
+// Welcome modal
+.ome-addon-security__welcome {
+  padding: var(--pf-t--global--spacer--md) 0;
+}
+
+.ome-addon-security__welcome-icon {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+
+  &::after {
+    position: absolute;
+    content: "";
+    padding: 16px;
+    border-radius: 50%;
+    width: 140px;
+    height: 140px;
+    border-color: var(--pf-t--global--color--brand--subtle--default);
+    border-width: 32px;
+    border-style: solid;
+  }
+}
+
+.ome-addon-security__welcome-shield {
+  font-size: 48px;
+  color: var(--pf-t--global--color--brand--default);
+}
+
+// Getting started card
+.ome-addon-security__getting-started-header {
+  user-select: none;
+}
+
+.ome-addon-security__gs-column {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+
+.ome-addon-security__gs-column-body {
+  padding: var(--pf-t--global--spacer--md);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.ome-addon-security__gs-links {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--pf-t--global--spacer--md) 0;
+  flex: 1;
+
+  li {
+    margin-bottom: var(--pf-t--global--spacer--sm);
+  }
+
+  a {
+    font-size: var(--pf-t--global--font--size--body--sm);
+    text-decoration: none;
+    color: var(--pf-t--global--text--color--link--default);
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.ome-addon-security__gs-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+  font-size: var(--pf-t--global--font--size--body--sm);
+  color: var(--pf-t--global--text--color--link--default);
+  text-decoration: none;
+  margin-top: auto;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// CVE section
+.ome-addon-security__cve-section {
+  margin-top: var(--pf-t--global--spacer--md);
+
+  .pf-v6-c-toolbar__content {
+    flex-wrap: nowrap;
+  }
+}
+
+.ome-addon-security__tab-pills {
+  padding: var(--pf-t--global--spacer--sm) 0;
+  border-bottom: 1px solid var(--pf-t--global--border--color--default);
+  margin-bottom: var(--pf-t--global--spacer--xs);
+}
+
+.ome-addon-security__tab-pill {
+  cursor: pointer;
+}
+
+.ome-addon-security__critical-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
+.ome-addon-security__critical-badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background-color: var(--pf-t--global--color--nonstatus--red--default);
+  color: var(--pf-t--global--text--color--on-brand--default);
+  font-size: var(--pf-t--global--font--size--body--sm);
+  font-weight: var(--pf-t--global--font--weight--body--bold);
+  padding: 0 4px;
+}
+
+.ome-addon-security__gs-header-label {
+  width: 100%;
+  border-radius: var(--pf-t--global--border--radius--small);
+  padding: var(--pf-t--global--spacer--xs) !important;
+
+  .pf-v6-c-alert__icon {
+    margin-left: var(--pf-t--global--spacer--xs);
+  }
+
+  .pf-v6-c-alert__title {
+    margin-right: var(--pf-t--global--spacer--xs);
+  }
+
+  &--compact {
+    width: auto;
+    display: inline-flex;
+    font-size: var(--pf-t--global--font--size--body--sm);
+  }
+
+  &--green {
+    background-color: #D6F0E0 !important;
+
+    .pf-v6-svg {
+      color: var(--pf-t--global-text-color--status--success--default);
+      fill: var(--pf-t--global-text-color--status--success--default);
+    }
+
+    .pf-v6-c-alert__title {
+      color: var(--pf-t--global-text-color--status--success--default);
+    }
+  }
+
+  &--purple {
+    background-color: #E0D7F6 !important;
+
+    .pf-v6-svg {
+      color: #6753ac;
+      fill: #6753ac;
+    }
+
+    .pf-v6-c-alert__title {
+      color: #6753ac;
+    }
+  }
+
+  &--warning {
+    background-color: #FFE8CC !important;
+
+    .pf-v6-svg {
+      color: var(--pf-t--global--text--color--status--warning--clicked);
+      fill: var(--pf-t--global--text--color--status--warning--clicked);
+    }
+
+    .pf-v6-c-alert__title {
+      color: var(--pf-t--global--text--color--status--warning--clicked);
+    }
+  }
+}

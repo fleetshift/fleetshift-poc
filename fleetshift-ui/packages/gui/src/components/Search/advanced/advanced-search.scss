@@ -1,0 +1,190 @@
+.ome-search__advanced-bar {
+  width: 100%;
+  position: relative;
+}
+
+// Color-coded input: mirror overlay with colored tokens on top of transparent input text
+.ome-search__input-wrapper {
+  position: relative;
+}
+
+.ome-search__input--colored {
+  input {
+    color: transparent !important;
+    caret-color: var(--pf-t--global--text--color--regular);
+  }
+}
+
+.ome-search__input-mirror {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  overflow: hidden;
+
+  // transparent border matches the form-control border width so text aligns
+  border: var(--pf-v6-c-form-control--BorderWidth, 1px) solid transparent;
+}
+
+.ome-search__input-mirror-scroll {
+  white-space: pre;
+}
+
+.ome-search__autocomplete {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: var(--pf-t--global--z-index--lg);
+  box-shadow: var(--pf-t--global--box-shadow--lg);
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+
+  .pf-v6-c-menu__content {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  code {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+  }
+
+  .pf-v6-c-menu__group-title {
+    padding-bottom: var(--pf-t--global--spacer--sm);
+    text-transform: uppercase;
+    font-size: var(--pf-t--global--font--size--xs);
+    letter-spacing: 0.05em;
+  }
+}
+
+// Operator chips — compact inline layout
+.ome-search__operator-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+}
+
+.ome-search__operator-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm);
+  border: var(--pf-t--global--border--width--regular) solid
+    var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: var(--pf-t--global--font--size--sm);
+
+  &:hover,
+  &--active {
+    background: var(--pf-t--global--background--color--primary--default);
+    color: var(--pf-t--global--color--nonstatus--white--default);
+    border-color: var(--pf-t--global--background--color--primary--default);
+  }
+
+  code {
+    font-family: var(--pf-t--global--font--family--mono);
+  }
+}
+
+// CEL preview pinned at top of menu
+.ome-search__cel-preview-header {
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+  border-bottom: var(--pf-t--global--border--width--regular) solid
+    var(--pf-t--global--border--color--default);
+  flex-shrink: 0;
+}
+
+.ome-search__cel-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--sm);
+  font-size: var(--pf-t--global--font--size--sm);
+}
+
+.ome-search__cel-preview-status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ome-search__cel-preview-icon--valid {
+  color: var(--pf-t--global--color--status--success--default);
+}
+
+.ome-search__cel-preview-icon--invalid {
+  color: var(--pf-t--global--color--status--danger--default);
+}
+
+.ome-search__cel-preview-expression {
+  font-family: var(--pf-t--global--font--family--mono);
+  font-size: var(--pf-t--global--font--size--sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex: 1;
+}
+
+.ome-search__cel-preview-error {
+  color: var(--pf-t--global--color--status--danger--default);
+  font-size: var(--pf-t--global--font--size--xs);
+  font-style: italic;
+}
+
+// Syntax coloring tokens
+.ome-search__cel-token--field {
+  color: var(--pf-t--global--color--brand--default);
+}
+
+.ome-search__cel-token--operator {
+  color: var(--pf-t--global--color--status--danger--default);
+}
+
+.ome-search__cel-token--value {
+  color: var(--pf-t--global--color--status--success--default);
+}
+
+.ome-search__cel-token--combinator {
+  color: var(--pf-t--global--color--nonstatus--gray--default);
+  font-weight: var(--pf-t--global--font--weight--body--bold);
+}
+
+.ome-search__cel-token--paren {
+  color: var(--pf-t--global--color--nonstatus--gray--default);
+}
+
+.ome-search__cel-token--macro {
+  color: var(--pf-t--global--color--nonstatus--purple--default);
+}
+
+// Keyboard shortcuts hint bar pinned at bottom of autocomplete menu
+.ome-search__keyboard-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--md);
+  padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--md);
+  border-top: var(--pf-t--global--border--width--regular) solid
+    var(--pf-t--global--border--color--default);
+  font-size: var(--pf-t--global--font--size--xs);
+  color: var(--pf-t--global--text--color--subtle);
+  flex-shrink: 0;
+
+  kbd {
+    display: inline-block;
+    min-width: 1.4em;
+    padding: 0 var(--pf-t--global--spacer--xs);
+    border: var(--pf-t--global--border--width--regular) solid
+      var(--pf-t--global--border--color--default);
+    border-radius: var(--pf-t--global--border--radius--small);
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--xs);
+    text-align: center;
+    line-height: 1.6;
+    margin-right: 2px;
+  }
+}

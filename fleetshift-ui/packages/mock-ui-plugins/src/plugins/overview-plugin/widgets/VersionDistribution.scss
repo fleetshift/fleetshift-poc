@@ -1,0 +1,16 @@
+.ome-overview-version-dist {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  padding: var(--pf-t--global--spacer--sm);
+
+  // Victory charts set inline fill colors that don't adapt to dark theme.
+  // Force all SVG text (title, subtitle, legend labels, tick labels) to
+  // use the PF text color variable.
+  svg {
+    text, tspan {
+      fill: var(--pf-t--global--text--color--regular) !important;
+    }
+  }
+}
