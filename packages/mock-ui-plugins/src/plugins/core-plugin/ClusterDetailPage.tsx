@@ -40,6 +40,7 @@ import {
   TabTitleText,
   Title,
 } from "@patternfly/react-core";
+import { PauseCircleIcon } from "@patternfly/react-icons";
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -84,7 +85,7 @@ function OverviewTab({
 }) {
   const cluster = result.resource;
   const state = deriveClusterState(cluster);
-  const sl = stateLabel(state);
+  const sl = stateLabel(state, cluster.state);
   const { spec } = cluster;
   const isGcpHcp = service === "gcphcp.fleetshift.io";
   const isKind = service === "kind.fleetshift.io";
@@ -445,7 +446,7 @@ export default function ClusterDetailPage() {
     );
   }
 
-  const sl = stateLabel(state);
+  const sl = stateLabel(state, result.resource.state);
 
   return (
     <div className="ome-core-detail-layout">
@@ -453,7 +454,12 @@ export default function ClusterDetailPage() {
         title={clusterName}
         subtitle={`Created ${formatTime(result.resource.createTime)}`}
         label={
-          <Label color={sl.color} isCompact className="pf-v6-u-mr-sm">
+          <Label
+            color={sl.color}
+            isCompact
+            className="pf-v6-u-mr-sm"
+            icon={state === "PAUSED_AUTH" ? <PauseCircleIcon /> : undefined}
+          >
             {sl.text}
             {result.resource.reconciling ? " (reconciling)" : ""}
           </Label>

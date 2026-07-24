@@ -42,7 +42,7 @@ import {
   useDataViewFilters,
   useDataViewPagination,
 } from "@patternfly/react-data-view/dist/dynamic/Hooks";
-import { CubesIcon } from "@patternfly/react-icons";
+import { CubesIcon, PauseCircleIcon } from "@patternfly/react-icons";
 import { ActionsColumn, Tbody, Td, Tr } from "@patternfly/react-table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -90,6 +90,7 @@ export default function ClustersPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ClusterRow | null>(null);
+  const [resuming, setResuming] = useState<string | null>(null);
   const [silentFailCount, setSilentFailCount] = useState(0);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -202,13 +203,35 @@ export default function ClustersPage() {
     }
   };
 
+  const handleResume = useCallback(
+    async (row: ClusterRow) => {
+      setResuming(row.id);
+      try {
+        const client = createApiClient(buildAddonBasePath(row.service));
+        await client.post(`/clusters/${row.id}:resume`);
+        await fetchClusters();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Resume failed");
+      } finally {
+        setResuming(null);
+      }
+    },
+    [fetchClusters],
+  );
+
   const pageRows: DataViewTr[] = useMemo(
     () =>
       filtered
         .slice((page - 1) * perPage, (page - 1) * perPage + perPage)
         .map((r) => {
-          const sl = stateLabel(deriveClusterState(r.result.resource));
+          const state = deriveClusterState(r.result.resource);
+          const sl = stateLabel(state, r.result.resource.state);
           const isDeleting = deleting === r.id;
+          const isPaused = state === "PAUSED_AUTH";
+          const canResume =
+            r.service === "gcphcp.fleetshift.io" &&
+            (isPaused || state === "FAILED");
+          const isResuming = resuming === r.id;
           return [
             {
               cell: (
@@ -230,7 +253,11 @@ export default function ClustersPage() {
             },
             {
               cell: (
-                <Label color={sl.color} isCompact>
+                <Label
+                  color={sl.color}
+                  isCompact
+                  icon={isPaused ? <PauseCircleIcon /> : undefined}
+                >
                   {sl.text}
                   {r.result.resource.reconciling ? " (reconciling)" : ""}
                 </Label>
@@ -241,9 +268,18 @@ export default function ClustersPage() {
             formatTime(r.result.resource.createTime),
             {
               cell:
-                deriveClusterState(r.result.resource) !== "DELETING" ? (
+                state !== "DELETING" ? (
                   <ActionsColumn
                     items={[
+                      ...(canResume
+                        ? [
+                            {
+                              title: isResuming ? "Resuming..." : "Resume",
+                              onClick: () => handleResume(r),
+                              isDisabled: isResuming,
+                            },
+                          ]
+                        : []),
                       {
                         title: isDeleting ? "Deleting..." : "Delete",
                         onClick: () => setDeleteTarget(r),
@@ -256,7 +292,7 @@ export default function ClustersPage() {
             },
           ];
         }),
-    [filtered, page, perPage, deleting],
+    [filtered, page, perPage, deleting, resuming, handleResume],
   );
   const activeState = loading
     ? DataViewState.loading

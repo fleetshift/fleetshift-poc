@@ -50,7 +50,7 @@ const STATE_LABELS: Record<
   ACTIVE: { text: "Active", color: "green" },
   DELETING: { text: "Deleting", color: "orange" },
   FAILED: { text: "Failed", color: "red" },
-  PAUSED_AUTH: { text: "Paused (Auth)", color: "orange" },
+  PAUSED_AUTH: { text: "Paused", color: "orange" },
   RUNNING: { text: "Running", color: "green" },
   PROVISIONING: { text: "Provisioning", color: "blue" },
   ERROR: { text: "Error", color: "red" },
@@ -63,9 +63,19 @@ const HEALTHY_STATES = new Set(["ACTIVE", "RUNNING"]);
 const FAILURE_STATES = new Set(["ERROR", "DEGRADED", "FAILED"]);
 const TRANSIENT_STATES = new Set(["CREATING", "DELETING", "PROVISIONING"]);
 
-export function stateLabel(state: string | undefined) {
+export function stateLabel(
+  state: string | undefined,
+  underlyingState?: string,
+) {
   if (!state) return DEFAULT_STATE_LABEL;
-  return STATE_LABELS[state] ?? DEFAULT_STATE_LABEL;
+  const label = STATE_LABELS[state] ?? DEFAULT_STATE_LABEL;
+  if (state === "PAUSED_AUTH" && underlyingState) {
+    const base = STATE_LABELS[underlyingState];
+    if (base) {
+      return { ...label, text: `${base.text} (Paused)` };
+    }
+  }
+  return label;
 }
 
 export function isFailureState(state: string | undefined): boolean {
@@ -114,6 +124,7 @@ export function buildAddonBasePath(service: string): string {
 export function deriveClusterState(
   resource: ClusterResource,
 ): string | undefined {
+  if (resource.pauseReason) return "PAUSED_AUTH";
   if (resource.state) return resource.state;
   const ready = resource.conditions?.Ready;
   if (ready?.status === "True") return "RUNNING";
