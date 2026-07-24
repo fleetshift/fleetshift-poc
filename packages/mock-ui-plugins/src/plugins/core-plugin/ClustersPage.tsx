@@ -225,7 +225,7 @@ export default function ClustersPage() {
         .slice((page - 1) * perPage, (page - 1) * perPage + perPage)
         .map((r) => {
           const state = deriveClusterState(r.result.resource);
-          const sl = stateLabel(state);
+          const sl = stateLabel(state, r.result.resource.state);
           const isDeleting = deleting === r.id;
           const isPaused = state === "PAUSED_AUTH";
           const canResume =

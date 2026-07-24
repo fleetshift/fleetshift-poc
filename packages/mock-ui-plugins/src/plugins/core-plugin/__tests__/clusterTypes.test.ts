@@ -85,10 +85,28 @@ describe("deriveClusterState", () => {
 describe("stateLabel", () => {
   it("returns label for known states", () => {
     expect(stateLabel("PAUSED_AUTH")).toEqual({
-      text: "Paused (Auth)",
+      text: "Paused",
       color: "orange",
     });
     expect(stateLabel("ACTIVE")).toEqual({ text: "Active", color: "green" });
+  });
+
+  it("composes underlying state with pause suffix", () => {
+    expect(stateLabel("PAUSED_AUTH", "CREATING")).toEqual({
+      text: "Creating (Paused)",
+      color: "orange",
+    });
+    expect(stateLabel("PAUSED_AUTH", "ACTIVE")).toEqual({
+      text: "Active (Paused)",
+      color: "orange",
+    });
+  });
+
+  it("falls back to plain Paused when underlying state is unknown", () => {
+    expect(stateLabel("PAUSED_AUTH", "BOGUS")).toEqual({
+      text: "Paused",
+      color: "orange",
+    });
   });
 
   it("returns Unknown for undefined or unrecognized state", () => {

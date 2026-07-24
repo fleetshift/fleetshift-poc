@@ -85,7 +85,7 @@ function OverviewTab({
 }) {
   const cluster = result.resource;
   const state = deriveClusterState(cluster);
-  const sl = stateLabel(state);
+  const sl = stateLabel(state, cluster.state);
   const { spec } = cluster;
   const isGcpHcp = service === "gcphcp.fleetshift.io";
   const isKind = service === "kind.fleetshift.io";
@@ -446,7 +446,7 @@ export default function ClusterDetailPage() {
     );
   }
 
-  const sl = stateLabel(state);
+  const sl = stateLabel(state, result.resource.state);
 
   return (
     <div className="ome-core-detail-layout">
