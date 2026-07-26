@@ -1,6 +1,6 @@
 # Rules for Agents
 
-This is the monorepo for FleetShift, a fleet management platform. It contains the management-plane server, CLI, proto definitions, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
+This is the monorepo for FleetShift, a fleet management platform. It contains the management-plane server, CLI, proto definitions, React web UI, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
 
 ## Understanding the domain
 
@@ -50,3 +50,7 @@ For how to...
 - write domain objects (aggregates, entities, values, where invariants belong, snapshot persistence), see fleetshift-server/docs/domain.md
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.
+
+## fleetshift-ui
+
+This is the complete frontend web app for fleetshift. See fleetshift-ui/AGENTS.md for agent instructions.
