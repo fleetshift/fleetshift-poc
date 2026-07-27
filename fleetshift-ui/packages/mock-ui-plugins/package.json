@@ -7,7 +7,8 @@
   "scripts": {
     "build": "rm -rf dist node_modules/.cache && rspack build",
     "build:ci": "rm -rf dist node_modules/.cache && for name in overview management core signing routing gcphcp kind setup configuration virtualization addon-demo settings; do echo \"--- $name ---\" && rspack build --config-name $name || exit 1; done",
-    "watch": "rspack build --watch"
+    "watch": "rspack build --watch",
+    "test:ct": "playwright test -c playwright-ct.config.ts"
   },
   "dependencies": {
     "@fleetshift/common": "*",

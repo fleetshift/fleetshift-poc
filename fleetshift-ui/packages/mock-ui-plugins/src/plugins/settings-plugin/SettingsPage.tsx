@@ -1,6 +1,6 @@
 import { Content, Title } from "@patternfly/react-core";
 
-import NavLayoutEditor from "./NavLayoutEditor";
+import NavLayoutEditor from "./nav-layout";
 
 const SettingsPage = () => (
   <>

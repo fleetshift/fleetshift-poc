@@ -171,4 +171,34 @@
       font-weight: var(--pf-t--global--font--weight--body--default);
     }
   }
+
+  // Drop target — highlights a group/section when an item will nest into it
+  &--drop-target {
+    .ome-settings-tree-item__row {
+      background-color: var(--pf-t--global--background--color--brand--default);
+      border-radius: var(--pf-t--global--border--radius--small);
+    }
+  }
+
+  &__empty-group {
+    padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+    font-style: italic;
+    border: 1px dashed var(--pf-t--global--border--color--default);
+    border-radius: var(--pf-t--global--border--radius--small);
+    text-align: center;
+  }
+}
+
+.ome-settings-tree-item--drop-target {
+   .ome-settings-tree-item__row {
+     &--section {
+        background-color: var(--pf-t--global--icon--color--brand--default);
+
+        .ome-settings-tree-item__label {
+          color: var(--pf-t--global--text--color--inverse) !important;
+        }
+      }
+   }
 }
