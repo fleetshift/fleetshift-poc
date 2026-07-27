@@ -112,12 +112,14 @@ npm test                   # vitest
 
 ## Diagrams
 
-- `docs/diagrams/` — LikeC4 `.c4` files. Config: `docs/diagrams/likec4.config.json`.
+- `docs/diagrams/<name>/` — each diagram is its own LikeC4 project (`likec4.config.json` + `.c4`). Projects must stay separate: LikeC4 merges all `.c4` files under one config into a single model.
 - **Code > diagrams.** Changed search/extensions/build/plugin code → validate `.c4` still matches. Diverged → update diagram.
 - **Generic, not specific.** Model pattern (modules → extensionPoints → extensions), not instances. Specific types = examples in descriptions only.
 - Current:
-  - `feature-contract.c4` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `packages/build-utils/src/extensions/`, `packages/mock-ui-plugins/rspack.config.ts`, `packages/gui/src/extensions/`.
-  - `search.c4` — indexing, extensionPoint linking, query/grouping. Trigger: `packages/gui/src/components/Search/`.
+  - `feature-contract/` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `packages/build-utils/src/extensions/`, `packages/mock-ui-plugins/rspack.config.ts`, `packages/gui/src/extensions/`.
+  - `extension-validation/` — self-validation and provider-side validation for extensions.
+  - `module-groups/` — module grouping model.
+  - `search/` — indexing, extensionPoint linking, query/grouping. Trigger: `packages/gui/src/components/Search/`.
 
 ## Verification
 
