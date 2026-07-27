@@ -77,7 +77,7 @@ const POOL_FIELDS: PoolFieldConfig[] = [
     label: "Pool ID",
     placeholder: "workers",
     validate: (v) =>
-      v.trim() && POOL_ID_PATTERN.test(v) ? "default" : "error",
+      !v.trim() ? "default" : POOL_ID_PATTERN.test(v) ? "default" : "error",
   },
   { type: "number", key: "replicas", label: "Replicas", min: 1 },
   {

@@ -105,6 +105,7 @@ const formSchema: Schema = {
           title: "Node pools",
           name: "node-pools",
           nextStep: "review",
+          StepTemplate: Pf6StepTemplate,
           component: "",
           fields: [
             {
@@ -116,6 +117,7 @@ const formSchema: Schema = {
         {
           title: "Review",
           name: "review",
+          StepTemplate: Pf6StepTemplate,
           component: "",
           fields: [
             {
