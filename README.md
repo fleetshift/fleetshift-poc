@@ -33,7 +33,7 @@ task test:all               # unit tests for all modules
 task protogen               # regenerate protobuf and gRPC stubs
 task image:build            # build server + web container images
 task image:aio              # build all-in-one image from local server-local + web
-task image:push             # push to DEV_REGISTRY
+task image:push             # push server, server-local, and web to DEV_REGISTRY (not the AIO image)
 ```
 
 ## Configuration
