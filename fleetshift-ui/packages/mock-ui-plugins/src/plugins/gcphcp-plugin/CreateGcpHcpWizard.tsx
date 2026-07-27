@@ -1,12 +1,133 @@
+import FormTemplate from "@data-driven-forms/pf4-component-mapper/form-template";
+import TextField from "@data-driven-forms/pf4-component-mapper/text-field";
+import DDFWizard from "@data-driven-forms/pf4-component-mapper/wizard";
+import {
+  componentTypes,
+  FormRenderer,
+  Schema,
+} from "@data-driven-forms/react-form-renderer";
 import type { ClusterProviderWizardProps } from "@fleetshift/common";
 import { usePluginNavigate } from "@fleetshift/common";
-import { Alert, Wizard, WizardStep } from "@patternfly/react-core";
+import { Alert } from "@patternfly/react-core";
+import type { ReactNode } from "react";
 import { useCallback, useState } from "react";
 
 import { createGcpHcpCluster } from "./api";
-import ClusterDetailsStep from "./ClusterDetailsStep";
-import NodePoolsStep from "./NodePoolsStep";
-import ReviewStep from "./ReviewStep";
+import DdfFormSelect from "./ddfComponents/DdfFormSelect";
+import DdfNodePoolsStep from "./ddfComponents/DdfNodePoolsStep";
+import DdfReviewStep from "./ddfComponents/DdfReviewStep";
+import { clusterIdValidator } from "./formValidators/formValidators";
+import { DEFAULT_NODEPOOL } from "./nodePoolYaml";
+
+const FORM_SELECT = "form-select";
+const NODE_POOLS_STEP = "node-pools-step";
+const REVIEW_STEP = "review-step";
+
+const componentMapper = {
+  [componentTypes.WIZARD]: DDFWizard,
+  [componentTypes.TEXT_FIELD]: TextField,
+  [FORM_SELECT]: DdfFormSelect,
+  [NODE_POOLS_STEP]: DdfNodePoolsStep,
+  [REVIEW_STEP]: DdfReviewStep,
+};
+
+const FormTemplateWrapper = (props: Record<string, unknown>) => (
+  <FormTemplate {...props} showFormControls={false} />
+);
+
+// DDF pf4-component-mapper wizard step uses "pf-c-form" (PF4).
+// Use a div with PF6 form class for spacing without nesting <form> inside <form>.
+function Pf6StepTemplate({ formFields }: { formFields: ReactNode }) {
+  return <div className="pf-v6-c-form">{formFields}</div>;
+}
+
+const formSchema: Schema = {
+  fields: [
+    {
+      // title: "Create GCP HCP Cluster",
+      name: "gcp-hcp-wizard",
+      component: componentTypes.WIZARD,
+      inModal: false,
+      fields: [
+        {
+          title: "Cluster details",
+          name: "cluster-details",
+          nextStep: "node-pools",
+          StepTemplate: Pf6StepTemplate,
+          component: "",
+          fields: [
+            {
+              name: "clusterId",
+              isRequired: true,
+              component: componentTypes.TEXT_FIELD,
+              label: "Cluster ID",
+              validate: [clusterIdValidator],
+              helperText:
+                "Lowercase letters, digits, and hyphens. Max 15 characters.",
+              placeholder: "my-hcp-cluster",
+            },
+            {
+              name: "endpointAccess",
+              component: FORM_SELECT,
+              label: "Endpoint access",
+              isRequired: true,
+              validate: [{ type: "required" }],
+              options: [
+                { label: "Public and Private", value: "PublicAndPrivate" },
+                { label: "Public", value: "Public" },
+                { label: "Private", value: "Private" },
+              ],
+            },
+            {
+              name: "releaseVersion",
+              isRequired: true,
+              component: componentTypes.TEXT_FIELD,
+              label: "Release version",
+              validate: [{ type: "required" }],
+              placeholder: "4.22.0",
+            },
+            {
+              name: "channelGroup",
+              component: FORM_SELECT,
+              label: "Channel group",
+              isRequired: true,
+              validate: [{ type: "required" }],
+              options: [
+                { label: "Stable", value: "stable" },
+                { label: "Candidate", value: "candidate" },
+                { label: "Fast", value: "fast" },
+                { label: "EUS", value: "eus" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Node pools",
+          name: "node-pools",
+          nextStep: "review",
+          component: "",
+          fields: [
+            {
+              name: "nodepools",
+              component: NODE_POOLS_STEP,
+            },
+          ],
+        },
+        {
+          title: "Review",
+          name: "review",
+          component: "",
+          fields: [
+            {
+              name: "review-content",
+              component: REVIEW_STEP,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
 
 export interface NodepoolEntry {
   id: string;
@@ -26,22 +147,12 @@ export interface GcpHcpFormData {
   nodepools: NodepoolEntry[];
 }
 
-const initialFormData: GcpHcpFormData = {
+const initialValues: GcpHcpFormData = {
   clusterId: "",
   endpointAccess: "PublicAndPrivate",
   releaseVersion: "",
   channelGroup: "stable",
-  nodepools: [
-    {
-      id: "",
-      replicas: 2,
-      instanceType: "n1-standard-4",
-      rootVolumeSize: 128,
-      rootVolumeType: "pd-standard",
-      autoRepair: true,
-      upgradeType: "Replace",
-    },
-  ],
+  nodepools: [{ ...DEFAULT_NODEPOOL }],
 };
 
 export default function CreateGcpHcpWizard({
@@ -49,16 +160,7 @@ export default function CreateGcpHcpWizard({
   onSetupNext,
 }: ClusterProviderWizardProps) {
   const clusters = usePluginNavigate("core-plugin", "ClustersModule");
-  const [formData, setFormData] = useState<GcpHcpFormData>(initialFormData);
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const updateField = useCallback(
-    <K extends keyof GcpHcpFormData>(field: K, value: GcpHcpFormData[K]) => {
-      setFormData((prev) => ({ ...prev, [field]: value }));
-    },
-    [],
-  );
 
   const handleCancel = useCallback(() => {
     if (onClose) {
@@ -68,66 +170,38 @@ export default function CreateGcpHcpWizard({
     }
   }, [onClose, clusters]);
 
-  const handleSubmit = useCallback(async () => {
-    if (
-      !formData.clusterId.trim() ||
-      !/^[a-z][-a-z0-9]*$/.test(formData.clusterId.trim()) ||
-      formData.clusterId.trim().length > 15
-    ) {
-      setError(
-        "Cluster ID must be 15 characters or less, start with a lowercase letter, and contain only lowercase letters, digits, and hyphens.",
-      );
-      return;
-    }
-    if (!formData.releaseVersion.trim()) {
-      setError("Release version is required.");
-      return;
-    }
-    if (formData.nodepools.some((np) => !np.id.trim())) {
-      setError("All node pools must have an ID.");
-      return;
-    }
+  const handleSubmit = useCallback(
+    async (values: GcpHcpFormData) => {
+      setError(null);
 
-    setCreating(true);
-    setError(null);
+      try {
+        await createGcpHcpCluster(values.clusterId.trim(), {
+          endpointAccess: values.endpointAccess,
+          releaseVersion: values.releaseVersion.trim(),
+          channelGroup: values.channelGroup,
+          nodepools: values.nodepools.map((np) => ({
+            id: np.id.trim(),
+            replicas: np.replicas,
+            instanceType: np.instanceType,
+            rootVolumeSize: np.rootVolumeSize,
+            rootVolumeType: np.rootVolumeType,
+            autoRepair: np.autoRepair,
+            upgradeType: np.upgradeType,
+          })),
+        });
 
-    try {
-      await createGcpHcpCluster(formData.clusterId.trim(), {
-        endpointAccess: formData.endpointAccess,
-        releaseVersion: formData.releaseVersion.trim(),
-        channelGroup: formData.channelGroup,
-        nodepools: formData.nodepools.map((np) => ({
-          id: np.id.trim(),
-          replicas: np.replicas,
-          instanceType: np.instanceType,
-          rootVolumeSize: np.rootVolumeSize,
-          rootVolumeType: np.rootVolumeType,
-          autoRepair: np.autoRepair,
-          upgradeType: np.upgradeType,
-        })),
-      });
-
-      if (onSetupNext) {
-        onSetupNext();
-      } else if (onClose) {
-        onClose();
-      } else {
-        clusters.navigate();
+        if (onSetupNext) {
+          onSetupNext();
+        } else if (onClose) {
+          onClose();
+        } else {
+          clusters.navigate();
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
-  }, [formData, onSetupNext, onClose, clusters]);
-
-  const isStep1Valid =
-    /^[a-z][-a-z0-9]*$/.test(formData.clusterId.trim()) &&
-    formData.clusterId.trim().length <= 15 &&
-    formData.releaseVersion.trim().length > 0;
-
-  const isStep2Valid = formData.nodepools.every(
-    (np) => np.id.trim().length > 0 && /^[a-z][-a-z0-9]*$/.test(np.id),
+    },
+    [onSetupNext, onClose, clusters],
   );
 
   return (
@@ -148,40 +222,14 @@ export default function CreateGcpHcpWizard({
           {error}
         </Alert>
       )}
-      <Wizard onClose={handleCancel} height={500} isVisitRequired>
-        <WizardStep
-          name="Cluster details"
-          id="cluster-details"
-          status={isStep1Valid ? "default" : "error"}
-          isDisabled={creating}
-          footer={{ isNextDisabled: !isStep1Valid }}
-        >
-          <ClusterDetailsStep formData={formData} onChange={updateField} />
-        </WizardStep>
-
-        <WizardStep
-          name="Node pools"
-          id="node-pools"
-          status={isStep2Valid ? "default" : "error"}
-          isDisabled={creating}
-          footer={{ isNextDisabled: !isStep2Valid }}
-        >
-          <NodePoolsStep formData={formData} onChange={updateField} />
-        </WizardStep>
-
-        <WizardStep
-          name="Review"
-          id="review"
-          isDisabled={creating}
-          footer={{
-            nextButtonText: creating ? "Creating..." : "Create cluster",
-            onNext: handleSubmit,
-            isNextDisabled: creating,
-          }}
-        >
-          <ReviewStep formData={formData} />
-        </WizardStep>
-      </Wizard>
+      <FormRenderer
+        schema={formSchema}
+        componentMapper={componentMapper}
+        FormTemplate={FormTemplateWrapper}
+        initialValues={initialValues}
+        onSubmit={(values) => handleSubmit(values as GcpHcpFormData)}
+        onCancel={handleCancel}
+      />
     </>
   );
 }

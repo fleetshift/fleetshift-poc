@@ -33,7 +33,24 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, rsp
 
 - Unit tests for edge cases and bug candidates, not happy-path snapshots.
 - Tests next to code (`__tests__/` or `.test.ts`). Vitest + `@testing-library/react`.
+- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright-ct.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `packages/gui/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `packages/mock-ui-plugins/src/plugins/gcphcp-plugin/__tests__/` for patterns.
 - E2E in `packages/e2e`, Playwright.
+
+### Playwright CT notes
+
+- Components mounted via `mount()` must be **imported**, not defined in the test file. For components requiring wrappers (FormRenderer, providers), create harness components in a separate `harnesses.tsx` file.
+- Bootstrap files: `playwright/index.html` + `playwright/index.tsx` (imports PF CSS).
+- DDF CJS/ESM dual-import issue: deep imports (`@data-driven-forms/pf4-component-mapper/form-template`) resolve CJS by default. Alias them to ESM paths in `ctViteConfig.resolve.alias` and dedupe `react-form-renderer` + `react-final-form` to prevent `FormRenderer` duplicate declaration errors.
+
+## Data Driven Forms (DDF)
+
+Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`. See `packages/mock-ui-plugins/src/plugins/gcphcp-plugin/CreateGcpHcpWizard.tsx` for reference implementation.
+
+- **Custom components**: DDF's pf4-component-mapper components are PF4-era. For PF6 controls (FormSelect, etc.), create custom DDF components using `useFieldApi` from `react-form-renderer`. Register in `componentMapper` with a custom string key. See `ddfComponents/DdfFormSelect.tsx`.
+- **Wizard steps**: Use `nextStep: "step-name"` to chain steps (without it, DDF shows "Submit" instead of "Next"). The DDF wizard step template uses PF4 class `pf-c-form`. Override with `StepTemplate` using `<div className="pf-v6-c-form">` — not `<Form>` to avoid form-in-form since `FormTemplate` already wraps in `<form>`.
+- **Async validators**: Must **throw** error strings. `composeValidators` catches via `.catch(error => error)`. Sync validators return error strings.
+- **Reactive updates in custom components**: Each field component must register via `useFieldApi(props)`. `useFormApi().getState().values` is a snapshot that won't re-render. For read-only access to all values, use `FormSpy` with `subscription={{ values: true }}`.
+- **Wrapping existing components**: To progressively migrate, wrap existing step components as DDF fields. Use `useFieldApi` to bridge DDF form state to component props. See `ddfComponents/DdfNodePoolsStep.tsx` and `ddfComponents/DdfReviewStep.tsx`.
 
 ## Style
 

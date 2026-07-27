@@ -74,6 +74,7 @@ export default function CreateClusterModal({
     onProviderSelect("");
   }, [onProviderSelect]);
 
+  console.log({providerExtensions, preselectedProvider})
   return (
     <Modal
       isOpen={isOpen}
