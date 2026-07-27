@@ -398,6 +398,49 @@ test.describe("SortableSection", () => {
     ).toContainText("Navigation");
   });
 
+  test("empty group as drop target gets drop-target class", async ({
+    mount,
+    page: p,
+  }) => {
+    const g = groupNode("g");
+    const nodes = [g, page("dragged")];
+    const pm = pages([["dragged", "Dragged"]]);
+    const dragState: DragState = {
+      dragId: "dragged",
+      dragParentId: null,
+      dropIndex: 0,
+      dropDepth: 1,
+      dropParentId: "g",
+      isBlock: false,
+      blockLength: 1,
+      sourceTopIndex: 1,
+      blockHeight: 40,
+      nestGap: 0,
+    };
+    await mount(
+      <TestSortableSection
+        sectionLabel="Main"
+        nodes={nodes}
+        pages={pm}
+        dragState={dragState}
+        isKbDrag={false}
+        onPointerDown={noop}
+        onPointerMove={noop}
+        onPointerUp={noop}
+        onPointerCancel={noop}
+        onKeyDown={noop}
+        onBlur={noop}
+      />,
+    );
+    const emptyPlaceholder = p.locator(
+      ".ome-settings-tree-item--drop-target .ome-settings-tree-item__empty-group",
+    );
+    await expect(emptyPlaceholder).toBeVisible();
+    await expect(emptyPlaceholder).toContainText(
+      "Drop items here to add to this group",
+    );
+  });
+
   test("drop target group gets drop-target class via dragState", async ({
     mount,
     page: p,

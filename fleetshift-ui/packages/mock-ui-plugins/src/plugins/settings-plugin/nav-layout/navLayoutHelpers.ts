@@ -2,8 +2,9 @@ import type {
   FlatNode,
   NavLayoutEntry,
   NavLayoutGroup,
+  NavLayoutPage,
 } from "@fleetshift/common";
-import { CORE_EXTENSION_META, NodeKind } from "@fleetshift/common";
+import { CORE_EXTENSION_META, isCustomGroup, NodeKind } from "@fleetshift/common";
 
 import type { DragState } from "../useDragTree";
 
@@ -72,11 +73,16 @@ export function findGroup(
   return undefined;
 }
 
-/** Collect all group IDs present in a layout. */
+/** Collect all group IDs present in a layout (including inside "more"). */
 export function collectGroupIds(layout: NavLayoutEntry[]): Set<string> {
   const ids = new Set<string>();
   for (const entry of layout) {
     if (entry.type === "group") ids.add(entry.groupId);
+    if (entry.type === "more") {
+      for (const id of collectGroupIds(entry.children)) {
+        ids.add(id);
+      }
+    }
   }
   return ids;
 }
@@ -84,6 +90,9 @@ export function collectGroupIds(layout: NavLayoutEntry[]): Set<string> {
 /**
  * Delete a custom group, promoting its children to top-level pages
  * at the group's position in the layout.
+ *
+ * Plugin-defined groups (non-custom) are silently kept — only
+ * user-created groups can be deleted.
  */
 export function deleteGroupFromLayout(
   layout: NavLayoutEntry[],
@@ -92,9 +101,14 @@ export function deleteGroupFromLayout(
   const result: NavLayoutEntry[] = [];
   for (const entry of layout) {
     if (entry.type === "group" && entry.groupId === groupId) {
-      // Promote children to top-level pages at this position
+      if (!isCustomGroup(entry)) {
+        result.push(entry);
+        continue;
+      }
       for (const child of entry.children) {
-        result.push({ type: "page", pageId: child.pageId });
+        const page: NavLayoutPage = { type: "page", pageId: child.pageId };
+        if (child.iconOverride) page.iconOverride = child.iconOverride;
+        result.push(page);
       }
     } else {
       result.push(entry);

@@ -178,6 +178,12 @@
       background-color: var(--pf-t--global--background--color--brand--default);
       border-radius: var(--pf-t--global--border--radius--small);
     }
+
+    .ome-settings-tree-item__empty-group {
+      background-color: var(--pf-t--global--background--color--brand--default);
+      border-color: var(--pf-t--global--border--color--brand--default);
+      color: var(--pf-t--global--text--color--inverse);
+    }
   }
 
   &__empty-group {

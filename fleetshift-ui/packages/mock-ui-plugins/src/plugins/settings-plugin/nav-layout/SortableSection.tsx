@@ -1,5 +1,6 @@
 import type { FlatNode } from "@fleetshift/common";
 import { MORE_ENTRY_ID, NodeKind } from "@fleetshift/common";
+import clsx from "clsx";
 import type { MotionValue } from "motion/react";
 
 import type { DragState } from "../useDragTree";
@@ -197,7 +198,10 @@ export function SortableSection({
         items.push(
           <li
             key={`${node.id}-empty`}
-            className="ome-settings-tree-item ome-settings-tree-item--nested pf-v6-u-mr-2xl"
+            className={clsx(
+              "ome-settings-tree-item ome-settings-tree-item--nested pf-v6-u-mr-2xl",
+              isDropTarget && "ome-settings-tree-item--drop-target",
+            )}
           >
             <div className="ome-settings-tree-item__empty-group">
               Drop items here to add to this group
