@@ -125,11 +125,6 @@ tasks:
           DEV: '{{.DEV}}'
           BUILD: "true"
 
-  build_fleetshift_image:
-    desc: Build the combined FleetShift image
-    cmds:
-      - podman build {{.CLI_ARGS}} -f {{.ROOT_DIR}}/Dockerfile.fleetshift -t quay.io/stolostron/fleetshift:latest {{.ROOT_DIR}}
-
   pull:
     desc: Pull latest container images
     env: *deploy_env
