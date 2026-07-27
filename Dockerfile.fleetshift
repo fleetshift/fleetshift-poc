@@ -30,9 +30,9 @@
 # default addon list remains kind,kubernetes until that intent is present.
 ARG SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest
 ARG WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest
+FROM ${WEB_IMAGE} AS web-assets
 FROM ${SERVER_IMAGE}
-ARG WEB_IMAGE
-COPY --from=${WEB_IMAGE} /srv/web /srv/web
+COPY --from=web-assets /srv/web /srv/web
 COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
 COPY deploy/scripts/fleetshift-aio-entrypoint.sh /usr/local/bin/fleetshift-aio-entrypoint.sh
 RUN chmod +x /usr/local/bin/render-gcphcp-config.sh /usr/local/bin/fleetshift-aio-entrypoint.sh \
