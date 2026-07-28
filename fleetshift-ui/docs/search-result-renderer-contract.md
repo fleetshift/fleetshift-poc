@@ -3,7 +3,7 @@
 **Jira:** [OME-194](https://redhat.atlassian.net/browse/OME-194)
 **Epic:** [OME-3 — Addon / Extension Model](https://redhat.atlassian.net/browse/OME-3)
 **Status:** Implemented
-**Depends on:** [Feature Contracts](feature-contracts.md), [Search Architecture](diagrams/search.c4)
+**Depends on:** [Feature Contracts](feature-contracts.md), [Search Architecture](diagrams/search/search.c4)
 
 ## Problem
 
