@@ -4,7 +4,6 @@ import {
   Checkbox,
   Flex,
   FlexItem,
-  Form,
   FormFieldGroupExpandable,
   FormFieldGroupHeader,
   FormGroup,
@@ -33,6 +32,160 @@ import {
   validatePools,
   VOLUME_TYPES,
 } from "./nodePoolYaml";
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+type PoolFieldConfig =
+  | {
+      type: "text";
+      key: string & keyof NodepoolEntry;
+      label: string;
+      span?: number;
+      placeholder?: string;
+      validate?: (value: string) => "default" | "error";
+    }
+  | {
+      type: "number";
+      key: string & keyof NodepoolEntry;
+      label: string;
+      span?: number;
+      min: number;
+    }
+  | {
+      type: "select";
+      key: string & keyof NodepoolEntry;
+      label: string;
+      span?: number;
+      options: SelectOption[];
+    }
+  | {
+      type: "checkbox";
+      key: string & keyof NodepoolEntry;
+      label: string;
+      span?: number;
+    };
+
+const POOL_ID_PATTERN = /^[a-z][-a-z0-9]*$/;
+
+const POOL_FIELDS: PoolFieldConfig[] = [
+  {
+    type: "text",
+    key: "id",
+    label: "Pool ID",
+    placeholder: "workers",
+    validate: (v) =>
+      !v.trim() ? "default" : POOL_ID_PATTERN.test(v) ? "default" : "error",
+  },
+  { type: "number", key: "replicas", label: "Replicas", min: 1 },
+  {
+    type: "select",
+    key: "instanceType",
+    label: "Instance type",
+    options: INSTANCE_TYPES.map((t) => ({ value: t, label: t })),
+  },
+  {
+    type: "number",
+    key: "rootVolumeSize",
+    label: "Root volume size (GB)",
+    min: 1,
+  },
+  {
+    type: "select",
+    key: "rootVolumeType",
+    label: "Root volume type",
+    options: VOLUME_TYPES.map((t) => ({ value: t, label: t })),
+  },
+  {
+    type: "select",
+    key: "upgradeType",
+    label: "Upgrade type",
+    options: UPGRADE_TYPES,
+  },
+  {
+    type: "checkbox",
+    key: "autoRepair",
+    label: "Enable auto-repair",
+    span: 12,
+  },
+];
+
+interface PoolFieldProps {
+  config: PoolFieldConfig;
+  pool: NodepoolEntry;
+  index: number;
+  onUpdate: (index: number, patch: Partial<NodepoolEntry>) => void;
+}
+
+function PoolField({ config, pool, index, onUpdate }: PoolFieldProps) {
+  const fieldId = `${config.key}-${index}`;
+  const update = (value: NodepoolEntry[string & keyof NodepoolEntry]) =>
+    onUpdate(index, { [config.key]: value } as Partial<NodepoolEntry>);
+
+  switch (config.type) {
+    case "checkbox":
+      return (
+        <Checkbox
+          id={fieldId}
+          label={config.label}
+          isChecked={pool[config.key] as boolean}
+          onChange={(_e, checked) => update(checked)}
+        />
+      );
+
+    case "text":
+      return (
+        <FormGroup label={config.label} isRequired fieldId={fieldId}>
+          <TextInput
+            id={fieldId}
+            isRequired
+            value={pool[config.key] as string}
+            onChange={(_e, val) => update(val)}
+            placeholder={config.placeholder}
+            validated={
+              config.validate?.(pool[config.key] as string) ?? "default"
+            }
+          />
+        </FormGroup>
+      );
+
+    case "number": {
+      const numValue = pool[config.key] as number;
+      return (
+        <FormGroup label={config.label} isRequired fieldId={fieldId}>
+          <NumberInput
+            id={fieldId}
+            value={numValue}
+            min={config.min}
+            onMinus={() => update(Math.max(config.min, numValue - 1))}
+            onPlus={() => update(numValue + 1)}
+            onChange={(e) => {
+              const val = Number((e.target as HTMLInputElement).value);
+              if (!isNaN(val) && val >= config.min) update(val);
+            }}
+          />
+        </FormGroup>
+      );
+    }
+
+    case "select":
+      return (
+        <FormGroup label={config.label} isRequired fieldId={fieldId}>
+          <FormSelect
+            id={fieldId}
+            value={pool[config.key] as string}
+            onChange={(_e, val) => update(val)}
+          >
+            {config.options.map((o) => (
+              <FormSelectOption key={o.value} value={o.value} label={o.label} />
+            ))}
+          </FormSelect>
+        </FormGroup>
+      );
+  }
+}
 
 interface NodePoolsStepProps {
   formData: GcpHcpFormData;
@@ -120,7 +273,7 @@ export default function NodePoolsStep({
       </Flex>
 
       {viewMode === "form" && (
-        <Form>
+        <div className="pf-v6-c-form">
           {formData.nodepools.map((pool, i) => (
             <FormFieldGroupExpandable
               key={i}
@@ -145,158 +298,16 @@ export default function NodePoolsStep({
               }
             >
               <Grid hasGutter>
-                <GridItem span={6}>
-                  <FormGroup
-                    label="Pool ID"
-                    isRequired
-                    fieldId={`pool-id-${i}`}
-                  >
-                    <TextInput
-                      id={`pool-id-${i}`}
-                      isRequired
-                      value={pool.id}
-                      onChange={(_e, val) => updatePool(i, { id: val })}
-                      placeholder="workers"
-                      validated={
-                        pool.id.trim() && /^[a-z][-a-z0-9]*$/.test(pool.id)
-                          ? "default"
-                          : "error"
-                      }
+                {POOL_FIELDS.map((field) => (
+                  <GridItem key={field.key} span={field.span ?? 6}>
+                    <PoolField
+                      config={field}
+                      pool={pool}
+                      index={i}
+                      onUpdate={updatePool}
                     />
-                  </FormGroup>
-                </GridItem>
-                <GridItem span={6}>
-                  <FormGroup
-                    label="Replicas"
-                    isRequired
-                    fieldId={`replicas-${i}`}
-                  >
-                    <NumberInput
-                      id={`replicas-${i}`}
-                      value={pool.replicas}
-                      min={1}
-                      onMinus={() =>
-                        updatePool(i, {
-                          replicas: Math.max(1, pool.replicas - 1),
-                        })
-                      }
-                      onPlus={() =>
-                        updatePool(i, { replicas: pool.replicas + 1 })
-                      }
-                      onChange={(e) => {
-                        const val = Number(
-                          (e.target as HTMLInputElement).value,
-                        );
-                        if (!isNaN(val) && val >= 1)
-                          updatePool(i, { replicas: val });
-                      }}
-                    />
-                  </FormGroup>
-                </GridItem>
-
-                <GridItem span={6}>
-                  <FormGroup
-                    label="Instance type"
-                    isRequired
-                    fieldId={`instance-type-${i}`}
-                  >
-                    <FormSelect
-                      id={`instance-type-${i}`}
-                      value={pool.instanceType}
-                      onChange={(_e, val) =>
-                        updatePool(i, { instanceType: val })
-                      }
-                    >
-                      {INSTANCE_TYPES.map((t) => (
-                        <FormSelectOption key={t} value={t} label={t} />
-                      ))}
-                    </FormSelect>
-                  </FormGroup>
-                </GridItem>
-                <GridItem span={6}>
-                  <FormGroup
-                    label="Root volume size (GB)"
-                    isRequired
-                    fieldId={`volume-size-${i}`}
-                  >
-                    <NumberInput
-                      id={`volume-size-${i}`}
-                      value={pool.rootVolumeSize}
-                      min={1}
-                      onMinus={() =>
-                        updatePool(i, {
-                          rootVolumeSize: Math.max(1, pool.rootVolumeSize - 1),
-                        })
-                      }
-                      onPlus={() =>
-                        updatePool(i, {
-                          rootVolumeSize: pool.rootVolumeSize + 1,
-                        })
-                      }
-                      onChange={(e) => {
-                        const val = Number(
-                          (e.target as HTMLInputElement).value,
-                        );
-                        if (!isNaN(val) && val >= 1)
-                          updatePool(i, { rootVolumeSize: val });
-                      }}
-                    />
-                  </FormGroup>
-                </GridItem>
-
-                <GridItem span={6}>
-                  <FormGroup
-                    label="Root volume type"
-                    isRequired
-                    fieldId={`volume-type-${i}`}
-                  >
-                    <FormSelect
-                      id={`volume-type-${i}`}
-                      value={pool.rootVolumeType}
-                      onChange={(_e, val) =>
-                        updatePool(i, { rootVolumeType: val })
-                      }
-                    >
-                      {VOLUME_TYPES.map((t) => (
-                        <FormSelectOption key={t} value={t} label={t} />
-                      ))}
-                    </FormSelect>
-                  </FormGroup>
-                </GridItem>
-                <GridItem span={6}>
-                  <FormGroup
-                    label="Upgrade type"
-                    isRequired
-                    fieldId={`upgrade-type-${i}`}
-                  >
-                    <FormSelect
-                      id={`upgrade-type-${i}`}
-                      value={pool.upgradeType}
-                      onChange={(_e, val) =>
-                        updatePool(i, { upgradeType: val })
-                      }
-                    >
-                      {UPGRADE_TYPES.map((t) => (
-                        <FormSelectOption
-                          key={t.value}
-                          value={t.value}
-                          label={t.label}
-                        />
-                      ))}
-                    </FormSelect>
-                  </FormGroup>
-                </GridItem>
-
-                <GridItem span={12}>
-                  <Checkbox
-                    id={`auto-repair-${i}`}
-                    label="Enable auto-repair"
-                    isChecked={pool.autoRepair}
-                    onChange={(_e, checked) =>
-                      updatePool(i, { autoRepair: checked })
-                    }
-                  />
-                </GridItem>
+                  </GridItem>
+                ))}
               </Grid>
             </FormFieldGroupExpandable>
           ))}
@@ -304,7 +315,7 @@ export default function NodePoolsStep({
           <Button variant="link" icon={<PlusCircleIcon />} onClick={addPool}>
             Add node pool
           </Button>
-        </Form>
+        </div>
       )}
 
       {viewMode === "yaml" && (
