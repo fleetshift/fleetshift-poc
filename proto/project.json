@@ -1,0 +1,23 @@
+{
+  "name": "proto",
+  "root": "proto",
+  "projectType": "library",
+  "tags": ["lang:proto", "scope:api"],
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task protogen",
+        "cwd": "."
+      },
+      "inputs": [
+        "{projectRoot}/**/*.proto",
+        "{workspaceRoot}/buf.yaml",
+        "{workspaceRoot}/buf.gen.yaml"
+      ],
+      "outputs": [
+        "{workspaceRoot}/fleetshift-server/internal/api/gen"
+      ]
+    }
+  }
+}

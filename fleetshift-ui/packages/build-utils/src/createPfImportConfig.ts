@@ -1,4 +1,5 @@
 import type { RspackPluginInstance } from "@rspack/core";
+import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
 
@@ -11,12 +12,13 @@ interface TransformImportEntry {
 }
 
 function loadDynamicModulesMap(
-  nodeModulesRoot: string,
+  _nodeModulesRoot: string,
 ): Record<string, string> {
-  const mapPath = path.resolve(
-    nodeModulesRoot,
-    "node_modules/@patternfly/react-core/dist/dynamic-modules.json",
+  const req = createRequire(import.meta.url);
+  const corePkgDir = path.dirname(
+    req.resolve("@patternfly/react-core/package.json"),
   );
+  const mapPath = path.resolve(corePkgDir, "dist/dynamic-modules.json");
   return JSON.parse(fs.readFileSync(mapPath, "utf-8"));
 }
 

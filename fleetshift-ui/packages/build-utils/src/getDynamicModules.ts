@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { createRequire } from "module";
 import fs from "fs";
 import * as glob from "glob";
 import path from "path";
@@ -17,14 +18,19 @@ const checkPfVersion = (version: string) => {
   }
 };
 
-const getDynamicModules = (root: string, nodeModulesRoot?: string) => {
+// Resolve package root regardless of hoisting
+const resolvePkgDir = (pkg: string) => {
+  const req = createRequire(import.meta.url);
+  return path.dirname(req.resolve(`${pkg}/package.json`));
+};
+
+const getDynamicModules = (root: string, _nodeModulesRoot?: string) => {
   if (!root) {
     throw new Error(
       "Provide a directory of your node_modules to find dynamic modules",
     );
   }
 
-  const modulesRoot = nodeModulesRoot || root;
   const packageFile = fs.readFileSync(path.resolve(root, "package.json"), {
     encoding: "utf-8",
   });
@@ -53,27 +59,29 @@ const getDynamicModules = (root: string, nodeModulesRoot?: string) => {
     return {};
   }
 
+  const corePkgDir = resolvePkgDir("@patternfly/react-core");
+  const iconsPkgDir = resolvePkgDir("@patternfly/react-icons");
+
   const componentsGlob = path.resolve(
-    modulesRoot,
-    "node_modules/@patternfly/react-core/dist/dynamic/*/**/package.json",
+    corePkgDir,
+    "dist/dynamic/*/**/package.json",
   );
   const iconsGlob = path.resolve(
-    modulesRoot,
-    "node_modules/@patternfly/react-icons/dist/dynamic/*/**/package.json",
+    iconsPkgDir,
+    "dist/dynamic/*/**/package.json",
   );
 
-  const readInstalledVersion = (pkg: string) => {
+  const readInstalledVersion = (pkgDir: string) => {
     const pkgJson = JSON.parse(
-      fs.readFileSync(
-        path.resolve(modulesRoot, "node_modules", pkg, "package.json"),
-        { encoding: "utf-8" },
-      ),
+      fs.readFileSync(path.resolve(pkgDir, "package.json"), {
+        encoding: "utf-8",
+      }),
     );
     return pkgJson.version as string;
   };
 
-  const coreInstalledVersion = readInstalledVersion("@patternfly/react-core");
-  const iconsInstalledVersion = readInstalledVersion("@patternfly/react-icons");
+  const coreInstalledVersion = readInstalledVersion(corePkgDir);
+  const iconsInstalledVersion = readInstalledVersion(iconsPkgDir);
 
   const files = [
     {

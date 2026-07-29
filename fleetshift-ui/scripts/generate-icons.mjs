@@ -14,10 +14,10 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = resolve(__dirname, "..");
 
-const iconsDir = join(
-  monorepoRoot,
-  "node_modules/@patternfly/react-icons/dist/esm/icons",
-);
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pfIconsPkg = dirname(require.resolve("@patternfly/react-icons/package.json"));
+const iconsDir = join(pfIconsPkg, "dist/esm/icons");
 
 /** Convert kebab-case file stem to PascalCase component name. */
 function toPascalCase(kebab) {

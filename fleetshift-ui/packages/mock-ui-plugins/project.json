@@ -1,0 +1,49 @@
+{
+  "name": "plugins",
+  "root": "fleetshift-ui/packages/mock-ui-plugins",
+  "sourceRoot": "fleetshift-ui/packages/mock-ui-plugins/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib", "federation:remote"],
+  "implicitDependencies": ["common", "build-utils"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build -w @fleetshift/mock-ui-plugins",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["common:build"]
+    },
+    "build:ci": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build:ci -w @fleetshift/mock-ui-plugins",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["common:build"]
+    },
+    "test:ct": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run test:ct -w @fleetshift/mock-ui-plugins",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/playwright-ct.config.*"
+      ],
+      "cache": false
+    }
+  }
+}

@@ -119,7 +119,20 @@ import clsx from "clsx";
 
 ## Commands
 
+npm workspaces are declared at the repo root. Run `npm install` from the repo root — not from `fleetshift-ui/`.
+
 ```bash
+# Via Nx (preferred — cached, dependency-aware):
+npx nx run common:build    # shared types/helpers
+npx nx run plugins:build   # MF remote plugins
+npx nx run gui:build       # SPA shell
+npx nx run ui:build        # full UI build (all deps)
+npx nx run gui:dev         # dev server (http://localhost:8085)
+npx nx run gui:dev:watch   # dev server with hot reload
+npx nx run ui:lint         # eslint + stylelint
+npx nx run ui:test         # vitest
+
+# Direct npm scripts still work:
 npm run build:all          # common → plugins → GUI → merge
 npm run lint               # eslint + stylelint
 npm run lint:fix           # auto-fix both
