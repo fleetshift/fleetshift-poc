@@ -29,7 +29,7 @@ var expectedGRPCServiceFamilies = []string{
 }
 
 // expectedHTTPRouteFamilies lists required HTTP route prefixes/patterns that
-// must be reachable (or explicitly exempt) on a ready app without WebDir.
+// must be reachable (or explicitly exempt) on a ready server without WebDir.
 var expectedHTTPRouteFamilies = []string{
 	"/v1/",
 	"/apis/fleetshift.io/",
@@ -40,9 +40,9 @@ var expectedHTTPRouteFamilies = []string{
 }
 
 func TestExpectedSurface_GRPCServices(t *testing.T) {
-	app := startTestApp(t)
+	srv := startTestServer(t)
 
-	conn, err := grpc.NewClient(app.Endpoints().GRPC.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(srv.Endpoints().GRPC.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestExpectedSurface_GRPCServices(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	info := app.grpcServer.GetServiceInfo()
+	info := srv.grpcServer.GetServiceInfo()
 	for _, want := range expectedGRPCServiceFamilies {
 		if _, ok := info[want]; !ok {
 			t.Errorf("missing expected gRPC service %q; registered=%v", want, keys(info))
@@ -64,8 +64,8 @@ func TestExpectedSurface_GRPCServices(t *testing.T) {
 }
 
 func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
-	app := startTestApp(t)
-	base := "http://" + app.Endpoints().HTTP.Dial
+	srv := startTestServer(t)
+	base := "http://" + srv.Endpoints().HTTP.Dial
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	probes := []struct {
@@ -115,8 +115,8 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 }
 
 func TestExpectedSurface_AuthMethodWiresCacheInvalidation(t *testing.T) {
-	app := startTestApp(t)
-	info := app.grpcServer.GetServiceInfo()
+	srv := startTestServer(t)
+	info := srv.grpcServer.GetServiceInfo()
 	svc, ok := info["fleetshift.v1.AuthMethodService"]
 	if !ok {
 		t.Fatal("AuthMethodService not registered")
@@ -135,13 +135,13 @@ func TestExpectedSurface_AuthMethodWiresCacheInvalidation(t *testing.T) {
 	// AuthMethodServer with Authn set; a nil Authn would omit cache invalidation.
 	// Prove the transport service is present and the readiness probe succeeded
 	// through authenticated middleware.
-	if !app.ready {
-		t.Fatal("app not ready")
+	if !srv.ready {
+		t.Fatal("server not ready")
 	}
 }
 
 func TestExpectedSurface_KindGCPConditionalRegistration(t *testing.T) {
-	app := startTestApp(t, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
+	srv := startTestServer(t, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
 		// Kind: schemas/targets only (no DeliveryCapability) so Agent may be nil.
 		// GCP: DeliveryCapability requires a non-nil agent.
 		kindDesc := kindaddon.Descriptor()
@@ -182,7 +182,7 @@ func TestExpectedSurface_KindGCPConditionalRegistration(t *testing.T) {
 			},
 		}, nil
 	}))
-	info := app.grpcServer.GetServiceInfo()
+	info := srv.grpcServer.GetServiceInfo()
 	// Core services remain; dynamic kind/gcphcp services are registered on the mux.
 	for _, want := range expectedGRPCServiceFamilies {
 		if _, ok := info[want]; !ok {

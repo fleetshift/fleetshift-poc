@@ -76,7 +76,7 @@ func Start(t *testing.T) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	app, err := bootstrap.Start(ctx, cfg, logger,
+	srv, err := bootstrap.Start(ctx, cfg, logger,
 		bootstrap.WithWorkflowRuntime(bootstrap.NewMemWorkflowRuntime()),
 		bootstrap.WithIdentity(bootstrap.Identity{
 			Discovery: stubDiscovery{},
@@ -90,12 +90,12 @@ func Start(t *testing.T) string {
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := app.Close(closeCtx); err != nil {
+		if err := srv.Close(closeCtx); err != nil {
 			t.Errorf("bootstrap.Close: %v", err)
 		}
 	})
 
-	return app.Endpoints().GRPC.Dial
+	return srv.Endpoints().GRPC.Dial
 }
 
 // facadeAddonAssembly preserves focused Kind/GCP HCP create/read semantics

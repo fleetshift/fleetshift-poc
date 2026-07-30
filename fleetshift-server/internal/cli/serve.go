@@ -80,13 +80,13 @@ func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 		return err
 	}
 
-	app, err := bootstrap.Start(signalCtx, cfg, logger)
+	srv, err := bootstrap.Start(signalCtx, cfg, logger)
 	if err != nil {
 		return err
 	}
 
 	waitErr := make(chan error, 1)
-	go func() { waitErr <- app.Wait() }()
+	go func() { waitErr <- srv.Wait() }()
 
 	select {
 	case <-signalCtx.Done():
@@ -95,7 +95,7 @@ func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = app.Close(closeCtx)
+			_ = srv.Close(closeCtx)
 			return err
 		}
 	}
@@ -103,7 +103,7 @@ func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 	// Fresh bounded context: never pass the cancelled signal context to Close.
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return app.Close(closeCtx)
+	return srv.Close(closeCtx)
 }
 
 // buildLogger creates a stderr slog logger with the given base level, format

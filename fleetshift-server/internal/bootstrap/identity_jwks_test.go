@@ -82,7 +82,7 @@ func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	app, err := Start(ctx, cfg, testLogger(),
+	srv, err := Start(ctx, cfg, testLogger(),
 		WithWorkflowRuntime(NewMemWorkflowRuntime()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: gated}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
@@ -95,7 +95,7 @@ func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_ = app.Close(closeCtx)
+		_ = srv.Close(closeCtx)
 	})
 }
 
@@ -162,7 +162,7 @@ func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 
 	jwksUp.Store(false)
 	startAt := time.Now()
-	app, err := Start(ctx, appCfg, testLogger(),
+	srv, err := Start(ctx, appCfg, testLogger(),
 		WithWorkflowRuntime(NewMemWorkflowRuntime()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: verifier}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
@@ -180,10 +180,10 @@ func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_ = app.Close(closeCtx)
+		_ = srv.Close(closeCtx)
 	})
 
-	conn, err := grpc.NewClient(app.Endpoints().GRPC.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(srv.Endpoints().GRPC.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

@@ -36,11 +36,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
 )
 
-// App is a fully ready FleetShift application. Endpoints are immutable.
-// Stores, services, and servers are not exposed; exercise the app through
-// public endpoints. Wait surfaces unexpected background termination; Close
-// is concurrency-safe, idempotent, and bounded by the caller's context.
-type App struct {
+// Server is a fully ready FleetShift process handle. Endpoints are immutable.
+// Stores, services, and transport servers are not exposed; exercise the
+// process through public endpoints. Wait surfaces unexpected background
+// termination; Close is concurrency-safe, idempotent, and bounded by the
+// caller's context.
+type Server struct {
 	endpoints Endpoints
 	logger    *slog.Logger
 
@@ -70,45 +71,45 @@ type App struct {
 }
 
 // Endpoints returns immutable resolved listener addresses.
-func (a *App) Endpoints() Endpoints { return a.endpoints }
+func (s *Server) Endpoints() Endpoints { return s.endpoints }
 
 // Wait blocks until an unexpected background termination occurs or Close
 // completes. After normal Close, Wait returns the same terminal result.
-func (a *App) Wait() error {
+func (s *Server) Wait() error {
 	select {
-	case err := <-a.serveErrCh:
-		a.closeMu.Lock()
-		shutdown := a.shutdownRequested
-		a.closeMu.Unlock()
+	case err := <-s.serveErrCh:
+		s.closeMu.Lock()
+		shutdown := s.shutdownRequested
+		s.closeMu.Unlock()
 		if shutdown && isExpectedServeStop(err) {
-			<-a.closeDone
-			return a.closeErr
+			<-s.closeDone
+			return s.closeErr
 		}
 		if err != nil {
 			return err
 		}
-		<-a.closeDone
-		return a.closeErr
-	case <-a.closeDone:
-		return a.closeErr
+		<-s.closeDone
+		return s.closeErr
+	case <-s.closeDone:
+		return s.closeErr
 	}
 }
 
 // Close performs bounded, idempotent shutdown. Concurrent callers share one
 // cleanup execution; each waits only until its own context expires.
-func (a *App) Close(ctx context.Context) error {
-	a.closeMu.Lock()
-	a.shutdownRequested = true
-	a.closeMu.Unlock()
+func (s *Server) Close(ctx context.Context) error {
+	s.closeMu.Lock()
+	s.shutdownRequested = true
+	s.closeMu.Unlock()
 
-	a.closeOnce.Do(func() {
-		a.closeErr = a.shutdown()
-		close(a.closeDone)
+	s.closeOnce.Do(func() {
+		s.closeErr = s.shutdown()
+		close(s.closeDone)
 	})
 
 	select {
-	case <-a.closeDone:
-		return a.closeErr
+	case <-s.closeDone:
+		return s.closeErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -118,7 +119,7 @@ func (a *App) Close(ctx context.Context) error {
 // only when the application is semantically ready. The start context bounds
 // construction and readiness; after success, long-lived work uses an
 // app-owned context. On failure, acquired resources are cleaned up in reverse.
-func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option) (*App, error) {
+func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option) (*Server, error) {
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
@@ -132,7 +133,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 
 	appCtx, appCancel := context.WithCancel(context.Background())
-	app := &App{
+	srv := &Server{
 		logger:        logger,
 		appCtx:        appCtx,
 		appCancel:     appCancel,
@@ -147,7 +148,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 			cleanups[i]()
 		}
 	}
-	fail := func(err error) (*App, error) {
+	fail := func(err error) (*Server, error) {
 		appCancel()
 		cleanup()
 		return nil, err
@@ -188,7 +189,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	default:
 		return fail(fmt.Errorf("unsupported database config %T", cfg.Database))
 	}
-	app.db = db
+	srv.db = db
 	cleanups = append(cleanups, func() { _ = db.Close() })
 
 	// --- workflow runtime ---
@@ -199,7 +200,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 			return fail(err)
 		}
 	}
-	app.wfRuntime = wfRuntime
+	srv.wfRuntime = wfRuntime
 	reg := wfRuntime.Registry()
 
 	specValidator, err := protovalidate.New()
@@ -233,7 +234,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	var kubeIndexing *kubernetesInProcessIndexing
 	if enabledAddons[AddonKubernetes] {
 		kubeIndexing = newKubernetesInProcessIndexing(appCtx, store, vault, logger)
-		app.kubeIndexing = kubeIndexing
+		srv.kubeIndexing = kubeIndexing
 		cleanups = append(cleanups, func() {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -336,7 +337,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		Methods:     authMethodRepo,
 		ProvisionWF: provWf,
 	}
-	app.authMethodSvc = authMethodSvc
+	srv.authMethodSvc = authMethodSvc
 
 	existingMethods, err := authMethodSvc.List(ctx)
 	if err != nil {
@@ -395,13 +396,13 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		Registry: activeResources,
 	})
 	dynamicapi.RegisterCompositeReflection(grpcServer, dynamicMux, fileRegistry)
-	app.grpcServer = grpcServer
+	srv.grpcServer = grpcServer
 
 	grpcLis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		return fail(fmt.Errorf("listen gRPC on %s: %w", cfg.GRPCAddr, err))
 	}
-	app.grpcLis = grpcLis
+	srv.grpcLis = grpcLis
 	cleanups = append(cleanups, func() { _ = grpcLis.Close() })
 	grpcEP, err := endpointFromListener(grpcLis)
 	if err != nil {
@@ -461,7 +462,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if err != nil {
 		return fail(fmt.Errorf("dynamic http mux grpc client: %w", err))
 	}
-	app.dynamicHTTPConn = dynamicHTTPConn
+	srv.dynamicHTTPConn = dynamicHTTPConn
 	cleanups = append(cleanups, func() { _ = dynamicHTTPConn.Close() })
 	dynamicHTTPMux := dynamicapi.NewDynamicHTTPMux(topMux, dynamicHTTPConn)
 
@@ -494,14 +495,14 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if err != nil {
 		return fail(fmt.Errorf("listen HTTP on %s: %w", cfg.HTTPAddr, err))
 	}
-	app.httpLis = httpLis
+	srv.httpLis = httpLis
 	cleanups = append(cleanups, func() { _ = httpLis.Close() })
 	httpEP, err := endpointFromListener(httpLis)
 	if err != nil {
 		return fail(err)
 	}
-	app.endpoints = Endpoints{GRPC: grpcEP, HTTP: httpEP}
-	app.httpServer = &http.Server{Handler: transporthttp.MaxBody(topMux)}
+	srv.endpoints = Endpoints{GRPC: grpcEP, HTTP: httpEP}
+	srv.httpServer = &http.Server{Handler: transporthttp.MaxBody(topMux)}
 
 	// --- addon lifecycle ---
 	//
@@ -581,7 +582,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 				logger,
 			)
 		})
-		app.indexReplayDone = replayDone
+		srv.indexReplayDone = replayDone
 		logger.Info("kubernetes index startup replay started")
 	}
 
@@ -598,29 +599,29 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	go func() {
 		logger.Info("gRPC server listening", "addr", grpcEP.Bind, "dial", grpcEP.Dial)
 		err := grpcServer.Serve(grpcLis)
-		app.serveErrCh <- err
+		srv.serveErrCh <- err
 	}()
 	go func() {
 		logger.Info("HTTP gateway listening", "addr", httpEP.Bind, "dial", httpEP.Dial)
-		err := app.httpServer.Serve(httpLis)
+		err := srv.httpServer.Serve(httpLis)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			app.serveErrCh <- err
+			srv.serveErrCh <- err
 		}
 	}()
 	// Serve owns accepted connections; register stop before readiness so a
 	// failed proveReadiness unwinds servers the same way as Close.
 	cleanups = append(cleanups, func() {
-		_ = stopIngress(grpcServer, app.httpServer, o.shutdownGrace)
+		_ = stopIngress(grpcServer, srv.httpServer, o.shutdownGrace)
 	})
 
 	if err := proveReadiness(ctx, grpcEP.Dial); err != nil {
 		return fail(err)
 	}
-	app.ready = true
+	srv.ready = true
 
 	// Successful start: transfer lifetime ownership; do not run fail cleanups.
 	cleanups = nil
-	return app, nil
+	return srv, nil
 }
 
 // rejectNilClaimedAgent fails Start when a DeliveryCapability is claimed
@@ -682,9 +683,9 @@ func isExpectedServeStop(err error) bool {
 
 // shutdown stops ingress, cancels app-owned work, joins index replay and
 // workflow runtime, and closes connections/DB. Invoked once from Close.
-func (a *App) shutdown() error {
-	a.logger.Info("shutting down")
-	a.ready = false
+func (s *Server) shutdown() error {
+	s.logger.Info("shutting down")
+	s.ready = false
 
 	var primary error
 	join := func(err error) {
@@ -699,38 +700,38 @@ func (a *App) shutdown() error {
 	}
 
 	// Quiesce ingress while dependencies remain live.
-	join(stopIngress(a.grpcServer, a.httpServer, a.shutdownGrace))
+	join(stopIngress(s.grpcServer, s.httpServer, s.shutdownGrace))
 
 	// Cancel app-owned work and join producers.
-	a.appCancel()
-	if a.indexReplayDone != nil {
+	s.appCancel()
+	if s.indexReplayDone != nil {
 		select {
-		case <-a.indexReplayDone:
-		case <-time.After(a.shutdownGrace):
+		case <-s.indexReplayDone:
+		case <-time.After(s.shutdownGrace):
 			join(fmt.Errorf("kubernetes index replay join timed out"))
 		}
 	}
-	if a.kubeIndexing != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), a.shutdownGrace)
-		join(a.kubeIndexing.Runtime.StopAll(stopCtx))
+	if s.kubeIndexing != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), s.shutdownGrace)
+		join(s.kubeIndexing.Runtime.StopAll(stopCtx))
 		cancel()
 	}
-	if a.wfRuntime != nil {
-		waitCtx, cancel := context.WithTimeout(context.Background(), a.shutdownGrace)
-		join(a.wfRuntime.Close(waitCtx))
+	if s.wfRuntime != nil {
+		waitCtx, cancel := context.WithTimeout(context.Background(), s.shutdownGrace)
+		join(s.wfRuntime.Close(waitCtx))
 		cancel()
 	}
-	if a.dynamicHTTPConn != nil {
-		join(a.dynamicHTTPConn.Close())
+	if s.dynamicHTTPConn != nil {
+		join(s.dynamicHTTPConn.Close())
 	}
-	if a.grpcLis != nil {
-		_ = a.grpcLis.Close()
+	if s.grpcLis != nil {
+		_ = s.grpcLis.Close()
 	}
-	if a.httpLis != nil {
-		_ = a.httpLis.Close()
+	if s.httpLis != nil {
+		_ = s.httpLis.Close()
 	}
-	if a.db != nil {
-		join(a.db.Close())
+	if s.db != nil {
+		join(s.db.Close())
 	}
 	return primary
 }

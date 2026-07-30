@@ -62,9 +62,9 @@ func TestGoWorkflowRuntime_ConcurrentClose(t *testing.T) {
 	}
 }
 
-func TestLifecycle_GoWorkflowRuntimeCloseThroughApp(t *testing.T) {
+func TestLifecycle_GoWorkflowRuntimeCloseThroughServer(t *testing.T) {
 	// Default unit helpers use MemWorkflowRuntime; exercise production runtime
-	// through App shutdown (appCancel + Close) and a second Close.
+	// through Server shutdown (appCancel + Close) and a second Close.
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
 	rt, err := NewGoWorkflowRuntime(SQLite{Path: dbPath}, testLogger())
 	if err != nil {
@@ -82,7 +82,7 @@ func TestLifecycle_GoWorkflowRuntimeCloseThroughApp(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	app, err := Start(ctx, cfg, testLogger(),
+	srv, err := Start(ctx, cfg, testLogger(),
 		WithWorkflowRuntime(rt),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
@@ -93,10 +93,10 @@ func TestLifecycle_GoWorkflowRuntimeCloseThroughApp(t *testing.T) {
 
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer closeCancel()
-	if err := app.Close(closeCtx); err != nil {
+	if err := srv.Close(closeCtx); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if err := app.Close(closeCtx); err != nil {
-		t.Fatalf("second App.Close: %v", err)
+	if err := srv.Close(closeCtx); err != nil {
+		t.Fatalf("second Server.Close: %v", err)
 	}
 }

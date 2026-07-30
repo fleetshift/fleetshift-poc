@@ -20,8 +20,8 @@ import (
 )
 
 func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
-	app := startTestApp(t)
-	ep := app.Endpoints()
+	srv := startTestServer(t)
+	ep := srv.Endpoints()
 	if ep.GRPC.Dial == "" || ep.HTTP.Dial == "" {
 		t.Fatalf("empty endpoints: %+v", ep)
 	}
@@ -216,12 +216,12 @@ func TestStopIngress_ReleasesListenersAfterServe(t *testing.T) {
 func TestLifecycle_ServeFailureReachesWait(t *testing.T) {
 	// Close the live gRPC listener under Serve so Wait sees a real serve error
 	// (same-package access; no production test hook).
-	app := startTestApp(t)
+	srv := startTestServer(t)
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- app.Wait() }()
+	go func() { errCh <- srv.Wait() }()
 
-	if err := app.grpcLis.Close(); err != nil {
+	if err := srv.grpcLis.Close(); err != nil {
 		t.Fatalf("close gRPC listener: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func freeLocalAddr(t *testing.T) string {
 }
 
 func TestLifecycle_CloseIdempotentAndConcurrent(t *testing.T) {
-	app := startTestApp(t)
+	srv := startTestServer(t)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 3)
@@ -260,7 +260,7 @@ func TestLifecycle_CloseIdempotentAndConcurrent(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			errs[i] = app.Close(ctx)
+			errs[i] = srv.Close(ctx)
 		}(i)
 	}
 	wg.Wait()
@@ -272,19 +272,19 @@ func TestLifecycle_CloseIdempotentAndConcurrent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := app.Close(ctx); err != nil {
+	if err := srv.Close(ctx); err != nil {
 		t.Fatalf("Close after close: %v", err)
 	}
 }
 
 func TestLifecycle_CloseCallerDeadlineIndependent(t *testing.T) {
-	app := startTestApp(t)
+	srv := startTestServer(t)
 
 	// A timed-out caller must not cancel shared cleanup for a later caller.
 	expired, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
 	time.Sleep(time.Millisecond)
-	if err := app.Close(expired); !errors.Is(err, context.DeadlineExceeded) {
+	if err := srv.Close(expired); !errors.Is(err, context.DeadlineExceeded) {
 		// Close may finish before the nanosecond deadline on a fast machine;
 		// either deadline exceeded or success is acceptable for the first call.
 		if err != nil {
@@ -294,14 +294,14 @@ func TestLifecycle_CloseCallerDeadlineIndependent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := app.Close(ctx); err != nil {
+	if err := srv.Close(ctx); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
 }
 
 func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
 	reg := &trackingRuntime{inner: NewMemWorkflowRuntime()}
-	_ = startTestApp(t, WithWorkflowRuntime(reg))
+	_ = startTestServer(t, WithWorkflowRuntime(reg))
 	if !reg.started {
 		t.Fatal("workflow runtime was not started")
 	}
@@ -313,7 +313,7 @@ func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
 	}
 }
 
-// trackingRuntime verifies Start is not called until the app finishes registering.
+// trackingRuntime verifies Start is not called until the server finishes registering.
 type trackingRuntime struct {
 	inner                *MemWorkflowRuntime
 	mu                   sync.Mutex

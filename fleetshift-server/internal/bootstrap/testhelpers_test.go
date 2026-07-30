@@ -66,7 +66,7 @@ func mustTestCAPEM(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-func startTestApp(t *testing.T, opts ...Option) *App {
+func startTestServer(t *testing.T, opts ...Option) *Server {
 	t.Helper()
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr: "127.0.0.1:0",
@@ -89,14 +89,14 @@ func startTestApp(t *testing.T, opts ...Option) *App {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 
-	app, err := Start(ctx, cfg, testLogger(), base...)
+	srv, err := Start(ctx, cfg, testLogger(), base...)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_ = app.Close(closeCtx)
+		_ = srv.Close(closeCtx)
 	})
-	return app
+	return srv
 }
