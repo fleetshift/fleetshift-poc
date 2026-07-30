@@ -93,26 +93,21 @@ func (s *Server) Wait() error {
 }
 
 // Close performs bounded, idempotent shutdown. Concurrent callers share one
-// cleanup execution; each waits only until its own context expires.
+// cleanup execution; the first caller runs shutdown to completion, and later
+// callers observe the same terminal result. Caller ctx does not cancel
+// in-flight shared cleanup.
 //
-// A timed-out caller does not cancel cleanup: shared shutdown continues until
-// completion so a later Close/Wait can observe the terminal result. Callers
-// that are about to exit the process must still join Wait (or use a deadline
-// that covers cleanup); returning from Close on ctx expiry alone does not mean
-// resources are gone.
+// TODO: Close(ctx) does not honestly bound the Once winner — shutdown ignores
+// ctx and the post-Do select rarely observes deadline. Revisit whether ctx
+// should be documented as advisory-only, dropped, or made a real wait budget.
 func (s *Server) Close(ctx context.Context) error {
 	s.closeMu.Lock()
 	s.shutdownRequested = true
 	s.closeMu.Unlock()
 
-	// Start shared cleanup inside Once, but do not run shutdown on the caller's
-	// goroutine: concurrent Close callers must reach the select below rather
-	// than block inside Once.Do (which would ignore their deadlines).
 	s.closeOnce.Do(func() {
-		go func() {
-			s.closeErr = s.shutdown()
-			close(s.closeDone)
-		}()
+		s.closeErr = s.shutdown()
+		close(s.closeDone)
 	})
 
 	select {

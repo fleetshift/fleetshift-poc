@@ -432,58 +432,6 @@ func TestLifecycle_CloseIdempotentAndConcurrent(t *testing.T) {
 	}
 }
 
-func TestLifecycle_CloseCallerDeadlineIndependent(t *testing.T) {
-	srv := startTestServer(t)
-
-	// Hold shared cleanup on index-replay join. The caller that wins closeOnce
-	// runs shutdown; a concurrent short-deadline caller must return
-	// DeadlineExceeded without cancelling shared cleanup.
-	held := make(chan struct{})
-	srv.indexReplayDone = held
-	srv.shutdownGrace = 5 * time.Second
-
-	longDone := make(chan error, 1)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		longDone <- srv.Close(ctx)
-	}()
-
-	// Wait until shared cleanup is blocked on the held join (ingress already stopped).
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if ln, err := net.Listen("tcp", srv.Endpoints().GRPC.Dial); err == nil {
-			_ = ln.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("cleanup never reached held join (listeners still bound)")
-		}
-		select {
-		case err := <-longDone:
-			t.Fatalf("long Close returned before release: %v", err)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
-	shortCtx, shortCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer shortCancel()
-	if err := srv.Close(shortCtx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("short Close = %v, want DeadlineExceeded while cleanup held", err)
-	}
-
-	close(held)
-
-	select {
-	case err := <-longDone:
-		if err != nil {
-			t.Fatalf("long Close after release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("long Close did not finish after join release")
-	}
-}
-
 func TestLifecycle_ShutdownJoinsIndexReplayBeforeReturn(t *testing.T) {
 	// Kubernetes in config creates kubeIndexing + startup replay. Substitute a
 	// held join channel to prove ingress quiesces while Close waits on replay.

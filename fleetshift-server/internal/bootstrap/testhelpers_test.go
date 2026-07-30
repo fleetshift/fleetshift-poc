@@ -79,10 +79,8 @@ func startTestServerWithConfig(t *testing.T, in ConfigInput, opts ...Option) *Se
 	}
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 		_ = srv.Close(closeCtx)
-		cancel()
-		// Close may return on wait-budget expiry while cleanup continues.
-		_ = srv.Wait()
 	})
 	return srv
 }

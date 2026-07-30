@@ -93,27 +93,17 @@ func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 		logger.Info("shutting down")
 	case err := <-waitErr:
 		if err != nil {
-			// Fresh bounded context: never pass the cancelled signal context.
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			_ = srv.Close(closeCtx)
-			cancel()
-			// First Wait already returned the serve failure; join shared cleanup
-			// with a fresh Wait so the process does not exit mid-shutdown.
-			_ = srv.Wait()
 			return err
 		}
 	}
 
 	// Fresh bounded context: never pass the cancelled signal context to Close.
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	closeErr := srv.Close(closeCtx)
-	cancel()
-	// Join the pre-started Wait so a Close wait-budget timeout cannot return
-	// from runServe (and exit the process) while cleanup is still running.
-	if err := <-waitErr; closeErr == nil {
-		return err
-	}
-	return closeErr
+	defer cancel()
+	return srv.Close(closeCtx)
 }
 
 // buildLogger creates a stderr slog logger with the given base level, format
