@@ -403,10 +403,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 	srv.grpcLis = grpcLis
 	cleanups = append(cleanups, func() { _ = grpcLis.Close() })
-	grpcEP, err := endpointFromListener(grpcLis)
-	if err != nil {
-		return fail(err)
-	}
+	grpcEP := endpointFromListener(grpcLis)
 
 	gwMux := runtime.NewServeMux()
 	gwOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
@@ -496,10 +493,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 	srv.httpLis = httpLis
 	cleanups = append(cleanups, func() { _ = httpLis.Close() })
-	httpEP, err := endpointFromListener(httpLis)
-	if err != nil {
-		return fail(err)
-	}
+	httpEP := endpointFromListener(httpLis)
 	srv.endpoints = Endpoints{GRPC: grpcEP, HTTP: httpEP}
 	srv.httpServer = &http.Server{Handler: transporthttp.MaxBody(topMux)}
 
@@ -659,7 +653,6 @@ func proveReadiness(ctx context.Context, grpcDial string) error {
 		// Expected when auth methods are configured and no credential is presented.
 		return nil
 	}
-	// Empty bootstrap (no auth methods) allows anonymous; other errors fail readiness.
 	if ok && st.Code() == codes.Unavailable {
 		return fmt.Errorf("readiness probe: %w", err)
 	}

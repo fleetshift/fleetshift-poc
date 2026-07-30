@@ -11,14 +11,15 @@ import (
 )
 
 // KeySetRegistrar registers JWKS URIs required for token verification.
-// Production verifiers implement this. Startup registration is best-effort;
-// Verify retries registration on demand when keys were not cached at boot.
+// Optional capability on a Verifier; not all verifiers implement it.
 type KeySetRegistrar interface {
+	// RegisterKeySet registers jwksURI for subsequent token verification.
+	// ctx bounds network I/O. A non-nil error means keys were not published;
+	// callers may retry later. Success is idempotent when already registered.
 	RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error
 }
 
-// Identity couples OIDC discovery with token verification (and required
-// key-set registration when the verifier implements KeySetRegistrar).
+// Identity holds OIDC discovery and token verification dependencies for Start.
 type Identity struct {
 	Discovery domain.OIDCDiscoveryClient
 	Verifier  domain.OIDCTokenVerifier

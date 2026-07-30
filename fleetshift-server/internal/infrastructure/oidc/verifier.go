@@ -299,6 +299,7 @@ func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (j
 	return ks, nil
 }
 
+// lookupKeySet returns the published key set for uri under v.mu.
 func (v *Verifier) lookupKeySet(uri string) (jwk.Set, bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()

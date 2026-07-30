@@ -20,25 +20,21 @@ type Endpoints struct {
 }
 
 // resolveDialAddress converts a listener address into a safe dial target.
-// Unspecified hosts (empty, 0.0.0.0, ::) become 127.0.0.1.
-func resolveDialAddress(addr net.Addr) (string, error) {
+// Unspecified hosts (empty, 0.0.0.0, ::) become 127.0.0.1. Non-TCP
+// addresses are returned via Addr.String() unchanged.
+func resolveDialAddress(addr net.Addr) string {
 	tcp, ok := addr.(*net.TCPAddr)
 	if !ok {
-		return addr.String(), nil
+		return addr.String()
 	}
 	host := tcp.IP.String()
 	if tcp.IP == nil || tcp.IP.IsUnspecified() {
 		host = "127.0.0.1"
 	}
-	return net.JoinHostPort(host, fmt.Sprintf("%d", tcp.Port)), nil
+	return net.JoinHostPort(host, fmt.Sprintf("%d", tcp.Port))
 }
 
 // endpointFromListener builds an Endpoint from a bound listener's address.
-func endpointFromListener(lis net.Listener) (Endpoint, error) {
-	bind := lis.Addr().String()
-	dial, err := resolveDialAddress(lis.Addr())
-	if err != nil {
-		return Endpoint{}, err
-	}
-	return Endpoint{Bind: bind, Dial: dial}, nil
+func endpointFromListener(lis net.Listener) Endpoint {
+	return Endpoint{Bind: lis.Addr().String(), Dial: resolveDialAddress(lis.Addr())}
 }

@@ -50,8 +50,7 @@ func WithAddonAssembly(fn AddonAssemblyFunc) Option {
 }
 
 // AddonAssemblyFunc builds ordered add-on specs after persistence and shared
-// deps exist. It must not start background work that outlives Start without
-// registering join ownership through the returned specs' AfterConnect hooks.
+// deps exist. It must not start background work that outlives Start.
 type AddonAssemblyFunc func(ctx context.Context, deps AddonDeps) ([]AddonSpec, error)
 
 // AddonDeps carries shared inputs required to assemble production or test add-ons.
