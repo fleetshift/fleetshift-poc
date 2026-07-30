@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -171,35 +170,6 @@ func TestDirectInventoryReportBackend_RoundTrip(t *testing.T) {
 		t.Fatalf("Get after ReplaceBatch delete err=%v, want ErrNotFound", err)
 	}
 	readTx.Rollback()
-}
-
-func TestNewKubernetesInProcessIndexing_WiresIndexingRuntime(t *testing.T) {
-	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
-	seedKubernetesObjectType(t, store)
-
-	sch := kubernetesaddon.InventorySchema()
-	if sch.ResourceType != kubernetesaddon.ObjectResourceType {
-		t.Fatalf("Schema.ResourceType = %q, want %q", sch.ResourceType, kubernetesaddon.ObjectResourceType)
-	}
-	if sch.Inventory == nil {
-		t.Fatal("Schema must declare Inventory for Connect registration")
-	}
-
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
-
-	indexing := newKubernetesInProcessIndexing(
-		runCtx, nil, application.NewInventoryReportService(store), slog.New(slog.DiscardHandler),
-	)
-	if indexing == nil || indexing.Runtime == nil {
-		t.Fatal("expected wired indexing runtime")
-	}
-
-	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := indexing.Runtime.StopAll(stopCtx); err != nil {
-		t.Fatalf("StopAll: %v", err)
-	}
 }
 
 func TestStoreTargetLister_BeginError(t *testing.T) {

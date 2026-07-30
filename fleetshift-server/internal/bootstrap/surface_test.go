@@ -4,18 +4,18 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"google.golang.org/grpc"
 )
 
 // expectedGRPCServiceFamilies is the independent inventory of required gRPC
@@ -41,20 +41,6 @@ var expectedHTTPRouteFamilies = []string{
 
 func TestExpectedSurface_GRPCServices(t *testing.T) {
 	srv := startTestServer(t)
-
-	conn, err := grpc.NewClient(srv.Endpoints().GRPC.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-
-	for i := 0; i < 50; i++ {
-		if conn.GetState().String() != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
 	info := srv.grpcServer.GetServiceInfo()
 	for _, want := range expectedGRPCServiceFamilies {
 		if _, ok := info[want]; !ok {
@@ -114,33 +100,48 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 	}
 }
 
-func TestExpectedSurface_AuthMethodServiceRegistered(t *testing.T) {
-	srv := startTestServer(t)
-	info := srv.grpcServer.GetServiceInfo()
-	svc, ok := info["fleetshift.v1.AuthMethodService"]
-	if !ok {
-		t.Fatal("AuthMethodService not registered")
-	}
-	found := false
-	for _, m := range svc.Methods {
-		if m.Name == "CreateAuthMethod" || m.Name == "DeleteAuthMethod" || m.Name == "ListAuthMethods" {
-			found = true
-			break
+func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
+	// D18 composition guardrail: with an auth method present, exempt WS routes
+	// stay reachable while wrapped UI routes require a bearer token.
+	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
+	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	seedOIDCAuthMethod(t, dbPath, idp.OIDCConfig())
+
+	srv := startTestServerWithConfig(t, ConfigInput{
+		DBPath: dbPath,
+	})
+	base := "http://" + srv.Endpoints().HTTP.Dial
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	for _, path := range []string{"/api/ui/setup/ws", "/api/ui/events/ws"} {
+		resp, err := client.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Errorf("%s returned 401; route must remain unauthenticated", path)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			t.Errorf("%s returned 404; route family missing", path)
 		}
 	}
-	if !found {
-		t.Fatalf("AuthMethodService methods unexpected: %+v", svc.Methods)
+
+	resp, err := client.Get(base + "/api/ui/github-signing-keys/octocat")
+	if err != nil {
+		t.Fatalf("GET github-signing-keys: %v", err)
 	}
-	// Prove the transport service is present and the readiness probe succeeded.
-	if !srv.ready {
-		t.Fatal("server not ready")
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("github-signing-keys status = %d, want 401 with auth configured and no token", resp.StatusCode)
 	}
 }
 
-func TestExpectedSurface_KindGCPConditionalRegistration(t *testing.T) {
-	srv := startTestServer(t, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
-		// Kind: schemas/targets only (no DeliveryCapability) so Agent may be nil.
-		// GCP: DeliveryCapability requires a non-nil agent.
+func TestExpectedSurface_KindGCPTargetsAndSchemasLive(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	srv := startTestServerWithConfig(t, ConfigInput{DBPath: dbPath}, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
 		kindDesc := kindaddon.Descriptor()
 		kindDesc.Capabilities = []domain.Capability{
 			domain.ManagedResourceCapability{ResourceType: kindaddon.ClusterResourceType},
@@ -179,11 +180,55 @@ func TestExpectedSurface_KindGCPConditionalRegistration(t *testing.T) {
 			},
 		}, nil
 	}))
-	info := srv.grpcServer.GetServiceInfo()
-	// Core services remain; dynamic kind/gcphcp services are registered on the mux.
-	for _, want := range expectedGRPCServiceFamilies {
-		if _, ok := info[want]; !ok {
-			t.Errorf("missing expected gRPC service %q after addon connect", want)
+	_ = srv
+
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := &sqlite.Store{DB: db}
+
+	ctx := context.Background()
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+
+	targets, err := tx.Targets().List(ctx)
+	if err != nil {
+		t.Fatalf("list targets: %v", err)
+	}
+	wantTargets := map[domain.TargetID]bool{"kind-local": false, "gcphcp-test": false}
+	for _, target := range targets {
+		if _, ok := wantTargets[target.ID()]; ok {
+			wantTargets[target.ID()] = true
+		}
+	}
+	for id, found := range wantTargets {
+		if !found {
+			t.Errorf("missing connected target %q", id)
+		}
+	}
+
+	types, err := tx.ExtensionResources().ListTypes(ctx)
+	if err != nil {
+		t.Fatalf("list types: %v", err)
+	}
+	wantTypes := map[domain.ResourceType]bool{
+		kindaddon.ClusterResourceType:   false,
+		kindaddon.NodeResourceType:      false,
+		gcphcpaddon.ClusterResourceType: false,
+	}
+	for _, typ := range types {
+		if _, ok := wantTypes[typ.ResourceType()]; ok {
+			wantTypes[typ.ResourceType()] = true
+		}
+	}
+	for rt, found := range wantTypes {
+		if !found {
+			t.Errorf("missing activated schema type %q", rt)
 		}
 	}
 }

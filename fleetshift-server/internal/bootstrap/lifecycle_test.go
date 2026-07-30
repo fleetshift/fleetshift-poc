@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
@@ -88,10 +89,14 @@ func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 }
 
 func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
+	grpcAddr := freeLocalAddr(t)
+	httpAddr := freeLocalAddr(t)
+	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+
 	cfg, err := NewConfig(ConfigInput{
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+		GRPCAddr: grpcAddr,
+		HTTPAddr: httpAddr,
+		DBPath:   dbPath,
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -113,6 +118,17 @@ func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected AfterConnect failure")
 	}
+
+	rebindGRPC, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		t.Fatalf("gRPC addr %s still held after failed Start: %v", grpcAddr, err)
+	}
+	_ = rebindGRPC.Close()
+	rebindHTTP, err := net.Listen("tcp", httpAddr)
+	if err != nil {
+		t.Fatalf("HTTP addr %s still held after failed Start: %v", httpAddr, err)
+	}
+	_ = rebindHTTP.Close()
 }
 
 func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
@@ -213,6 +229,121 @@ func TestStopIngress_ReleasesListenersAfterServe(t *testing.T) {
 	}
 }
 
+func TestStopIngress_GracefulFallbackForcesStop(t *testing.T) {
+	grpcLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen gRPC: %v", err)
+	}
+	httpLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen HTTP: %v", err)
+	}
+	grpcAddr := grpcLis.Addr().String()
+
+	hold := make(chan struct{})
+	handlerEntered := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-hold:
+		default:
+			close(hold)
+		}
+	})
+
+	impl := &hangServer{hold: hold, entered: handlerEntered}
+	grpcServer := grpc.NewServer()
+	grpcServer.RegisterService(&grpc.ServiceDesc{
+		ServiceName: "bootstrap.test.Hang",
+		HandlerType: (*hangServiceServer)(nil),
+		Methods: []grpc.MethodDesc{{
+			MethodName: "Hang",
+			Handler: func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+				in := new(emptypb.Empty)
+				if err := dec(in); err != nil {
+					return nil, err
+				}
+				if interceptor == nil {
+					return srv.(hangServiceServer).Hang(ctx, in)
+				}
+				info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/bootstrap.test.Hang/Hang"}
+				return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+					return srv.(hangServiceServer).Hang(ctx, req.(*emptypb.Empty))
+				})
+			},
+		}},
+	}, impl)
+	httpServer := &http.Server{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+
+	serveDone := make(chan struct{})
+	go func() {
+		_ = grpcServer.Serve(grpcLis)
+		close(serveDone)
+	}()
+	go func() { _ = httpServer.Serve(httpLis) }()
+
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc dial: %v", err)
+	}
+	defer conn.Close()
+
+	go func() {
+		_ = conn.Invoke(context.Background(), "/bootstrap.test.Hang/Hang", &emptypb.Empty{}, &emptypb.Empty{})
+	}()
+	select {
+	case <-handlerEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("hanging RPC never entered server handler")
+	}
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- stopIngress(grpcServer, httpServer, 50*time.Millisecond) }()
+
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("stopIngress: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stopIngress did not return after forced Stop")
+	}
+
+	select {
+	case <-serveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gRPC Serve did not exit after forced Stop")
+	}
+
+	rebind, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		t.Fatalf("gRPC addr still held after forced stop: %v", err)
+	}
+	_ = rebind.Close()
+}
+
+type hangServiceServer interface {
+	Hang(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
+}
+
+type hangServer struct {
+	hold    <-chan struct{}
+	entered chan struct{}
+}
+
+func (h *hangServer) Hang(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+	select {
+	case <-h.entered:
+	default:
+		close(h.entered)
+	}
+	select {
+	case <-h.hold:
+		return &emptypb.Empty{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func TestLifecycle_ServeFailureReachesWait(t *testing.T) {
 	// Close the live gRPC listener under Serve so Wait sees a real serve error
 	// (same-package access; no production test hook).
@@ -232,6 +363,30 @@ func TestLifecycle_ServeFailureReachesWait(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Wait")
+	}
+}
+
+func TestLifecycle_CloseThenWaitReturnsCloseResult(t *testing.T) {
+	srv := startTestServer(t)
+
+	// Start Wait before Close so the serveErrCh path runs isExpectedServeStop
+	// while closeDone is still open (Close-then-Wait can race to closeDone).
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- srv.Wait() }()
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Close(closeCtx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	select {
+	case err := <-waitDone:
+		if err != nil {
+			t.Fatalf("Wait after Close = %v, want nil close result", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Wait after Close")
 	}
 }
 
@@ -280,22 +435,121 @@ func TestLifecycle_CloseIdempotentAndConcurrent(t *testing.T) {
 func TestLifecycle_CloseCallerDeadlineIndependent(t *testing.T) {
 	srv := startTestServer(t)
 
-	// A timed-out caller must not cancel shared cleanup for a later caller.
-	expired, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
-	defer cancel()
-	time.Sleep(time.Millisecond)
-	if err := srv.Close(expired); !errors.Is(err, context.DeadlineExceeded) {
-		// Close may finish before the nanosecond deadline on a fast machine;
-		// either deadline exceeded or success is acceptable for the first call.
-		if err != nil {
-			t.Logf("first Close: %v", err)
+	// Hold shared cleanup on index-replay join. The caller that wins closeOnce
+	// runs shutdown; a concurrent short-deadline caller must return
+	// DeadlineExceeded without cancelling shared cleanup.
+	held := make(chan struct{})
+	srv.indexReplayDone = held
+	srv.shutdownGrace = 5 * time.Second
+
+	longDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		longDone <- srv.Close(ctx)
+	}()
+
+	// Wait until shared cleanup is blocked on the held join (ingress already stopped).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if ln, err := net.Listen("tcp", srv.Endpoints().GRPC.Dial); err == nil {
+			_ = ln.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cleanup never reached held join (listeners still bound)")
+		}
+		select {
+		case err := <-longDone:
+			t.Fatalf("long Close returned before release: %v", err)
+		case <-time.After(10 * time.Millisecond):
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := srv.Close(ctx); err != nil {
-		t.Fatalf("second Close: %v", err)
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer shortCancel()
+	if err := srv.Close(shortCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("short Close = %v, want DeadlineExceeded while cleanup held", err)
+	}
+
+	close(held)
+
+	select {
+	case err := <-longDone:
+		if err != nil {
+			t.Fatalf("long Close after release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("long Close did not finish after join release")
+	}
+}
+
+func TestLifecycle_ShutdownJoinsIndexReplayBeforeReturn(t *testing.T) {
+	// Kubernetes in config creates kubeIndexing + startup replay. Substitute a
+	// held join channel to prove ingress quiesces while Close waits on replay.
+	srv := startTestServerWithConfig(t, ConfigInput{Addons: "kubernetes"})
+	if srv.kubeIndexing == nil {
+		t.Fatal("expected kubeIndexing when kubernetes addon enabled")
+	}
+
+	grpcAddr := srv.Endpoints().GRPC.Dial
+	httpAddr := srv.Endpoints().HTTP.Dial
+
+	held := make(chan struct{})
+	srv.indexReplayDone = held
+	srv.shutdownGrace = 5 * time.Second
+
+	closeDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		closeDone <- srv.Close(ctx)
+	}()
+
+	// Ingress stops before dependency join — addresses become rebindable while
+	// Close is still waiting on indexReplayDone.
+	deadline := time.Now().Add(2 * time.Second)
+	var reboundGRPC, reboundHTTP bool
+	for time.Now().Before(deadline) && !(reboundGRPC && reboundHTTP) {
+		if !reboundGRPC {
+			if ln, err := net.Listen("tcp", grpcAddr); err == nil {
+				_ = ln.Close()
+				reboundGRPC = true
+			}
+		}
+		if !reboundHTTP {
+			if ln, err := net.Listen("tcp", httpAddr); err == nil {
+				_ = ln.Close()
+				reboundHTTP = true
+			}
+		}
+		if reboundGRPC && reboundHTTP {
+			break
+		}
+		select {
+		case err := <-closeDone:
+			t.Fatalf("Close returned before replay release (grpc rebound=%v http rebound=%v): %v", reboundGRPC, reboundHTTP, err)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if !reboundGRPC || !reboundHTTP {
+		t.Fatalf("listeners not released during replay join wait (grpc=%v http=%v)", reboundGRPC, reboundHTTP)
+	}
+
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close returned before replay release: %v", err)
+	default:
+	}
+
+	close(held)
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close after replay release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not finish after replay release")
 	}
 }
 

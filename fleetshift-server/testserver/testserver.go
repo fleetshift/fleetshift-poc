@@ -89,10 +89,12 @@ func Start(t *testing.T) string {
 	}
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
 		if err := srv.Close(closeCtx); err != nil {
 			t.Errorf("bootstrap.Close: %v", err)
 		}
+		cancel()
+		// Close may return on wait-budget expiry while cleanup continues.
+		_ = srv.Wait()
 	})
 
 	return srv.Endpoints().GRPC.Dial

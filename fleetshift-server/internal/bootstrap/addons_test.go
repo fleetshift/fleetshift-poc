@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 )
 
 func TestBuildTrustBundlePlacement(t *testing.T) {
@@ -73,7 +74,7 @@ func TestOIDCHTTPClientFromBundle(t *testing.T) {
 		t.Fatalf("empty bundle = %v, want nil", got)
 	}
 
-	client := oidcHTTPClientFromBundle(mustTestCAPEM(t))
+	client := oidcHTTPClientFromBundle(testutil.MustCAPEM(t))
 	if client == nil {
 		t.Fatal("non-empty bundle returned nil client")
 	}

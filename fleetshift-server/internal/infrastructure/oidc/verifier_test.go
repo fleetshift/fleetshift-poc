@@ -160,8 +160,14 @@ func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
 	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
 	jwksBody := fetchJWKSBody(t, idp.HTTPClient(), string(idp.OIDCConfig().JWKSURI))
 
+	enteredA := make(chan struct{})
 	releaseA := make(chan struct{})
 	proxyA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-enteredA:
+		default:
+			close(enteredA)
+		}
 		select {
 		case <-releaseA:
 			w.Header().Set("Content-Type", "application/json")
@@ -195,8 +201,11 @@ func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
 		errA <- verifier.RegisterKeySet(ctx, domain.EndpointURL(proxyA.URL+"/jwks"))
 	}()
 
-	// Give URI A time to enter Fetch and hold (without holding a global lock).
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-enteredA:
+	case <-time.After(3 * time.Second):
+		t.Fatal("URI A never entered JWKS handler")
+	}
 
 	startB := time.Now()
 	ctxB, cancelB := context.WithTimeout(context.Background(), 2*time.Second)
@@ -220,10 +229,14 @@ func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
 	jwksBody := fetchJWKSBody(t, idp.HTTPClient(), string(idp.OIDCConfig().JWKSURI))
 
-	var entered atomic.Int32
+	entered := make(chan struct{})
 	hold := make(chan struct{})
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		entered.Add(1)
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
 		select {
 		case <-hold:
 			w.Header().Set("Content-Type", "application/json")
@@ -255,11 +268,9 @@ func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 		errLeader <- verifier.RegisterKeySet(leaderCtx, uri)
 	}()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for entered.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if entered.Load() == 0 {
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
 		t.Fatal("leader never entered JWKS handler")
 	}
 
@@ -272,7 +283,7 @@ func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 
 	// Expire the leader while still held, then release so the waiter's own
 	// attempt can fetch successfully with its healthy context.
-	time.Sleep(150 * time.Millisecond)
+	<-leaderCtx.Done()
 	close(hold)
 	wg.Wait()
 
