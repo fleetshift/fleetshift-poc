@@ -1,7 +1,7 @@
 // Package testserver provides a focused shared-builder facade over
-// serverapp for sibling-module integration tests. New uses are frozen;
+// bootstrap for sibling-module integration tests. New uses are frozen;
 // prefer internal/testenv when it lands. The independent object graph
-// has been deleted — Start delegates to serverapp with workflow, identity,
+// has been deleted — Start delegates to bootstrap with workflow, identity,
 // and add-on substitutions that preserve Kind/GCP HCP create/read semantics.
 package testserver
 
@@ -16,9 +16,9 @@ import (
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
 )
 
 // stubVerifier returns a fixed test identity for any token.
@@ -34,7 +34,7 @@ func (stubVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ string) (do
 	}, nil
 }
 
-// RegisterKeySet implements serverapp.KeySetRegistrar as a no-op.
+// RegisterKeySet implements bootstrap.KeySetRegistrar as a no-op.
 func (stubVerifier) RegisterKeySet(context.Context, domain.EndpointURL) error { return nil }
 
 // stubDiscovery returns fixed test metadata.
@@ -51,7 +51,7 @@ func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL
 	}, nil
 }
 
-// Start launches an in-process FleetShift server via serverapp and returns
+// Start launches an in-process FleetShift server via bootstrap and returns
 // its gRPC dial address. The server is stopped when the test finishes.
 func Start(t *testing.T) string {
 	t.Helper()
@@ -59,7 +59,7 @@ func Start(t *testing.T) string {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "fleetshift.db")
 
-	cfg, err := serverapp.NewConfig(serverapp.ConfigInput{
+	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr: "127.0.0.1:0",
 		HTTPAddr: "127.0.0.1:0",
 		DBPath:   dbPath,
@@ -76,22 +76,22 @@ func Start(t *testing.T) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	app, err := serverapp.Start(ctx, cfg, logger,
-		serverapp.WithWorkflowRuntime(serverapp.NewMemWorkflowRuntime()),
-		serverapp.WithIdentity(serverapp.Identity{
+	app, err := bootstrap.Start(ctx, cfg, logger,
+		bootstrap.WithWorkflowRuntime(bootstrap.NewMemWorkflowRuntime()),
+		bootstrap.WithIdentity(bootstrap.Identity{
 			Discovery: stubDiscovery{},
 			Verifier:  stubVerifier{},
 		}),
-		serverapp.WithAddonAssembly(facadeAddonAssembly),
+		bootstrap.WithAddonAssembly(facadeAddonAssembly),
 	)
 	if err != nil {
-		t.Fatalf("serverapp.Start: %v", err)
+		t.Fatalf("bootstrap.Start: %v", err)
 	}
 	t.Cleanup(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := app.Close(closeCtx); err != nil {
-			t.Errorf("serverapp.Close: %v", err)
+			t.Errorf("bootstrap.Close: %v", err)
 		}
 	})
 
@@ -105,7 +105,7 @@ func Start(t *testing.T) string {
 // stay live, resources remain CREATING, and delete does not wait on delivery.
 // GCP HCP keeps DeliveryCapability with a recording agent and no Reporter so
 // the target type is routable while deliveries stay incomplete.
-func facadeAddonAssembly(_ context.Context, deps serverapp.AddonDeps) ([]serverapp.AddonSpec, error) {
+func facadeAddonAssembly(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
 	// No Reporter: deliveries stay incomplete so create/read tests observe CREATING.
 	recording := &sqlite.RecordingDeliveryService{Store: deps.Store}
 
@@ -116,7 +116,7 @@ func facadeAddonAssembly(_ context.Context, deps serverapp.AddonDeps) ([]servera
 		domain.InventoryResourceCapability{ResourceType: kindaddon.NodeResourceType},
 	}
 
-	return []serverapp.AddonSpec{
+	return []bootstrap.AddonSpec{
 		{
 			Descriptor: kindDesc,
 			Connect: application.ConnectInput{

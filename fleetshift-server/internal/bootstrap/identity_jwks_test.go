@@ -1,4 +1,4 @@
-package serverapp
+package bootstrap
 
 import (
 	"context"
@@ -57,7 +57,7 @@ func seedOIDCAuthMethod(t *testing.T, dbPath string, cfg domain.OIDCConfig) {
 }
 
 func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
-	// Fast cement for serverapp: registerPersistedKeySets failures must not
+	// Fast cement for bootstrap: registerPersistedKeySets failures must not
 	// fail Start (warn-and-continue).
 	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")

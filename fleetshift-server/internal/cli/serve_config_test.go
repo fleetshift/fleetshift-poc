@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 )
 
 func TestLoadServeConfig(t *testing.T) {
@@ -39,7 +39,7 @@ func TestLoadServeConfig(t *testing.T) {
 		flags   serveFlags
 		sel     serveSelections
 		envGCP  string
-		want    serverapp.Config
+		want    bootstrap.Config
 		wantErr string
 	}{
 		{
@@ -47,14 +47,14 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr: ":50051",
 				httpAddr: ":8080",
-				dbPath:   serverapp.DefaultSQLitePath,
+				dbPath:   bootstrap.DefaultSQLitePath,
 				addons:   "kind,kubernetes",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
-				Addons:   []serverapp.AddonName{serverapp.AddonKind, serverapp.AddonKubernetes},
+				Database: bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				Addons:   []bootstrap.AddonName{bootstrap.AddonKind, bootstrap.AddonKubernetes},
 			},
 		},
 		{
@@ -62,13 +62,13 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr:        ":50051",
 				httpAddr:        ":8080",
-				dbPath:          serverapp.DefaultSQLitePath,
+				dbPath:          bootstrap.DefaultSQLitePath,
 				databaseURLFile: urlPath,
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.Postgres{
+				Database: bootstrap.Postgres{
 					Host:      "localhost",
 					Port:      5432,
 					User:      "user",
@@ -84,13 +84,13 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr:   ":50051",
 				httpAddr:   ":8080",
-				dbPath:     serverapp.DefaultSQLitePath,
+				dbPath:     bootstrap.DefaultSQLitePath,
 				oidcCAFile: caPath,
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr:     ":50051",
 				HTTPAddr:     ":8080",
-				Database:     serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
+				Database:     bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
 				OIDCCABundle: validCA,
 			},
 		},
@@ -99,15 +99,15 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr: ":50051",
 				httpAddr: ":8080",
-				dbPath:   serverapp.DefaultSQLitePath,
+				dbPath:   bootstrap.DefaultSQLitePath,
 				addons:   "gcphcp",
 			},
 			envGCP: "/env/gcphcp.yaml",
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr:         ":50051",
 				HTTPAddr:         ":8080",
-				Database:         serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
-				Addons:           []serverapp.AddonName{serverapp.AddonGCPHCP},
+				Database:         bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				Addons:           []bootstrap.AddonName{bootstrap.AddonGCPHCP},
 				GCPHCPConfigPath: "/env/gcphcp.yaml",
 			},
 		},
@@ -126,7 +126,7 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr:    ":50051",
 				httpAddr:    ":8080",
-				dbPath:      serverapp.DefaultSQLitePath,
+				dbPath:      bootstrap.DefaultSQLitePath,
 				databaseURL: "mysql://localhost/db",
 			},
 			wantErr: "scheme must be postgres or postgresql",
@@ -146,7 +146,7 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr: ":50051",
 				httpAddr: ":8080",
-				dbPath:   serverapp.DefaultSQLitePath,
+				dbPath:   bootstrap.DefaultSQLitePath,
 				addons:   "gcphcp",
 			},
 			wantErr: "GCPHCP_CONFIG",
@@ -156,7 +156,7 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr:    ":50051",
 				httpAddr:    ":8080",
-				dbPath:      serverapp.DefaultSQLitePath,
+				dbPath:      bootstrap.DefaultSQLitePath,
 				databaseURL: "postgres://user:pass@localhost:5432/db",
 			},
 			sel:     serveSelections{DB: true},
@@ -167,7 +167,7 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr:        ":50051",
 				httpAddr:        ":8080",
-				dbPath:          serverapp.DefaultSQLitePath,
+				dbPath:          bootstrap.DefaultSQLitePath,
 				databaseURLFile: filepath.Join(t.TempDir(), "missing-url"),
 			},
 			wantErr: "read database URL file",
@@ -177,7 +177,7 @@ func TestLoadServeConfig(t *testing.T) {
 			flags: serveFlags{
 				grpcAddr:        ":50051",
 				httpAddr:        ":8080",
-				dbPath:          serverapp.DefaultSQLitePath,
+				dbPath:          bootstrap.DefaultSQLitePath,
 				databaseURLFile: emptyURLPath,
 			},
 			wantErr: "--database-url-file is set but contains no database URL",
@@ -270,7 +270,7 @@ func TestReadDatabaseURLFile(t *testing.T) {
 	}
 }
 
-func assertConfigEqual(t *testing.T, got, want serverapp.Config) {
+func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 	t.Helper()
 	if got.GRPCAddr != want.GRPCAddr ||
 		got.HTTPAddr != want.HTTPAddr ||
@@ -290,13 +290,13 @@ func assertConfigEqual(t *testing.T, got, want serverapp.Config) {
 		}
 	}
 	switch wantDB := want.Database.(type) {
-	case serverapp.SQLite:
-		gotDB, ok := got.Database.(serverapp.SQLite)
+	case bootstrap.SQLite:
+		gotDB, ok := got.Database.(bootstrap.SQLite)
 		if !ok || gotDB != wantDB {
 			t.Fatalf("Database = %#v, want %#v", got.Database, want.Database)
 		}
-	case serverapp.Postgres:
-		gotDB, ok := got.Database.(serverapp.Postgres)
+	case bootstrap.Postgres:
+		gotDB, ok := got.Database.(bootstrap.Postgres)
 		if !ok ||
 			gotDB.Host != wantDB.Host ||
 			gotDB.Port != wantDB.Port ||

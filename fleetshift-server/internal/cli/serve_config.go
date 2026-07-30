@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 )
 
 // serveSelections records which database-related flags were explicitly set
@@ -15,13 +15,13 @@ type serveSelections struct {
 }
 
 // loadServeConfig resolves environment/file inputs without mutating serveFlags,
-// then parses them into serverapp.Config before any resource acquisition.
-func loadServeConfig(f *serveFlags, sel serveSelections) (serverapp.Config, error) {
+// then parses them into bootstrap.Config before any resource acquisition.
+func loadServeConfig(f *serveFlags, sel serveSelections) (bootstrap.Config, error) {
 	var dbURLFromFile string
 	if f.databaseURLFile != "" {
 		content, err := readDatabaseURLFile(f.databaseURLFile)
 		if err != nil {
-			return serverapp.Config{}, err
+			return bootstrap.Config{}, err
 		}
 		dbURLFromFile = content
 	}
@@ -30,12 +30,12 @@ func loadServeConfig(f *serveFlags, sel serveSelections) (serverapp.Config, erro
 	if f.oidcCAFile != "" {
 		data, err := os.ReadFile(f.oidcCAFile)
 		if err != nil {
-			return serverapp.Config{}, fmt.Errorf("read OIDC CA file: %w", err)
+			return bootstrap.Config{}, fmt.Errorf("read OIDC CA file: %w", err)
 		}
 		caBundle = data
 	}
 
-	return serverapp.NewConfig(serverapp.ConfigInput{
+	return bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr:               f.grpcAddr,
 		HTTPAddr:               f.httpAddr,
 		DBPath:                 f.dbPath,

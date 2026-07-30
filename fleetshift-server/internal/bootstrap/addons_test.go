@@ -1,4 +1,4 @@
-package serverapp
+package bootstrap
 
 import (
 	"net/http"

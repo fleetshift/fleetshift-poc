@@ -1,4 +1,4 @@
-package serverapp_test
+package bootstrap_test
 
 import (
 	"crypto/ecdsa"
@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 )
 
 func TestNewConfig(t *testing.T) {
@@ -21,37 +21,37 @@ func TestNewConfig(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		in      serverapp.ConfigInput
-		want    serverapp.Config
+		in      bootstrap.ConfigInput
+		want    bootstrap.Config
 		wantErr string
 	}{
 		{
 			name: "valid sqlite defaults",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				DBPath:   serverapp.DefaultSQLitePath,
+				DBPath:   bootstrap.DefaultSQLitePath,
 				Addons:   "kind,kubernetes",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
-				Addons:   []serverapp.AddonName{serverapp.AddonKind, serverapp.AddonKubernetes},
+				Database: bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				Addons:   []bootstrap.AddonName{bootstrap.AddonKind, bootstrap.AddonKubernetes},
 			},
 		},
 		{
 			name: "valid postgres URL",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
-				DBPath:      serverapp.DefaultSQLitePath,
+				DBPath:      bootstrap.DefaultSQLitePath,
 				DatabaseURL: "postgres://user:pass@localhost:5432/fleetshift?sslmode=disable",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.Postgres{
+				Database: bootstrap.Postgres{
 					Host:      "localhost",
 					Port:      5432,
 					User:      "user",
@@ -64,17 +64,17 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "postgres from file content",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:               ":50051",
 				HTTPAddr:               ":8080",
-				DBPath:                 serverapp.DefaultSQLitePath,
+				DBPath:                 bootstrap.DefaultSQLitePath,
 				DatabaseURLFileSet:     true,
 				DatabaseURLFileContent: "postgres://user:pass@localhost:5432/from-file",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.Postgres{
+				Database: bootstrap.Postgres{
 					Host:      "localhost",
 					Port:      5432,
 					User:      "user",
@@ -87,64 +87,64 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "valid CA bundle is copied",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:     ":50051",
 				HTTPAddr:     ":8080",
-				DBPath:       serverapp.DefaultSQLitePath,
+				DBPath:       bootstrap.DefaultSQLitePath,
 				OIDCCABundle: validCA,
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr:     ":50051",
 				HTTPAddr:     ":8080",
-				Database:     serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
+				Database:     bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
 				OIDCCABundle: validCA,
 			},
 		},
 		{
 			name: "gcphcp with config path",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:         ":50051",
 				HTTPAddr:         ":8080",
-				DBPath:           serverapp.DefaultSQLitePath,
+				DBPath:           bootstrap.DefaultSQLitePath,
 				Addons:           "gcphcp",
 				GCPHCPConfigPath: "/tmp/gcphcp.yaml",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr:         ":50051",
 				HTTPAddr:         ":8080",
-				Database:         serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
-				Addons:           []serverapp.AddonName{serverapp.AddonGCPHCP},
+				Database:         bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				Addons:           []bootstrap.AddonName{bootstrap.AddonGCPHCP},
 				GCPHCPConfigPath: "/tmp/gcphcp.yaml",
 			},
 		},
 		{
 			name: "addon whitespace and duplicates normalized",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				DBPath:   serverapp.DefaultSQLitePath,
+				DBPath:   bootstrap.DefaultSQLitePath,
 				Addons:   " kind , kubernetes ,kind ",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.SQLite{Path: serverapp.DefaultSQLitePath},
-				Addons:   []serverapp.AddonName{serverapp.AddonKind, serverapp.AddonKubernetes},
+				Database: bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				Addons:   []bootstrap.AddonName{bootstrap.AddonKind, bootstrap.AddonKubernetes},
 			},
 		},
 		{
 			name: "non-default db path without explicit flag keeps postgres when URL set",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
 				DBPath:      "custom.db",
 				DBExplicit:  false,
 				DatabaseURL: "postgres://user:pass@localhost:5432/db",
 			},
-			want: serverapp.Config{
+			want: bootstrap.Config{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				Database: serverapp.Postgres{
+				Database: bootstrap.Postgres{
 					Host:      "localhost",
 					Port:      5432,
 					User:      "user",
@@ -157,10 +157,10 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "explicit db with default path still conflicts with URL",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
-				DBPath:      serverapp.DefaultSQLitePath,
+				DBPath:      bootstrap.DefaultSQLitePath,
 				DBExplicit:  true,
 				DatabaseURL: "postgres://user:pass@localhost:5432/db",
 			},
@@ -168,10 +168,10 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "empty database URL file does not fall back to SQLite",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:               ":50051",
 				HTTPAddr:               ":8080",
-				DBPath:                 serverapp.DefaultSQLitePath,
+				DBPath:                 bootstrap.DefaultSQLitePath,
 				DatabaseURLFileSet:     true,
 				DatabaseURLFileContent: "",
 			},
@@ -179,10 +179,10 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "whitespace-only database URL file does not fall back to SQLite",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:               ":50051",
 				HTTPAddr:               ":8080",
-				DBPath:                 serverapp.DefaultSQLitePath,
+				DBPath:                 bootstrap.DefaultSQLitePath,
 				DatabaseURLFileSet:     true,
 				DatabaseURLFileContent: "  \n\t",
 			},
@@ -190,10 +190,10 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "file and database-url conflict",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:               ":50051",
 				HTTPAddr:               ":8080",
-				DBPath:                 serverapp.DefaultSQLitePath,
+				DBPath:                 bootstrap.DefaultSQLitePath,
 				DatabaseURL:            "postgres://inline",
 				DatabaseURLFileSet:     true,
 				DatabaseURLFileContent: "postgres://from-file",
@@ -202,7 +202,7 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "file and explicit db conflict",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:               ":50051",
 				HTTPAddr:               ":8080",
 				DBPath:                 "custom.db",
@@ -214,23 +214,23 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "missing grpc addr",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				HTTPAddr: ":8080",
-				DBPath:   serverapp.DefaultSQLitePath,
+				DBPath:   bootstrap.DefaultSQLitePath,
 			},
 			wantErr: "grpc listen address is required",
 		},
 		{
 			name: "missing http addr",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
-				DBPath:   serverapp.DefaultSQLitePath,
+				DBPath:   bootstrap.DefaultSQLitePath,
 			},
 			wantErr: "http listen address is required",
 		},
 		{
 			name: "neither database mode",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
 			},
@@ -238,7 +238,7 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "invalid database URL scheme",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
 				DatabaseURL: "mysql://user:pass@localhost:3306/db",
@@ -247,7 +247,7 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "database URL missing host",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
 				DatabaseURL: "postgres:///dbname",
@@ -256,7 +256,7 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "database URL missing db name",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
 				DatabaseURL: "postgres://user:pass@localhost:5432",
@@ -265,50 +265,50 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name: "unknown addon",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				DBPath:   serverapp.DefaultSQLitePath,
+				DBPath:   bootstrap.DefaultSQLitePath,
 				Addons:   "not-an-addon",
 			},
 			wantErr: `unknown addon "not-an-addon"`,
 		},
 		{
 			name: "gcphcp without config path",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
 				HTTPAddr: ":8080",
-				DBPath:   serverapp.DefaultSQLitePath,
+				DBPath:   bootstrap.DefaultSQLitePath,
 				Addons:   "gcphcp",
 			},
 			wantErr: "GCPHCP_CONFIG",
 		},
 		{
 			name: "invalid OIDC UI authority",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:        ":50051",
 				HTTPAddr:        ":8080",
-				DBPath:          serverapp.DefaultSQLitePath,
+				DBPath:          bootstrap.DefaultSQLitePath,
 				OIDCUIAuthority: "://bad",
 			},
 			wantErr: "oidc UI authority",
 		},
 		{
 			name: "OIDC UI authority missing host",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:        ":50051",
 				HTTPAddr:        ":8080",
-				DBPath:          serverapp.DefaultSQLitePath,
+				DBPath:          bootstrap.DefaultSQLitePath,
 				OIDCUIAuthority: "http:///path",
 			},
 			wantErr: "host is required",
 		},
 		{
 			name: "invalid CA data",
-			in: serverapp.ConfigInput{
+			in: bootstrap.ConfigInput{
 				GRPCAddr:     ":50051",
 				HTTPAddr:     ":8080",
-				DBPath:       serverapp.DefaultSQLitePath,
+				DBPath:       bootstrap.DefaultSQLitePath,
 				OIDCCABundle: []byte("not-pem"),
 			},
 			wantErr: "invalid OIDC CA data",
@@ -317,7 +317,7 @@ func TestNewConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := serverapp.NewConfig(tt.in)
+			got, err := bootstrap.NewConfig(tt.in)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("NewConfig() = nil error, want %q", tt.wantErr)
@@ -339,10 +339,10 @@ func TestNewConfig(t *testing.T) {
 }
 
 func TestConfigAddonSet(t *testing.T) {
-	cfg, err := serverapp.NewConfig(serverapp.ConfigInput{
+	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr:         ":50051",
 		HTTPAddr:         ":8080",
-		DBPath:           serverapp.DefaultSQLitePath,
+		DBPath:           bootstrap.DefaultSQLitePath,
 		Addons:           "kind,gcphcp",
 		GCPHCPConfigPath: "/tmp/gcphcp.yaml",
 	})
@@ -350,12 +350,12 @@ func TestConfigAddonSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := cfg.AddonSet()
-	if !got[serverapp.AddonKind] || !got[serverapp.AddonGCPHCP] || got[serverapp.AddonKubernetes] {
+	if !got[bootstrap.AddonKind] || !got[bootstrap.AddonGCPHCP] || got[bootstrap.AddonKubernetes] {
 		t.Fatalf("AddonSet() = %#v", got)
 	}
 }
 
-func assertConfigEqual(t *testing.T, got, want serverapp.Config) {
+func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 	t.Helper()
 	if got.GRPCAddr != want.GRPCAddr ||
 		got.HTTPAddr != want.HTTPAddr ||
@@ -377,19 +377,19 @@ func assertConfigEqual(t *testing.T, got, want serverapp.Config) {
 	assertDatabaseEqual(t, got.Database, want.Database)
 }
 
-func assertDatabaseEqual(t *testing.T, got, want serverapp.Database) {
+func assertDatabaseEqual(t *testing.T, got, want bootstrap.Database) {
 	t.Helper()
 	switch wantDB := want.(type) {
-	case serverapp.SQLite:
-		gotDB, ok := got.(serverapp.SQLite)
+	case bootstrap.SQLite:
+		gotDB, ok := got.(bootstrap.SQLite)
 		if !ok {
 			t.Fatalf("Database type = %T, want SQLite", got)
 		}
 		if gotDB != wantDB {
 			t.Fatalf("SQLite = %#v, want %#v", gotDB, wantDB)
 		}
-	case serverapp.Postgres:
-		gotDB, ok := got.(serverapp.Postgres)
+	case bootstrap.Postgres:
+		gotDB, ok := got.(bootstrap.Postgres)
 		if !ok {
 			t.Fatalf("Database type = %T, want Postgres", got)
 		}

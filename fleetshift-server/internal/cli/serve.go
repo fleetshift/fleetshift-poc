@@ -12,12 +12,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
 )
 
 // serveFlags holds raw serve CLI flag values before edge resolution into
-// serverapp.Config.
+// bootstrap.Config.
 type serveFlags struct {
 	grpcAddr         string
 	httpAddr         string
@@ -49,7 +49,7 @@ func newServeCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&f.grpcAddr, "grpc-addr", ":50051", "gRPC listen address")
 	cmd.Flags().StringVar(&f.httpAddr, "http-addr", ":8080", "HTTP/JSON gateway listen address")
-	cmd.Flags().StringVar(&f.dbPath, "db", serverapp.DefaultSQLitePath, "SQLite database path")
+	cmd.Flags().StringVar(&f.dbPath, "db", bootstrap.DefaultSQLitePath, "SQLite database path")
 	cmd.Flags().StringVar(&f.databaseURL, "database-url", os.Getenv("DATABASE_URL"), "PostgreSQL connection URL (mutually exclusive with --db)")
 	cmd.Flags().StringVar(&f.databaseURLFile, "database-url-file", os.Getenv("DATABASE_URL_FILE"), "path to file containing PostgreSQL connection URL (mutually exclusive with --database-url and --db)")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
@@ -65,7 +65,7 @@ func newServeCmd() *cobra.Command {
 }
 
 // runServe loads normalized config at the CLI edge, builds the logger, and
-// delegates construction, readiness, supervision, and cleanup to serverapp.
+// delegates construction, readiness, supervision, and cleanup to bootstrap.
 func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -80,7 +80,7 @@ func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 		return err
 	}
 
-	app, err := serverapp.Start(signalCtx, cfg, logger)
+	app, err := bootstrap.Start(signalCtx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -209,13 +209,13 @@ func resolveGCPHCPConfigPath(flagPath string) string {
 
 // parseAddons splits a comma-separated addon wire string into an AddonName set.
 // It does not check whether names are allow-listed.
-func parseAddons(spec string) map[serverapp.AddonName]bool {
-	addons := make(map[serverapp.AddonName]bool)
+func parseAddons(spec string) map[bootstrap.AddonName]bool {
+	addons := make(map[bootstrap.AddonName]bool)
 	if spec == "" {
 		return addons
 	}
 	for a := range strings.SplitSeq(spec, ",") {
-		name := serverapp.AddonName(strings.TrimSpace(a))
+		name := bootstrap.AddonName(strings.TrimSpace(a))
 		if name != "" {
 			addons[name] = true
 		}

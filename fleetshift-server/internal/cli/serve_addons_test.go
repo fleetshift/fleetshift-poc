@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 )
 
 func TestDefaultAddons(t *testing.T) {
@@ -37,34 +37,34 @@ func TestParseAddons(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		want  map[serverapp.AddonName]bool
+		want  map[bootstrap.AddonName]bool
 	}{
 		{
 			name:  "all addons",
 			input: "kind,kubernetes,gcphcp",
-			want: map[serverapp.AddonName]bool{
-				serverapp.AddonKind:       true,
-				serverapp.AddonKubernetes: true,
-				serverapp.AddonGCPHCP:     true,
+			want: map[bootstrap.AddonName]bool{
+				bootstrap.AddonKind:       true,
+				bootstrap.AddonKubernetes: true,
+				bootstrap.AddonGCPHCP:     true,
 			},
 		},
 		{
 			name:  "single addon",
 			input: "kind",
-			want:  map[serverapp.AddonName]bool{serverapp.AddonKind: true},
+			want:  map[bootstrap.AddonName]bool{bootstrap.AddonKind: true},
 		},
 		{
 			name:  "whitespace trimmed",
 			input: " kind , kubernetes ",
-			want: map[serverapp.AddonName]bool{
-				serverapp.AddonKind:       true,
-				serverapp.AddonKubernetes: true,
+			want: map[bootstrap.AddonName]bool{
+				bootstrap.AddonKind:       true,
+				bootstrap.AddonKubernetes: true,
 			},
 		},
 		{
 			name:  "empty string",
 			input: "",
-			want:  map[serverapp.AddonName]bool{},
+			want:  map[bootstrap.AddonName]bool{},
 		},
 	}
 

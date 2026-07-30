@@ -1,10 +1,10 @@
-// Package serverapp is the sole bootstrap/composition edge for FleetShift.
+// Package bootstrap is the sole composition edge for FleetShift.
 // It owns normalized production configuration, eager construction of the
 // complete application graph, listener authority, semantic readiness,
 // background supervision, and bounded shutdown. fleetshift serve and the
 // frozen testserver facade both use Start; packages below this edge must
-// not import serverapp.
-package serverapp
+// not import bootstrap.
+package bootstrap
 
 import (
 	"crypto/x509"
@@ -88,7 +88,7 @@ type ConfigInput struct {
 }
 
 // Config is the normalized typed production configuration accepted by
-// serverapp. Obtain it only through NewConfig, which parses ConfigInput and
+// bootstrap. Obtain it only through NewConfig, which parses ConfigInput and
 // returns a value that already satisfies configuration invariants. Runtime
 // objects, listeners, loggers, fakes, and controllers are not configuration
 // fields. Fields remain exported for composition ergonomics; the supported
