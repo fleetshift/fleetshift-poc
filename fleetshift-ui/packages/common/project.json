@@ -1,0 +1,32 @@
+{
+  "name": "common",
+  "root": "fleetshift-ui/packages/common",
+  "sourceRoot": "fleetshift-ui/packages/common/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build -w @fleetshift/common",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["fleetshift-poc:ui:generate-icons"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run packages/common/",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*"
+      ]
+    }
+  }
+}

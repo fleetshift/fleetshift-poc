@@ -1,0 +1,21 @@
+{
+  "name": "build-utils",
+  "root": "fleetshift-ui/packages/build-utils",
+  "sourceRoot": "fleetshift-ui/packages/build-utils/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build -w @fleetshift/build-utils",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"]
+    }
+  }
+}

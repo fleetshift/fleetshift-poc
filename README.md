@@ -5,36 +5,114 @@ This repository represents both a **prototype** for a next generation k8s/OpenSh
 ## Prerequisites
 
 - **Go 1.22+**
+- **Node.js 20+** — for Nx and UI packages
 - **[Task](https://taskfile.dev/)** — `go install github.com/go-task/task/v3/cmd/task@latest`
 - **buf** — for protobuf generation (`brew install bufbuild/buf/buf`)
 - `.env` file — copy from `.env.template`
 
 Deployment-specific prerequisites (podman, oc, kind, etc.) are listed in each deployment guide below.
 
+## Setup
+
+```bash
+npm install                 # install all workspace dependencies (from repo root)
+```
+
+All UI packages are npm workspaces declared at the root. A single `npm install` at the repo root handles everything — no separate install inside `fleetshift-ui/`.
+
+## Monorepo
+
+This workspace uses [Nx](https://nx.dev) for build orchestration — caching, dependency graph, affected detection, and parallel execution. Nx wraps the existing Taskfile commands, so both `task` and `nx` work.
+
+```bash
+npx nx show projects        # list all projects
+npx nx graph                # visualize dependency graph
+npx nx run server:test      # run a single target (cached)
+npx nx run-many -t test     # run target across all projects (parallel)
+npx nx affected -t test     # only test what changed
+```
+
+Projects: `server`, `cli`, `proto`, `gui`, `common`, `build-utils`, `plugins`, `e2e`.
+
 ## Build
 
 ```bash
-task build:all              # build all Go binaries → bin/
-task build:server           # fleetshift-server
-task build:cli              # fleetctl CLI
+npx nx run server:build     # fleetshift-server
+npx nx run cli:build        # fleetctl CLI
+npx nx run common:build     # shared UI types/helpers
+npx nx run plugins:build    # all MF remote plugins
+npx nx run gui:build        # SPA shell
+npx nx run-many -t build    # build all (parallel, cached)
+
+# Or via Taskfile directly:
+task build:server
+task build:cli
+task build:all
 ```
 
-Builds are incremental — only recompiles when source files change.
+Builds are cached — unchanged sources skip recompilation entirely.
+
+## UI Development
+
+```bash
+npx nx run gui:dev          # dev server (http://localhost:8085)
+npx nx run gui:dev:watch    # dev server with hot reload
+npx nx run gui:test:ct      # component tests (playwright)
+npx nx run plugins:test:ct  # plugin component tests
+npx nx run e2e:e2e          # end-to-end tests
+```
+
+UI packages: `gui` (SPA shell), `common` (shared types), `build-utils` (rspack helpers), `plugins` (12 MF remotes), `e2e` (playwright).
 
 ## Test
 
 ```bash
-task test:all               # unit tests for all modules
+npx nx run-many -t test     # unit tests for all modules
+npx nx affected -t test     # only test what changed
+npx nx run server:test      # Go server tests (cached)
+npx nx run common:test      # shared UI lib tests
+
+# Or via Taskfile:
+task test:all
 ```
 
 ## Generate & Images
 
 ```bash
-task protogen               # regenerate protobuf and gRPC stubs
+npx nx run proto:generate   # regenerate protobuf and gRPC stubs
+
+# Or via Taskfile:
+task protogen
 task image:build            # build server + web container images
 task image:aio              # build all-in-one image from local server-local + web
 task image:push             # push server, server-local, and web to DEV_REGISTRY (not the AIO image)
 ```
+
+## Local Development (Podman)
+
+All podman deploy commands are available through Nx. Env vars (AUTH, LOCAL_WEB, UI_SETUP, DB, etc.) pass through to Taskfile.
+
+```bash
+npx nx run pd:dev                                    # start local dev stack
+AUTH=external LOCAL_WEB=true UI_SETUP=true npx nx run pd:dev  # with external auth + local web
+npx nx run pd:up                                     # start stack (non-dev)
+npx nx run pd:down                                   # stop stack
+npx nx run pd:clean                                  # stop + remove volumes
+npx nx run pd:status                                 # show container status
+npx nx run pd:logs                                   # tail all logs
+npx nx run pd:rebuild                                # rebuild and restart
+npx nx run pd:rebuild-web                            # rebuild web container only
+npx nx run pd:cli-setup                              # configure CLI against local stack
+npx nx run pd:cert-init                              # generate local mkcert certs
+npx nx run pd:reset-keycloak                         # reset keycloak realm
+npx nx run pd:clock-drift                            # fix podman clock drift
+npx nx run pd:test-attestation                       # test attestation flow
+
+# Or via Taskfile directly:
+task pd:dev AUTH=external LOCAL_WEB=true UI_SETUP=true
+```
+
+Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain Taskfile-only — they target remote clusters, not local dev.
 
 ## Configuration
 

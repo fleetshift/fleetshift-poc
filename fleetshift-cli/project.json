@@ -1,0 +1,33 @@
+{
+  "name": "cli",
+  "root": "fleetshift-cli",
+  "projectType": "application",
+  "tags": ["lang:go", "scope:cli"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task build:cli",
+        "cwd": "."
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ],
+      "outputs": ["{workspaceRoot}/bin/fleetctl"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task test:cli",
+        "cwd": "."
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    }
+  }
+}

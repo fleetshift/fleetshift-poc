@@ -33,15 +33,15 @@ COPY scripts/generate-icons.mjs scripts/generate-icons.mjs
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/build/node_modules \
     npm install --include-workspace-root \
-    -w packages/common \
-    -w packages/build-utils \
-    -w packages/gui \
-    -w packages/mock-ui-plugins \
+    -w @fleetshift/common \
+    -w @fleetshift/build-utils \
+    -w @fleetshift/gui \
+    -w @fleetshift/mock-ui-plugins \
     && npm run generate:icons \
-    && npm run build -w packages/common \
-    && npm run build:ci -w packages/mock-ui-plugins \
+    && npm run build -w @fleetshift/common \
+    && npm run build:ci -w @fleetshift/mock-ui-plugins \
     && node scripts/generate-plugin-registry.mjs \
-    && npm run build -w packages/gui \
+    && npm run build -w @fleetshift/gui \
     && node scripts/merge-web.mjs \
     && cp -a web/. /srv/web/
 

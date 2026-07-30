@@ -6,13 +6,18 @@ import { execSync } from "child_process";
 import Watchpack from "watchpack";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const wsRoot = resolve(root, "..");
 const guiDist = resolve(root, "packages/gui/dist");
 const pluginsDist = resolve(root, "packages/mock-ui-plugins/dist");
 const watchOnly = process.argv.includes("--watch");
 
+function nx(target) {
+  execSync(`npx nx run ${target}`, { cwd: wsRoot, stdio: "inherit" });
+}
+
 // Always rebuild common — it's fast (tsc only) and rspack depends on its dist
 console.log("Building @fleetshift/common...");
-execSync("npm run build -w packages/common", { cwd: root, stdio: "inherit" });
+nx("common:build");
 
 function merge() {
   try {
@@ -27,16 +32,10 @@ function merge() {
 
 if (!watchOnly) {
   console.log("Running initial build...");
-  execSync("npm run build -w packages/mock-ui-plugins", {
-    cwd: root,
-    stdio: "inherit",
-  });
-  execSync("node scripts/generate-plugin-registry.mjs", {
-    cwd: root,
-    stdio: "inherit",
-  });
-  execSync("npm run build -w packages/gui", { cwd: root, stdio: "inherit" });
-  execSync("node scripts/merge-web.mjs", { cwd: root, stdio: "inherit" });
+  nx("plugins:build");
+  nx("ui:generate-registry");
+  nx("gui:build");
+  nx("ui:merge-web");
 }
 
 console.log("\nStarting watch mode...\n");
