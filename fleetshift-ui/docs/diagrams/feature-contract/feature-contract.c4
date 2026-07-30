@@ -1,5 +1,5 @@
 // FleetShift UI — Feature Contract Architecture
-// Source of truth: docs/feature-contracts.md, packages/build-utils/src/extensions/
+// Source of truth: docs/feature-contracts.md, build-utils/src/extensions/
 //
 // How plugins declare capabilities via typed extension builders,
 // how the shell discovers and renders them, and how the Go backend

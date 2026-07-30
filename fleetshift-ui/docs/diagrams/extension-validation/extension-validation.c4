@@ -1,5 +1,5 @@
 // FleetShift UI — Extension Validation Architecture
-// Source of truth: docs/extension-validation.md, packages/build-utils/src/extensions/
+// Source of truth: docs/extension-validation.md, build-utils/src/extensions/
 //
 // Two-sided trust boundary for ALL extension types:
 //

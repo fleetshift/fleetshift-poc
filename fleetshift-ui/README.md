@@ -4,7 +4,7 @@ Multi-cluster Kubernetes management dashboard. Composable pages built from dynam
 
 ## Architecture
 
-npm workspaces monorepo with packages under `packages/`:
+npm workspaces monorepo. Packages live directly under `fleetshift-ui/`:
 
 | Package | Description |
 |---------|-------------|
@@ -68,9 +68,9 @@ Output goes to `web/` — pass `--web-dir=./web/` to the Go backend to serve it.
 ### Individual Package Builds
 
 ```bash
-npm run build --workspace=packages/common
-npm run build --workspace=packages/mock-ui-plugins
-npm run build --workspace=packages/gui
+npx nx run common:build
+npx nx run plugins:build
+npx nx run gui:build
 ```
 
 ## Containerized Build
@@ -94,7 +94,7 @@ OIDC config (authority, client ID) is fetched dynamically from `GET /api/ui/conf
 
 ## Plugin Architecture
 
-Plugins are Module Federation remotes loaded via Scalprum. Each plugin is a `DynamicRemotePlugin` in `packages/mock-ui-plugins/webpack.config.ts`:
+Plugins are Module Federation remotes loaded via Scalprum. Each plugin is a `DynamicRemotePlugin` in `mock-ui-plugins/webpack.config.ts`:
 
 | Plugin | Key | Purpose |
 |--------|-----|---------|

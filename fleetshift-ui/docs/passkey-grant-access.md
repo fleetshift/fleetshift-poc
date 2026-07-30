@@ -50,11 +50,11 @@ The Grant Access page walks the user through the flow with four states, each in 
 
 | File | Purpose |
 |------|---------|
-| `packages/gui/src/utils/webauthn.ts` | Buffer encoding utilities, WebAuthn options parsing |
-| `packages/gui/src/api/passkey.ts` | Passkey API calls (create, grant, delete, status check) |
-| `packages/gui/src/hooks/usePasskey.ts` | React hook for passkey state + WebSocket updates |
-| `packages/gui/src/pages/GrantAccessPage/` | UI components per state |
-| `packages/mock-servers/src/routes/passkey.ts` | Server routes — challenge generation, signature verification |
+| `gui/src/utils/webauthn.ts` | Buffer encoding utilities, WebAuthn options parsing |
+| `gui/src/api/passkey.ts` | Passkey API calls (create, grant, delete, status check) |
+| `gui/src/hooks/usePasskey.ts` | React hook for passkey state + WebSocket updates |
+| `gui/src/pages/GrantAccessPage/` | UI components per state |
+| `mock-servers/src/routes/passkey.ts` | Server routes — challenge generation, signature verification |
 
 ## Concepts and Standards
 

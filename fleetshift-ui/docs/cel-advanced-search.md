@@ -380,7 +380,7 @@ No backend changes. Uses existing `QueryResources` endpoint with `?filter=`.
 1. Add `@react-querybuilder/core` dependency — CEL formatting (`formatQuery`) and parsing (`parseCEL`)
 2. Define static base field registry in `@fleetshift/common` — fields, types, operators, enum values, descriptions, aliases
 3. Build Orama autocomplete index from the field registry — fuzzy field name matching for suggestions
-4. Build advanced search components (shell — `packages/gui`):
+4. Build advanced search components (shell — `gui`):
    - **Search bar expansion** — full-width animation on activation (`/` shortcut or icon button)
    - **Autocomplete dropdown** — context-aware suggestions (fields → operators → values → combinators)
    - **Tab completion** — `Tab` accepts top suggestion, arrow keys navigate
