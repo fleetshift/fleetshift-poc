@@ -7,8 +7,8 @@ import Watchpack from "watchpack";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wsRoot = resolve(root, "..");
-const guiDist = resolve(root, "packages/gui/dist");
-const pluginsDist = resolve(root, "packages/mock-ui-plugins/dist");
+const guiDist = resolve(root, "gui/dist");
+const pluginsDist = resolve(root, "mock-ui-plugins/dist");
 const watchOnly = process.argv.includes("--watch");
 
 function nx(target) {
@@ -52,8 +52,8 @@ function spawnRspack(cwd) {
   );
 }
 
-const pluginsCwd = resolve(root, "packages/mock-ui-plugins");
-const guiCwd = resolve(root, "packages/gui");
+const pluginsCwd = resolve(root, "mock-ui-plugins");
+const guiCwd = resolve(root, "gui");
 
 let pluginsWatch = spawnRspack(pluginsCwd);
 let guiWatch = spawnRspack(guiCwd);

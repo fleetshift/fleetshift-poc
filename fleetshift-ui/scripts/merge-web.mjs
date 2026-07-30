@@ -5,8 +5,8 @@ import { execFileSync } from "child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const webDir = resolve(root, "web");
-const pluginsDist = resolve(root, "packages/mock-ui-plugins/dist");
-const guiDist = resolve(root, "packages/gui/dist");
+const pluginsDist = resolve(root, "mock-ui-plugins/dist");
+const guiDist = resolve(root, "gui/dist");
 const incremental = process.argv.includes("--incremental");
 
 mkdirSync(webDir, { recursive: true });

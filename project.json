@@ -1,0 +1,192 @@
+{
+  "name": "fleetshift-poc",
+  "root": ".",
+  "targets": {
+    "build:all": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task build:all"
+      },
+      "dependsOn": ["server:build", "cli:build"]
+    },
+    "test:all": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task test:all"
+      },
+      "dependsOn": ["server:test", "cli:test"]
+    },
+    "test:deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task test:deploy"
+      },
+      "cache": true,
+      "inputs": ["{workspaceRoot}/deploy/scripts/**/*"]
+    },
+    "protogen": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task protogen"
+      },
+      "dependsOn": ["proto:generate"]
+    },
+    "image:build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task image:build"
+      },
+      "cache": false,
+      "dependsOn": ["server:build"]
+    },
+    "image:aio": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task image:aio"
+      },
+      "cache": false,
+      "dependsOn": ["image:build"]
+    },
+    "image:push": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "task image:push"
+      },
+      "cache": false
+    },
+    "ui:generate-icons": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/generate-icons.mjs",
+        "cwd": "fleetshift-ui"
+      },
+      "cache": true,
+      "inputs": ["{workspaceRoot}/fleetshift-ui/scripts/generate-icons.mjs"],
+      "outputs": ["{workspaceRoot}/fleetshift-ui/common/src/generated/pf-icons.json"]
+    },
+    "ui:generate-registry": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/generate-plugin-registry.mjs",
+        "cwd": "fleetshift-ui"
+      },
+      "dependsOn": ["plugins:build"],
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/fleetshift-ui/scripts/generate-plugin-registry.mjs",
+        "{workspaceRoot}/fleetshift-ui/mock-ui-plugins/dist/**/*"
+      ]
+    },
+    "ui:merge-web": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/merge-web.mjs",
+        "cwd": "fleetshift-ui"
+      },
+      "dependsOn": ["gui:build", "ui:generate-registry"],
+      "cache": false,
+      "outputs": ["{workspaceRoot}/fleetshift-ui/web"]
+    },
+    "ui:build": {
+      "dependsOn": [
+        "ui:generate-icons",
+        "common:build",
+        "plugins:build",
+        "gui:build",
+        "ui:generate-registry",
+        "ui:merge-web"
+      ]
+    },
+    "ui:dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/dev.mjs",
+        "cwd": "fleetshift-ui"
+      },
+      "cache": false
+    },
+    "ui:test": {
+      "dependsOn": ["common:test"]
+    },
+    "ui:lint": {
+      "dependsOn": [
+        "gui:lint",
+        "common:lint",
+        "plugins:lint",
+        "build-utils:lint",
+        "gui:lint:css",
+        "plugins:lint:css"
+      ]
+    },
+    "pd:up": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:up" },
+      "cache": false
+    },
+    "pd:dev": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:dev" },
+      "cache": false
+    },
+    "pd:down": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:down" },
+      "cache": false
+    },
+    "pd:clean": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:clean" },
+      "cache": false
+    },
+    "pd:logs": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:logs" },
+      "cache": false
+    },
+    "pd:status": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:status" },
+      "cache": false
+    },
+    "pd:rebuild": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:rebuild" },
+      "cache": false
+    },
+    "pd:rebuild-web": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:rebuild-web" },
+      "cache": false
+    },
+    "pd:pull": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:pull" },
+      "cache": false
+    },
+    "pd:cli-setup": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:cli-setup" },
+      "cache": false
+    },
+    "pd:cert-init": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:cert-init" },
+      "cache": false
+    },
+    "pd:reset-keycloak": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:reset-keycloak" },
+      "cache": false
+    },
+    "pd:clock-drift": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:clock-drift" },
+      "cache": false
+    },
+    "pd:test-attestation": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:test-attestation" },
+      "cache": false
+    }
+  }
+}

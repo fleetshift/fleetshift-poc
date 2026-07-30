@@ -3,7 +3,7 @@
  * Build-time script: reads @patternfly/react-icons package exports and
  * generates a JSON manifest (name + kebab-case file stem + keywords).
  *
- * Output: packages/common/src/generated/pf-icons.json
+ * Output: common/src/generated/pf-icons.json
  * Run:    npm run generate:icons
  */
 
@@ -56,7 +56,7 @@ manifest.sort((a, b) => a.localeCompare(b));
 
 const outPath = join(
   monorepoRoot,
-  "packages/common/src/generated/pf-icons.json",
+  "common/src/generated/pf-icons.json",
 );
 
 mkdirSync(dirname(outPath), { recursive: true });

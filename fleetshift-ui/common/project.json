@@ -1,0 +1,39 @@
+{
+  "name": "common",
+  "root": "fleetshift-ui/common",
+  "sourceRoot": "fleetshift-ui/common/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build -w @fleetshift/common",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["fleetshift-poc:ui:generate-icons"]
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "eslintConfig": "{workspaceRoot}/fleetshift-ui/eslint.config.mjs",
+        "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"]
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx vitest run --config vitest.config.ts"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{workspaceRoot}/vitest.config.ts"
+      ]
+    }
+  }
+}

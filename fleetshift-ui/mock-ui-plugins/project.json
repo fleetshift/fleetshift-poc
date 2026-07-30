@@ -1,0 +1,62 @@
+{
+  "name": "plugins",
+  "root": "fleetshift-ui/mock-ui-plugins",
+  "sourceRoot": "fleetshift-ui/mock-ui-plugins/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib", "federation:remote"],
+  "implicitDependencies": ["common", "build-utils"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build -w @fleetshift/mock-ui-plugins",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["common:build"]
+    },
+    "build:ci": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build:ci -w @fleetshift/mock-ui-plugins",
+        "cwd": "fleetshift-ui"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["common:build"]
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "eslintConfig": "{workspaceRoot}/fleetshift-ui/eslint.config.mjs",
+        "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"]
+      }
+    },
+    "lint:css": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "stylelint 'mock-ui-plugins/src/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+        "cwd": "fleetshift-ui"
+      }
+    },
+    "test:ct": {
+      "executor": "@nx/playwright:playwright",
+      "options": {
+        "config": "fleetshift-ui/mock-ui-plugins/playwright-ct.config.ts"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/playwright-ct.config.*"
+      ],
+      "cache": false
+    }
+  }
+}

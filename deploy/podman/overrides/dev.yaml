@@ -12,8 +12,8 @@ services:
 
   web-builder:
     build:
-      context: ${UI_DIR:-../../../fleetshift-user-interface}
-      dockerfile: Dockerfile.web
+      context: ../..
+      dockerfile: fleetshift-ui/Dockerfile.web
     privileged: true
 
   # ── Backend — extend base image with local tooling ──────────────
