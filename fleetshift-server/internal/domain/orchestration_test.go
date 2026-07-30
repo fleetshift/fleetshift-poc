@@ -471,6 +471,14 @@ func (r *stubRegistry) SignalDeleteCleanupComplete(_ context.Context, _ domain.F
 	return nil
 }
 
+func (r *stubRegistry) RegisterResumeManagedResource(_ *domain.ResumeManagedResourceWorkflowSpec) (domain.ResumeManagedResourceWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) Start(context.Context) error { return nil }
+func (r *stubRegistry) Wait(context.Context) error  { return nil }
+func (r *stubRegistry) Close(context.Context) error { return nil }
+
 // ---------------------------------------------------------------------------
 // Delivery agent fakes
 // ---------------------------------------------------------------------------

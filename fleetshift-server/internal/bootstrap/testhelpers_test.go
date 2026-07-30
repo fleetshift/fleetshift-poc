@@ -78,7 +78,7 @@ func startTestServer(t *testing.T, opts ...Option) *Server {
 	}
 
 	base := []Option{
-		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return nil, nil

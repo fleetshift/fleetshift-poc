@@ -50,9 +50,9 @@ type Server struct {
 	grpcLis    net.Listener
 	httpLis    net.Listener
 
-	wfRuntime WorkflowRuntime
-	appCtx    context.Context
-	appCancel context.CancelFunc
+	wfRegistry domain.Registry
+	appCtx     context.Context
+	appCancel  context.CancelFunc
 
 	db                *sql.DB
 	dynamicHTTPConn   *grpc.ClientConn
@@ -192,16 +192,15 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	srv.db = db
 	cleanups = append(cleanups, func() { _ = db.Close() })
 
-	// --- workflow runtime ---
-	wfRuntime := o.workflowRuntime
-	if wfRuntime == nil {
-		wfRuntime, err = NewGoWorkflowRuntime(cfg.Database, logger)
+	// --- workflow registry ---
+	reg := o.workflowRegistry
+	if reg == nil {
+		reg, err = NewGoWorkflowRegistry(cfg.Database, logger)
 		if err != nil {
 			return fail(err)
 		}
 	}
-	srv.wfRuntime = wfRuntime
-	reg := wfRuntime.Registry()
+	srv.wfRegistry = reg
 
 	specValidator, err := protovalidate.New()
 	if err != nil {
@@ -586,14 +585,14 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		logger.Info("kubernetes index startup replay started")
 	}
 
-	// --- start workflow runtime and servers ---
-	if err := wfRuntime.Start(appCtx); err != nil {
+	// --- start workflow registry and servers ---
+	if err := reg.Start(appCtx); err != nil {
 		return fail(err)
 	}
 	cleanups = append(cleanups, func() {
 		waitCtx, cancel := context.WithTimeout(context.Background(), o.shutdownGrace)
 		defer cancel()
-		_ = wfRuntime.Close(waitCtx)
+		_ = reg.Close(waitCtx)
 	})
 
 	go func() {
@@ -716,9 +715,9 @@ func (s *Server) shutdown() error {
 		join(s.kubeIndexing.Runtime.StopAll(stopCtx))
 		cancel()
 	}
-	if s.wfRuntime != nil {
+	if s.wfRegistry != nil {
 		waitCtx, cancel := context.WithTimeout(context.Background(), s.shutdownGrace)
-		join(s.wfRuntime.Close(waitCtx))
+		join(s.wfRegistry.Close(waitCtx))
 		cancel()
 	}
 	if s.dynamicHTTPConn != nil {

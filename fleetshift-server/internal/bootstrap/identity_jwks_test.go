@@ -83,7 +83,7 @@ func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
 	defer cancel()
 
 	srv, err := Start(ctx, cfg, testLogger(),
-		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: gated}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return nil, nil
@@ -163,7 +163,7 @@ func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 	jwksUp.Store(false)
 	startAt := time.Now()
 	srv, err := Start(ctx, appCfg, testLogger(),
-		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: verifier}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return nil, nil

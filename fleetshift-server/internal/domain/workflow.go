@@ -184,9 +184,11 @@ type DeleteCleanupSignaler interface {
 	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
 }
 
-// Registry registers workflow specs and provides cross-workflow
-// signaling. Workflow specs receive it at construction so engine
-// capabilities are available without lazy field assignment.
+// Registry registers workflow specs, provides cross-workflow signaling,
+// and owns the engine's start/wait/close lifecycle. All workflows must be
+// registered before Start. Workflow specs receive the registry at
+// construction so engine capabilities are available without lazy field
+// assignment.
 type Registry interface {
 	FulfillmentSignaler
 	DeleteCleanupSignaler
@@ -200,6 +202,15 @@ type Registry interface {
 	RegisterDeleteManagedResource(spec *DeleteManagedResourceWorkflowSpec) (DeleteManagedResourceWorkflow, error)
 	RegisterDeleteManagedResourceCleanup(spec *DeleteManagedResourceCleanupWorkflowSpec) (DeleteManagedResourceCleanupWorkflow, error)
 	RegisterResumeManagedResource(spec *ResumeManagedResourceWorkflowSpec) (ResumeManagedResourceWorkflow, error)
+
+	// Start begins background workflow processing. Call only after all
+	// workflows have been registered.
+	Start(ctx context.Context) error
+	// Wait blocks until the registry has stopped or ctx is cancelled.
+	// A stop caused by Close is not reported as an error.
+	Wait(ctx context.Context) error
+	// Close performs bounded shutdown. Callers supply the deadline via ctx.
+	Close(ctx context.Context) error
 }
 
 // OrchestrationWorkflow is a registered orchestration workflow that

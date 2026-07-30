@@ -77,7 +77,7 @@ func Start(t *testing.T) string {
 	defer cancel()
 
 	srv, err := bootstrap.Start(ctx, cfg, logger,
-		bootstrap.WithWorkflowRuntime(bootstrap.NewMemWorkflowRuntime()),
+		bootstrap.WithWorkflowRegistry(bootstrap.NewMemWorkflowRegistry()),
 		bootstrap.WithIdentity(bootstrap.Identity{
 			Discovery: stubDiscovery{},
 			Verifier:  stubVerifier{},

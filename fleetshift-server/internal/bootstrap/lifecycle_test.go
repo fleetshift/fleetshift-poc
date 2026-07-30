@@ -71,7 +71,7 @@ func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 	}
 
 	_, err = Start(context.Background(), cfg, testLogger(),
-		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
 	)
@@ -98,7 +98,7 @@ func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 	}
 
 	_, err = Start(context.Background(), cfg, testLogger(),
-		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return []AddonSpec{{
@@ -126,7 +126,7 @@ func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
 	}
 
 	_, err = Start(context.Background(), cfg, testLogger(),
-		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return []AddonSpec{{
@@ -300,10 +300,10 @@ func TestLifecycle_CloseCallerDeadlineIndependent(t *testing.T) {
 }
 
 func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
-	reg := &trackingRuntime{inner: NewMemWorkflowRuntime()}
-	_ = startTestServer(t, WithWorkflowRuntime(reg))
+	reg := &trackingRegistry{inner: NewMemWorkflowRegistry()}
+	_ = startTestServer(t, WithWorkflowRegistry(reg))
 	if !reg.started {
-		t.Fatal("workflow runtime was not started")
+		t.Fatal("workflow registry was not started")
 	}
 	if reg.startBeforeRegister {
 		t.Fatal("workflow Start occurred before registrations completed")
@@ -313,9 +313,9 @@ func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
 	}
 }
 
-// trackingRuntime verifies Start is not called until the server finishes registering.
-type trackingRuntime struct {
-	inner                *MemWorkflowRuntime
+// trackingRegistry verifies Start is not called until the server finishes registering.
+type trackingRegistry struct {
+	inner                domain.Registry
 	mu                   sync.Mutex
 	started              bool
 	registersBeforeStart int
@@ -323,10 +323,13 @@ type trackingRuntime struct {
 	registerCount        int
 }
 
-func (r *trackingRuntime) Registry() domain.Registry {
-	return &trackingRegistry{rt: r, inner: r.inner.Registry()}
+func (r *trackingRegistry) note() {
+	r.mu.Lock()
+	r.registerCount++
+	r.mu.Unlock()
 }
-func (r *trackingRuntime) Start(ctx context.Context) error {
+
+func (r *trackingRegistry) Start(ctx context.Context) error {
 	r.mu.Lock()
 	if r.registerCount == 0 {
 		r.startBeforeRegister = true
@@ -336,19 +339,8 @@ func (r *trackingRuntime) Start(ctx context.Context) error {
 	r.mu.Unlock()
 	return r.inner.Start(ctx)
 }
-func (r *trackingRuntime) Wait(ctx context.Context) error  { return r.inner.Wait(ctx) }
-func (r *trackingRuntime) Close(ctx context.Context) error { return r.inner.Close(ctx) }
-
-type trackingRegistry struct {
-	rt    *trackingRuntime
-	inner domain.Registry
-}
-
-func (r *trackingRegistry) note() {
-	r.rt.mu.Lock()
-	r.rt.registerCount++
-	r.rt.mu.Unlock()
-}
+func (r *trackingRegistry) Wait(ctx context.Context) error  { return r.inner.Wait(ctx) }
+func (r *trackingRegistry) Close(ctx context.Context) error { return r.inner.Close(ctx) }
 
 func (r *trackingRegistry) SignalFulfillmentEvent(ctx context.Context, id domain.FulfillmentID, event domain.FulfillmentEvent) error {
 	return r.inner.SignalFulfillmentEvent(ctx, id, event)

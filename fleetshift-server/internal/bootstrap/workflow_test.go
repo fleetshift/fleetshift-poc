@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-func TestGoWorkflowRuntime_CloseCancelsAndIsIdempotent(t *testing.T) {
-	rt, err := NewGoWorkflowRuntime(SQLite{Path: filepath.Join(t.TempDir(), "wf.db")}, testLogger())
+func TestGoWorkflowRegistry_CloseCancelsAndIsIdempotent(t *testing.T) {
+	rt, err := NewGoWorkflowRegistry(SQLite{Path: filepath.Join(t.TempDir(), "wf.db")}, testLogger())
 	if err != nil {
-		t.Fatalf("NewGoWorkflowRuntime: %v", err)
+		t.Fatalf("NewGoWorkflowRegistry: %v", err)
 	}
 
 	// Parent ctx is never cancelled; Close must stop the worker itself.
@@ -33,10 +33,10 @@ func TestGoWorkflowRuntime_CloseCancelsAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestGoWorkflowRuntime_ConcurrentClose(t *testing.T) {
-	rt, err := NewGoWorkflowRuntime(SQLite{Path: filepath.Join(t.TempDir(), "wf.db")}, testLogger())
+func TestGoWorkflowRegistry_ConcurrentClose(t *testing.T) {
+	rt, err := NewGoWorkflowRegistry(SQLite{Path: filepath.Join(t.TempDir(), "wf.db")}, testLogger())
 	if err != nil {
-		t.Fatalf("NewGoWorkflowRuntime: %v", err)
+		t.Fatalf("NewGoWorkflowRegistry: %v", err)
 	}
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -62,13 +62,13 @@ func TestGoWorkflowRuntime_ConcurrentClose(t *testing.T) {
 	}
 }
 
-func TestLifecycle_GoWorkflowRuntimeCloseThroughServer(t *testing.T) {
-	// Default unit helpers use MemWorkflowRuntime; exercise production runtime
-	// through Server shutdown (appCancel + Close) and a second Close.
+func TestLifecycle_GoWorkflowRegistryCloseThroughServer(t *testing.T) {
+	// Default unit helpers use the in-memory registry; exercise production
+	// go-workflows through Server shutdown (appCancel + Close) and a second Close.
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
-	rt, err := NewGoWorkflowRuntime(SQLite{Path: dbPath}, testLogger())
+	rt, err := NewGoWorkflowRegistry(SQLite{Path: dbPath}, testLogger())
 	if err != nil {
-		t.Fatalf("NewGoWorkflowRuntime: %v", err)
+		t.Fatalf("NewGoWorkflowRegistry: %v", err)
 	}
 
 	cfg, err := NewConfig(ConfigInput{
@@ -83,7 +83,7 @@ func TestLifecycle_GoWorkflowRuntimeCloseThroughServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	srv, err := Start(ctx, cfg, testLogger(),
-		WithWorkflowRuntime(rt),
+		WithWorkflowRegistry(rt),
 		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
 	)

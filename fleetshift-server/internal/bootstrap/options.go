@@ -15,9 +15,9 @@ type Option func(*options)
 
 // options is the unexported Start option bag.
 type options struct {
-	workflowRuntime WorkflowRuntime
-	identity        *Identity
-	addonAssembly   AddonAssemblyFunc
+	workflowRegistry domain.Registry
+	identity         *Identity
+	addonAssembly    AddonAssemblyFunc
 
 	shutdownGrace time.Duration
 }
@@ -29,10 +29,11 @@ func defaultOptions() options {
 	}
 }
 
-// WithWorkflowRuntime substitutes the lifecycle-owning workflow runtime.
-// When omitted, Start builds the production go-workflows runtime from Config.Database.
-func WithWorkflowRuntime(rt WorkflowRuntime) Option {
-	return func(o *options) { o.workflowRuntime = rt }
+// WithWorkflowRegistry substitutes the workflow registry (registration and
+// Start/Wait/Close lifecycle). When omitted, Start builds the production
+// go-workflows registry from Config.Database.
+func WithWorkflowRegistry(reg domain.Registry) Option {
+	return func(o *options) { o.workflowRegistry = reg }
 }
 
 // WithIdentity substitutes discovery and token verification dependencies.
