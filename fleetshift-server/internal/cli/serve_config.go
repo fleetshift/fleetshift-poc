@@ -11,7 +11,7 @@ import (
 // serveSelections records which database-related flags were explicitly set
 // via the CLI (pflag.Changed). Environment-provided defaults are not explicit.
 type serveSelections struct {
-	DB bool
+	DBExplicit bool
 }
 
 // loadServeConfig resolves environment/file inputs without mutating serveFlags,
@@ -42,7 +42,7 @@ func loadServeConfig(f *serveFlags, sel serveSelections) (bootstrap.Config, erro
 		DatabaseURL:            f.databaseURL,
 		DatabaseURLFileContent: dbURLFromFile,
 		DatabaseURLFileSet:     f.databaseURLFile != "",
-		DBExplicit:             sel.DB,
+		DBExplicit:             sel.DBExplicit,
 		OIDCCABundle:           caBundle,
 		WebDir:                 f.webDir,
 		OIDCUIAuthority:        f.oidcUIAuthority,

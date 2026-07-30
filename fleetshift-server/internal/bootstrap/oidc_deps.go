@@ -19,15 +19,15 @@ type KeySetRegistrar interface {
 	RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error
 }
 
-// Identity holds OIDC discovery and token verification dependencies for Start.
-type Identity struct {
+// OIDCDeps holds OIDC discovery and token verification dependencies for Start.
+type OIDCDeps struct {
 	Discovery domain.OIDCDiscoveryClient
 	Verifier  domain.OIDCTokenVerifier
 }
 
-// NewProductionIdentity builds the production discovery client and verifier.
+// NewProductionOIDCDeps builds the production discovery client and verifier.
 // oidcCABundle is optional PEM material for a custom trust store.
-func NewProductionIdentity(ctx context.Context, oidcCABundle []byte) (Identity, error) {
+func NewProductionOIDCDeps(ctx context.Context, oidcCABundle []byte) (OIDCDeps, error) {
 	oidcHTTPClient := oidcHTTPClientFromBundle(oidcCABundle)
 	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
 
@@ -37,9 +37,9 @@ func NewProductionIdentity(ctx context.Context, oidcCABundle []byte) (Identity, 
 	}
 	tokenVerifier, err := oidc.NewVerifier(ctx, verifierOpts...)
 	if err != nil {
-		return Identity{}, fmt.Errorf("create OIDC verifier: %w", err)
+		return OIDCDeps{}, fmt.Errorf("create OIDC verifier: %w", err)
 	}
-	return Identity{
+	return OIDCDeps{
 		Discovery: discoveryClient,
 		Verifier:  tokenVerifier,
 	}, nil

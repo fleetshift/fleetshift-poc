@@ -149,7 +149,7 @@ func assembleProductionAddons(
 				)},
 				Schemas: []domain.ExtensionResourceSchema{gcphcpaddon.Schema(targetID)},
 			},
-			AfterConnectWarn: func(ctx context.Context) error {
+			AfterConnectBestEffort: func(ctx context.Context) error {
 				return gcphcpConcreteAgent.RecoverActiveDeliveries(ctx, []domain.TargetID{targetID})
 			},
 		})

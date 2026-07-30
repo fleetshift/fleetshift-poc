@@ -86,7 +86,7 @@ func TestKubernetesIndexStartupReplay_CancelsAndJoins(t *testing.T) {
 	}
 }
 
-func TestStoreBackedTargetLister_ListsFromStore(t *testing.T) {
+func TestStoreTargetLister_ListsFromStore(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -189,7 +189,7 @@ func TestNewKubernetesInProcessIndexing_WiresIndexingRuntime(t *testing.T) {
 	defer cancelRun()
 
 	indexing := newKubernetesInProcessIndexing(runCtx, store, nil, slog.New(slog.DiscardHandler))
-	if indexing == nil || indexing.Runtime == nil || indexing.Host == nil {
+	if indexing == nil || indexing.Runtime == nil {
 		t.Fatal("expected wired indexing runtime")
 	}
 
@@ -200,7 +200,7 @@ func TestNewKubernetesInProcessIndexing_WiresIndexingRuntime(t *testing.T) {
 	}
 }
 
-func TestStoreBackedTargetLister_BeginError(t *testing.T) {
+func TestStoreTargetLister_BeginError(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	if err := db.Close(); err != nil {
@@ -211,7 +211,7 @@ func TestStoreBackedTargetLister_BeginError(t *testing.T) {
 	}
 }
 
-func TestStoreBackedTargetLister_ListError(t *testing.T) {
+func TestStoreTargetLister_ListError(t *testing.T) {
 	store := &listFailStore{err: errors.New("list targets failed")}
 	_, err := (storeTargetLister{store: store}).ListTargets(context.Background())
 	if err == nil {

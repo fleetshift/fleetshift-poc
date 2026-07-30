@@ -84,7 +84,7 @@ func TestLifecycle_GoWorkflowRegistryCloseThroughServer(t *testing.T) {
 	defer cancel()
 	srv, err := Start(ctx, cfg, testLogger(),
 		WithWorkflowRegistry(rt),
-		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
 	)
 	if err != nil {

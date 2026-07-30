@@ -16,7 +16,7 @@ type Option func(*options)
 // options is the unexported Start option bag.
 type options struct {
 	workflowRegistry domain.Registry
-	identity         *Identity
+	oidcDeps         *OIDCDeps
 	addonAssembly    AddonAssemblyFunc
 
 	shutdownGrace time.Duration
@@ -36,10 +36,10 @@ func WithWorkflowRegistry(reg domain.Registry) Option {
 	return func(o *options) { o.workflowRegistry = reg }
 }
 
-// WithIdentity substitutes discovery and token verification dependencies.
+// WithOIDCDeps substitutes discovery and token verification dependencies.
 // When omitted, Start builds the production OIDC discovery client and verifier.
-func WithIdentity(id Identity) Option {
-	return func(o *options) { o.identity = &id }
+func WithOIDCDeps(deps OIDCDeps) Option {
+	return func(o *options) { o.oidcDeps = &deps }
 }
 
 // WithAddonAssembly substitutes ordered typed add-on assembly. When omitted,
@@ -76,7 +76,7 @@ type AddonSpec struct {
 	// AfterConnect runs after a successful Connect. Failures fail Start.
 	// Use for work that must complete before readiness (not GCP recovery).
 	AfterConnect func(ctx context.Context) error
-	// AfterConnectWarn runs after Connect; errors are logged and ignored
+	// AfterConnectBestEffort runs after Connect; errors are logged and ignored
 	// (GCP recovery compatibility).
-	AfterConnectWarn func(ctx context.Context) error
+	AfterConnectBestEffort func(ctx context.Context) error
 }

@@ -243,14 +243,14 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		})
 	}
 
-	// --- identity ---
-	identity := o.identity
-	if identity == nil {
-		id, err := NewProductionIdentity(ctx, cfg.OIDCCABundle)
+	// --- OIDC deps ---
+	oidcDeps := o.oidcDeps
+	if oidcDeps == nil {
+		deps, err := NewProductionOIDCDeps(ctx, cfg.OIDCCABundle)
 		if err != nil {
 			return fail(err)
 		}
-		identity = &id
+		oidcDeps = &deps
 	}
 
 	keyResolver := newProductionKeyResolver()
@@ -318,7 +318,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 	provSpec := &domain.ProvisionIdPWorkflowSpec{
 		AuthMethods:      authMethodRepo,
-		Discovery:        identity.Discovery,
+		Discovery:        oidcDeps.Discovery,
 		CreateDeployment: createWf,
 		EventSink:        setupHub,
 	}
@@ -342,9 +342,9 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if err != nil {
 		return fail(fmt.Errorf("load auth methods: %w", err))
 	}
-	registerPersistedKeySets(ctx, logger, identity.Verifier, existingMethods)
+	registerPersistedKeySets(ctx, logger, oidcDeps.Verifier, existingMethods)
 
-	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, identity.Verifier, observability.NewAuthnObserver(logger))
+	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, oidcDeps.Verifier, observability.NewAuthnObserver(logger))
 
 	provenanceSvc := &domain.ProvenanceService{
 		KeyResolver: keyResolver,
@@ -368,7 +368,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		Store: store, CreateWF: createWf, DeleteWF: deleteWf, ResumeWF: resumeWf, ProvenanceSvc: provenanceSvc,
 	}
 	signerEnrollmentSvc := &application.SignerEnrollmentService{
-		Store: store, Verifier: identity.Verifier, AuthMethods: authMethodRepo,
+		Store: store, Verifier: oidcDeps.Verifier, AuthMethods: authMethodRepo,
 	}
 	extensionResourceSvc := application.NewExtensionResourceService(
 		store, createMRWf, deleteMRWf, resumeMRWf, provenanceSvc,
@@ -439,7 +439,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	// cannot set Authorization headers — see TODO below).
 	httpAuthn := &transporthttp.AuthnMiddleware{
 		Methods:  authMethodSvc,
-		Verifier: identity.Verifier,
+		Verifier: oidcDeps.Verifier,
 		Logger:   logger.With("component", "authn-http"),
 	}
 	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
@@ -451,7 +451,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	topMux.HandleFunc("GET /api/ui/events/ws", eventHub.HandleWS)
 	topMux.Handle("GET /api/ui/github-signing-keys/{username}", httpAuthn.Wrap(http.HandlerFunc(transporthttp.HandleGitHubSigningKeys)))
 	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
-		AuthMethods: authMethodSvc, Verifier: identity.Verifier, Store: store, ProvenanceSvc: provenanceSvc,
+		AuthMethods: authMethodSvc, Verifier: oidcDeps.Verifier, Store: store, ProvenanceSvc: provenanceSvc,
 	})
 
 	dynamicHTTPConn, err := grpc.NewClient(grpcEP.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -556,9 +556,9 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 				return fail(err)
 			}
 		}
-		if spec.AfterConnectWarn != nil {
-			if err := spec.AfterConnectWarn(ctx); err != nil {
-				logger.Error("addon post-connect warning", "addon", spec.Descriptor.ID, "error", err)
+		if spec.AfterConnectBestEffort != nil {
+			if err := spec.AfterConnectBestEffort(ctx); err != nil {
+				logger.Error("addon post-connect best-effort failed", "addon", spec.Descriptor.ID, "error", err)
 			}
 		}
 	}

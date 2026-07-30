@@ -79,7 +79,7 @@ func startTestServer(t *testing.T, opts ...Option) *Server {
 
 	base := []Option{
 		WithWorkflowRegistry(NewMemWorkflowRegistry()),
-		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return nil, nil
 		}),

@@ -1,7 +1,7 @@
 // Package testserver provides a focused shared-builder facade over
 // bootstrap for sibling-module integration tests. New uses are frozen;
 // prefer internal/testenv when it lands. The independent object graph
-// has been deleted — Start delegates to bootstrap with workflow, identity,
+// has been deleted — Start delegates to bootstrap with workflow, OIDC,
 // and add-on substitutions that preserve Kind/GCP HCP create/read semantics.
 package testserver
 
@@ -78,11 +78,11 @@ func Start(t *testing.T) string {
 
 	srv, err := bootstrap.Start(ctx, cfg, logger,
 		bootstrap.WithWorkflowRegistry(bootstrap.NewMemWorkflowRegistry()),
-		bootstrap.WithIdentity(bootstrap.Identity{
+		bootstrap.WithOIDCDeps(bootstrap.OIDCDeps{
 			Discovery: stubDiscovery{},
 			Verifier:  stubVerifier{},
 		}),
-		bootstrap.WithAddonAssembly(facadeAddonAssembly),
+		bootstrap.WithAddonAssembly(testAddonAssembly),
 	)
 	if err != nil {
 		t.Fatalf("bootstrap.Start: %v", err)
@@ -98,14 +98,14 @@ func Start(t *testing.T) string {
 	return srv.Endpoints().GRPC.Dial
 }
 
-// facadeAddonAssembly preserves focused Kind/GCP HCP create/read semantics
+// testAddonAssembly preserves focused Kind/GCP HCP create/read semantics
 // for sibling CLI tests.
 //
 // Kind omits DeliveryCapability so Connect.Agent may be nil: schemas/targets
 // stay live, resources remain CREATING, and delete does not wait on delivery.
 // GCP HCP keeps DeliveryCapability with a recording agent and no Reporter so
 // the target type is routable while deliveries stay incomplete.
-func facadeAddonAssembly(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
+func testAddonAssembly(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
 	// No Reporter: deliveries stay incomplete so create/read tests observe CREATING.
 	recording := &sqlite.RecordingDeliveryService{Store: deps.Store}
 

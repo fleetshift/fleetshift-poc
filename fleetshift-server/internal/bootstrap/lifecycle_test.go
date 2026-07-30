@@ -72,7 +72,7 @@ func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 
 	_, err = Start(context.Background(), cfg, testLogger(),
 		WithWorkflowRegistry(NewMemWorkflowRegistry()),
-		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
 	)
 	if err == nil {
@@ -99,7 +99,7 @@ func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 
 	_, err = Start(context.Background(), cfg, testLogger(),
 		WithWorkflowRegistry(NewMemWorkflowRegistry()),
-		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return []AddonSpec{{
 				Descriptor: domain.AddonDescriptor{ID: "noop", Name: "noop"},
@@ -127,7 +127,7 @@ func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
 
 	_, err = Start(context.Background(), cfg, testLogger(),
 		WithWorkflowRegistry(NewMemWorkflowRegistry()),
-		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
 		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
 			return []AddonSpec{{
 				Descriptor: domain.AddonDescriptor{

@@ -14,8 +14,6 @@ import (
 type kubernetesInProcessIndexing struct {
 	// Runtime is injected into Kind/GCP agents and used for StopAll / replay.
 	Runtime kubernetesaddon.IndexingRuntime
-	// Host is the concrete in-process host (same instance as Runtime).
-	Host *kubernetesaddon.KubernetesInProcessIndexHost
 }
 
 // newKubernetesInProcessIndexing wires the Kubernetes indexing runtime
@@ -39,10 +37,7 @@ func newKubernetesInProcessIndexing(
 		kubernetesaddon.DefaultIndexerClients{},
 		logger,
 	)
-	return &kubernetesInProcessIndexing{
-		Runtime: host,
-		Host:    host,
-	}
+	return &kubernetesInProcessIndexing{Runtime: host}
 }
 
 // directInventoryReportBackend adapts InventoryReportService onto the

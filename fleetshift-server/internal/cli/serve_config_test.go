@@ -159,7 +159,7 @@ func TestLoadServeConfig(t *testing.T) {
 				dbPath:      bootstrap.DefaultSQLitePath,
 				databaseURL: "postgres://user:pass@localhost:5432/db",
 			},
-			sel:     serveSelections{DB: true},
+			sel:     serveSelections{DBExplicit: true},
 			wantErr: "--database-url and --db are mutually exclusive",
 		},
 		{

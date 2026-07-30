@@ -43,7 +43,7 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the FleetShift gRPC and HTTP servers",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			sel := serveSelections{DB: cmd.Flags().Changed("db")}
+			sel := serveSelections{DBExplicit: cmd.Flags().Changed("db")}
 			return runServe(cmd.Context(), f, sel)
 		},
 	}

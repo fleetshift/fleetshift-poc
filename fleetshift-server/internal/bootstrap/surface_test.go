@@ -114,7 +114,7 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 	}
 }
 
-func TestExpectedSurface_AuthMethodWiresCacheInvalidation(t *testing.T) {
+func TestExpectedSurface_AuthMethodServiceRegistered(t *testing.T) {
 	srv := startTestServer(t)
 	info := srv.grpcServer.GetServiceInfo()
 	svc, ok := info["fleetshift.v1.AuthMethodService"]
@@ -131,10 +131,7 @@ func TestExpectedSurface_AuthMethodWiresCacheInvalidation(t *testing.T) {
 	if !found {
 		t.Fatalf("AuthMethodService methods unexpected: %+v", svc.Methods)
 	}
-	// Authn interceptor wiring is exercised by the shared builder registering
-	// AuthMethodServer with Authn set; a nil Authn would omit cache invalidation.
-	// Prove the transport service is present and the readiness probe succeeded
-	// through authenticated middleware.
+	// Prove the transport service is present and the readiness probe succeeded.
 	if !srv.ready {
 		t.Fatal("server not ready")
 	}
