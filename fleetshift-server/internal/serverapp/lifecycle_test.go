@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -111,6 +112,104 @@ func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected AfterConnect failure")
+	}
+}
+
+func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
+	cfg, err := NewConfig(ConfigInput{
+		GRPCAddr: "127.0.0.1:0",
+		HTTPAddr: "127.0.0.1:0",
+		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	_, err = Start(context.Background(), cfg, testLogger(),
+		WithWorkflowRuntime(NewMemWorkflowRuntime()),
+		WithIdentity(Identity{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) {
+			return []AddonSpec{{
+				Descriptor: domain.AddonDescriptor{
+					ID:           "nil-agent",
+					Name:         "nil-agent",
+					Capabilities: []domain.Capability{domain.DeliveryCapability{TargetType: "test"}},
+				},
+				Connect: application.ConnectInput{}, // Agent intentionally nil
+			}}, nil
+		}),
+	)
+	if err == nil || !strings.Contains(err.Error(), "Connect.Agent is nil") {
+		t.Fatalf("Start error = %v, want Connect.Agent is nil", err)
+	}
+}
+
+func TestStopIngress_ReleasesListenersAfterServe(t *testing.T) {
+	// stopIngress is shared by Close and Start's post-Serve fail cleanup.
+	// Exercise it against live Serve loops without a production test hook.
+	grpcLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen gRPC: %v", err)
+	}
+	httpLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen HTTP: %v", err)
+	}
+	grpcAddr := grpcLis.Addr().String()
+	httpAddr := httpLis.Addr().String()
+
+	grpcServer := grpc.NewServer()
+	httpServer := &http.Server{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+
+	serveDone := make(chan struct{}, 2)
+	go func() {
+		_ = grpcServer.Serve(grpcLis)
+		serveDone <- struct{}{}
+	}()
+	go func() {
+		_ = httpServer.Serve(httpLis)
+		serveDone <- struct{}{}
+	}()
+
+	// Prove both listeners accepted connections before stop.
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc dial: %v", err)
+	}
+	conn.Connect()
+	conn.Close()
+	resp, err := http.Get("http://" + httpAddr + "/")
+	if err != nil {
+		t.Fatalf("http get: %v", err)
+	}
+	resp.Body.Close()
+
+	if err := stopIngress(grpcServer, httpServer, 2*time.Second); err != nil {
+		t.Fatalf("stopIngress: %v", err)
+	}
+
+	for range 2 {
+		select {
+		case <-serveDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Serve goroutines did not exit after stopIngress")
+		}
+	}
+
+	rebindGRPC, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		t.Fatalf("gRPC addr %s still held after stopIngress: %v", grpcAddr, err)
+	}
+	_ = rebindGRPC.Close()
+	rebindHTTP, err := net.Listen("tcp", httpAddr)
+	if err != nil {
+		t.Fatalf("HTTP addr %s still held after stopIngress: %v", httpAddr, err)
+	}
+	_ = rebindHTTP.Close()
+
+	// Second stop must remain safe for fail/Close overlap.
+	if err := stopIngress(grpcServer, httpServer, 2*time.Second); err != nil {
+		t.Fatalf("second stopIngress: %v", err)
 	}
 }
 

@@ -129,6 +129,11 @@ func NewConfig(in ConfigInput) (Config, error) {
 	effectiveURL := in.DatabaseURL
 	if in.DatabaseURLFileSet {
 		effectiveURL = in.DatabaseURLFileContent
+		// File path selected but empty/whitespace must not fall through to the
+		// default SQLite --db path (e.g. an unpopulated mounted secret).
+		if strings.TrimSpace(effectiveURL) == "" {
+			return Config{}, fmt.Errorf("--database-url-file is set but contains no database URL")
+		}
 	}
 	if effectiveURL != "" && in.DBExplicit {
 		return Config{}, fmt.Errorf("--database-url and --db are mutually exclusive")

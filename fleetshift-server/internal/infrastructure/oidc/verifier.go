@@ -22,6 +22,12 @@ type Verifier struct {
 
 	mu      sync.RWMutex
 	keySets map[string]jwk.Set // jwksURI -> cached set
+
+	// registerMu guards registerLocks. Per-URI mutexes serialize registration
+	// for one JWKS URL without holding v.mu across network I/O, and without
+	// sharing one caller's context across waiters (unlike singleflight).
+	registerMu    sync.Mutex
+	registerLocks map[string]*sync.Mutex
 }
 
 // VerifierOption configures a [Verifier].
@@ -56,9 +62,10 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 		return nil, fmt.Errorf("create JWK cache: %w", err)
 	}
 	return &Verifier{
-		cache:      cache,
-		httpClient: cfg.httpClient,
-		keySets:    make(map[string]jwk.Set),
+		cache:         cache,
+		httpClient:    cfg.httpClient,
+		keySets:       make(map[string]jwk.Set),
+		registerLocks: make(map[string]*sync.Mutex),
 	}, nil
 }
 
@@ -76,15 +83,40 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 // We intentionally avoid cache.Refresh on the failure path: httprc workers
 // exit on synchronous refresh failure, which permanently breaks the cache
 // after a handful of down-IdP attempts.
+//
+// Network I/O runs outside v.mu. Same-URI callers serialize on a per-URI
+// mutex and each attempt uses that caller's ctx; other URIs are not blocked.
 func (v *Verifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error {
 	uri := string(jwksURI)
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	if _, ok := v.keySets[uri]; ok {
+	if v.hasKeySet(uri) {
 		return nil
 	}
 
+	uriMu := v.lockForURI(uri)
+	uriMu.Lock()
+	defer uriMu.Unlock()
+
+	if v.hasKeySet(uri) {
+		return nil
+	}
+	return v.doRegisterKeySet(ctx, uri)
+}
+
+// lockForURI returns the per-URI mutex used to serialize registration.
+func (v *Verifier) lockForURI(uri string) *sync.Mutex {
+	v.registerMu.Lock()
+	defer v.registerMu.Unlock()
+	m, ok := v.registerLocks[uri]
+	if !ok {
+		m = &sync.Mutex{}
+		v.registerLocks[uri] = m
+	}
+	return m
+}
+
+// doRegisterKeySet performs preflight fetch, cache registration, and publish.
+// It must not hold v.mu across network or cache I/O.
+func (v *Verifier) doRegisterKeySet(ctx context.Context, uri string) error {
 	if v.cache.IsRegistered(ctx, uri) {
 		// Prior success that wasn't published yet (shouldn't happen), or a
 		// stale registration left after a failed WaitReady — reuse if ready,
@@ -125,6 +157,14 @@ func (v *Verifier) fetchOptions() []jwk.FetchOption {
 	return []jwk.FetchOption{jwk.WithHTTPClient(client)}
 }
 
+// hasKeySet reports whether uri is already published in keySets.
+func (v *Verifier) hasKeySet(uri string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	_, ok := v.keySets[uri]
+	return ok
+}
+
 // publishCachedSet stores a ready CachedSet in keySets. On CachedSet failure
 // it unregisters the URI so a later RegisterKeySet can recover.
 func (v *Verifier) publishCachedSet(ctx context.Context, uri string) error {
@@ -132,6 +172,11 @@ func (v *Verifier) publishCachedSet(ctx context.Context, uri string) error {
 	if err != nil {
 		_ = v.cache.Unregister(ctx, uri)
 		return fmt.Errorf("create cached set for %s: %w", uri, err)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, ok := v.keySets[uri]; ok {
+		return nil
 	}
 	v.keySets[uri] = cached
 	return nil
@@ -229,10 +274,7 @@ func tokenDiagnostics(rawToken string, config domain.OIDCConfig) string {
 // when it was not published at boot (IdP recovery path).
 func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (jwk.Set, error) {
 	uri := string(jwksURI)
-	v.mu.RLock()
-	ks, ok := v.keySets[uri]
-	v.mu.RUnlock()
-	if ok {
+	if ks, ok := v.lookupKeySet(uri); ok {
 		return ks, nil
 	}
 
@@ -240,7 +282,16 @@ func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (j
 		return nil, err
 	}
 
+	ks, ok := v.lookupKeySet(uri)
+	if !ok {
+		return nil, fmt.Errorf("key set for %s missing after registration", uri)
+	}
+	return ks, nil
+}
+
+func (v *Verifier) lookupKeySet(uri string) (jwk.Set, bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return v.keySets[uri], nil
+	ks, ok := v.keySets[uri]
+	return ks, ok
 }

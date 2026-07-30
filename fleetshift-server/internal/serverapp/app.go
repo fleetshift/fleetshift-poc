@@ -607,6 +607,11 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 			app.serveErrCh <- err
 		}
 	}()
+	// Serve owns accepted connections; register stop before readiness so a
+	// failed proveReadiness unwinds servers the same way as Close.
+	cleanups = append(cleanups, func() {
+		_ = stopIngress(grpcServer, app.httpServer, o.shutdownGrace)
+	})
 
 	if err := proveReadiness(ctx, grpcEP.Dial); err != nil {
 		return fail(err)
@@ -618,15 +623,13 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	return app, nil
 }
 
-// rejectNilClaimedAgent is a placeholder for delivery-agent presence checks.
-// It currently always returns nil: focused facade assemblies may claim
-// DeliveryCapability with a nil Connect.Agent (schemas/targets only).
-// Production assembly still supplies non-nil agents.
+// rejectNilClaimedAgent fails Start when a DeliveryCapability is claimed
+// without a Connect.Agent. A claimed capability must be routable.
 func rejectNilClaimedAgent(spec AddonSpec) error {
 	for _, cap := range spec.Descriptor.Capabilities {
 		if _, ok := cap.(domain.DeliveryCapability); ok {
 			if spec.Connect.Agent == nil {
-				return nil
+				return fmt.Errorf("addon %q claims delivery capability but Connect.Agent is nil", spec.Descriptor.ID)
 			}
 		}
 	}
@@ -696,23 +699,7 @@ func (a *App) shutdown() error {
 	}
 
 	// Quiesce ingress while dependencies remain live.
-	stopped := make(chan struct{})
-	go func() {
-		a.grpcServer.GracefulStop()
-		close(stopped)
-	}()
-	select {
-	case <-stopped:
-	case <-time.After(a.shutdownGrace):
-		a.grpcServer.Stop()
-		<-stopped
-	}
-
-	httpCtx, httpCancel := context.WithTimeout(context.Background(), a.shutdownGrace)
-	defer httpCancel()
-	if a.httpServer != nil {
-		join(a.httpServer.Shutdown(httpCtx))
-	}
+	join(stopIngress(a.grpcServer, a.httpServer, a.shutdownGrace))
 
 	// Cancel app-owned work and join producers.
 	a.appCancel()
@@ -744,6 +731,33 @@ func (a *App) shutdown() error {
 	}
 	if a.db != nil {
 		join(a.db.Close())
+	}
+	return primary
+}
+
+// stopIngress performs graceful-then-forced gRPC stop and bounded HTTP
+// Shutdown. Used by Close and by Start fail cleanup after Serve has begun.
+func stopIngress(grpcServer *grpc.Server, httpServer *http.Server, grace time.Duration) error {
+	var primary error
+	if grpcServer != nil {
+		stopped := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(grace):
+			grpcServer.Stop()
+			<-stopped
+		}
+	}
+	if httpServer != nil {
+		httpCtx, cancel := context.WithTimeout(context.Background(), grace)
+		if err := httpServer.Shutdown(httpCtx); err != nil {
+			primary = err
+		}
+		cancel()
 	}
 	return primary
 }

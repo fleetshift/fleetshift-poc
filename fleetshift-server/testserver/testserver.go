@@ -73,7 +73,8 @@ func Start(t *testing.T) string {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	app, err := serverapp.Start(ctx, cfg, logger,
 		serverapp.WithWorkflowRuntime(serverapp.NewMemWorkflowRuntime()),
@@ -97,17 +98,27 @@ func Start(t *testing.T) string {
 	return app.Endpoints().GRPC.Dial
 }
 
-// facadeAddonAssembly preserves focused Kind/GCP HCP descriptors and
-// create/read behavior for sibling CLI tests. Kind uses schemas/targets
-// without a delivery agent (resources stay CREATING). GCP HCP uses the
-// recording agent so the target type is routable.
+// facadeAddonAssembly preserves focused Kind/GCP HCP create/read semantics
+// for sibling CLI tests.
+//
+// Kind omits DeliveryCapability so Connect.Agent may be nil: schemas/targets
+// stay live, resources remain CREATING, and delete does not wait on delivery.
+// GCP HCP keeps DeliveryCapability with a recording agent and no Reporter so
+// the target type is routable while deliveries stay incomplete.
 func facadeAddonAssembly(_ context.Context, deps serverapp.AddonDeps) ([]serverapp.AddonSpec, error) {
 	// No Reporter: deliveries stay incomplete so create/read tests observe CREATING.
 	recording := &sqlite.RecordingDeliveryService{Store: deps.Store}
 
+	kindDesc := kindaddon.Descriptor()
+	kindDesc.Capabilities = []domain.Capability{
+		domain.ManagedResourceCapability{ResourceType: kindaddon.ClusterResourceType},
+		domain.InventoryResourceCapability{ResourceType: kindaddon.ClusterResourceType},
+		domain.InventoryResourceCapability{ResourceType: kindaddon.NodeResourceType},
+	}
+
 	return []serverapp.AddonSpec{
 		{
-			Descriptor: kindaddon.Descriptor(),
+			Descriptor: kindDesc,
 			Connect: application.ConnectInput{
 				Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 					ID:   "kind-local",

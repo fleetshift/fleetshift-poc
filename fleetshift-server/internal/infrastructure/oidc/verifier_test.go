@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -150,6 +151,136 @@ func TestVerifier_RegisterKeySetFailsFastWhenJWKSUnavailable(t *testing.T) {
 	}
 	if elapsed > time.Second {
 		t.Fatalf("RegisterKeySet took %v while JWKS returned 503; want fail-fast (<1s), not Ready()-until-deadline", elapsed)
+	}
+}
+
+func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
+	// A slow/hung registration for URI A must not delay registration for URI B.
+	// Before the fix, v.mu was held across Fetch, serializing all URIs.
+	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
+	jwksBody := fetchJWKSBody(t, idp.HTTPClient(), string(idp.OIDCConfig().JWKSURI))
+
+	releaseA := make(chan struct{})
+	proxyA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-releaseA:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(jwksBody)
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	t.Cleanup(proxyA.Close)
+
+	proxyB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwksBody)
+	}))
+	t.Cleanup(proxyB.Close)
+
+	verifier, err := oidc.NewVerifier(context.Background(), oidc.WithHTTPClient(&http.Client{
+		Timeout: 5 * time.Second,
+	}))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	errA := make(chan error, 1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		errA <- verifier.RegisterKeySet(ctx, domain.EndpointURL(proxyA.URL+"/jwks"))
+	}()
+
+	// Give URI A time to enter Fetch and hold (without holding a global lock).
+	time.Sleep(50 * time.Millisecond)
+
+	startB := time.Now()
+	ctxB, cancelB := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelB()
+	if err := verifier.RegisterKeySet(ctxB, domain.EndpointURL(proxyB.URL+"/jwks")); err != nil {
+		t.Fatalf("RegisterKeySet B while A blocked: %v", err)
+	}
+	if elapsed := time.Since(startB); elapsed > time.Second {
+		t.Fatalf("RegisterKeySet B took %v while A was blocked; want independent progress", elapsed)
+	}
+
+	close(releaseA)
+	wg.Wait()
+	// A may succeed after release or time out depending on scheduling; either is fine.
+	_ = <-errA
+}
+
+func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
+	// Same-URI registration must use each caller's ctx. A short-lived first
+	// attempt must not cause a concurrent waiter with a healthy budget to fail.
+	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
+	jwksBody := fetchJWKSBody(t, idp.HTTPClient(), string(idp.OIDCConfig().JWKSURI))
+
+	var entered atomic.Int32
+	hold := make(chan struct{})
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered.Add(1)
+		select {
+		case <-hold:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(jwksBody)
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	t.Cleanup(proxy.Close)
+
+	verifier, err := oidc.NewVerifier(context.Background(), oidc.WithHTTPClient(&http.Client{
+		Timeout: 5 * time.Second,
+	}))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	uri := domain.EndpointURL(proxy.URL + "/jwks")
+
+	leaderCtx, leaderCancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer leaderCancel()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errLeader := make(chan error, 1)
+	errFollower := make(chan error, 1)
+
+	go func() {
+		defer wg.Done()
+		errLeader <- verifier.RegisterKeySet(leaderCtx, uri)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for entered.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if entered.Load() == 0 {
+		t.Fatal("leader never entered JWKS handler")
+	}
+
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		errFollower <- verifier.RegisterKeySet(ctx, uri)
+	}()
+
+	// Expire the leader while still held, then release so the waiter's own
+	// attempt can fetch successfully with its healthy context.
+	time.Sleep(150 * time.Millisecond)
+	close(hold)
+	wg.Wait()
+
+	if err := <-errLeader; err == nil {
+		t.Fatal("expected leader RegisterKeySet to fail after short deadline")
+	}
+	if err := <-errFollower; err != nil {
+		t.Fatalf("follower RegisterKeySet: %v (must not inherit leader ctx failure)", err)
 	}
 }
 

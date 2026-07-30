@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	wfbackend "github.com/cschleiden/go-workflows/backend"
@@ -38,6 +39,10 @@ type WorkflowRuntime interface {
 type GoWorkflowRuntime struct {
 	reg    *goworkflows.Registry
 	worker *worker.Worker
+
+	cancel   context.CancelFunc
+	waitOnce sync.Once
+	waitErr  error
 }
 
 // NewGoWorkflowRuntime builds a production workflow runtime for database.
@@ -70,19 +75,32 @@ func NewGoWorkflowRuntime(database Database, logger *slog.Logger) (*GoWorkflowRu
 // Registry implements WorkflowRuntime.
 func (r *GoWorkflowRuntime) Registry() domain.Registry { return r.reg }
 
-// Start implements WorkflowRuntime.
+// Start implements WorkflowRuntime. The worker is stopped by canceling the
+// derived run context from Close (or when the parent ctx is cancelled).
 func (r *GoWorkflowRuntime) Start(ctx context.Context) error {
-	if err := r.worker.Start(ctx); err != nil {
+	runCtx, cancel := context.WithCancel(ctx)
+	if err := r.worker.Start(runCtx); err != nil {
+		cancel()
 		return fmt.Errorf("start workflow worker: %w", err)
 	}
+	r.cancel = cancel
 	return nil
+}
+
+// waitCompletion joins the worker exactly once. go-workflows'
+// WaitForCompletion closes an internal channel and is not safe to call twice.
+func (r *GoWorkflowRuntime) waitCompletion() error {
+	r.waitOnce.Do(func() {
+		r.waitErr = r.worker.WaitForCompletion()
+	})
+	return r.waitErr
 }
 
 // Wait implements WorkflowRuntime. The go-workflows worker exposes
 // cancellation/join only; poll/task failures are not claimed here.
 func (r *GoWorkflowRuntime) Wait(ctx context.Context) error {
 	done := make(chan error, 1)
-	go func() { done <- r.worker.WaitForCompletion() }()
+	go func() { done <- r.waitCompletion() }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -91,8 +109,12 @@ func (r *GoWorkflowRuntime) Wait(ctx context.Context) error {
 	}
 }
 
-// Close implements WorkflowRuntime.
+// Close implements WorkflowRuntime. It cancels the Start run context, then
+// joins worker completion within ctx.
 func (r *GoWorkflowRuntime) Close(ctx context.Context) error {
+	if r.cancel != nil {
+		r.cancel()
+	}
 	return r.Wait(ctx)
 }
 

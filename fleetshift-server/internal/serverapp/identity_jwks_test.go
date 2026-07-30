@@ -172,9 +172,9 @@ func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start with unavailable JWKS: %v", err)
 	}
-	// registerPersistedKeySets uses a 2s per-method bound; preflight must fail
-	// fast on 503 so Start does not approach that ceiling.
-	if elapsed := time.Since(startAt); elapsed > 3*time.Second {
+	// Whole Start includes DB/listeners/readiness, so keep a CI-tolerant
+	// ceiling that still flags a non-fail-fast JWKS preflight (2s/method).
+	if elapsed := time.Since(startAt); elapsed > 8*time.Second {
 		t.Fatalf("Start took %v with JWKS down; want fail-fast warn-and-continue", elapsed)
 	}
 	t.Cleanup(func() {

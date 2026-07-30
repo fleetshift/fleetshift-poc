@@ -169,6 +169,7 @@ func newProductionKeyResolver() *domain.KeyResolver {
 }
 
 // oidcHTTPClientFromBundle builds an optional HTTP client with custom CA trust.
+// Empty input returns nil (callers use the system trust store / default client).
 func oidcHTTPClientFromBundle(oidcCABundle []byte) *http.Client {
 	if len(oidcCABundle) == 0 {
 		return nil

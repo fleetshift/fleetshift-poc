@@ -167,6 +167,28 @@ func TestNewConfig(t *testing.T) {
 			wantErr: "--database-url and --db are mutually exclusive",
 		},
 		{
+			name: "empty database URL file does not fall back to SQLite",
+			in: serverapp.ConfigInput{
+				GRPCAddr:               ":50051",
+				HTTPAddr:               ":8080",
+				DBPath:                 serverapp.DefaultSQLitePath,
+				DatabaseURLFileSet:     true,
+				DatabaseURLFileContent: "",
+			},
+			wantErr: "--database-url-file is set but contains no database URL",
+		},
+		{
+			name: "whitespace-only database URL file does not fall back to SQLite",
+			in: serverapp.ConfigInput{
+				GRPCAddr:               ":50051",
+				HTTPAddr:               ":8080",
+				DBPath:                 serverapp.DefaultSQLitePath,
+				DatabaseURLFileSet:     true,
+				DatabaseURLFileContent: "  \n\t",
+			},
+			wantErr: "--database-url-file is set but contains no database URL",
+		},
+		{
 			name: "file and database-url conflict",
 			in: serverapp.ConfigInput{
 				GRPCAddr:               ":50051",

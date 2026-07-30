@@ -82,4 +82,3 @@ func TestParseAddons(t *testing.T) {
 		})
 	}
 }
-

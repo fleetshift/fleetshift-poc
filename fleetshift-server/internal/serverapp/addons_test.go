@@ -1,6 +1,7 @@
 package serverapp
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -64,5 +65,26 @@ func TestBuildTrustBundlePlacement(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOIDCHTTPClientFromBundle(t *testing.T) {
+	if got := oidcHTTPClientFromBundle(nil); got != nil {
+		t.Fatalf("empty bundle = %v, want nil", got)
+	}
+
+	client := oidcHTTPClientFromBundle(mustTestCAPEM(t))
+	if client == nil {
+		t.Fatal("non-empty bundle returned nil client")
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("TLSClientConfig is nil")
+	}
+	if transport.TLSClientConfig.RootCAs == nil {
+		t.Fatal("RootCAs is nil")
 	}
 }

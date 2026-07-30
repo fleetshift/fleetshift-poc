@@ -2,11 +2,8 @@ package serverapp
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -30,21 +27,7 @@ type Identity struct {
 // NewProductionIdentity builds the production discovery client and verifier.
 // oidcCABundle is optional PEM material for a custom trust store.
 func NewProductionIdentity(ctx context.Context, oidcCABundle []byte) (Identity, error) {
-	var oidcHTTPClient *http.Client
-	if len(oidcCABundle) > 0 {
-		pool, err := x509.SystemCertPool()
-		if err != nil {
-			pool = x509.NewCertPool()
-		}
-		pool.AppendCertsFromPEM(oidcCABundle)
-		oidcHTTPClient = &http.Client{
-			Timeout: 5 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: pool},
-			},
-		}
-	}
-
+	oidcHTTPClient := oidcHTTPClientFromBundle(oidcCABundle)
 	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
 
 	var verifierOpts []oidc.VerifierOption

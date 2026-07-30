@@ -15,6 +15,7 @@ import (
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 // expectedGRPCServiceFamilies is the independent inventory of required gRPC
@@ -102,15 +103,7 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 	for _, family := range expectedHTTPRouteFamilies {
 		matched := false
 		for _, p := range probes {
-			if strings.HasPrefix(p.path, strings.TrimSuffix(family, "/")) || strings.Contains(p.path, strings.Trim(family, "/")) {
-				matched = true
-				break
-			}
-			if family == "/apis/fleetshift.io/" && strings.HasPrefix(p.path, "/apis/fleetshift.io/") {
-				matched = true
-				break
-			}
-			if family == "/v1/" && strings.HasPrefix(p.path, "/v1/") {
+			if strings.HasPrefix(p.path, family) {
 				matched = true
 				break
 			}
@@ -148,10 +141,19 @@ func TestExpectedSurface_AuthMethodWiresCacheInvalidation(t *testing.T) {
 }
 
 func TestExpectedSurface_KindGCPConditionalRegistration(t *testing.T) {
-	app := startTestApp(t, WithAddonAssembly(func(_ context.Context, _ AddonDeps) ([]AddonSpec, error) {
+	app := startTestApp(t, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
+		// Kind: schemas/targets only (no DeliveryCapability) so Agent may be nil.
+		// GCP: DeliveryCapability requires a non-nil agent.
+		kindDesc := kindaddon.Descriptor()
+		kindDesc.Capabilities = []domain.Capability{
+			domain.ManagedResourceCapability{ResourceType: kindaddon.ClusterResourceType},
+			domain.InventoryResourceCapability{ResourceType: kindaddon.ClusterResourceType},
+			domain.InventoryResourceCapability{ResourceType: kindaddon.NodeResourceType},
+		}
+		recording := &sqlite.RecordingDeliveryService{Store: deps.Store}
 		return []AddonSpec{
 			{
-				Descriptor: kindaddon.Descriptor(),
+				Descriptor: kindDesc,
 				Connect: application.ConnectInput{
 					Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 						ID:   "kind-local",
@@ -168,6 +170,7 @@ func TestExpectedSurface_KindGCPConditionalRegistration(t *testing.T) {
 			{
 				Descriptor: gcphcpaddon.Descriptor(),
 				Connect: application.ConnectInput{
+					Agent: recording,
 					Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 						ID:                    "gcphcp-test",
 						Type:                  gcphcpaddon.TargetType,

@@ -26,7 +26,11 @@ func TestLoadServeConfig(t *testing.T) {
 	}
 
 	urlPath := filepath.Join(t.TempDir(), "db-url")
+	emptyURLPath := filepath.Join(t.TempDir(), "empty-db-url")
 	if err := os.WriteFile(urlPath, []byte("postgres://user:pass@localhost:5432/from-file\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(emptyURLPath, []byte("  \n\t"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,26 +173,14 @@ func TestLoadServeConfig(t *testing.T) {
 			wantErr: "read database URL file",
 		},
 		{
-			name: "does not mutate databaseURL flag when reading file",
+			name: "empty database URL file does not fall back to SQLite",
 			flags: serveFlags{
 				grpcAddr:        ":50051",
 				httpAddr:        ":8080",
 				dbPath:          serverapp.DefaultSQLitePath,
-				databaseURLFile: urlPath,
+				databaseURLFile: emptyURLPath,
 			},
-			want: serverapp.Config{
-				GRPCAddr: ":50051",
-				HTTPAddr: ":8080",
-				Database: serverapp.Postgres{
-					Host:      "localhost",
-					Port:      5432,
-					User:      "user",
-					Password:  "pass",
-					Name:      "from-file",
-					Params:    url.Values{},
-					DriverDSN: "postgres://user:pass@localhost:5432/from-file",
-				},
-			},
+			wantErr: "--database-url-file is set but contains no database URL",
 		},
 	}
 
