@@ -74,6 +74,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build common library
+        run: npx nx run common:build
+
       - name: Unit tests (vitest)
         run: npx nx run ui:test
 
