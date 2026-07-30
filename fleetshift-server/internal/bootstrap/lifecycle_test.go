@@ -53,6 +53,47 @@ func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
 	}
 }
 
+func TestLifecycle_GatewaySurvivesStartContextCancel(t *testing.T) {
+	// HandlerFromEndpoint closed its ClientConn when the start ctx ended
+	// (testserver.Start's defer cancel). Shared Close-owned conn must remain.
+	startCtx, startCancel := context.WithCancel(context.Background())
+	cfg, err := NewConfig(ConfigInput{
+		GRPCAddr: "127.0.0.1:0",
+		HTTPAddr: "127.0.0.1:0",
+		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	srv, err := Start(startCtx, cfg, testLogger(),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
+	)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = srv.Close(closeCtx)
+	})
+
+	startCancel()
+
+	resp, err := http.Get("http://" + srv.Endpoints().HTTP.Dial + "/v1/deployments")
+	if err != nil {
+		t.Fatalf("gateway after start ctx cancel: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatal("gateway /v1/deployments missing after start ctx cancel")
+	}
+	if resp.StatusCode >= 500 {
+		t.Fatalf("gateway status %d after start ctx cancel; loopback conn likely closed", resp.StatusCode)
+	}
+}
+
 func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 	// Hold HTTP so Start's second net.Listen fails after gRPC bind succeeds.
 	heldHTTP, err := net.Listen("tcp", "127.0.0.1:0")

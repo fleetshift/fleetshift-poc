@@ -291,9 +291,19 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	cleanups = append(cleanups, func() { _ = grpcLis.Close() })
 	grpcEP := endpointFromListener(grpcLis)
 
+	// Shared loopback ClientConn for static gRPC-gateway handlers and the
+	// dynamic HTTP mux. Owned by Close (via dynamicHTTPConn); must not use
+	// HandlerFromEndpoint with the start ctx, which would close the conn when
+	// that ctx ends (e.g. testserver.Start's defer cancel).
+	dynamicHTTPConn, err := grpc.NewClient(grpcEP.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fail(fmt.Errorf("loopback grpc client: %w", err))
+	}
+	srv.dynamicHTTPConn = dynamicHTTPConn
+	cleanups = append(cleanups, func() { _ = dynamicHTTPConn.Close() })
+
 	gwMux := runtime.NewServeMux()
-	gwOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	if err := registerGatewayHandlers(ctx, gwMux, grpcEP.Dial, gwOpts); err != nil {
+	if err := registerGatewayHandlers(ctx, gwMux, dynamicHTTPConn); err != nil {
 		return fail(err)
 	}
 
@@ -331,12 +341,6 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		AuthMethods: wfs.authMethodSvc, Verifier: oidcDeps.Verifier, Store: p.store, ProvenanceSvc: wfs.provenanceSvc,
 	})
 
-	dynamicHTTPConn, err := grpc.NewClient(grpcEP.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fail(fmt.Errorf("dynamic http mux grpc client: %w", err))
-	}
-	srv.dynamicHTTPConn = dynamicHTTPConn
-	cleanups = append(cleanups, func() { _ = dynamicHTTPConn.Close() })
 	dynamicHTTPMux := dynamicapi.NewDynamicHTTPMux(topMux, dynamicHTTPConn)
 
 	if cfg.WebDir != "" {

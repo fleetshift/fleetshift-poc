@@ -14,19 +14,20 @@ import (
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 )
 
-// registerGatewayHandlers registers the static gRPC-gateway handlers against
-// the resolved gRPC dial address.
-func registerGatewayHandlers(ctx context.Context, gwMux *runtime.ServeMux, grpcDial string, gwOpts []grpc.DialOption) error {
-	if err := pb.RegisterDeploymentServiceHandlerFromEndpoint(ctx, gwMux, grpcDial, gwOpts); err != nil {
+// registerGatewayHandlers registers the static gRPC-gateway handlers on mux
+// using a shared loopback ClientConn. Conn lifetime is owned by the caller
+// (Close), not the registration context.
+func registerGatewayHandlers(ctx context.Context, gwMux *runtime.ServeMux, conn *grpc.ClientConn) error {
+	if err := pb.RegisterDeploymentServiceHandler(ctx, gwMux, conn); err != nil {
 		return fmt.Errorf("register deployment gateway: %w", err)
 	}
-	if err := pb.RegisterAuthMethodServiceHandlerFromEndpoint(ctx, gwMux, grpcDial, gwOpts); err != nil {
+	if err := pb.RegisterAuthMethodServiceHandler(ctx, gwMux, conn); err != nil {
 		return fmt.Errorf("register auth method gateway: %w", err)
 	}
-	if err := pb.RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx, gwMux, grpcDial, gwOpts); err != nil {
+	if err := pb.RegisterSignerEnrollmentServiceHandler(ctx, gwMux, conn); err != nil {
 		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
-	if err := pb.RegisterResourceQueryServiceHandlerFromEndpoint(ctx, gwMux, grpcDial, gwOpts); err != nil {
+	if err := pb.RegisterResourceQueryServiceHandler(ctx, gwMux, conn); err != nil {
 		return fmt.Errorf("register resource query gateway: %w", err)
 	}
 	return nil
