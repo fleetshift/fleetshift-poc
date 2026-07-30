@@ -19,16 +19,16 @@ type kubernetesInProcessIndexing struct {
 // newKubernetesInProcessIndexing wires the Kubernetes indexing runtime
 // and inventory reporter for server composition. Callers inject Runtime
 // into Kind and GCP HCP agents, run ReplayPersistedIndexers after addon
-// connect, and call StopAll on shutdown.
+// connect, and call StopAll on shutdown. inventoryReports is the shared
+// InventoryReportService used elsewhere in composition.
 func newKubernetesInProcessIndexing(
 	ctx context.Context,
-	store domain.Store,
 	vault domain.Vault,
+	inventoryReports *application.InventoryReportService,
 	logger *slog.Logger,
 ) *kubernetesInProcessIndexing {
-	inventoryReportSvc := application.NewInventoryReportService(store)
 	reporter := kubernetesaddon.NewDirectInventoryReporter(
-		newDirectInventoryReportBackend(inventoryReportSvc),
+		newDirectInventoryReportBackend(inventoryReports),
 	)
 	host := kubernetesaddon.NewKubernetesInProcessIndexHost(
 		ctx,

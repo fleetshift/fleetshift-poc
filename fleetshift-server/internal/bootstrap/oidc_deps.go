@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -26,9 +27,8 @@ type OIDCDeps struct {
 }
 
 // NewProductionOIDCDeps builds the production discovery client and verifier.
-// oidcCABundle is optional PEM material for a custom trust store.
-func NewProductionOIDCDeps(ctx context.Context, oidcCABundle []byte) (OIDCDeps, error) {
-	oidcHTTPClient := oidcHTTPClientFromBundle(oidcCABundle)
+// oidcHTTPClient is optional; nil uses the system trust store / default client.
+func NewProductionOIDCDeps(ctx context.Context, oidcHTTPClient *http.Client) (OIDCDeps, error) {
 	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
 
 	var verifierOpts []oidc.VerifierOption

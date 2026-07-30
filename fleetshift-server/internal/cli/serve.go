@@ -206,19 +206,3 @@ func resolveGCPHCPConfigPath(flagPath string) string {
 	}
 	return os.Getenv("GCPHCP_CONFIG")
 }
-
-// parseAddons splits a comma-separated addon wire string into an AddonName set.
-// It does not check whether names are allow-listed.
-func parseAddons(spec string) map[bootstrap.AddonName]bool {
-	addons := make(map[bootstrap.AddonName]bool)
-	if spec == "" {
-		return addons
-	}
-	for a := range strings.SplitSeq(spec, ",") {
-		name := bootstrap.AddonName(strings.TrimSpace(a))
-		if name != "" {
-			addons[name] = true
-		}
-	}
-	return addons
-}

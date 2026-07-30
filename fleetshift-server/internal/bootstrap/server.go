@@ -27,8 +27,6 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
-	pgstore "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
@@ -58,7 +56,6 @@ type Server struct {
 	dynamicHTTPConn   *grpc.ClientConn
 	kubeIndexing      *kubernetesInProcessIndexing
 	indexReplayDone   <-chan struct{}
-	authMethodSvc     *application.AuthMethodService
 	shutdownGrace     time.Duration
 	serveErrCh        chan error
 	shutdownRequested bool
@@ -155,42 +152,12 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 
 	// --- persistence ---
-	var (
-		db             *sql.DB
-		store          domain.Store
-		vault          domain.Vault
-		authMethodRepo domain.AuthMethodRepository
-		err            error
-	)
-	// activeResources backs QueryRepository's optional type-specific
-	// field validation and DynamicSchemaActivator's activation state
-	// (see [domain.QuerySchemaProvider] and
-	// [extensionresource.ActiveResourceRegistry]). It starts empty and is
-	// populated as managed resource schemas are activated below.
-	activeResources := extensionresource.NewActiveResourceRegistry()
-
-	switch database := cfg.Database.(type) {
-	case Postgres:
-		db, err = pgstore.Open(database.DriverDSN)
-		if err != nil {
-			return fail(fmt.Errorf("open database: %w", err))
-		}
-		store = &pgstore.Store{DB: db, SchemaProvider: activeResources}
-		vault = &pgstore.VaultStore{DB: db}
-		authMethodRepo = &pgstore.AuthMethodRepo{DB: db}
-	case SQLite:
-		db, err = sqlite.Open(database.Path)
-		if err != nil {
-			return fail(fmt.Errorf("open database: %w", err))
-		}
-		store = &sqlite.Store{DB: db, SchemaProvider: activeResources}
-		vault = &sqlite.VaultStore{DB: db}
-		authMethodRepo = &sqlite.AuthMethodRepo{DB: db}
-	default:
-		return fail(fmt.Errorf("unsupported database config %T", cfg.Database))
+	p, err := openPersistence(cfg.Database)
+	if err != nil {
+		return fail(err)
 	}
-	srv.db = db
-	cleanups = append(cleanups, func() { _ = db.Close() })
+	srv.db = p.db
+	cleanups = append(cleanups, func() { _ = p.db.Close() })
 
 	// --- workflow registry ---
 	reg := o.workflowRegistry
@@ -212,15 +179,15 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	logger.Info("enabled addons", "addons", slices.Sorted(maps.Keys(enabledAddons)))
 
 	eventHub := transporthttp.NewEventHub(logger)
+	inventoryReportService := application.NewInventoryReportService(p.store)
 	deliveryReporter := application.NewDeliveryReportService(
-		store,
+		p.store,
 		reg,
 		application.WithDeliveryObserver(observability.NewMultiDeliveryObserver(
 			observability.NewDeliveryObserver(logger),
 			eventHub,
 		)),
 	)
-	inventoryReportService := application.NewInventoryReportService(store)
 	inventoryReporter := application.NewInventoryReporterAdapter(inventoryReportService)
 
 	// --- kubernetes indexing runtime ---
@@ -232,7 +199,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	// Orchestration does not start or stop indexers.
 	var kubeIndexing *kubernetesInProcessIndexing
 	if enabledAddons[AddonKubernetes] {
-		kubeIndexing = newKubernetesInProcessIndexing(appCtx, store, vault, logger)
+		kubeIndexing = newKubernetesInProcessIndexing(appCtx, p.vault, inventoryReportService, logger)
 		srv.kubeIndexing = kubeIndexing
 		cleanups = append(cleanups, func() {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -243,10 +210,11 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		})
 	}
 
-	// --- OIDC deps ---
+	// --- OIDC deps (shared HTTP client for discovery, verifier, kube agent) ---
+	oidcHTTPClient := oidcHTTPClientFromBundle(cfg.OIDCCABundle)
 	oidcDeps := o.oidcDeps
 	if oidcDeps == nil {
-		deps, err := NewProductionOIDCDeps(ctx, cfg.OIDCCABundle)
+		deps, err := NewProductionOIDCDeps(ctx, oidcHTTPClient)
 		if err != nil {
 			return fail(err)
 		}
@@ -254,124 +222,45 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 
 	keyResolver := newProductionKeyResolver()
-	oidcHTTPClient := oidcHTTPClientFromBundle(cfg.OIDCCABundle)
 
-	// --- register all workflows before starting the worker ---
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
-		domain.WithVault(vault),
-	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
-	if err != nil {
-		return fail(fmt.Errorf("register orchestration: %w", err))
-	}
-
-	createWf, err := reg.RegisterCreateDeployment(&domain.CreateDeploymentWorkflowSpec{
-		Store: store, Orchestration: orchWf,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register create-deployment: %w", err))
-	}
-
-	deleteObs := observability.NewDeleteObserver(logger)
-	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(&domain.DeleteDeploymentCleanupWorkflowSpec{
-		Store: store, Observer: deleteObs,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register delete-deployment-cleanup: %w", err))
-	}
-	deleteWf, err := reg.RegisterDeleteDeployment(&domain.DeleteDeploymentWorkflowSpec{
-		Store: store, Orchestration: orchWf, Cleanup: cleanupWf, Observer: deleteObs,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register delete-deployment: %w", err))
-	}
-
-	createMRWf, err := reg.RegisterCreateManagedResource(&domain.CreateManagedResourceWorkflowSpec{
-		Store: store, Orchestration: orchWf,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register create-managed-resource: %w", err))
-	}
-	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(&domain.DeleteManagedResourceCleanupWorkflowSpec{
-		Store: store, Observer: deleteObs,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register delete-managed-resource-cleanup: %w", err))
-	}
-	deleteMRWf, err := reg.RegisterDeleteManagedResource(&domain.DeleteManagedResourceWorkflowSpec{
-		Store: store, Orchestration: orchWf, Cleanup: mrCleanupWf, Observer: deleteObs,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register delete-managed-resource: %w", err))
-	}
-
-	setupHub := transporthttp.NewSetupHub(logger)
+	// Parse GCP config once when enabled (trust placement + production assembly).
+	var gcphcpCfg *gcphcpaddon.Config
 	var gcphcpTargetID string
 	if enabledAddons[AddonGCPHCP] {
-		gcphcpCfg, err := gcphcpaddon.ParseConfig(cfg.GCPHCPConfigPath)
+		parsed, err := gcphcpaddon.ParseConfig(cfg.GCPHCPConfigPath)
 		if err != nil {
 			return fail(fmt.Errorf("parse gcphcp config: %w", err))
 		}
-		gcphcpTargetID = gcphcpCfg.Targets[0].ID
+		gcphcpCfg = &parsed
+		gcphcpTargetID = parsed.Targets[0].ID
 	}
-	provSpec := &domain.ProvisionIdPWorkflowSpec{
-		AuthMethods:      authMethodRepo,
-		Discovery:        oidcDeps.Discovery,
-		CreateDeployment: createWf,
-		EventSink:        setupHub,
-	}
-	if placement := buildTrustBundlePlacement(enabledAddons, gcphcpTargetID); placement.Type != "" {
-		provSpec.TrustBundlePlacement = placement
-	}
-	// Facade assemblies may enable kind/gcphcp without Config.Addons; trust
-	// placement for those is handled when the facade sets Config.Addons to match.
-	provWf, err := reg.RegisterProvisionIdP(provSpec)
+
+	// --- register all workflows before starting the worker ---
+	setupHub := transporthttp.NewSetupHub(logger)
+	wfs, err := registerWorkflows(
+		reg, p.store, p.vault, router, p.authMethodRepo, *oidcDeps, setupHub,
+		enabledAddons, gcphcpTargetID, keyResolver, logger,
+	)
 	if err != nil {
-		return fail(fmt.Errorf("register provision-idp: %w", err))
+		return fail(err)
 	}
 
-	authMethodSvc := &application.AuthMethodService{
-		Methods:     authMethodRepo,
-		ProvisionWF: provWf,
-	}
-	srv.authMethodSvc = authMethodSvc
-
-	existingMethods, err := authMethodSvc.List(ctx)
+	existingMethods, err := wfs.authMethodSvc.List(ctx)
 	if err != nil {
 		return fail(fmt.Errorf("load auth methods: %w", err))
 	}
 	registerPersistedKeySets(ctx, logger, oidcDeps.Verifier, existingMethods)
 
-	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, oidcDeps.Verifier, observability.NewAuthnObserver(logger))
-
-	provenanceSvc := &domain.ProvenanceService{
-		KeyResolver: keyResolver,
-		AuthMethods: authMethodRepo,
-	}
-	resumeWf, err := reg.RegisterResumeDeployment(&domain.ResumeDeploymentWorkflowSpec{
-		Store: store, Orchestration: orchWf, ProvenanceSvc: provenanceSvc,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register resume-deployment: %w", err))
-	}
-	resumeMRWf, err := reg.RegisterResumeManagedResource(&domain.ResumeManagedResourceWorkflowSpec{
-		Store: store, Orchestration: orchWf, ProvenanceSvc: provenanceSvc,
-	})
-	if err != nil {
-		return fail(fmt.Errorf("register resume-managed-resource: %w", err))
-	}
-
-	resourceQuerySvc := application.NewResourceQueryService(store)
+	authnInterceptor := transportgrpc.NewAuthnInterceptor(wfs.authMethodSvc, oidcDeps.Verifier, observability.NewAuthnObserver(logger))
+	resourceQuerySvc := application.NewResourceQueryService(p.store)
 	deploymentSvc := &application.DeploymentService{
-		Store: store, CreateWF: createWf, DeleteWF: deleteWf, ResumeWF: resumeWf, ProvenanceSvc: provenanceSvc,
+		Store: p.store, CreateWF: wfs.createWf, DeleteWF: wfs.deleteWf, ResumeWF: wfs.resumeWf, ProvenanceSvc: wfs.provenanceSvc,
 	}
 	signerEnrollmentSvc := &application.SignerEnrollmentService{
-		Store: store, Verifier: oidcDeps.Verifier, AuthMethods: authMethodRepo,
+		Store: p.store, Verifier: oidcDeps.Verifier, AuthMethods: p.authMethodRepo,
 	}
 	extensionResourceSvc := application.NewExtensionResourceService(
-		store, createMRWf, deleteMRWf, resumeMRWf, provenanceSvc,
+		p.store, wfs.createMRWf, wfs.deleteMRWf, wfs.resumeMRWf, wfs.provenanceSvc,
 	)
 
 	// --- transport ---
@@ -382,19 +271,10 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		grpc.ChainStreamInterceptor(authnInterceptor.Stream()),
 		grpc.UnknownServiceHandler(dynamicMux.Handle),
 	)
-	pb.RegisterDeploymentServiceServer(grpcServer, &transportgrpc.DeploymentServer{Deployments: deploymentSvc})
-	pb.RegisterAuthMethodServiceServer(grpcServer, &transportgrpc.AuthMethodServer{
-		AuthMethods: authMethodSvc,
-		Authn:       authnInterceptor,
-	})
-	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
-		Enrollments: signerEnrollmentSvc,
-	})
-	pb.RegisterResourceQueryServiceServer(grpcServer, &transportgrpc.ResourceQueryServer{
-		Queries:  resourceQuerySvc,
-		Registry: activeResources,
-	})
-	dynamicapi.RegisterCompositeReflection(grpcServer, dynamicMux, fileRegistry)
+	registerStaticGRPCServices(
+		grpcServer, deploymentSvc, wfs.authMethodSvc, authnInterceptor,
+		signerEnrollmentSvc, resourceQuerySvc, p.activeResources, dynamicMux, fileRegistry,
+	)
 	srv.grpcServer = grpcServer
 
 	grpcLis, err := net.Listen("tcp", cfg.GRPCAddr)
@@ -407,17 +287,8 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 
 	gwMux := runtime.NewServeMux()
 	gwOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	if err := pb.RegisterDeploymentServiceHandlerFromEndpoint(ctx, gwMux, grpcEP.Dial, gwOpts); err != nil {
-		return fail(fmt.Errorf("register deployment gateway: %w", err))
-	}
-	if err := pb.RegisterAuthMethodServiceHandlerFromEndpoint(ctx, gwMux, grpcEP.Dial, gwOpts); err != nil {
-		return fail(fmt.Errorf("register auth method gateway: %w", err))
-	}
-	if err := pb.RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx, gwMux, grpcEP.Dial, gwOpts); err != nil {
-		return fail(fmt.Errorf("register signer enrollment gateway: %w", err))
-	}
-	if err := pb.RegisterResourceQueryServiceHandlerFromEndpoint(ctx, gwMux, grpcEP.Dial, gwOpts); err != nil {
-		return fail(fmt.Errorf("register resource query gateway: %w", err))
+	if err := registerGatewayHandlers(ctx, gwMux, grpcEP.Dial, gwOpts); err != nil {
+		return fail(err)
 	}
 
 	// Dynamic managed resource HTTP routes are registered directly on
@@ -438,7 +309,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	// unauthenticated (events/ws because the browser WebSocket API
 	// cannot set Authorization headers — see TODO below).
 	httpAuthn := &transporthttp.AuthnMiddleware{
-		Methods:  authMethodSvc,
+		Methods:  wfs.authMethodSvc,
 		Verifier: oidcDeps.Verifier,
 		Logger:   logger.With("component", "authn-http"),
 	}
@@ -451,7 +322,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	topMux.HandleFunc("GET /api/ui/events/ws", eventHub.HandleWS)
 	topMux.Handle("GET /api/ui/github-signing-keys/{username}", httpAuthn.Wrap(http.HandlerFunc(transporthttp.HandleGitHubSigningKeys)))
 	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
-		AuthMethods: authMethodSvc, Verifier: oidcDeps.Verifier, Store: store, ProvenanceSvc: provenanceSvc,
+		AuthMethods: wfs.authMethodSvc, Verifier: oidcDeps.Verifier, Store: p.store, ProvenanceSvc: wfs.provenanceSvc,
 	})
 
 	dynamicHTTPConn, err := grpc.NewClient(grpcEP.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -470,7 +341,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 			Logger:         logger,
 			AuthMiddleware: httpAuthn.Wrap,
 			AuthConfigured: func(ctx context.Context) (bool, error) {
-				methods, err := authMethodSvc.List(ctx)
+				methods, err := wfs.authMethodSvc.List(ctx)
 				if err != nil {
 					return false, err
 				}
@@ -502,8 +373,8 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	// Enable then Connect before Serve so schemas/targets/agents are ready
 	// when the first request arrives. (Older serve connected after listen;
 	// that is no longer needed because proveReadiness gates Start return.)
-	typeSvc := application.NewExtensionResourceTypeService(store)
-	platformResourceSvc := application.NewPlatformResourceService(store)
+	typeSvc := application.NewExtensionResourceTypeService(p.store)
+	platformResourceSvc := application.NewPlatformResourceService(p.store)
 	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
 		HTTPMux:      dynamicHTTPMux,
@@ -513,7 +384,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 			Validator: specValidator,
 		},
 		PlatformDeps: platformresource.Deps{Resources: platformResourceSvc},
-		Registry:     activeResources,
+		Registry:     p.activeResources,
 	}
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
 		Router: router, TypeSvc: typeSvc, Activator: activator,
@@ -522,11 +393,10 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	addonDeps := AddonDeps{
 		Config:            cfg,
 		Logger:            logger,
-		Store:             store,
-		Vault:             vault,
+		Store:             p.store,
+		Vault:             p.vault,
 		DeliveryReporter:  deliveryReporter,
 		InventoryReporter: inventoryReporter,
-		OIDCCABundle:      cfg.OIDCCABundle,
 		Indexing:          kubeIndexing,
 		IndexCtx:          appCtx,
 	}
@@ -535,32 +405,13 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if o.addonAssembly != nil {
 		specs, err = o.addonAssembly(ctx, addonDeps)
 	} else {
-		specs, err = assembleProductionAddons(addonDeps, keyResolver, oidcHTTPClient)
+		specs, err = assembleProductionAddons(addonDeps, keyResolver, oidcHTTPClient, gcphcpCfg)
 	}
 	if err != nil {
 		return fail(err)
 	}
-
-	for _, spec := range specs {
-		if err := addonMgr.Enable(ctx, spec.Descriptor); err != nil {
-			return fail(fmt.Errorf("enable %s addon: %w", spec.Descriptor.ID, err))
-		}
-		if err := rejectNilClaimedAgent(spec); err != nil {
-			return fail(err)
-		}
-		if err := addonMgr.Connect(ctx, spec.Descriptor.ID, spec.Connect); err != nil {
-			return fail(fmt.Errorf("connect %s addon: %w", spec.Descriptor.ID, err))
-		}
-		if spec.AfterConnect != nil {
-			if err := spec.AfterConnect(ctx); err != nil {
-				return fail(err)
-			}
-		}
-		if spec.AfterConnectBestEffort != nil {
-			if err := spec.AfterConnectBestEffort(ctx); err != nil {
-				logger.Error("addon post-connect best-effort failed", "addon", spec.Descriptor.ID, "error", err)
-			}
-		}
+	if err := enableAndConnectAddons(ctx, addonMgr, specs, logger); err != nil {
+		return fail(err)
 	}
 
 	// One-shot startup replay recovers persisted Kubernetes targets; it must
@@ -569,8 +420,8 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		replayDone := startKubernetesIndexStartupReplay(appCtx, func(replayCtx context.Context) {
 			kubernetesaddon.ReplayPersistedIndexers(
 				replayCtx,
-				storeTargetLister{store: store},
-				vault,
+				storeTargetLister{store: p.store},
+				p.vault,
 				kubeIndexing.Runtime,
 				logger,
 			)

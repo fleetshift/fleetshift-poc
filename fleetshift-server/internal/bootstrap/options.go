@@ -61,7 +61,6 @@ type AddonDeps struct {
 	Vault             domain.Vault
 	DeliveryReporter  domain.DeliveryReporter
 	InventoryReporter domain.InventoryReporter
-	OIDCCABundle      []byte
 	// Indexing is non-nil when the kubernetes add-on is being assembled for production.
 	Indexing *kubernetesInProcessIndexing
 	// IndexCtx is the app-owned context for indexer work; cancelled on Close.

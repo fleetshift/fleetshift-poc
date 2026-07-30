@@ -2,8 +2,6 @@ package cli
 
 import (
 	"testing"
-
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 )
 
 func TestDefaultAddons(t *testing.T) {
@@ -30,55 +28,5 @@ func TestResolveGCPHCPConfigPath(t *testing.T) {
 	t.Setenv("GCPHCP_CONFIG", "")
 	if got := resolveGCPHCPConfigPath(""); got != "" {
 		t.Fatalf("empty path = %q, want empty", got)
-	}
-}
-
-func TestParseAddons(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  map[bootstrap.AddonName]bool
-	}{
-		{
-			name:  "all addons",
-			input: "kind,kubernetes,gcphcp",
-			want: map[bootstrap.AddonName]bool{
-				bootstrap.AddonKind:       true,
-				bootstrap.AddonKubernetes: true,
-				bootstrap.AddonGCPHCP:     true,
-			},
-		},
-		{
-			name:  "single addon",
-			input: "kind",
-			want:  map[bootstrap.AddonName]bool{bootstrap.AddonKind: true},
-		},
-		{
-			name:  "whitespace trimmed",
-			input: " kind , kubernetes ",
-			want: map[bootstrap.AddonName]bool{
-				bootstrap.AddonKind:       true,
-				bootstrap.AddonKubernetes: true,
-			},
-		},
-		{
-			name:  "empty string",
-			input: "",
-			want:  map[bootstrap.AddonName]bool{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseAddons(tt.input)
-			if len(got) != len(tt.want) {
-				t.Fatalf("parseAddons(%q) returned %d entries, want %d", tt.input, len(got), len(tt.want))
-			}
-			for k, v := range tt.want {
-				if got[k] != v {
-					t.Errorf("parseAddons(%q)[%q] = %v, want %v", tt.input, k, got[k], v)
-				}
-			}
-		})
 	}
 }

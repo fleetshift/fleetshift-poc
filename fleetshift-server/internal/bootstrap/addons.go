@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -43,10 +44,12 @@ func buildTrustBundlePlacement(enabledAddons map[AddonName]bool, gcphcpTargetID 
 // external dependencies (Docker, cloud creds, etc.) that AddonManager
 // should not own; Enable/Connect only register capabilities and wire
 // schemas/targets/agents into the running graph.
+// gcphcpCfg is required when AddonGCPHCP is enabled (parsed once by Start).
 func assembleProductionAddons(
 	deps AddonDeps,
 	keyResolver *domain.KeyResolver,
 	oidcHTTPClient *http.Client,
+	gcphcpCfg *gcphcpaddon.Config,
 ) ([]AddonSpec, error) {
 	enabled := deps.Config.AddonSet()
 	var specs []AddonSpec
@@ -56,8 +59,8 @@ func assembleProductionAddons(
 			kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(deps.Logger)),
 			kindaddon.WithInventoryWatcher(kindaddon.NewInventoryWatcher(deps.InventoryReporter)),
 		}
-		if len(deps.OIDCCABundle) > 0 {
-			kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(deps.OIDCCABundle))
+		if len(deps.Config.OIDCCABundle) > 0 {
+			kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(deps.Config.OIDCCABundle))
 		}
 		if deps.Indexing != nil {
 			kindOpts = append(kindOpts, kindaddon.WithIndexingRuntime(deps.Indexing.Runtime))
@@ -116,9 +119,8 @@ func assembleProductionAddons(
 	}
 
 	if enabled[AddonGCPHCP] {
-		gcphcpCfg, err := gcphcpaddon.ParseConfig(deps.Config.GCPHCPConfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("parse gcphcp config: %w", err)
+		if gcphcpCfg == nil {
+			return nil, fmt.Errorf("gcphcp addon is enabled but config was not provided to assembly")
 		}
 		agentDeps := gcphcpaddon.AgentDeps{
 			Gateway:  gcphcpCfg.Gateway,
@@ -156,6 +158,33 @@ func assembleProductionAddons(
 	}
 
 	return specs, nil
+}
+
+// enableAndConnectAddons runs Enable/Connect and post-connect hooks for each
+// spec. A claimed DeliveryCapability requires a non-nil Connect.Agent.
+func enableAndConnectAddons(ctx context.Context, addonMgr *application.AddonManager, specs []AddonSpec, logger *slog.Logger) error {
+	for _, spec := range specs {
+		if err := addonMgr.Enable(ctx, spec.Descriptor); err != nil {
+			return fmt.Errorf("enable %s addon: %w", spec.Descriptor.ID, err)
+		}
+		if err := rejectNilClaimedAgent(spec); err != nil {
+			return err
+		}
+		if err := addonMgr.Connect(ctx, spec.Descriptor.ID, spec.Connect); err != nil {
+			return fmt.Errorf("connect %s addon: %w", spec.Descriptor.ID, err)
+		}
+		if spec.AfterConnect != nil {
+			if err := spec.AfterConnect(ctx); err != nil {
+				return err
+			}
+		}
+		if spec.AfterConnectBestEffort != nil {
+			if err := spec.AfterConnectBestEffort(ctx); err != nil {
+				logger.Error("addon post-connect best-effort failed", "addon", spec.Descriptor.ID, "error", err)
+			}
+		}
+	}
+	return nil
 }
 
 // newProductionKeyResolver builds the built-in key registry resolver.

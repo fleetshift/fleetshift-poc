@@ -188,7 +188,9 @@ func TestNewKubernetesInProcessIndexing_WiresIndexingRuntime(t *testing.T) {
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 
-	indexing := newKubernetesInProcessIndexing(runCtx, store, nil, slog.New(slog.DiscardHandler))
+	indexing := newKubernetesInProcessIndexing(
+		runCtx, nil, application.NewInventoryReportService(store), slog.New(slog.DiscardHandler),
+	)
 	if indexing == nil || indexing.Runtime == nil {
 		t.Fatal("expected wired indexing runtime")
 	}
