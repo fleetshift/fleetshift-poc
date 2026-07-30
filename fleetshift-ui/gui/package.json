@@ -7,7 +7,7 @@
   "scripts": {
     "build": "rspack build",
     "test": "vitest run --root ../.. gui/",
-    "test:ct": "playwright test -c playwright-ct.config.ts"
+    "test:ct": "playwright test"
   },
   "dependencies": {
     "@dnd-kit/react": "^0.3.2",

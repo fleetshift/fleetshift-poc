@@ -57,17 +57,6 @@
         "command": "stylelint 'gui/src/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
         "cwd": "fleetshift-ui"
       }
-    },
-    "test:ct": {
-      "executor": "@nx/playwright:playwright",
-      "options": {
-        "config": "fleetshift-ui/gui/playwright-ct.config.ts"
-      },
-      "inputs": [
-        "{projectRoot}/src/**/*",
-        "{projectRoot}/playwright-ct.config.*"
-      ],
-      "cache": false
     }
   }
 }

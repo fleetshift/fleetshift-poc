@@ -15,6 +15,13 @@
           "name": "docker:run"
         }
       }
+    },
+    {
+      "plugin": "@nx/playwright/plugin",
+      "options": {
+        "targetName": "test:ct",
+        "ciTargetName": "test:ct:ci"
+      }
     }
   ],
   "namedInputs": {

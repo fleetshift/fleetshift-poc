@@ -46,17 +46,6 @@
         "command": "stylelint 'mock-ui-plugins/src/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
         "cwd": "fleetshift-ui"
       }
-    },
-    "test:ct": {
-      "executor": "@nx/playwright:playwright",
-      "options": {
-        "config": "fleetshift-ui/mock-ui-plugins/playwright-ct.config.ts"
-      },
-      "inputs": [
-        "{projectRoot}/src/**/*",
-        "{projectRoot}/playwright-ct.config.*"
-      ],
-      "cache": false
     }
   }
 }
