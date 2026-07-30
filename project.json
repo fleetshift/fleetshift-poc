@@ -187,6 +187,86 @@
       "executor": "nx:run-commands",
       "options": { "command": "task pd:test-attestation" },
       "cache": false
+    },
+    "kc:deploy": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task keycloak:deploy" },
+      "cache": false
+    },
+    "kc:teardown": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task keycloak:teardown" },
+      "cache": false
+    },
+    "kc:reset-realm": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task keycloak:reset-realm" },
+      "cache": false
+    },
+    "kc:add-user": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task keycloak:add-user" },
+      "cache": false
+    },
+    "kc:add-base-domain": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task keycloak:add-base-domain" },
+      "cache": false
+    },
+    "k8s:deploy": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:deploy" },
+      "cache": false
+    },
+    "k8s:teardown": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:teardown" },
+      "cache": false
+    },
+    "k8s:auth-setup": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:auth-setup" },
+      "cache": false
+    },
+    "k8s:status": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:status" },
+      "cache": false
+    },
+    "k8s:logs": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:logs" },
+      "cache": false
+    },
+    "k8s:set-image": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:set-image" },
+      "cache": false
+    },
+    "k8s:reset-image": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:reset-image" },
+      "cache": false
+    },
+    "k8s:import-images": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:import-images" },
+      "cache": false
+    },
+    "k8s:register-redirect": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:register-redirect" },
+      "cache": false
+    },
+    "k8s:grpc-cert:deploy": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:grpc-route-cert:deploy" },
+      "cache": false
+    },
+    "k8s:grpc-cert:teardown": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task kubernetes:grpc-route-cert:teardown" },
+      "cache": false
     }
   }
 }
