@@ -1,5 +1,9 @@
-// Package serverapp owns normalized production configuration for
-// fleetshift serve and tests.
+// Package serverapp is the sole bootstrap/composition edge for FleetShift.
+// It owns normalized production configuration, eager construction of the
+// complete application graph, listener authority, semantic readiness,
+// background supervision, and bounded shutdown. fleetshift serve and the
+// frozen testserver facade both use Start; packages below this edge must
+// not import serverapp.
 package serverapp
 
 import (
@@ -57,7 +61,10 @@ type Postgres struct {
 	DriverDSN string
 }
 
-func (SQLite) database()   {}
+// database seals Database to this package.
+func (SQLite) database() {}
+
+// database seals Database to this package.
 func (Postgres) database() {}
 
 // ConfigInput is the pure parse input: resolved edge values plus
@@ -284,6 +291,8 @@ func parsePostgresURL(raw string) (Postgres, error) {
 	return pg, nil
 }
 
+// driverDSN builds the canonical database/sql connection string from parsed
+// Postgres fields, using scheme (postgres or postgresql).
 func (p Postgres) driverDSN(scheme string) string {
 	u := url.URL{
 		Scheme: scheme,

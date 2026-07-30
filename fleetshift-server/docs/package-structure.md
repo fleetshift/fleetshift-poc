@@ -4,9 +4,9 @@ Dependencies flow downward only.
 
 ## Layers
 
-### Layer 1: Main (`cmd/fleetshift` and `internal/main`)
+### Layer 1: Main (`cmd/fleetshift`, `internal/cli`, and `internal/serverapp`)
 
-CLI commands, config serialization, object graph and object lifecycle. No business logic. Thin front to layers 2 and sometimes directly to 3. Initializes objects from layer 5.
+CLI commands, config serialization, and the application object graph / lifecycle. No business logic. `internal/serverapp` is the sole bootstrap/composition edge: it eagerly constructs the complete production graph, owns listeners, readiness, supervision, and shutdown, and is shared by `fleetshift serve` and the frozen `testserver` facade. `internal/cli` stays a thin front for flags, environment/file resolution, logger construction, and OS signals. Packages below `serverapp` must not import it.
 
 Depends on: Transport and Infrastructure, sometimes Application and Domain (when the CLI is acting as "the transport")
 

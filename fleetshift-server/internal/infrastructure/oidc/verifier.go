@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -16,7 +17,8 @@ import (
 // Verifier implements [domain.OIDCTokenVerifier] using lestrrat-go/jwx.
 // It manages a [jwk.Cache] internally for JWKS auto-refresh.
 type Verifier struct {
-	cache *jwk.Cache
+	cache      *jwk.Cache
+	httpClient httprc.HTTPClient // optional; nil means http.DefaultClient for preflight
 
 	mu      sync.RWMutex
 	keySets map[string]jwk.Set // jwksURI -> cached set
@@ -25,6 +27,7 @@ type Verifier struct {
 // VerifierOption configures a [Verifier].
 type VerifierOption func(*verifierConfig)
 
+// verifierConfig holds optional settings collected by [VerifierOption]s.
 type verifierConfig struct {
 	httpClient httprc.HTTPClient
 }
@@ -53,14 +56,26 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 		return nil, fmt.Errorf("create JWK cache: %w", err)
 	}
 	return &Verifier{
-		cache:   cache,
-		keySets: make(map[string]jwk.Set),
+		cache:      cache,
+		httpClient: cfg.httpClient,
+		keySets:    make(map[string]jwk.Set),
 	}, nil
 }
 
 // RegisterKeySet registers a JWKS URI with the background cache so keys
-// are refreshed automatically. Call this on startup for persisted auth
-// methods and after creating new ones.
+// are refreshed automatically. Called at process start for persisted auth
+// methods and on demand from Verify when keys were not cached at boot.
+//
+// Registration is fail-fast and recoverable:
+//  1. Preflight fetch under ctx (surfaces 503/timeout immediately).
+//  2. On success, register with httprc for background auto-refresh.
+//  3. Publish into keySets only after the cache has a ready set.
+//
+// A failed attempt leaves keySets untouched and clears any partial httprc
+// registration so a later call (including on-demand from Verify) can recover.
+// We intentionally avoid cache.Refresh on the failure path: httprc workers
+// exit on synchronous refresh failure, which permanently breaks the cache
+// after a handful of down-IdP attempts.
 func (v *Verifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error {
 	uri := string(jwksURI)
 	v.mu.Lock()
@@ -70,11 +85,52 @@ func (v *Verifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointUR
 		return nil
 	}
 
+	if v.cache.IsRegistered(ctx, uri) {
+		// Prior success that wasn't published yet (shouldn't happen), or a
+		// stale registration left after a failed WaitReady — reuse if ready,
+		// otherwise clear and continue.
+		if _, err := v.cache.Lookup(ctx, uri); err == nil {
+			return v.publishCachedSet(ctx, uri)
+		}
+		if err := v.cache.Unregister(ctx, uri); err != nil {
+			return fmt.Errorf("unregister stale JWKS URI %s: %w", uri, err)
+		}
+	}
+
+	// Preflight: httprc Ready() only unblocks on first *success* or ctx
+	// cancel — a 503 never fails Register quickly. Fetch ourselves first.
+	if _, err := jwk.Fetch(ctx, uri, v.fetchOptions()...); err != nil {
+		return fmt.Errorf("fetch JWKS for %s: %w", uri, err)
+	}
+
+	// JWKS is reachable; register for auto-refresh. Default WaitReady waits
+	// for httprc's own first fetch (second GET). Bound by the same ctx.
 	if err := v.cache.Register(ctx, uri); err != nil {
+		if v.cache.IsRegistered(ctx, uri) {
+			_ = v.cache.Unregister(ctx, uri)
+		}
 		return fmt.Errorf("register JWKS URI %s: %w", uri, err)
 	}
+
+	return v.publishCachedSet(ctx, uri)
+}
+
+// fetchOptions returns jwk.Fetch options using the verifier's HTTP client,
+// or http.DefaultClient when none was configured.
+func (v *Verifier) fetchOptions() []jwk.FetchOption {
+	client := v.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return []jwk.FetchOption{jwk.WithHTTPClient(client)}
+}
+
+// publishCachedSet stores a ready CachedSet in keySets. On CachedSet failure
+// it unregisters the URI so a later RegisterKeySet can recover.
+func (v *Verifier) publishCachedSet(ctx context.Context, uri string) error {
 	cached, err := v.cache.CachedSet(uri)
 	if err != nil {
+		_ = v.cache.Unregister(ctx, uri)
 		return fmt.Errorf("create cached set for %s: %w", uri, err)
 	}
 	v.keySets[uri] = cached
@@ -169,6 +225,8 @@ func tokenDiagnostics(rawToken string, config domain.OIDCConfig) string {
 		config.IssuerURL, config.Audience, iss, aud)
 }
 
+// getKeySet returns the cached key set for jwksURI, registering it on demand
+// when it was not published at boot (IdP recovery path).
 func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (jwk.Set, error) {
 	uri := string(jwksURI)
 	v.mu.RLock()

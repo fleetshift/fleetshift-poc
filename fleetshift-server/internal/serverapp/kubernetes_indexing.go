@@ -1,4 +1,4 @@
-package cli
+package serverapp
 
 import (
 	"context"
@@ -52,8 +52,8 @@ type directInventoryReportBackend struct {
 	reports *application.InventoryReportService
 }
 
-// newDirectInventoryReportBackend adapts InventoryReportService onto
-// [kubernetesaddon.InventoryReportBackend].
+// newDirectInventoryReportBackend adapts InventoryReportService for the
+// Kubernetes addon's InventoryReportBackend port.
 func newDirectInventoryReportBackend(
 	reports *application.InventoryReportService,
 ) *directInventoryReportBackend {
