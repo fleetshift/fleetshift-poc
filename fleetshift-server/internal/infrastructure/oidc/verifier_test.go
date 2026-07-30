@@ -211,7 +211,7 @@ func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
 	close(releaseA)
 	wg.Wait()
 	// A may succeed after release or time out depending on scheduling; either is fine.
-	_ = <-errA
+	<-errA
 }
 
 func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {

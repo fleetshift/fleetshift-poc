@@ -26,6 +26,16 @@ type Verifier struct {
 	// registerMu guards registerLocks. Per-URI mutexes serialize registration
 	// for one JWKS URL without holding v.mu across network I/O, and without
 	// sharing one caller's context across waiters (unlike singleflight).
+	// registerLocks is keyed by configured auth-method JWKS URIs only (not
+	// request-supplied). Entries are never removed; cardinality is bounded by
+	// the number of OIDC auth methods.
+	//
+	// TODO: During a prolonged IdP/JWKS outage, every Verify → getKeySet →
+	// RegisterKeySet for an unpublished URI re-drives jwk.Fetch under the
+	// per-URI mutex, so waiters queue and then each attempt another upstream
+	// fetch. Consider a short negative-result cache (few seconds) so outage
+	// load is bounded, while still allowing on-demand recovery when the IdP
+	// returns (cool-down may delay first success by the TTL).
 	registerMu    sync.Mutex
 	registerLocks map[string]*sync.Mutex
 }
