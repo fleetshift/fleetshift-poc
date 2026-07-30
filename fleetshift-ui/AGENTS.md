@@ -33,7 +33,7 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, rsp
 
 - Unit tests for edge cases and bug candidates, not happy-path snapshots.
 - Tests next to code (`__tests__/` or `.test.ts`). Vitest + `@testing-library/react`.
-- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright-ct.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `gui/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `mock-ui-plugins/src/plugins/gcphcp-plugin/__tests__/` for patterns.
+- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `gui/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `mock-ui-plugins/src/plugins/gcphcp-plugin/__tests__/` for patterns.
 - E2E in `e2e`, Playwright.
 
 ### Playwright CT notes
