@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/serverapp"
 )
 
 func TestDefaultAddons(t *testing.T) {
@@ -16,23 +16,6 @@ func TestDefaultAddons(t *testing.T) {
 	t.Setenv("FLEETSHIFT_SERVER_ADDONS", "kubernetes,gcphcp")
 	if got := defaultAddons(); got != "kubernetes,gcphcp" {
 		t.Fatalf("defaultAddons() with env = %q, want kubernetes,gcphcp", got)
-	}
-}
-
-func TestRequireGCPHCPConfig(t *testing.T) {
-	if err := requireGCPHCPConfig("/tmp/gcphcp.yaml"); err != nil {
-		t.Fatalf("requireGCPHCPConfig(path) unexpected error: %v", err)
-	}
-
-	err := requireGCPHCPConfig("")
-	if err == nil {
-		t.Fatal("requireGCPHCPConfig(\"\") = nil, want error")
-	}
-	if !strings.Contains(err.Error(), "GCPHCP_CONFIG") {
-		t.Fatalf("requireGCPHCPConfig error %q does not mention GCPHCP_CONFIG", err)
-	}
-	if !strings.Contains(err.Error(), "--gcphcp-config") {
-		t.Fatalf("requireGCPHCPConfig error %q does not mention --gcphcp-config", err)
 	}
 }
 
@@ -55,27 +38,34 @@ func TestParseAddons(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		want  map[string]bool
+		want  map[serverapp.AddonName]bool
 	}{
 		{
 			name:  "all addons",
 			input: "kind,kubernetes,gcphcp",
-			want:  map[string]bool{"kind": true, "kubernetes": true, "gcphcp": true},
+			want: map[serverapp.AddonName]bool{
+				serverapp.AddonKind:       true,
+				serverapp.AddonKubernetes: true,
+				serverapp.AddonGCPHCP:     true,
+			},
 		},
 		{
 			name:  "single addon",
 			input: "kind",
-			want:  map[string]bool{"kind": true},
+			want:  map[serverapp.AddonName]bool{serverapp.AddonKind: true},
 		},
 		{
 			name:  "whitespace trimmed",
 			input: " kind , kubernetes ",
-			want:  map[string]bool{"kind": true, "kubernetes": true},
+			want: map[serverapp.AddonName]bool{
+				serverapp.AddonKind:       true,
+				serverapp.AddonKubernetes: true,
+			},
 		},
 		{
 			name:  "empty string",
 			input: "",
-			want:  map[string]bool{},
+			want:  map[serverapp.AddonName]bool{},
 		},
 	}
 
@@ -97,18 +87,18 @@ func TestParseAddons(t *testing.T) {
 func TestBuildTrustBundlePlacement(t *testing.T) {
 	tests := []struct {
 		name          string
-		enabledAddons map[string]bool
+		enabledAddons map[serverapp.AddonName]bool
 		gcphcpTarget  string
 		want          domain.PlacementStrategySpec
 	}{
 		{
 			name:          "no trust bundle consumers",
-			enabledAddons: map[string]bool{"kubernetes": true},
+			enabledAddons: map[serverapp.AddonName]bool{serverapp.AddonKubernetes: true},
 			want:          domain.PlacementStrategySpec{},
 		},
 		{
 			name:          "kind only",
-			enabledAddons: map[string]bool{"kind": true},
+			enabledAddons: map[serverapp.AddonName]bool{serverapp.AddonKind: true},
 			want: domain.PlacementStrategySpec{
 				Type:    domain.PlacementStrategyStatic,
 				Targets: []domain.TargetID{"kind-local"},
@@ -116,7 +106,7 @@ func TestBuildTrustBundlePlacement(t *testing.T) {
 		},
 		{
 			name:          "gcphcp only",
-			enabledAddons: map[string]bool{"gcphcp": true},
+			enabledAddons: map[serverapp.AddonName]bool{serverapp.AddonGCPHCP: true},
 			gcphcpTarget:  "gcphcp-example-us-central1",
 			want: domain.PlacementStrategySpec{
 				Type:    domain.PlacementStrategyStatic,
@@ -124,9 +114,12 @@ func TestBuildTrustBundlePlacement(t *testing.T) {
 			},
 		},
 		{
-			name:          "kind and gcphcp",
-			enabledAddons: map[string]bool{"kind": true, "gcphcp": true},
-			gcphcpTarget:  "gcphcp-example-us-central1",
+			name: "kind and gcphcp",
+			enabledAddons: map[serverapp.AddonName]bool{
+				serverapp.AddonKind:   true,
+				serverapp.AddonGCPHCP: true,
+			},
+			gcphcpTarget: "gcphcp-example-us-central1",
 			want: domain.PlacementStrategySpec{
 				Type:    domain.PlacementStrategyStatic,
 				Targets: []domain.TargetID{"kind-local", "gcphcp-example-us-central1"},
