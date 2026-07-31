@@ -33,9 +33,9 @@ const (
 	DefaultTeardownTimeout = 15 * time.Second
 )
 
-// Env is a started hermetic environment. Exercise the product through
-// public endpoints; use Delivery/Inventory controllers only for stimuli
-// that public APIs cannot cause.
+// Env is a started test environment for a selected profile. Exercise the
+// product through public endpoints; use Delivery/Inventory controllers
+// only for stimuli that public APIs cannot cause.
 type Env struct {
 	Profile      string
 	Capabilities []string
@@ -265,7 +265,8 @@ func (e *Env) bootstrapAuthAndProbe(ctx context.Context) error {
 	return nil
 }
 
-// IssueToken mints a programmatic access token for the hermetic IdP.
+// IssueToken mints a programmatic access token for the environment's
+// identity provider.
 func (e *Env) IssueToken(claims oidctest.TokenClaims) (string, error) {
 	if e.idp == nil {
 		return "", fmt.Errorf("testenv: identity provider not started")

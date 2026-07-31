@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// StartT starts a hermetic environment for a Go test. It fails the test
+// StartT starts a test environment for a Go test. It fails the test
 // on start error and registers cleanup via t.Cleanup.
 func StartT(t *testing.T, opts ...Option) *Env {
 	t.Helper()

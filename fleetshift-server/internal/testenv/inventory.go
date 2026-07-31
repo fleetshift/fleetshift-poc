@@ -44,7 +44,8 @@ func (c *InventoryController) ReplaceLabels(ctx context.Context, name domain.Res
 	})
 }
 
-// ResourceType returns the inventory resource type published by hermetic-api.
+// ResourceType returns the inventory resource type this controller was
+// constructed with.
 func (c *InventoryController) ResourceType() domain.ResourceType {
 	return c.resourceType
 }
