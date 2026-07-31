@@ -166,7 +166,7 @@ func Start(ctx context.Context, opts ...Option) (*Env, error) {
 // startHermeticAPI assembles the hermetic-api profile over bootstrap:
 // oidctest identity, memworkflow, fake delivery, and controlled inventory.
 func (e *Env) startHermeticAPI(ctx context.Context) error {
-	idp, err := oidctest.New(oidctest.WithCADir(filepath.Join(e.dir, "oidc-ca")))
+	idp, err := oidctest.New()
 	if err != nil {
 		return fmt.Errorf("start oidctest: %w", err)
 	}
