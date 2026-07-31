@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -31,6 +32,14 @@ const (
 	DefaultEventualPoll    = 100 * time.Millisecond
 	DefaultStartupTimeout  = 30 * time.Second
 	DefaultTeardownTimeout = 15 * time.Second
+
+	// ServerLogFile is the private server log under [Env.WorkDir].
+	// It is not under the allow-listed artifacts root.
+	ServerLogFile = "server.log"
+
+	// KeepWorkDirEnv forces retention of owned work directories after
+	// [Env.Finish] regardless of test outcome. Any non-empty value enables it.
+	KeepWorkDirEnv = "FLEETSHIFT_TESTENV_KEEP"
 )
 
 // Env is a started test environment for a selected profile. Exercise the
@@ -45,11 +54,17 @@ type Env struct {
 	Inventory *InventoryController
 	Artifacts *ArtifactBundle
 
-	idp       *oidctest.Provider
-	server    *bootstrap.Server
-	logger    *slog.Logger
-	dir       string
-	startedAt time.Time
+	idp         *oidctest.Provider
+	server      *bootstrap.Server
+	logger      *slog.Logger
+	dir         string
+	ownedDir    bool
+	keepWorkDir bool
+	logFile     *os.File
+	logPath     string
+	finished    bool
+	kept        bool
+	startedAt   time.Time
 }
 
 // Option configures [Start].
@@ -57,10 +72,11 @@ type Option func(*startConfig)
 
 // startConfig holds options applied by [Start].
 type startConfig struct {
-	profile   string
-	workDir   string
-	logger    *slog.Logger
-	artifacts string
+	profile     string
+	workDir     string
+	logger      *slog.Logger
+	artifacts   string
+	keepWorkDir bool
 }
 
 // WithProfile selects an environment profile. Only [ProfileHermeticAPI]
@@ -69,14 +85,21 @@ func WithProfile(name string) Option {
 	return func(c *startConfig) { c.profile = name }
 }
 
-// WithWorkDir sets the private runtime directory (SQLite DB, and
-// artifacts when [WithArtifactDir] is unset). When empty, Start creates
-// a temporary directory; [Env.Close] does not remove it.
+// WithWorkDir sets the private runtime directory (DB, server.log, and
+// default artifacts). When empty, Start creates a temporary directory.
+// Caller-owned directories are never removed by [Env.Finish].
 func WithWorkDir(dir string) Option {
 	return func(c *startConfig) { c.workDir = dir }
 }
 
-// WithLogger substitutes the environment logger.
+// WithKeepWorkDir retains Start-owned work directories after [Env.Finish]
+// regardless of pass/fail. Equivalent to a non-empty [KeepWorkDirEnv].
+func WithKeepWorkDir() Option {
+	return func(c *startConfig) { c.keepWorkDir = true }
+}
+
+// WithLogger substitutes the environment logger. When set, Start does not
+// create or tee [ServerLogFile]; the caller owns log capture.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *startConfig) { c.logger = logger }
 }
@@ -87,10 +110,32 @@ func WithArtifactDir(dir string) Option {
 	return func(c *startConfig) { c.artifacts = dir }
 }
 
+// WorkDir returns the private runtime directory (DB, server.log, and
+// default artifacts parent).
+func (e *Env) WorkDir() string {
+	if e == nil {
+		return ""
+	}
+	return e.dir
+}
+
+// ServerLogPath returns the private server log path under [WorkDir].
+// Empty when a custom [WithLogger] was used (no automatic file).
+func (e *Env) ServerLogPath() string {
+	if e == nil {
+		return ""
+	}
+	return e.logPath
+}
+
 // Start starts a runner-neutral environment. It returns only after
 // listeners serve, migrations and the workflow runtime are ready, and
 // every claimed capability is usable (including an authenticated
 // capability probe for hermetic-api).
+//
+// On a start failure after the environment shell was created, Start returns
+// a non-nil *Env that has already been Close'd so callers can [Env.Finish]
+// (or inspect WorkDir) for retention. Prefer [StartT] from tests.
 func Start(ctx context.Context, opts ...Option) (*Env, error) {
 	cfg := startConfig{profile: ProfileHermeticAPI}
 	for _, o := range opts {
@@ -98,6 +143,9 @@ func Start(ctx context.Context, opts ...Option) (*Env, error) {
 	}
 	if cfg.profile == "" {
 		cfg.profile = ProfileHermeticAPI
+	}
+	if os.Getenv(KeepWorkDirEnv) != "" {
+		cfg.keepWorkDir = true
 	}
 	switch cfg.profile {
 	case ProfileHermeticAPI:
@@ -129,16 +177,33 @@ func Start(ctx context.Context, opts ...Option) (*Env, error) {
 	}
 
 	logger := cfg.logger
+	var logFile *os.File
+	var logPath string
 	if logger == nil {
-		logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		logPath = filepath.Join(dir, ServerLogFile)
+		var err error
+		logFile, err = os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			if ownedDir {
+				_ = os.RemoveAll(dir)
+			}
+			return nil, fmt.Errorf("testenv: create server log: %w", err)
+		}
+		logger = slog.New(slog.NewJSONHandler(io.MultiWriter(os.Stderr, logFile), &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
 	}
 
 	env := &Env{
-		Profile:   cfg.profile,
-		logger:    logger,
-		dir:       dir,
-		startedAt: time.Now(),
-		Artifacts: newArtifactBundle(artifactDir),
+		Profile:     cfg.profile,
+		logger:      logger,
+		dir:         dir,
+		ownedDir:    ownedDir,
+		keepWorkDir: cfg.keepWorkDir,
+		logFile:     logFile,
+		logPath:     logPath,
+		startedAt:   time.Now(),
+		Artifacts:   newArtifactBundle(artifactDir),
 	}
 	env.Artifacts.recordEvent("environment_start", map[string]any{
 		"profile": cfg.profile,
@@ -148,7 +213,7 @@ func Start(ctx context.Context, opts ...Option) (*Env, error) {
 		env.Artifacts.recordEvent("environment_start_failed", map[string]any{"error": err.Error()})
 		_ = env.Close(context.Background())
 		logger.Warn("testenv: hermetic start failed", "err", err)
-		return nil, err
+		return env, err
 	}
 	env.Capabilities = append([]string(nil), HermeticCapabilities...)
 	env.Artifacts.recordEvent("environment_ready", map[string]any{
@@ -310,16 +375,20 @@ func boundedChild(parent context.Context, max time.Duration) (context.Context, c
 	return context.WithDeadline(parent, deadline)
 }
 
-// Close shuts down the environment. It is bounded, idempotent, and
-// records cleanup outcome in the artifact bundle.
+// Close shuts down the environment. It is bounded and safe to call when
+// already stopped (server/idp/log handles are cleared). A repeat call may
+// re-record artifact close events. Close does not remove the work
+// directory; use [Env.Finish] (or [StartT]) for retention policy.
 func (e *Env) Close(ctx context.Context) error {
 	if e == nil {
 		return nil
 	}
 	var errs []error
-	e.Artifacts.recordEvent("environment_close", map[string]any{
-		"uptime": time.Since(e.startedAt).String(),
-	})
+	if e.Artifacts != nil {
+		e.Artifacts.recordEvent("environment_close", map[string]any{
+			"uptime": time.Since(e.startedAt).String(),
+		})
+	}
 	if e.server != nil {
 		if err := e.server.Close(ctx); err != nil {
 			errs = append(errs, err)
@@ -337,6 +406,59 @@ func (e *Env) Close(ctx context.Context) error {
 	if closeErr != nil {
 		status = "close_error"
 	}
-	_ = e.Artifacts.writeSummary(e, status, closeErr)
+	if e.Artifacts != nil {
+		_ = e.Artifacts.writeSummary(e, status, closeErr)
+	}
+	if e.logFile != nil {
+		if err := e.logFile.Close(); err != nil {
+			errs = append(errs, err)
+			closeErr = errors.Join(errs...)
+		}
+		e.logFile = nil
+	}
 	return closeErr
+}
+
+// Finish closes the environment and applies work-dir retention:
+// Start-owned directories are removed on a clean pass, and retained on
+// failure, close error, [WithKeepWorkDir], or [KeepWorkDirEnv].
+// Caller-owned [WithWorkDir] directories are never removed.
+// Finish is idempotent. After the first call, [Env.Kept] reports whether
+// a Start-owned work directory was retained.
+func (e *Env) Finish(ctx context.Context, passed bool) error {
+	if e == nil {
+		return nil
+	}
+	if e.finished {
+		return nil
+	}
+	e.finished = true
+	closeErr := e.Close(ctx)
+	keep := e.ownedDir && (e.keepWorkDir || !passed || closeErr != nil)
+	e.kept = keep
+	if err := e.applyRetention(keep); err != nil {
+		e.kept = true // still on disk
+		return errors.Join(closeErr, err)
+	}
+	return closeErr
+}
+
+// Kept reports whether Finish retained a Start-owned work directory.
+// False before Finish, when the dir was caller-owned, or when it was removed.
+func (e *Env) Kept() bool {
+	if e == nil {
+		return false
+	}
+	return e.kept
+}
+
+// applyRetention removes a Start-owned work directory when keep is false.
+func (e *Env) applyRetention(keep bool) error {
+	if e == nil || !e.ownedDir || keep {
+		return nil
+	}
+	if err := os.RemoveAll(e.dir); err != nil {
+		return fmt.Errorf("testenv: remove work dir: %w", err)
+	}
+	return nil
 }
