@@ -14,6 +14,14 @@ import (
 
 func startTestEnv(t *testing.T, opts ...testenv.Option) *testenv.Env {
 	t.Helper()
+	// Ignore ambient FLEETSHIFT_TESTENV_KEEP from the developer shell so
+	// delete-on-pass assertions stay deterministic.
+	t.Setenv(testenv.KeepWorkDirEnv, "")
+	return startTestEnvAllowKeepEnv(t, opts...)
+}
+
+func startTestEnvAllowKeepEnv(t *testing.T, opts ...testenv.Option) *testenv.Env {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), testenv.DefaultStartupTimeout)
 	t.Cleanup(cancel)
 
@@ -101,10 +109,13 @@ func TestFinish_KeepWorkDirRetainsOnPass(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var env *testenv.Env
 			if tt.env != nil {
 				tt.env(t)
+				env = startTestEnvAllowKeepEnv(t, tt.opts...)
+			} else {
+				env = startTestEnv(t, tt.opts...)
 			}
-			env := startTestEnv(t, tt.opts...)
 			dir := env.WorkDir()
 			t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
