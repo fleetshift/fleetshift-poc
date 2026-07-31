@@ -31,6 +31,8 @@ This proposal focuses on the previously unresolved trust-distribution problem:
 
 The wire representation may extend or reuse the standard Sigstore bundle, in-toto/DSSE, and TUF-shaped trust material explored by the [logless Sigstore bundle POC](../../poc/attestation/sigstore_tuf_bundle/README.md), provided doing so preserves this protocol's continuity and ordering properties. Reusing those formats does not imply that Fulcio, a timestamp authority, or a transparency service becomes required infrastructure.
 
+The surrounding enrollment, continuity, delivery-ordering, and local-cutoff model has an executable three-role prototype in [`poc/trust-model-v3`](../../poc/trust-model-v3/README.md). It deliberately uses linear hash chains and a simple signed-content attestation so that storage and derivation optimizations do not obscure the core guarantees.
+
 ## 2. System roles
 
 ### Controlled client
