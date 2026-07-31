@@ -154,13 +154,15 @@ Trade-offs:
 
 ### None (run as platform)
 
-This is the most novel model. It relies on provenance, transport authentication, and the "fleetlet" delivery agent design to secure, in order to avoid giving the platform server trust, while supporting both time & space separation for authorized deployments. Provenance provides prove of original authorization, and the fleetlet has isolated authority for its target behind network separation that decouples it from the platform server.
+This is the most novel model. It relies on provenance, transport authentication, and the "fleetlet" delivery agent design to reduce the authority concentrated in the platform server, while supporting both time and space separation for deliveries. Provenance proves what an authentic user or workload signed, and the fleetlet has isolated authority for its target behind network separation that decouples it from the platform server. The resource manager remains the primary tenant, workspace, and API permission boundary unless a deployment deliberately configures stronger target-side policy.
 
 ## Provenance
 
 > The provenance model described in this section has a working prototype in `poc/attestation/hybrid/`. The prototype isolates the target-side verification core — the attestation data model, constraint evaluation, strategy-implied policy, update chains, and trust anchor verification. See `poc/attestation/hybrid/README.md` for a guide to the prototype and its mapping to this design. Where this section and the prototype cover the same ground, the prototype's concrete model is authoritative.
 
-When supported, a delivery agent independently verifies that a real user authorized the operation. This composes with all credential presentations. It tightens the scope of what a compromised platform can do, especially in the "run as platform" case.
+The proposed [V3 trust-distribution model](trust_model_v3.md) inherits this attestation model rather than replacing it. It explores how ordinary OIDC enrollment, user key continuity, authenticated current state, and ordered delivery commitments can replace or supplement the key-binding and trust-distribution layer without requiring Fulcio, a timestamp authority, or dedicated transparency witnesses.
+
+When supported, a delivery agent independently verifies that a real user signed the operation and that the delivered result satisfies the constraints carried by the attestation. This authentic-provenance check composes with all credential presentations. It tightens the scope of what a compromised platform can do, especially in the "run as platform" case, but does not imply that the agent reproduces the resource manager's complete authorization policy.
 
 1. A request intent (and/or derived decisions like manifests or placement) is accompanied by signed proof material (attestation envelope)
 2. The platform delivers the envelope to the target
@@ -171,10 +173,10 @@ Users sign directly with their own key, per device per user agent — no stored 
 The trust chain has three independent links:
 
 - JWT proves identity (from the tenant IdP, establishing a trust chain from the user's configured public key)
-- User signature proves authorization (the user signed THIS specific content — intent or output)
+- User signature proves authentic provenance (the user signed THIS specific intent or output); tenant and workspace permission remains a separate resource-manager check
 - Platform connection auth proves transport integrity (for standard transport); platform signature for buffer transport
 
-These are independent — compromising one doesn't break the others. The per-request JWT needn't be stored. The user authenticates (JWT verified at request time), signs the content (cryptographic proof of what they authorized + their current claims), then the per-request JWT can be discarded. The user's signature carries everything the delivery agent needs. No stored per-request tokens, no token-reuse-window concern.
+These are independent — compromising one doesn't break the others. The per-request JWT needn't be stored. The user authenticates (JWT verified at request time), signs the content (cryptographic proof of what they authorized + their current claims), then the per-request JWT can be discarded. The signed attestation carries what the delivery agent needs for provenance and constraint validation; complete tenant and workspace permission remains the resource manager's responsibility. No stored per-request tokens, no token-reuse-window concern.
 
 Note: a JWT may still be stored as part of the key binding bundle (see below), but that is per-enrollment with a TTL — not per-request.
 
@@ -764,4 +766,3 @@ User signing is preferred for the same reasons it supersedes JWT-embedded proven
 - **Web Crypto API (SubtleCrypto):** Fallback for environments without passkey support. Weaker: no hardware protection (keys are JS-accessible, vulnerable to XSS), browser/origin-specific, no biometric UX.
 - **HTTP Message Signatures (RFC 9421):** Signs components of an HTTP *request* (method, path, headers, body digest) for hop-by-hop transport integrity. The signature is bound to the HTTP request lifecycle and doesn't survive beyond it. For FleetShift, the signature must travel from the user to the delivery agent through intermediaries (platform, rendering, transport) — a content signature over the intent hash, not a transport signature over one HTTP hop.
 - **Git commit signing as the verification mechanism:** Git commit signatures are bound to the git object model (tree hash, parent, author). Using them for delivery verification requires either forwarding git metadata to the delivery agent (fragile, doesn't survive rendering) or having the agent pull from git directly (heavy). Instead, GitOps uses the same signing model as web/CLI: tooling signs the content and stores the signature in git. Git commit signing is orthogonal git-level integrity.
-

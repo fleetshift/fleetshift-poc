@@ -341,6 +341,12 @@ The shell does not know or care whether a plugin is built-in or an addon,
 or whether assets are served from the same origin or a CDN. Scalprum loads
 them all the same way.
 
+### Security-sensitive core surfaces
+
+Equivalent plugin loading does not imply equivalent trust. Addon JavaScript that executes in the shell must be treated as untrusted relative to enrollment, canonicalization, key access, and signing. It must not receive a general-purpose signing API or direct access to key handles merely because it can extend a core page.
+
+Security-sensitive signing UI should use a deliberately smaller boundary, such as an independently deployed origin, a sandboxed isolated context with a narrow message protocol, or an external/native signer. Content Security Policy, integrity-pinned assets, and a service worker that mediates a purpose-specific signing protocol can reduce exposure. A same-origin service worker is defense in depth, however, not an independent trust root against compromise of the shell's origin. See [trust_model_v3.md](trust_model_v3.md#controlled-client-security-considerations) for the client threat boundary.
+
 ## OCI Artifact Distribution
 
 Addon UI plugins are packaged as **OCI artifacts** — minimal container images
