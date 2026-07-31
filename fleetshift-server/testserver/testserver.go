@@ -1,6 +1,6 @@
 // Package testserver provides a focused shared-builder facade over
 // bootstrap for sibling-module integration tests. New uses are frozen;
-// prefer internal/testenv when it lands. The independent object graph
+// prefer internal/testenv for new hermetic scenarios. The independent object graph
 // has been deleted — Start delegates to bootstrap with workflow, OIDC,
 // and add-on substitutions that preserve Kind/GCP HCP create/read semantics.
 package testserver

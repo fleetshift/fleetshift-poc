@@ -1,11 +1,13 @@
-// Package oidctest provides a fake OIDC identity provider for testing.
-// It generates real cryptographic keys, issues signed JWTs, and serves
-// standard OIDC discovery and JWKS endpoints over HTTPS with a
-// self-signed CA.
+// Package oidctest provides a lightweight fake OIDC identity provider for
+// testing. It generates real cryptographic keys, issues signed JWTs, and
+// serves OIDC discovery and JWKS over HTTPS with a self-signed CA.
 //
-// The provider is reusable across unit tests (in-process TLS) and
-// integration tests where external consumers like the K8s API server
-// need to reach it over real HTTPS.
+// This helper is for programmatic API identity (token minting + JWKS
+// verification). It is not a browser IdP: authorization-code and token
+// exchange endpoints are not implemented. Discovery still advertises
+// authorization_endpoint and token_endpoint URLs so production
+// CreateAuthMethod / OIDCConfig population can complete; those paths
+// return HTTP 404 if called. Browser OIDC is out of scope here.
 package oidctest
 
 import (
@@ -22,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -34,12 +37,13 @@ import (
 
 // Provider is a fake OIDC identity provider for testing. It serves
 // OIDC discovery and JWKS endpoints over HTTPS and issues signed JWTs
-// programmatically via [Provider.IssueToken].
+// programmatically via [Provider.Issue].
 type Provider struct {
 	issuerURL  string
 	audience   string
 	caCertPEM  []byte
 	caCertPath string
+	caDir      string // owned temp dir when New created it; empty if caller-supplied
 	jwkPriv    jwk.Key
 	jwksJSON   []byte
 	server     *http.Server
@@ -48,7 +52,7 @@ type Provider struct {
 }
 
 // TokenClaims configures the claims embedded in a token issued by
-// [Provider.IssueToken].
+// [Provider.Issue].
 type TokenClaims struct {
 	Subject  string
 	Groups   []string
@@ -61,11 +65,13 @@ type TokenClaims struct {
 // Option configures a [Provider].
 type Option func(*providerConfig)
 
+// providerConfig holds options applied by [New].
 type providerConfig struct {
 	audience      string
 	listenAddress string
 	issuerURL     string   // override; empty means derive from listen address
 	extraSANIPs   []net.IP // additional IP SANs for the server certificate
+	caDir         string   // optional; when empty New creates a temp dir
 }
 
 // WithAudience sets the default audience for issued tokens.
@@ -96,11 +102,16 @@ func WithIssuerURL(url string) Option {
 	return func(c *providerConfig) { c.issuerURL = url }
 }
 
-// Start creates and starts a fake OIDC provider. The server is stopped
-// automatically when the test finishes.
-func Start(t *testing.T, opts ...Option) *Provider {
-	t.Helper()
+// WithCADir sets the directory used for the CA certificate PEM file.
+// When omitted, [New] creates and owns a temporary directory closed by
+// [Provider.Close].
+func WithCADir(dir string) Option {
+	return func(c *providerConfig) { c.caDir = dir }
+}
 
+// New creates and starts a fake OIDC provider. Callers must call
+// [Provider.Close] when finished. Prefer [Start] from tests.
+func New(opts ...Option) (*Provider, error) {
 	cfg := providerConfig{
 		audience:      "fleetshift",
 		listenAddress: "127.0.0.1:0",
@@ -109,38 +120,46 @@ func Start(t *testing.T, opts ...Option) *Provider {
 		o(&cfg)
 	}
 
-	caCert, caKey := generateCA(t)
-	serverCert, serverKey := generateServerCert(t, caCert, caKey, cfg.extraSANIPs)
+	caCert, caKey, err := generateCA()
+	if err != nil {
+		return nil, err
+	}
+	serverCert, serverKey, err := generateServerCert(caCert, caKey, cfg.extraSANIPs)
+	if err != nil {
+		return nil, err
+	}
 
 	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("oidctest: generate ECDSA signing key: %v", err)
+		return nil, fmt.Errorf("oidctest: generate ECDSA signing key: %w", err)
 	}
 
 	jwkPriv, err := jwk.Import(signingKey)
 	if err != nil {
-		t.Fatalf("oidctest: import private key to JWK: %v", err)
+		return nil, fmt.Errorf("oidctest: import private key to JWK: %w", err)
 	}
 	if err := jwkPriv.Set(jwk.KeyIDKey, "test-kid"); err != nil {
-		t.Fatalf("oidctest: set key ID: %v", err)
+		return nil, fmt.Errorf("oidctest: set key ID: %w", err)
 	}
 
 	pubKey, err := jwk.Import(signingKey.PublicKey)
 	if err != nil {
-		t.Fatalf("oidctest: import public key to JWK: %v", err)
+		return nil, fmt.Errorf("oidctest: import public key to JWK: %w", err)
 	}
 	if err := pubKey.Set(jwk.KeyIDKey, "test-kid"); err != nil {
-		t.Fatalf("oidctest: set key ID on public key: %v", err)
+		return nil, fmt.Errorf("oidctest: set key ID on public key: %w", err)
 	}
 	if err := pubKey.Set(jwk.AlgorithmKey, jwa.ES256()); err != nil {
-		t.Fatalf("oidctest: set algorithm on public key: %v", err)
+		return nil, fmt.Errorf("oidctest: set algorithm on public key: %w", err)
 	}
 
 	keySet := jwk.NewSet()
-	keySet.AddKey(pubKey)
+	if err := keySet.AddKey(pubKey); err != nil {
+		return nil, fmt.Errorf("oidctest: add public key to set: %w", err)
+	}
 	jwksJSON, err := json.Marshal(keySet)
 	if err != nil {
-		t.Fatalf("oidctest: marshal JWKS: %v", err)
+		return nil, fmt.Errorf("oidctest: marshal JWKS: %w", err)
 	}
 
 	caCertPEM := pem.EncodeToMemory(&pem.Block{
@@ -148,14 +167,24 @@ func Start(t *testing.T, opts ...Option) *Provider {
 		Bytes: caCert.Raw,
 	})
 
-	caCertFile, err := os.CreateTemp(t.TempDir(), "oidc-ca-*.pem")
-	if err != nil {
-		t.Fatalf("oidctest: create CA cert temp file: %v", err)
+	caDir := cfg.caDir
+	ownedCADir := ""
+	if caDir == "" {
+		ownedCADir, err = os.MkdirTemp("", "oidctest-ca-*")
+		if err != nil {
+			return nil, fmt.Errorf("oidctest: create CA cert temp dir: %w", err)
+		}
+		caDir = ownedCADir
+	} else if err := os.MkdirAll(caDir, 0o755); err != nil {
+		return nil, fmt.Errorf("oidctest: create CA cert dir: %w", err)
 	}
-	if _, err := caCertFile.Write(caCertPEM); err != nil {
-		t.Fatalf("oidctest: write CA cert: %v", err)
+	caCertPath := filepath.Join(caDir, "ca.pem")
+	if err := os.WriteFile(caCertPath, caCertPEM, 0o600); err != nil {
+		if ownedCADir != "" {
+			_ = os.RemoveAll(ownedCADir)
+		}
+		return nil, fmt.Errorf("oidctest: write CA cert: %w", err)
 	}
-	caCertFile.Close()
 
 	tlsCert := tls.Certificate{
 		Certificate: [][]byte{serverCert.Raw},
@@ -164,7 +193,10 @@ func Start(t *testing.T, opts ...Option) *Provider {
 
 	lis, err := net.Listen("tcp", cfg.listenAddress)
 	if err != nil {
-		t.Fatalf("oidctest: listen on %s: %v", cfg.listenAddress, err)
+		if ownedCADir != "" {
+			_ = os.RemoveAll(ownedCADir)
+		}
+		return nil, fmt.Errorf("oidctest: listen on %s: %w", cfg.listenAddress, err)
 	}
 
 	_, port, _ := net.SplitHostPort(lis.Addr().String())
@@ -193,7 +225,8 @@ func Start(t *testing.T, opts ...Option) *Provider {
 		issuerURL:  issuerURL,
 		audience:   cfg.audience,
 		caCertPEM:  caCertPEM,
-		caCertPath: caCertFile.Name(),
+		caCertPath: caCertPath,
+		caDir:      ownedCADir,
 		jwkPriv:    jwkPriv,
 		jwksJSON:   jwksJSON,
 		listener:   lis,
@@ -216,11 +249,40 @@ func Start(t *testing.T, opts ...Option) *Provider {
 	tlsListener := tls.NewListener(lis, tlsConfig)
 	go p.server.Serve(tlsListener)
 
-	t.Cleanup(func() {
-		p.server.Close()
-	})
+	return p, nil
+}
 
+// Start creates and starts a fake OIDC provider. The server is stopped
+// automatically when the test finishes. This is a thin [testing.T]
+// adapter over [New].
+func Start(t *testing.T, opts ...Option) *Provider {
+	t.Helper()
+	opts = append([]Option{WithCADir(t.TempDir())}, opts...)
+	p, err := New(opts...)
+	if err != nil {
+		t.Fatalf("oidctest: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = p.Close()
+	})
 	return p
+}
+
+// Close stops the HTTPS server and removes any owned temporary CA
+// directory. It is safe to call more than once.
+func (p *Provider) Close() error {
+	var err error
+	if p.server != nil {
+		err = p.server.Close()
+		p.server = nil
+	}
+	if p.caDir != "" {
+		if rmErr := os.RemoveAll(p.caDir); rmErr != nil && err == nil {
+			err = rmErr
+		}
+		p.caDir = ""
+	}
+	return err
 }
 
 // SetIssuerURL overrides the issuer URL after startup. This is useful
@@ -245,8 +307,7 @@ func (p *Provider) Port() string {
 // CACertPEM returns the PEM-encoded CA certificate.
 func (p *Provider) CACertPEM() []byte { return p.caCertPEM }
 
-// CACertPath returns the path to a temp file containing the CA cert PEM.
-// The file is cleaned up when the test finishes.
+// CACertPath returns the path to a file containing the CA cert PEM.
 func (p *Provider) CACertPath() string { return p.caCertPath }
 
 // HTTPClient returns an [http.Client] whose transport trusts the
@@ -254,7 +315,9 @@ func (p *Provider) CACertPath() string { return p.caCertPath }
 func (p *Provider) HTTPClient() *http.Client { return p.httpClient }
 
 // OIDCConfig returns a [domain.OIDCConfig] pre-filled with the
-// provider's issuer, audience, and endpoint URLs.
+// provider's issuer, audience, and endpoint URLs. Authorization and
+// token endpoint URLs are present for config completeness only; this
+// provider does not implement those HTTP handlers.
 func (p *Provider) OIDCConfig() domain.OIDCConfig {
 	return domain.OIDCConfig{
 		IssuerURL:             domain.IssuerURL(p.issuerURL),
@@ -265,10 +328,8 @@ func (p *Provider) OIDCConfig() domain.OIDCConfig {
 	}
 }
 
-// IssueToken creates a signed JWT with the given claims.
-func (p *Provider) IssueToken(t *testing.T, claims TokenClaims) string {
-	t.Helper()
-
+// Issue creates a signed JWT with the given claims.
+func (p *Provider) Issue(claims TokenClaims) (string, error) {
 	sub := claims.Subject
 	if sub == "" {
 		sub = "test-user"
@@ -302,16 +363,29 @@ func (p *Provider) IssueToken(t *testing.T, claims TokenClaims) string {
 
 	tok, err := builder.Build()
 	if err != nil {
-		t.Fatalf("oidctest: build token: %v", err)
+		return "", fmt.Errorf("oidctest: build token: %w", err)
 	}
 
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256(), p.jwkPriv))
 	if err != nil {
-		t.Fatalf("oidctest: sign token: %v", err)
+		return "", fmt.Errorf("oidctest: sign token: %w", err)
 	}
-	return string(signed)
+	return string(signed), nil
 }
 
+// IssueToken creates a signed JWT with the given claims. This is a thin
+// [testing.T] adapter over [Provider.Issue].
+func (p *Provider) IssueToken(t *testing.T, claims TokenClaims) string {
+	t.Helper()
+	token, err := p.Issue(claims)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	return token
+}
+
+// handleDiscovery serves OIDC discovery JSON. Authorization and token
+// endpoints are advertised for config completeness but are not served.
 func (p *Provider) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 	doc := map[string]string{
 		"issuer":                 p.issuerURL,
@@ -320,20 +394,20 @@ func (p *Provider) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 		"token_endpoint":         p.issuerURL + "/token",
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(doc)
+	_ = json.NewEncoder(w).Encode(doc)
 }
 
+// handleJWKS serves the provider's public signing keys as JWKS.
 func (p *Provider) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(p.jwksJSON)
+	_, _ = w.Write(p.jwksJSON)
 }
 
-func generateCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
-	t.Helper()
-
+// generateCA creates a short-lived self-signed CA certificate and key.
+func generateCA() (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("oidctest: generate CA key: %v", err)
+		return nil, nil, fmt.Errorf("oidctest: generate CA key: %w", err)
 	}
 
 	template := &x509.Certificate{
@@ -348,23 +422,23 @@ func generateCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
-		t.Fatalf("oidctest: create CA certificate: %v", err)
+		return nil, nil, fmt.Errorf("oidctest: create CA certificate: %w", err)
 	}
 
 	cert, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		t.Fatalf("oidctest: parse CA certificate: %v", err)
+		return nil, nil, fmt.Errorf("oidctest: parse CA certificate: %w", err)
 	}
 
-	return cert, key
+	return cert, key, nil
 }
 
-func generateServerCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, extraIPs []net.IP) (*x509.Certificate, *ecdsa.PrivateKey) {
-	t.Helper()
-
+// generateServerCert creates a server certificate signed by caCert,
+// including localhost DNS names and optional extra IP SANs.
+func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, extraIPs []net.IP) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("oidctest: generate server key: %v", err)
+		return nil, nil, fmt.Errorf("oidctest: generate server key: %w", err)
 	}
 
 	ips := []net.IP{net.IPv4(127, 0, 0, 1)}
@@ -383,13 +457,13 @@ func generateServerCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.Pri
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &key.PublicKey, caKey)
 	if err != nil {
-		t.Fatalf("oidctest: create server certificate: %v", err)
+		return nil, nil, fmt.Errorf("oidctest: create server certificate: %w", err)
 	}
 
 	cert, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		t.Fatalf("oidctest: parse server certificate: %v", err)
+		return nil, nil, fmt.Errorf("oidctest: parse server certificate: %w", err)
 	}
 
-	return cert, key
+	return cert, key, nil
 }

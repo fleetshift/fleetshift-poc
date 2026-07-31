@@ -101,8 +101,8 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 }
 
 func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
-	// D18 composition guardrail: with an auth method present, exempt WS routes
-	// stay reachable while wrapped UI routes require a bearer token.
+	// With an auth method present, exempt WS routes stay reachable while
+	// wrapped UI routes require a bearer token.
 	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
 	seedOIDCAuthMethod(t, dbPath, idp.OIDCConfig())
