@@ -62,6 +62,42 @@ func TestStart_HermeticAPI_AuthenticatedProbe(t *testing.T) {
 	}
 }
 
+func TestPollCallContext_CancelsBlockedIO(t *testing.T) {
+	env := testenv.StartT(t)
+
+	token, err := env.IssueToken(oidctest.TokenClaims{Subject: "timeout-user"})
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+	conn, err := env.DialGRPC()
+	if err != nil {
+		t.Fatalf("DialGRPC: %v", err)
+	}
+	defer conn.Close()
+
+	// Parent poll budget already expired; PollCallContext must inherit it
+	// without relying on wall-clock sleeps.
+	pollCtx, pollCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer pollCancel()
+
+	callCtx, callCancel := testenv.PollCallContext(pollCtx)
+	defer callCancel()
+	if callCtx.Err() != context.DeadlineExceeded {
+		t.Fatalf("callCtx.Err() = %v, want %v", callCtx.Err(), context.DeadlineExceeded)
+	}
+
+	_, err = pb.NewDeploymentServiceClient(conn).ListDeployments(
+		testenv.AuthedContext(callCtx, token),
+		&pb.ListDeploymentsRequest{},
+	)
+	if err == nil {
+		t.Fatal("expected ListDeployments to fail on an already-expired context")
+	}
+	if callCtx.Err() != context.DeadlineExceeded {
+		t.Fatalf("callCtx.Err() = %v, want %v", callCtx.Err(), context.DeadlineExceeded)
+	}
+}
+
 func TestStart_UnsupportedProfile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
