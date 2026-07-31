@@ -1,4 +1,4 @@
-package cli
+package bootstrap
 
 import (
 	"context"
@@ -14,23 +14,21 @@ import (
 type kubernetesInProcessIndexing struct {
 	// Runtime is injected into Kind/GCP agents and used for StopAll / replay.
 	Runtime kubernetesaddon.IndexingRuntime
-	// Host is the concrete in-process host (same instance as Runtime).
-	Host *kubernetesaddon.KubernetesInProcessIndexHost
 }
 
 // newKubernetesInProcessIndexing wires the Kubernetes indexing runtime
 // and inventory reporter for server composition. Callers inject Runtime
 // into Kind and GCP HCP agents, run ReplayPersistedIndexers after addon
-// connect, and call StopAll on shutdown.
+// connect, and call StopAll on shutdown. inventoryReports is the shared
+// InventoryReportService used elsewhere in composition.
 func newKubernetesInProcessIndexing(
 	ctx context.Context,
-	store domain.Store,
 	vault domain.Vault,
+	inventoryReports *application.InventoryReportService,
 	logger *slog.Logger,
 ) *kubernetesInProcessIndexing {
-	inventoryReportSvc := application.NewInventoryReportService(store)
 	reporter := kubernetesaddon.NewDirectInventoryReporter(
-		newDirectInventoryReportBackend(inventoryReportSvc),
+		newDirectInventoryReportBackend(inventoryReports),
 	)
 	host := kubernetesaddon.NewKubernetesInProcessIndexHost(
 		ctx,
@@ -39,10 +37,7 @@ func newKubernetesInProcessIndexing(
 		kubernetesaddon.DefaultIndexerClients{},
 		logger,
 	)
-	return &kubernetesInProcessIndexing{
-		Runtime: host,
-		Host:    host,
-	}
+	return &kubernetesInProcessIndexing{Runtime: host}
 }
 
 // directInventoryReportBackend adapts InventoryReportService onto the
@@ -52,8 +47,8 @@ type directInventoryReportBackend struct {
 	reports *application.InventoryReportService
 }
 
-// newDirectInventoryReportBackend adapts InventoryReportService onto
-// [kubernetesaddon.InventoryReportBackend].
+// newDirectInventoryReportBackend adapts InventoryReportService for the
+// Kubernetes addon's InventoryReportBackend port.
 func newDirectInventoryReportBackend(
 	reports *application.InventoryReportService,
 ) *directInventoryReportBackend {

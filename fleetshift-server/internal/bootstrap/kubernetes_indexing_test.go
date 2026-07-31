@@ -1,10 +1,9 @@
-package cli
+package bootstrap
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -86,7 +85,7 @@ func TestKubernetesIndexStartupReplay_CancelsAndJoins(t *testing.T) {
 	}
 }
 
-func TestStoreBackedTargetLister_ListsFromStore(t *testing.T) {
+func TestStoreTargetLister_ListsFromStore(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -173,34 +172,7 @@ func TestDirectInventoryReportBackend_RoundTrip(t *testing.T) {
 	readTx.Rollback()
 }
 
-func TestNewKubernetesInProcessIndexing_WiresIndexingRuntime(t *testing.T) {
-	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
-	seedKubernetesObjectType(t, store)
-
-	sch := kubernetesaddon.InventorySchema()
-	if sch.ResourceType != kubernetesaddon.ObjectResourceType {
-		t.Fatalf("Schema.ResourceType = %q, want %q", sch.ResourceType, kubernetesaddon.ObjectResourceType)
-	}
-	if sch.Inventory == nil {
-		t.Fatal("Schema must declare Inventory for Connect registration")
-	}
-
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
-
-	indexing := newKubernetesInProcessIndexing(runCtx, store, nil, slog.New(slog.DiscardHandler))
-	if indexing == nil || indexing.Runtime == nil || indexing.Host == nil {
-		t.Fatal("expected wired indexing runtime")
-	}
-
-	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := indexing.Runtime.StopAll(stopCtx); err != nil {
-		t.Fatalf("StopAll: %v", err)
-	}
-}
-
-func TestStoreBackedTargetLister_BeginError(t *testing.T) {
+func TestStoreTargetLister_BeginError(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	if err := db.Close(); err != nil {
@@ -211,7 +183,7 @@ func TestStoreBackedTargetLister_BeginError(t *testing.T) {
 	}
 }
 
-func TestStoreBackedTargetLister_ListError(t *testing.T) {
+func TestStoreTargetLister_ListError(t *testing.T) {
 	store := &listFailStore{err: errors.New("list targets failed")}
 	_, err := (storeTargetLister{store: store}).ListTargets(context.Background())
 	if err == nil {

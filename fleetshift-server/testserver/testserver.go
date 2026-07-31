@@ -1,33 +1,30 @@
-// Package testserver provides a fully wired in-process FleetShift gRPC
-// server for integration testing. The server uses SQLite in-memory storage
-// and the in-memory workflow engine, making tests fast and deterministic.
+// Package testserver provides a focused shared-builder facade over
+// bootstrap for sibling-module integration tests. New uses are frozen;
+// prefer internal/testenv when it lands. The independent object graph
+// has been deleted — Start delegates to bootstrap with workflow, OIDC,
+// and add-on substitutions that preserve Kind/GCP HCP create/read semantics.
 package testserver
 
 import (
 	"context"
-	"net"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
-	"buf.build/go/protovalidate"
-	"google.golang.org/grpc"
-
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
-	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 )
 
 // stubVerifier returns a fixed test identity for any token.
 type stubVerifier struct{}
 
+// Verify implements domain.OIDCTokenVerifier with a fixed test subject.
 func (stubVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ string) (domain.SubjectClaims, error) {
 	return domain.SubjectClaims{
 		FederatedIdentity: domain.FederatedIdentity{
@@ -37,9 +34,14 @@ func (stubVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ string) (do
 	}, nil
 }
 
+// RegisterKeySet implements bootstrap.KeySetRegistrar as a no-op.
+func (stubVerifier) RegisterKeySet(context.Context, domain.EndpointURL) error { return nil }
+
 // stubDiscovery returns fixed test metadata.
 type stubDiscovery struct{}
 
+// FetchMetadata implements domain.OIDCDiscoveryClient with endpoints derived
+// from the requested issuer URL.
 func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL) (domain.OIDCMetadata, error) {
 	return domain.OIDCMetadata{
 		Issuer:                issuerURL,
@@ -49,217 +51,101 @@ func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL
 	}, nil
 }
 
-// Start launches an in-process gRPC server and returns its address.
-// The server is stopped automatically when the test finishes.
+// Start launches an in-process FleetShift server via bootstrap and returns
+// its gRPC dial address. The server is stopped when the test finishes.
 func Start(t *testing.T) string {
 	t.Helper()
 
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "fleetshift.db")
 
-	router := delivery.NewRoutingDeliveryService()
-	recording := &sqlite.RecordingDeliveryService{Store: store}
-	router.Register("test", recording)
-	router.Register(gcphcpaddon.TargetType, recording)
+	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
+		GRPCAddr: "127.0.0.1:0",
+		HTTPAddr: "127.0.0.1:0",
+		DBPath:   dbPath,
+		// kind alone drives trust-bundle placement for provision-IdP;
+		// gcphcp is assembled via WithAddonAssembly without requiring a
+		// production gcphcp config file.
+		Addons: "kind",
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
 
-	reg := &memworkflow.Registry{}
-	recording.Reporter = application.NewDeliveryReportService(store, reg)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithAckRetryInterval(5*time.Second),
+	srv, err := bootstrap.Start(ctx, cfg, logger,
+		bootstrap.WithWorkflowRegistry(bootstrap.NewMemWorkflowRegistry()),
+		bootstrap.WithOIDCDeps(bootstrap.OIDCDeps{
+			Discovery: stubDiscovery{},
+			Verifier:  stubVerifier{},
+		}),
+		bootstrap.WithAddonAssembly(testAddonAssembly),
 	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
+		t.Fatalf("bootstrap.Start: %v", err)
 	}
-
-	cwfSpec := &domain.CreateDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createWf, err := reg.RegisterCreateDeployment(cwfSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateDeployment: %v", err)
-	}
-
-	provSpec := &domain.ProvisionIdPWorkflowSpec{
-		AuthMethods:      &sqlite.AuthMethodRepo{DB: db},
-		Discovery:        stubDiscovery{},
-		CreateDeployment: createWf,
-	}
-	trustBundleTargets := []domain.TargetID{"kind-local"}
-	if len(trustBundleTargets) > 0 {
-		provSpec.TrustBundlePlacement = domain.PlacementStrategySpec{
-			Type:    domain.PlacementStrategyStatic,
-			Targets: trustBundleTargets,
+	t.Cleanup(func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Close(closeCtx); err != nil {
+			t.Errorf("bootstrap.Close: %v", err)
 		}
-	}
-	provWf, err := reg.RegisterProvisionIdP(provSpec)
-	if err != nil {
-		t.Fatalf("RegisterProvisionIdP: %v", err)
-	}
-
-	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{Store: store}
-	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeploymentCleanup: %v", err)
-	}
-
-	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-		Cleanup:       cleanupWf,
-	}
-	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeployment: %v", err)
-	}
-
-	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeDeployment: %v", err)
-	}
-
-	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateManagedResource: %v", err)
-	}
-
-	mrCleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store}
-	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(mrCleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
-	}
-
-	deleteMRSpec := &domain.DeleteManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-		Cleanup:       mrCleanupWf,
-	}
-	deleteMRWf, err := reg.RegisterDeleteManagedResource(deleteMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteManagedResource: %v", err)
-	}
-
-	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeManagedResource: %v", err)
-	}
-
-	deploymentSvc := &application.DeploymentService{
-		Store:    store,
-		CreateWF: createWf,
-		DeleteWF: deleteWf,
-		ResumeWF: resumeWf,
-	}
-
-	extensionResourceSvc := application.NewExtensionResourceService(
-		store, createMRWf, deleteMRWf, resumeMRWf, nil,
-	)
-
-	specValidator, err := protovalidate.New()
-	if err != nil {
-		t.Fatalf("protovalidate.New: %v", err)
-	}
-
-	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
-	authMethodSvc := &application.AuthMethodService{
-		Methods:     authMethodRepo,
-		ProvisionWF: provWf,
-	}
-	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, stubVerifier{}, domain.NoOpAuthnObserver{})
-
-	dynamicMux := dynamicapi.NewDynamicServiceMux()
-	fileRegistry := dynamicapi.NewDynamicFileRegistry()
-
-	srv := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
-		grpc.ChainStreamInterceptor(authnInterceptor.Stream()),
-		grpc.UnknownServiceHandler(dynamicMux.Handle),
-	)
-	pb.RegisterDeploymentServiceServer(srv, &transportgrpc.DeploymentServer{
-		Deployments: deploymentSvc,
 	})
-	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
-		AuthMethods: authMethodSvc,
-	})
-	dynamicapi.RegisterCompositeReflection(srv, dynamicMux, fileRegistry)
 
-	activator := &extensionresource.DynamicSchemaActivator{
-		GRPCMux:      dynamicMux,
-		FileRegistry: fileRegistry,
-		Deps: extensionresource.Deps{
-			Resources: extensionResourceSvc,
-			Validator: specValidator,
+	return srv.Endpoints().GRPC.Dial
+}
+
+// testAddonAssembly preserves focused Kind/GCP HCP create/read semantics
+// for sibling CLI tests.
+//
+// Kind omits DeliveryCapability so Connect.Agent may be nil: schemas/targets
+// stay live, resources remain CREATING, and delete does not wait on delivery.
+// GCP HCP keeps DeliveryCapability with a recording agent and no Reporter so
+// the target type is routable while deliveries stay incomplete.
+func testAddonAssembly(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
+	// No Reporter: deliveries stay incomplete so create/read tests observe CREATING.
+	recording := &sqlite.RecordingDeliveryService{Store: deps.Store}
+
+	kindDesc := kindaddon.Descriptor()
+	kindDesc.Capabilities = []domain.Capability{
+		domain.ManagedResourceCapability{ResourceType: kindaddon.ClusterResourceType},
+		domain.InventoryResourceCapability{ResourceType: kindaddon.ClusterResourceType},
+		domain.InventoryResourceCapability{ResourceType: kindaddon.NodeResourceType},
+	}
+
+	return []bootstrap.AddonSpec{
+		{
+			Descriptor: kindDesc,
+			Connect: application.ConnectInput{
+				Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+					ID:   "kind-local",
+					Type: kindaddon.TargetType,
+					Name: "Local Kind Provider",
+					AcceptedManifestTypes: []domain.ManifestType{
+						kindaddon.ClusterManifestType,
+						kindaddon.ManagedClusterManifestType,
+					},
+				})},
+				Schemas: []domain.ExtensionResourceSchema{kindaddon.Schema(), kindaddon.NodeSchema()},
+			},
 		},
-		Registry: extensionresource.NewActiveResourceRegistry(),
-	}
-
-	// Use the AddonManager lifecycle (Enable → Connect) to match
-	// production wiring in serve.go. This registers targets, creates
-	// managed resource type definitions, and activates schemas.
-	typeSvc := application.NewExtensionResourceTypeService(store)
-	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
-		Router:    router,
-		TypeSvc:   typeSvc,
-		Activator: activator,
-	})
-
-	ctx := context.Background()
-	if err := addonMgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
-		t.Fatalf("enable kind addon: %v", err)
-	}
-
-	schema := kindaddon.Schema()
-	if err := addonMgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
-		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-			ID:                    "kind-local",
-			Type:                  kindaddon.TargetType,
-			Name:                  "Local Kind Provider",
-			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType, kindaddon.ManagedClusterManifestType},
-		})},
-		Schemas: []domain.ExtensionResourceSchema{schema, kindaddon.NodeSchema()},
-	}); err != nil {
-		t.Fatalf("connect kind addon: %v", err)
-	}
-
-	if err := addonMgr.Enable(ctx, gcphcpaddon.Descriptor()); err != nil {
-		t.Fatalf("enable gcphcp addon: %v", err)
-	}
-
-	gcpSchema := gcphcpaddon.Schema("gcphcp-test")
-	if err := addonMgr.Connect(ctx, gcphcpaddon.Descriptor().ID, application.ConnectInput{
-		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-			ID:                    "gcphcp-test",
-			Type:                  gcphcpaddon.TargetType,
-			Name:                  "Test GCP HCP Provider",
-			AcceptedManifestTypes: []domain.ManifestType{gcphcpaddon.ClusterManifestType},
-		})},
-		Schemas: []domain.ExtensionResourceSchema{gcpSchema},
-	}); err != nil {
-		t.Fatalf("connect gcphcp addon: %v", err)
-	}
-
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-
-	go srv.Serve(lis)
-	t.Cleanup(func() { srv.GracefulStop() })
-
-	return lis.Addr().String()
+		{
+			Descriptor: gcphcpaddon.Descriptor(),
+			Connect: application.ConnectInput{
+				Agent: recording,
+				Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+					ID:   "gcphcp-test",
+					Type: gcphcpaddon.TargetType,
+					Name: "Test GCP HCP Provider",
+					AcceptedManifestTypes: []domain.ManifestType{
+						gcphcpaddon.ClusterManifestType,
+					},
+				})},
+				Schemas: []domain.ExtensionResourceSchema{gcphcpaddon.Schema("gcphcp-test")},
+			},
+		},
+	}, nil
 }

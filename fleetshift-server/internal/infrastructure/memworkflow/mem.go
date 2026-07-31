@@ -34,12 +34,22 @@ const activityMaxAttempts = 10
 
 // Registry implements [domain.Registry] with in-memory execution.
 // Workflow instances are tracked so that event signals can be delivered
-// to the correct goroutine.
+// to the correct goroutine. Start/Wait/Close are no-ops: there is no
+// durable worker process to supervise.
 type Registry struct {
 	mu               sync.Mutex
 	instances        map[domain.FulfillmentID]*instance
 	cleanupInstances map[domain.FulfillmentID]*instance
 }
+
+// Start implements [domain.Registry]. The in-memory engine has no worker.
+func (r *Registry) Start(context.Context) error { return nil }
+
+// Wait implements [domain.Registry]. The in-memory engine has no worker.
+func (r *Registry) Wait(context.Context) error { return nil }
+
+// Close implements [domain.Registry]. The in-memory engine has no worker.
+func (r *Registry) Close(context.Context) error { return nil }
 
 type instance struct {
 	events chan []byte // JSON-serialized signal events

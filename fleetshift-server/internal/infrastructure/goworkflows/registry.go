@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cschleiden/go-workflows/backend"
@@ -40,6 +41,52 @@ type Registry struct {
 	Client          *client.Client
 	Timeout         time.Duration
 	ActivityOptions *workflow.ActivityOptions // nil uses defaultActivityOptions
+
+	cancel   context.CancelFunc
+	waitOnce sync.Once
+	waitErr  error
+}
+
+// Start begins the go-workflows worker. The worker is stopped by canceling
+// the derived run context from Close (or when the parent ctx is cancelled).
+func (r *Registry) Start(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	if err := r.Worker.Start(runCtx); err != nil {
+		cancel()
+		return fmt.Errorf("start workflow worker: %w", err)
+	}
+	r.cancel = cancel
+	return nil
+}
+
+// waitCompletion joins the worker exactly once. go-workflows'
+// WaitForCompletion closes an internal channel and is not safe to call twice.
+func (r *Registry) waitCompletion() error {
+	r.waitOnce.Do(func() {
+		r.waitErr = r.Worker.WaitForCompletion()
+	})
+	return r.waitErr
+}
+
+// Wait blocks until the worker stops or ctx is cancelled. The go-workflows
+// worker exposes cancellation/join only; poll/task failures are not claimed.
+func (r *Registry) Wait(ctx context.Context) error {
+	done := make(chan error, 1)
+	go func() { done <- r.waitCompletion() }()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// Close cancels the Start run context, then joins worker completion within ctx.
+func (r *Registry) Close(ctx context.Context) error {
+	if r.cancel != nil {
+		r.cancel()
+	}
+	return r.Wait(ctx)
 }
 
 func (r *Registry) activityOptions() workflow.ActivityOptions {
