@@ -75,7 +75,7 @@ npx nx run gui:build
 
 ## Containerized Build
 
-`Dockerfile.web` builds all frontend assets inside a UBI9 container. It is used as an init container in the compose stack — the Go backend mounts the output volume and serves the assets.
+`Dockerfile.web` (at repo root) builds all frontend assets inside a UBI9 container. It is used as an init container in the compose stack — the Go backend mounts the output volume and serves the assets.
 
 ```
 Dockerfile.web  ->  web-builder init container  ->  /srv/web volume  ->  Go backend serves /

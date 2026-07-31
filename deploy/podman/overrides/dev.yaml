@@ -13,7 +13,7 @@ services:
   web-builder:
     build:
       context: ../..
-      dockerfile: fleetshift-ui/Dockerfile.web
+      dockerfile: Dockerfile.web
     privileged: true
 
   # ── Backend — extend base image with local tooling ──────────────
