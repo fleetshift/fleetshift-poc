@@ -70,6 +70,10 @@ func TestFinish_RetainsOwnedDirOnFailure(t *testing.T) {
 	dir := env.WorkDir()
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
+	if _, err := os.Stat(filepath.Join(dir, testenv.DBFile)); !os.IsNotExist(err) {
+		t.Fatalf("%s should not exist during the run (memory SQLite); err=%v", testenv.DBFile, err)
+	}
+
 	finishEnv(t, env, false)
 	if !env.Kept() {
 		t.Fatal("Kept() = false after failure, want true")
@@ -86,6 +90,9 @@ func TestFinish_RetainsOwnedDirOnFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "artifacts", "summary.json")); err != nil {
 		t.Fatalf("artifacts/summary.json missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, testenv.DBFile)); err != nil {
+		t.Fatalf("%s missing after retention dump: %v", testenv.DBFile, err)
 	}
 }
 
@@ -126,6 +133,9 @@ func TestFinish_KeepWorkDirRetainsOnPass(t *testing.T) {
 			if _, err := os.Stat(dir); err != nil {
 				t.Fatalf("work dir missing: %v", err)
 			}
+			if _, err := os.Stat(filepath.Join(dir, testenv.DBFile)); err != nil {
+				t.Fatalf("%s missing after keep dump: %v", testenv.DBFile, err)
+			}
 		})
 	}
 }
@@ -143,6 +153,9 @@ func TestFinish_CallerOwnedWorkDirNeverRemoved(t *testing.T) {
 	}
 	if _, err := os.Stat(env.ServerLogPath()); err != nil {
 		t.Fatalf("server.log missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, testenv.DBFile)); err != nil {
+		t.Fatalf("%s missing after caller-owned Finish dump: %v", testenv.DBFile, err)
 	}
 }
 

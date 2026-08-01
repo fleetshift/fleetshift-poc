@@ -5,12 +5,14 @@ package testenv
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -23,6 +25,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery/fake"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 // Default call, eventual, startup, and teardown budgets.
@@ -37,10 +40,21 @@ const (
 	// It is not under the allow-listed artifacts root.
 	ServerLogFile = "server.log"
 
+	// DBFile is the SQLite snapshot written under [Env.WorkDir] when Finish
+	// retains the work directory (or always for caller-owned work dirs).
+	DBFile = "fleetshift.db"
+
+	// injectedSQLitePath is a Config.DBPath placeholder when the real handle
+	// is supplied via bootstrap.WithSQLiteDB (Path is not opened).
+	injectedSQLitePath = "memory"
+
 	// KeepWorkDirEnv forces retention of owned work directories after
 	// [Env.Finish] regardless of test outcome. Any non-empty value enables it.
 	KeepWorkDirEnv = "FLEETSHIFT_TESTENV_KEEP"
 )
+
+// memoryDBSeq isolates shared-cache memory databases across Start calls.
+var memoryDBSeq atomic.Uint64
 
 // Env is a started test environment for a selected profile. Exercise the
 // product through public endpoints; use Delivery/Inventory controllers
@@ -65,6 +79,11 @@ type Env struct {
 	finished    bool
 	kept        bool
 	startedAt   time.Time
+
+	// Shared-cache memory SQLite. Env closes sentinel and DB after
+	// Server.Close.
+	db         *sql.DB
+	dbSentinel *sql.Conn
 }
 
 // Option configures [Start].
@@ -85,9 +104,10 @@ func WithProfile(name string) Option {
 	return func(c *startConfig) { c.profile = name }
 }
 
-// WithWorkDir sets the private runtime directory (DB, server.log, and
-// default artifacts). When empty, Start creates a temporary directory.
-// Caller-owned directories are never removed by [Env.Finish].
+// WithWorkDir sets the private runtime directory (server.log, default
+// artifacts, and the Finish-time [DBFile] snapshot). When empty, Start
+// creates a temporary directory. Caller-owned directories are never removed
+// by [Env.Finish]; Finish always dumps [DBFile] into them.
 func WithWorkDir(dir string) Option {
 	return func(c *startConfig) { c.workDir = dir }
 }
@@ -110,8 +130,8 @@ func WithArtifactDir(dir string) Option {
 	return func(c *startConfig) { c.artifacts = dir }
 }
 
-// WorkDir returns the private runtime directory (DB, server.log, and
-// default artifacts parent).
+// WorkDir returns the private runtime directory (server.log, default
+// artifacts parent, and Finish-time [DBFile] when retained).
 func (e *Env) WorkDir() string {
 	if e == nil {
 		return ""
@@ -242,11 +262,20 @@ func (e *Env) startHermeticAPI(ctx context.Context) error {
 		return fmt.Errorf("oidc deps: %w", err)
 	}
 
-	dbPath := filepath.Join(e.dir, "fleetshift.db")
+	// Shared-cache memory SQLite avoids disk I/O during the run. Env owns
+	// the handle and sentinel; Finish dumps [DBFile] when retaining WorkDir.
+	db, sentinel, err := sqlite.OpenMemory(fmt.Sprintf("testenv-%d", memoryDBSeq.Add(1)))
+	if err != nil {
+		return fmt.Errorf("open memory sqlite: %w", err)
+	}
+	e.db = db
+	e.dbSentinel = sentinel
+
 	bcfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr: "127.0.0.1:0",
 		HTTPAddr: "127.0.0.1:0",
-		DBPath:   dbPath,
+		// Path is not opened; the handle is supplied via WithSQLiteDB.
+		DBPath: injectedSQLitePath,
 		// No production add-ons: trust-bundle placement stays unset so
 		// anonymous CreateAuthMethod can complete without targets.
 	})
@@ -258,6 +287,7 @@ func (e *Env) startHermeticAPI(ctx context.Context) error {
 	var inventoryCtrl *InventoryController
 
 	srv, err := bootstrap.Start(ctx, bcfg, e.logger,
+		bootstrap.WithSQLiteDB(db),
 		bootstrap.WithWorkflowRegistry(bootstrap.NewMemWorkflowRegistry()),
 		bootstrap.WithOIDCDeps(oidcDeps),
 		bootstrap.WithAddonAssembly(func(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
@@ -395,6 +425,18 @@ func (e *Env) Close(ctx context.Context) error {
 		}
 		e.server = nil
 	}
+	if e.dbSentinel != nil {
+		if err := e.dbSentinel.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		e.dbSentinel = nil
+	}
+	if e.db != nil {
+		if err := e.db.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		e.db = nil
+	}
 	if e.idp != nil {
 		if err := e.idp.Close(); err != nil {
 			errs = append(errs, err)
@@ -423,6 +465,11 @@ func (e *Env) Close(ctx context.Context) error {
 // Start-owned directories are removed on a clean pass, and retained on
 // failure, close error, [WithKeepWorkDir], or [KeepWorkDirEnv].
 // Caller-owned [WithWorkDir] directories are never removed.
+//
+// When the work directory will remain (retained Start-owned, or any
+// caller-owned dir), Finish quiesces the server, dumps SQLite [DBFile]
+// into WorkDir, then releases the Env-owned DB handle via Close so the
+// snapshot is present for debugging.
 // Finish is idempotent. After the first call, [Env.Kept] reports whether
 // a Start-owned work directory was retained.
 func (e *Env) Finish(ctx context.Context, passed bool) error {
@@ -433,14 +480,33 @@ func (e *Env) Finish(ctx context.Context, passed bool) error {
 		return nil
 	}
 	e.finished = true
-	closeErr := e.Close(ctx)
-	keep := e.ownedDir && (e.keepWorkDir || !passed || closeErr != nil)
+	// Retention is decided before DB close so a dump can run after the
+	// server is quiesced but while the Env-owned DB handle is still open.
+	keep := e.ownedDir && (e.keepWorkDir || !passed)
+	var serverErr error
+	if e.server != nil {
+		serverErr = e.server.Close(ctx)
+		e.server = nil
+	}
+	dumpErr := e.dumpDBIfRetaining(keep)
+	closeErr := errors.Join(serverErr, dumpErr, e.Close(ctx))
+	if e.ownedDir && closeErr != nil {
+		keep = true
+	}
 	e.kept = keep
 	if err := e.applyRetention(keep); err != nil {
 		e.kept = true // still on disk
 		return errors.Join(closeErr, err)
 	}
 	return closeErr
+}
+
+// dumpDBIfRetaining writes [DBFile] when the work dir will remain on disk.
+func (e *Env) dumpDBIfRetaining(keep bool) error {
+	if e == nil || e.db == nil || !(keep || !e.ownedDir) {
+		return nil
+	}
+	return sqlite.DumpToFile(e.db, filepath.Join(e.dir, DBFile))
 }
 
 // Kept reports whether Finish retained a Start-owned work directory.

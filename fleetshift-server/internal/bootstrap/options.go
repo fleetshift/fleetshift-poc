@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"time"
 
@@ -18,6 +19,7 @@ type options struct {
 	workflowRegistry domain.Registry
 	oidcDeps         *OIDCDeps
 	addonAssembly    AddonAssemblyFunc
+	sqliteDB         *sql.DB
 
 	shutdownGrace time.Duration
 }
@@ -34,6 +36,14 @@ func defaultOptions() options {
 // go-workflows registry from Config.Database.
 func WithWorkflowRegistry(reg domain.Registry) Option {
 	return func(o *options) { o.workflowRegistry = reg }
+}
+
+// WithSQLiteDB substitutes the SQLite *sql.DB used for persistence.
+// Config.Database must be [SQLite]; Path is not opened. The caller retains
+// ownership and must Close the database after Server.Close (or after a
+// failed Start).
+func WithSQLiteDB(db *sql.DB) Option {
+	return func(o *options) { o.sqliteDB = db }
 }
 
 // WithOIDCDeps substitutes discovery and token verification dependencies.

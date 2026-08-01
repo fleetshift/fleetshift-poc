@@ -56,8 +56,8 @@ func AssertAllowListedArtifacts(t *testing.T, env *Env) {
 
 	workDir := filepath.Dir(root)
 	for _, private := range []string{
-		filepath.Join(workDir, "fleetshift.db"),
-		filepath.Join(workDir, "oidc-ca"),
+		filepath.Join(workDir, DBFile),
+		filepath.Join(workDir, ServerLogFile),
 	} {
 		rel, err := filepath.Rel(root, private)
 		if err != nil {

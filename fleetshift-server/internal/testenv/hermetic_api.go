@@ -18,11 +18,15 @@ const (
 // HermeticCapabilities is the capability set published after hermetic-api
 // readiness. Only these proven capabilities are advertised for the profile.
 var HermeticCapabilities = []string{
-	"real-composition",
-	"temp-sqlite",
+	// Shared-cache in-memory SQLite via the production opener
+	"sqlite-memory",
+	// In-process memworkflow.Registry — serialization/concurrency only
 	"memworkflow",
+	// Fake delivery agent driven by testenv.Delivery (gate/fail/progress)
 	"scripted-delivery",
+	// Inventory state injected through testenv.Inventory for the hermetic Widget schema
 	"controlled-inventory",
+	// oidctest programmatic tokens and JWKS (IssueToken)
 	"programmatic-identity",
 }
 

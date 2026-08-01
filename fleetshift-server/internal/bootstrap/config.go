@@ -42,7 +42,9 @@ type Database interface {
 	database()
 }
 
-// SQLite is file-backed SQLite persistence.
+// SQLite selects SQLite persistence. Path is the filesystem path or DSN
+// passed to database/sql when Start opens the database. When
+// [WithSQLiteDB] is set, Path is not opened.
 type SQLite struct {
 	Path string
 }

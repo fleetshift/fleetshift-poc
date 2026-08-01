@@ -1,6 +1,6 @@
-// Package fake provides a programmable [domain.DeliveryAgent] for
-// hermetic scenarios. Behavior is driven through a typed [Controller];
-// delivery outcomes are reported asynchronously via the injected
+// Package fake provides a programmable [domain.DeliveryAgent].
+// Behavior is driven through a typed [Controller]; delivery
+// outcomes are reported asynchronously via the injected
 // [domain.DeliveryReporter].
 package fake
 
