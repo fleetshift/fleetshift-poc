@@ -7,8 +7,8 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "task build:cli",
-        "cwd": "."
+        "command": "go build -o ../bin/fleetctl ./cmd/fleetctl",
+        "cwd": "fleetshift-cli"
       },
       "inputs": [
         "{projectRoot}/**/*.go",
@@ -20,8 +20,8 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "task test:cli",
-        "cwd": "."
+        "command": "go test -count=1 ./...",
+        "cwd": "fleetshift-cli"
       },
       "inputs": [
         "{projectRoot}/**/*.go",

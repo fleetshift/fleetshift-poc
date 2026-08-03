@@ -6,7 +6,8 @@
 # Used as an init container in the compose stack:
 #   command: ["cp", "-a", "/srv/web/.", "/output/"]
 
-FROM registry.access.redhat.com/ubi9/nodejs-22:latest
+# ── Stage 1: build ──────────────────────────────────────────────
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS builder
 
 USER 0
 WORKDIR /build
@@ -45,7 +46,11 @@ RUN --mount=type=cache,target=/root/.npm \
     && npm run build:ci -w @fleetshift/mock-ui-plugins \
     && node fleetshift-ui/scripts/generate-plugin-registry.mjs \
     && npm run build -w @fleetshift/gui \
-    && node fleetshift-ui/scripts/merge-web.mjs \
-    && cp -a fleetshift-ui/web/. /srv/web/
+    && node fleetshift-ui/scripts/merge-web.mjs
+
+# ── Stage 2: runtime (static assets only) ───────────────────────
+FROM registry.access.redhat.com/ubi9-micro:latest
+
+COPY --from=builder /build/fleetshift-ui/web/ /srv/web/
 
 CMD ["cp", "-a", "/srv/web/.", "/output/"]
