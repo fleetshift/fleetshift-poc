@@ -8,11 +8,11 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, rsp
 
 ## Packages
 
-- `packages/gui` — Shell SPA (routing, auth, search, layout). No business logic.
-- `packages/mock-ui-plugins` — All plugins under `src/plugins/<name>-plugin/`.
-- `packages/common` — Shared types, utils, cross-plugin hooks. Dual CJS/ESM.
-- `packages/build-utils` — Webpack helpers (PF transforms, ts-loader). No build step.
-- `packages/e2e` — Playwright tests.
+- `gui` — Shell SPA (routing, auth, search, layout). No business logic.
+- `mock-ui-plugins` — All plugins under `src/plugins/<name>-plugin/`.
+- `common` — Shared types, utils, cross-plugin hooks. Dual CJS/ESM.
+- `build-utils` — Webpack helpers (PF transforms, ts-loader). No build step.
+- `e2e` — Playwright tests.
 
 ## Components
 
@@ -33,8 +33,8 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, rsp
 
 - Unit tests for edge cases and bug candidates, not happy-path snapshots.
 - Tests next to code (`__tests__/` or `.test.ts`). Vitest + `@testing-library/react`.
-- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright-ct.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `packages/gui/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `packages/mock-ui-plugins/src/plugins/gcphcp-plugin/__tests__/` for patterns.
-- E2E in `packages/e2e`, Playwright.
+- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `gui/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `mock-ui-plugins/src/plugins/gcphcp-plugin/__tests__/` for patterns.
+- E2E in `e2e`, Playwright.
 
 ### Playwright CT notes
 
@@ -44,7 +44,7 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, rsp
 
 ## Data Driven Forms (DDF)
 
-Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`. See `packages/mock-ui-plugins/src/plugins/gcphcp-plugin/CreateGcpHcpWizard.tsx` for reference implementation.
+Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`. See `mock-ui-plugins/src/plugins/gcphcp-plugin/CreateGcpHcpWizard.tsx` for reference implementation.
 
 - **Custom components**: DDF's pf4-component-mapper components are PF4-era. For PF6 controls (FormSelect, etc.), create custom DDF components using `useFieldApi` from `react-form-renderer`. Register in `componentMapper` with a custom string key. See `ddfComponents/DdfFormSelect.tsx`.
 - **Wizard steps**: Use `nextStep: "step-name"` to chain steps (without it, DDF shows "Submit" instead of "Next"). The DDF wizard step template uses PF4 class `pf-c-form`. Override with `StepTemplate` using `<div className="pf-v6-c-form">` — not `<Form>` to avoid form-in-form since `FormTemplate` already wraps in `<form>`.
@@ -132,12 +132,8 @@ npx nx run gui:dev:watch   # dev server with hot reload
 npx nx run ui:lint         # eslint + stylelint
 npx nx run ui:test         # vitest
 
-# Direct npm scripts still work:
-npm run build:all          # common → plugins → GUI → merge
-npm run lint               # eslint + stylelint
-npm run lint:fix           # auto-fix both
-npm run lint:css           # stylelint only
-npm test                   # vitest
+# Nx is the only task runner. fleetshift-ui has no package.json scripts.
+# npm install runs from the repo root (workspaces declared there).
 ```
 
 ## Diagrams
@@ -146,10 +142,10 @@ npm test                   # vitest
 - **Code > diagrams.** Changed search/extensions/build/plugin code → validate `.c4` still matches. Diverged → update diagram.
 - **Generic, not specific.** Model pattern (modules → extensionPoints → extensions), not instances. Specific types = examples in descriptions only.
 - Current:
-  - `feature-contract/` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `packages/build-utils/src/extensions/`, `packages/mock-ui-plugins/rspack.config.ts`, `packages/gui/src/extensions/`.
+  - `feature-contract/` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `build-utils/src/extensions/`, `mock-ui-plugins/rspack.config.ts`, `gui/src/extensions/`.
   - `extension-validation/` — self-validation and provider-side validation for extensions.
   - `module-groups/` — module grouping model.
-  - `search/` — indexing, extensionPoint linking, query/grouping. Trigger: `packages/gui/src/components/Search/`.
+  - `search/` — indexing, extensionPoint linking, query/grouping. Trigger: `gui/src/components/Search/`.
 
 ## Verification
 

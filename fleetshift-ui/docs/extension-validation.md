@@ -34,7 +34,7 @@ The trust boundary has two sides, and **all extension types** must participate �
 
 ### `ExtensionValidationResult`
 
-New type in `packages/build-utils/src/extensions/types.ts`. Used exclusively by self-validation (`isValidExtension`). Provider validation returns boolean only — reasons are logged inside the function.
+New type in `build-utils/src/extensions/types.ts`. Used exclusively by self-validation (`isValidExtension`). Provider validation returns boolean only — reasons are logged inside the function.
 
 ```typescript
 /**
@@ -132,7 +132,7 @@ This gives full control: `BaseExtensionProperties` is the mandatory, non-overrid
 
 ### Runtime types
 
-New file `packages/common/src/validation.ts` (re-exported from `@fleetshift/common`). These types live in common because any plugin can be an extension point owner — not just the shell:
+New file `common/src/validation.ts` (re-exported from `@fleetshift/common`). These types live in common because any plugin can be an extension point owner — not just the shell:
 
 ```typescript
 export type ExtensionValidationResult = {
@@ -192,13 +192,13 @@ All builder functions (`createModule()`, `createModuleGroup()`, `createSetup()`,
 
 For `createModule()`, `extensionPoints` entries now require a `validate` CodeRef. TypeScript enforces this through the updated `ExtensionPointDeclaration` type.
 
-**Affected code:** `packages/build-utils/src/extensions/validate.ts`, `packages/build-utils/src/extensions/types.ts`
+**Affected code:** `build-utils/src/extensions/validate.ts`, `build-utils/src/extensions/types.ts`
 
 ## Runtime Changes
 
 ### New hook: `useValidatedExtensions`
 
-New file `packages/common/src/useValidatedExtensions.ts` (re-exported from `@fleetshift/common`). Any plugin that owns an extension point needs this hook:
+New file `common/src/useValidatedExtensions.ts` (re-exported from `@fleetshift/common`). Any plugin that owns an extension point needs this hook:
 
 ```typescript
 function useValidatedExtensions<T extends Extension>(
@@ -607,7 +607,7 @@ sequenceDiagram
 
 ## Debug Page
 
-The `/debug` page (`packages/gui/src/pages/DebugPage.tsx`) gains a new accordion panel:
+The `/debug` page (`gui/src/pages/DebugPage.tsx`) gains a new accordion panel:
 
 - **"Extension Validation"** panel showing:
   - Count: N validated, M rejected
@@ -618,7 +618,7 @@ The `/debug` page (`packages/gui/src/pages/DebugPage.tsx`) gains a new accordion
 
 ## Migration
 
-### Phase 1: Types and Build Validation (packages/build-utils)
+### Phase 1: Types and Build Validation (build-utils)
 
 1. Add `ExtensionValidationResult` type to `types.ts`.
 2. Add required `isValidExtension: EncodedCodeRef` to `BaseExtensionProperties` (all types inherit it).
@@ -636,10 +636,10 @@ The `/debug` page (`packages/gui/src/pages/DebugPage.tsx`) gains a new accordion
 
 ### Phase 2: Runtime Types and Hook
 
-1. Add `validation.ts` with runtime types (including `ValidationRejectionSource`, `SelfValidationCache`) to `packages/common/src/` and re-export from `@fleetshift/common`. Plugins that own extension points need these types.
-2. Add `useValidatedExtensions.ts` hook in `packages/common/src/` — implements both self-validation and provider-validation passes with caching. Available to any plugin, not just the shell.
+1. Add `validation.ts` with runtime types (including `ValidationRejectionSource`, `SelfValidationCache`) to `common/src/` and re-export from `@fleetshift/common`. Plugins that own extension points need these types.
+2. Add `useValidatedExtensions.ts` hook in `common/src/` — implements both self-validation and provider-validation passes with caching. Available to any plugin, not just the shell.
 3. Add extension point `validate` CodeRef resolution logic (lookup extension point declaration from parent module, resolve `validate` CodeRef).
-4. Create a Scalprum shared store for validation results in `packages/gui/` (shell exposes it). Add `useValidationResults` hook in `packages/common/` — wraps the Scalprum store accessor, re-exported from `@fleetshift/common` so any plugin can read validation state without depending on React context or singletons.
+4. Create a Scalprum shared store for validation results in `gui/` (shell exposes it). Add `useValidationResults` hook in `common/` — wraps the Scalprum store accessor, re-exported from `@fleetshift/common` so any plugin can read validation state without depending on React context or singletons.
 
 ### Phase 3: Consumption Site Migration
 
@@ -647,7 +647,7 @@ The `/debug` page (`packages/gui/src/pages/DebugPage.tsx`) gains a new accordion
 2. Update `AppNav.tsx` to use `useValidatedExtensions(isModuleExtension)`.
 3. Update `useSetupExtensions.ts` to use `useValidatedExtensions(isSetupExtension)`.
 
-### Phase 4: Plugin Updates (packages/mock-ui-plugins)
+### Phase 4: Plugin Updates (mock-ui-plugins)
 
 1. Add `isValidExtension` CodeRef to **all** extensions across all plugins (module, module-group, setup, cluster-provider, onboarding-action).
 2. Implement self-validation functions and expose them in `exposedModules`. For simple types, a trivial `() => ({ valid: true })` is acceptable.

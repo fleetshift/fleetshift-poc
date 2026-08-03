@@ -100,10 +100,10 @@ tasks:
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}}{{end}}
         .
       - >-
-        podman build -f fleetshift-ui/Dockerfile.web
+        podman build -f Dockerfile.web
         -t quay.io/stolostron/fleetshift-web:{{.IMAGE_TAG}}
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-web:{{.IMAGE_TAG}}{{end}}
-        fleetshift-ui
+        .
 
   image:aio:
     desc: Build all-in-one image from locally built server-local + web

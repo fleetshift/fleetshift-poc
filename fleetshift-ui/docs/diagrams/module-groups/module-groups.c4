@@ -1,5 +1,5 @@
 // FleetShift UI — Module Groups Architecture
-// Source of truth: docs/module-groups.md, packages/build-utils/src/extensions/
+// Source of truth: docs/module-groups.md, build-utils/src/extensions/
 //
 // How plugins declare module groups for nested navigation,
 // how the build validates group references (same-plugin only),

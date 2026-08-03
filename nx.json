@@ -15,8 +15,27 @@
           "name": "docker:run"
         }
       }
+    },
+    {
+      "plugin": "@nx/playwright/plugin",
+      "options": {
+        "targetName": "test:ct",
+        "ciTargetName": "test:ct:ci"
+      }
     }
   ],
+  "namedInputs": {
+    "uiSource": [
+      "{projectRoot}/src/**/*.{ts,tsx,js,jsx}",
+      "{projectRoot}/tsconfig*.json"
+    ],
+    "uiStyles": [
+      "{projectRoot}/src/**/*.{css,scss}"
+    ],
+    "eslintConfig": [
+      "{workspaceRoot}/fleetshift-ui/eslint.config.mjs"
+    ]
+  },
   "targetDefaults": {
     "build": {
       "cache": true
@@ -25,7 +44,12 @@
       "cache": true
     },
     "lint": {
-      "cache": true
+      "cache": true,
+      "inputs": ["uiSource", "eslintConfig"]
+    },
+    "lint:css": {
+      "cache": true,
+      "inputs": ["uiStyles"]
     }
   }
 }

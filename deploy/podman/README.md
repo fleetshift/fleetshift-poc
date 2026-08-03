@@ -54,7 +54,7 @@ At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`
 
 ## All-in-one image
 
-Published image `quay.io/stolostron/fleetshift:latest` bundles the server (from `fleetshift-server-local`, including a container runtime CLI for kind), baked-in UI assets, and defaults to serving the UI. Build it from this monorepo with `task image:aio`: that builds `Dockerfile` / `Dockerfile.local` / `fleetshift-ui/Dockerfile.web`, then assembles via `Dockerfile.fleetshift` without duplicating those Dockerfiles. A thin reassemble from already-published component tags is still possible by passing `--build-arg SERVER_IMAGE=...` and `--build-arg WEB_IMAGE=...`.
+Published image `quay.io/stolostron/fleetshift:latest` bundles the server (from `fleetshift-server-local`, including a container runtime CLI for kind), baked-in UI assets, and defaults to serving the UI. Build it from this monorepo with `task image:aio`: that builds `Dockerfile` / `Dockerfile.local` / `Dockerfile.web`, then assembles via `Dockerfile.fleetshift` without duplicating those Dockerfiles. A thin reassemble from already-published component tags is still possible by passing `--build-arg SERVER_IMAGE=...` and `--build-arg WEB_IMAGE=...`.
 
 API + UI (runs as non-root by default):
 
@@ -133,7 +133,7 @@ All tasks use the `podman:` namespace (alias `pd:`).
 
 ## Full Stack Dev Mode
 
-`task podman:dev` builds frontend assets in a container (using `Dockerfile.web` from the UI repo) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required. Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo.
+`task podman:dev` builds frontend assets in a container (using `Dockerfile.web`) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required. Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo.
 
 After changing Go code, run `task podman:rebuild` to rebuild and restart. After changing frontend code, run `task podman:clean` then `task podman:dev` to rebuild the web assets.
 

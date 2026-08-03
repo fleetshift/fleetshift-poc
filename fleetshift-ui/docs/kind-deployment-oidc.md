@@ -57,7 +57,7 @@ kind get kubeconfig --name <cluster-name> | kubectl --kubeconfig /dev/stdin get 
 
 **Fix (UI):** The deployment form now defaults the Kind Config field to empty. The manifest sent is just `{"name": "cluster-name"}` — no `config` field. The backend generates the config automatically.
 
-**File:** `packages/mock-ui-plugins/src/plugins/management-plugin/DeploymentsPage.tsx`
+**File:** `mock-ui-plugins/src/plugins/management-plugin/DeploymentsPage.tsx`
 
 ### Issue 2: OIDC issuer URL unreachable from kind containers
 

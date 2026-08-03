@@ -12,7 +12,7 @@ services:
 
   web-builder:
     build:
-      context: ${UI_DIR:-../../../fleetshift-user-interface}
+      context: ../..
       dockerfile: Dockerfile.web
     privileged: true
 

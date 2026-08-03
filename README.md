@@ -32,7 +32,7 @@ npx nx run-many -t test     # run target across all projects (parallel)
 npx nx affected -t test     # only test what changed
 ```
 
-Projects: `server`, `cli`, `proto`, `gui`, `common`, `build-utils`, `plugins`, `e2e`.
+Projects: `server`, `cli`, `proto`, `gui`, `common`, `build-utils`, `plugins`.
 
 ## Build
 
@@ -59,10 +59,9 @@ npx nx run gui:dev          # dev server (http://localhost:8085)
 npx nx run gui:dev:watch    # dev server with hot reload
 npx nx run gui:test:ct      # component tests (playwright)
 npx nx run plugins:test:ct  # plugin component tests
-npx nx run e2e:e2e          # end-to-end tests
 ```
 
-UI packages: `gui` (SPA shell), `common` (shared types), `build-utils` (rspack helpers), `plugins` (12 MF remotes), `e2e` (playwright).
+UI packages: `gui` (SPA shell), `common` (shared types), `build-utils` (rspack helpers), `plugins` (12 MF remotes)
 
 ## Test
 

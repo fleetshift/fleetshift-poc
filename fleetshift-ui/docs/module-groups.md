@@ -200,7 +200,7 @@ Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
 3. **Unique ids within group.** Two modules in the same group cannot share an id.
 4. **Group id format.** Must match `/^[a-z][a-z0-9-]*$/` (same as module ids) since it becomes a URL segment.
 
-**Affected code:** `validateExtensionSet` in `packages/build-utils/src/extensions/validate.ts`, `createModuleGroup` builder in `packages/build-utils/src/extensions/builders.ts`, types in `packages/build-utils/src/extensions/types.ts`.
+**Affected code:** `validateExtensionSet` in `build-utils/src/extensions/validate.ts`, `createModuleGroup` builder in `build-utils/src/extensions/builders.ts`, types in `build-utils/src/extensions/types.ts`.
 
 ## Backend: `navLayout` Changes
 

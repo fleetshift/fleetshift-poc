@@ -1,0 +1,51 @@
+# Frontend builder — produces /srv/web with all static assets.
+#
+# Build context must be the monorepo root (contains package.json,
+# package-lock.json, and workspace declarations).
+#
+# Used as an init container in the compose stack:
+#   command: ["cp", "-a", "/srv/web/.", "/output/"]
+
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest
+
+USER 0
+WORKDIR /build
+
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
+# Copy package manifests for layer caching
+COPY package.json package-lock.json ./
+COPY fleetshift-ui/common/package.json fleetshift-ui/common/
+COPY fleetshift-ui/build-utils/package.json fleetshift-ui/build-utils/
+COPY fleetshift-ui/gui/package.json fleetshift-ui/gui/
+COPY fleetshift-ui/mock-ui-plugins/package.json fleetshift-ui/mock-ui-plugins/
+
+# Copy tsconfig chain
+COPY tsconfig.json ./
+COPY fleetshift-ui/tsconfig.json fleetshift-ui/
+
+# Copy all source
+COPY fleetshift-ui/common/ fleetshift-ui/common/
+COPY fleetshift-ui/build-utils/ fleetshift-ui/build-utils/
+COPY fleetshift-ui/gui/ fleetshift-ui/gui/
+COPY fleetshift-ui/mock-ui-plugins/ fleetshift-ui/mock-ui-plugins/
+COPY fleetshift-ui/scripts/merge-web.mjs fleetshift-ui/scripts/merge-web.mjs
+COPY fleetshift-ui/scripts/generate-plugin-registry.mjs fleetshift-ui/scripts/generate-plugin-registry.mjs
+COPY fleetshift-ui/scripts/generate-icons.mjs fleetshift-ui/scripts/generate-icons.mjs
+
+# Install + build in one RUN so node_modules cache mount is available throughout
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/build/node_modules \
+    npm install --include-workspace-root \
+    -w @fleetshift/common \
+    -w @fleetshift/build-utils \
+    -w @fleetshift/gui \
+    -w @fleetshift/mock-ui-plugins \
+    && npm run build -w @fleetshift/common \
+    && npm run build:ci -w @fleetshift/mock-ui-plugins \
+    && node fleetshift-ui/scripts/generate-plugin-registry.mjs \
+    && npm run build -w @fleetshift/gui \
+    && node fleetshift-ui/scripts/merge-web.mjs \
+    && cp -a fleetshift-ui/web/. /srv/web/
+
+CMD ["cp", "-a", "/srv/web/.", "/output/"]

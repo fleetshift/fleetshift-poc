@@ -66,7 +66,7 @@ Using `resourceType` as the key in `properties.resourceType` means:
 Follows the existing `createClusterProvider` pattern — CodeRefs are passed already wrapped as `{ $codeRef: "Module.export" }`:
 
 ```typescript
-// packages/build-utils/src/extensions/searchResultRenderer.ts
+// build-utils/src/extensions/searchResultRenderer.ts
 
 export const RENDER_SEARCH_TYPE = "fleetshift.render-search" as const;
 
@@ -170,7 +170,7 @@ Both addons route to `ClustersModule` in `core-plugin` — the clusters detail p
 The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `fleetshift.render-search` exactly:
 
 ```typescript
-// packages/gui/src/extensions/isSearchResultRendererExtension.ts
+// gui/src/extensions/isSearchResultRendererExtension.ts
 
 export function isSearchResultRendererExtension(
   e: Extension,
@@ -332,7 +332,7 @@ Three render paths:
 `inventorySearch` is currently a plain async function. To consume resolved extensions, it becomes a hook that uses `useResolvedExtensions` from the SDK:
 
 ```typescript
-// packages/gui/src/hooks/useInventorySearch.tsx
+// gui/src/hooks/useInventorySearch.tsx
 
 function useInventorySearch(): {
   search: (term: string) => Promise<SearchResultItem[]>;
@@ -407,30 +407,30 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 
 | File | Layer | What |
 |------|-------|------|
-| `packages/build-utils/src/extensions/searchResultRenderer.ts` | Build | `RENDER_SEARCH_TYPE`, `createSearchResultRenderer`, types |
-| `packages/build-utils/src/extensions/__tests__/searchResultRenderer.test.ts` | Build | Builder output, validation, `validateExtensionSet` integration |
-| `packages/common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
-| `packages/gui/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
-| `packages/gui/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
-| `packages/mock-ui-plugins/src/plugins/kind-plugin/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
-| `packages/mock-ui-plugins/src/plugins/gcphcp-plugin/GcpHcpSearchResult.tsx` | Plugin | `resolveGcpHcpCluster`, `GcpHcpClusterIcon` re-export |
+| `build-utils/src/extensions/searchResultRenderer.ts` | Build | `RENDER_SEARCH_TYPE`, `createSearchResultRenderer`, types |
+| `build-utils/src/extensions/__tests__/searchResultRenderer.test.ts` | Build | Builder output, validation, `validateExtensionSet` integration |
+| `common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
+| `gui/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
+| `gui/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
+| `mock-ui-plugins/src/plugins/kind-plugin/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
+| `mock-ui-plugins/src/plugins/gcphcp-plugin/GcpHcpSearchResult.tsx` | Plugin | `resolveGcpHcpCluster`, `GcpHcpClusterIcon` re-export |
 
 ### Modified
 
 | File | Layer | What |
 |------|-------|------|
-| `packages/build-utils/src/extensions/validate.ts` | Build | `case RENDER_SEARCH_TYPE` in validation switch |
-| `packages/build-utils/src/extensions/index.ts` | Build | Re-export builder, type constant, types |
-| `packages/common/src/index.ts` | Common | Re-export `SearchResultRender`, `InventoryResource`, `SearchResultResolve` |
-| `packages/mock-ui-plugins/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` for both plugins |
-| `packages/gui/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
-| `packages/gui/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
+| `build-utils/src/extensions/validate.ts` | Build | `case RENDER_SEARCH_TYPE` in validation switch |
+| `build-utils/src/extensions/index.ts` | Build | Re-export builder, type constant, types |
+| `common/src/index.ts` | Common | Re-export `SearchResultRender`, `InventoryResource`, `SearchResultResolve` |
+| `mock-ui-plugins/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` for both plugins |
+| `gui/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
+| `gui/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
 
 ### Deleted
 
 | File | Why |
 |------|-----|
-| `packages/gui/src/components/Search/inventorySearch.ts` | Replaced by `useInventorySearch` hook |
+| `gui/src/components/Search/inventorySearch.ts` | Replaced by `useInventorySearch` hook |
 
 ### Not changed
 

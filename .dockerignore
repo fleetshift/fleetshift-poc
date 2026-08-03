@@ -13,8 +13,12 @@
 .env
 .env.*
 
-# Repo areas not needed for server/cli image builds
-# (Dockerfile only COPYs fleetshift-server/ and fleetshift-cli/)
+# Node / JS artifacts (web builder selectively COPYs what it needs)
+**/node_modules
+fleetshift-ui/**/dist
+fleetshift-ui/web
+
+# Repo areas not needed for builds
 bin
 **/bin/
 poc

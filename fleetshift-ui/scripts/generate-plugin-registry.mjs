@@ -3,7 +3,7 @@ import { resolve, dirname, relative, sep } from "path";
 import { fileURLToPath } from "url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const distDir = resolve(root, "packages/mock-ui-plugins/dist");
+const distDir = resolve(root, "mock-ui-plugins/dist");
 const outputDir = process.argv[2] ? resolve(process.argv[2]) : distDir;
 
 const pluginMeta = [
