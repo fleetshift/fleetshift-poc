@@ -3,11 +3,14 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/onsi/gomega"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -127,7 +130,13 @@ func (s *apiScenario) WaitUntilCreatingAndReconciling(id string) {
 	s.waitDeployment(id, func(g Gomega, dep *pb.Deployment) {
 		g.Expect(dep.GetState()).To(Equal(pb.Deployment_STATE_CREATING))
 		g.Expect(dep.GetReconciling()).To(BeTrue())
-		g.Expect(s.env.Delivery.Calls()).NotTo(BeEmpty())
+		var delivers int
+		for _, c := range s.env.Delivery.Calls() {
+			if c.Kind == fake.CallDeliver {
+				delivers++
+			}
+		}
+		g.Expect(delivers).To(BeNumerically(">=", 1))
 	})
 }
 
@@ -145,12 +154,14 @@ func (s *apiScenario) WaitUntilGone(id string) {
 	defer pollCancel()
 	s.g.Eventually(func(g Gomega) {
 		_, err := s.getDeployment(pollCtx, id)
-		g.Expect(err).To(HaveOccurred())
+		g.Expect(status.Code(err)).To(Equal(codes.NotFound))
 	}).WithContext(pollCtx).WithPolling(testenv.DefaultEventualPoll).Should(Succeed())
 }
 
 func (s *apiScenario) WaitUntilProgressObserved(message string) {
 	s.t.Helper()
+	pollCtx, pollCancel := context.WithTimeout(context.Background(), testenv.DefaultEventualTimeout)
+	defer pollCancel()
 	s.g.Eventually(func(g Gomega) {
 		var progress int
 		for _, r := range s.env.Delivery.Reports() {
@@ -159,7 +170,7 @@ func (s *apiScenario) WaitUntilProgressObserved(message string) {
 			}
 		}
 		g.Expect(progress).To(BeNumerically(">=", 1))
-	}).WithTimeout(testenv.DefaultEventualTimeout).WithPolling(testenv.DefaultEventualPoll).Should(Succeed())
+	}).WithContext(pollCtx).WithPolling(testenv.DefaultEventualPoll).Should(Succeed())
 }
 
 func (s *apiScenario) LabelInventory(name string, labels map[string]string) {
@@ -185,9 +196,14 @@ func (s *apiScenario) WaitUntilQueryFinds(filter, nameSuffix string) {
 			},
 		)
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(page.GetResources()).NotTo(BeEmpty())
-		g.Expect(page.GetResources()[0].GetName()).To(HaveSuffix(nameSuffix))
-		g.Expect(page.GetResources()[0].GetResourceType()).To(Equal(string(testenv.HermeticInventoryType)))
+		matched := false
+		for _, r := range page.GetResources() {
+			if r.GetResourceType() == string(testenv.HermeticInventoryType) && strings.HasSuffix(r.GetName(), nameSuffix) {
+				matched = true
+				break
+			}
+		}
+		g.Expect(matched).To(BeTrue(), "query results should include %s of type %s", nameSuffix, testenv.HermeticInventoryType)
 	}).WithContext(pollCtx).WithPolling(testenv.DefaultEventualPoll).Should(Succeed())
 }
 

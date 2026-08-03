@@ -28,7 +28,7 @@ func openPersistence(database Database, openedSQLite *sql.DB) (persistence, erro
 	switch db := database.(type) {
 	case Postgres:
 		if openedSQLite != nil {
-			return persistence{}, fmt.Errorf("WithSQLiteDB requires SQLite config, got PostgreSQL")
+			return persistence{}, fmt.Errorf("WithSQLiteDBAndRegistry requires SQLite config, got PostgreSQL")
 		}
 		sqlDB, err := pgstore.Open(db.DriverDSN)
 		if err != nil {
@@ -58,6 +58,6 @@ func openPersistence(database Database, openedSQLite *sql.DB) (persistence, erro
 			activeResources: activeResources,
 		}, nil
 	default:
-		return persistence{}, fmt.Errorf("unsupported database config %T", database)
+		return persistence{}, fmt.Errorf("unsupported database config %s", databaseKind(database))
 	}
 }

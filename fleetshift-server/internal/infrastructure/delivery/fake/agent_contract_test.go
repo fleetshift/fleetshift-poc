@@ -194,6 +194,69 @@ func TestContract_QueueSuccessResetsMode(t *testing.T) {
 	rep.waitResults(t, 2)
 }
 
+func TestContract_QueueSuccessUnblocksInFlightGate(t *testing.T) {
+	rep := &recordingReporter{}
+	agent, ctrl := fake.New(rep)
+
+	if err := ctrl.Gate(); err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- agent.Deliver(context.Background(), testTarget(), "f1:t1", nil, domain.DeliveryAuth{}, nil, 1)
+	}()
+	waitCalls(t, ctrl, 1)
+
+	ctrl.QueueSuccess()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Deliver after QueueSuccess: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Deliver still blocked after QueueSuccess")
+	}
+	rep.waitResults(t, 1)
+}
+
+func TestContract_InjectTransientFailureUnblocksInFlightGate(t *testing.T) {
+	rep := &recordingReporter{}
+	agent, ctrl := fake.New(rep)
+
+	if err := ctrl.Gate(); err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- agent.Deliver(context.Background(), testTarget(), "f1:t1", nil, domain.DeliveryAuth{}, nil, 1)
+	}()
+	waitCalls(t, ctrl, 1)
+
+	if err := ctrl.InjectTransientFailure(1); err != nil {
+		t.Fatalf("InjectTransientFailure: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("in-flight Deliver after InjectTransientFailure: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Deliver still blocked after InjectTransientFailure")
+	}
+	rep.waitResults(t, 1)
+
+	// Transient applies to subsequent calls, not the unblocked in-flight one.
+	if err := agent.Deliver(context.Background(), testTarget(), "f1:t1", nil, domain.DeliveryAuth{}, nil, 2); err == nil {
+		t.Fatal("expected transient failure on next Deliver")
+	}
+	if err := agent.Deliver(context.Background(), testTarget(), "f1:t1", nil, domain.DeliveryAuth{}, nil, 3); err != nil {
+		t.Fatalf("Deliver after transient budget: %v", err)
+	}
+	rep.waitResults(t, 2)
+}
+
 func TestContract_ControllerInvalidOps(t *testing.T) {
 	_, ctrl := fake.New(&recordingReporter{})
 

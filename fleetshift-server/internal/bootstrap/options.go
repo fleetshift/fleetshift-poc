@@ -33,17 +33,33 @@ func defaultOptions() options {
 
 // WithWorkflowRegistry substitutes the workflow registry (registration and
 // Start/Wait/Close lifecycle). When omitted, Start builds the production
-// go-workflows registry from Config.Database.
+// go-workflows registry from Config.Database. reg must be non-nil.
 func WithWorkflowRegistry(reg domain.Registry) Option {
+	if reg == nil {
+		panic("bootstrap.WithWorkflowRegistry: registry is nil")
+	}
 	return func(o *options) { o.workflowRegistry = reg }
 }
 
-// WithSQLiteDB substitutes the SQLite *sql.DB used for persistence.
-// Config.Database must be [SQLite]; Path is not opened. The caller retains
-// ownership and must Close the database after Server.Close (or after a
-// failed Start).
-func WithSQLiteDB(db *sql.DB) Option {
-	return func(o *options) { o.sqliteDB = db }
+// WithSQLiteDBAndRegistry substitutes the SQLite *sql.DB used for persistence
+// and the workflow registry that must accompany it. Config.Database must be
+// [SQLite]; Path is not opened. The caller retains ownership and must Close
+// the database after Server.Close (or after a failed Start).
+//
+// reg is required in the same option because the default go-workflows SQLite
+// backend opens Config.Database.Path on its own and would diverge from db.
+// Both db and reg must be non-nil.
+func WithSQLiteDBAndRegistry(db *sql.DB, reg domain.Registry) Option {
+	if db == nil {
+		panic("bootstrap.WithSQLiteDBAndRegistry: db is nil")
+	}
+	if reg == nil {
+		panic("bootstrap.WithSQLiteDBAndRegistry: workflow registry is nil")
+	}
+	return func(o *options) {
+		o.sqliteDB = db
+		o.workflowRegistry = reg
+	}
 }
 
 // WithOIDCDeps substitutes discovery and token verification dependencies.

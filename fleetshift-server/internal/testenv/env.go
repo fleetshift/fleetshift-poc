@@ -45,7 +45,7 @@ const (
 	DBFile = "fleetshift.db"
 
 	// injectedSQLitePath is a Config.DBPath placeholder when the real handle
-	// is supplied via bootstrap.WithSQLiteDB (Path is not opened).
+	// is supplied via bootstrap.WithSQLiteDBAndRegistry (Path is not opened).
 	injectedSQLitePath = "memory"
 
 	// KeepWorkDirEnv forces retention of owned work directories after
@@ -274,7 +274,7 @@ func (e *Env) startHermeticAPI(ctx context.Context) error {
 	bcfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr: "127.0.0.1:0",
 		HTTPAddr: "127.0.0.1:0",
-		// Path is not opened; the handle is supplied via WithSQLiteDB.
+		// Path is not opened; the handle is supplied via WithSQLiteDBAndRegistry.
 		DBPath: injectedSQLitePath,
 		// No production add-ons: trust-bundle placement stays unset so
 		// anonymous CreateAuthMethod can complete without targets.
@@ -287,8 +287,7 @@ func (e *Env) startHermeticAPI(ctx context.Context) error {
 	var inventoryCtrl *InventoryController
 
 	srv, err := bootstrap.Start(ctx, bcfg, e.logger,
-		bootstrap.WithSQLiteDB(db),
-		bootstrap.WithWorkflowRegistry(bootstrap.NewMemWorkflowRegistry()),
+		bootstrap.WithSQLiteDBAndRegistry(db, bootstrap.NewMemWorkflowRegistry()),
 		bootstrap.WithOIDCDeps(oidcDeps),
 		bootstrap.WithAddonAssembly(func(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
 			agent, ctrl := fake.New(deps.DeliveryReporter)
@@ -480,13 +479,17 @@ func (e *Env) Finish(ctx context.Context, passed bool) error {
 		return nil
 	}
 	e.finished = true
-	// Retention is decided before DB close so a dump can run after the
-	// server is quiesced but while the Env-owned DB handle is still open.
+	// Dump runs after the server is quiesced and before Close releases the
+	// Env-owned DB handle. Promote keep on server close error here so a
+	// failed quiesce still gets a fleetshift.db snapshot before retain.
 	keep := e.ownedDir && (e.keepWorkDir || !passed)
 	var serverErr error
 	if e.server != nil {
 		serverErr = e.server.Close(ctx)
 		e.server = nil
+	}
+	if e.ownedDir && serverErr != nil {
+		keep = true
 	}
 	dumpErr := e.dumpDBIfRetaining(keep)
 	closeErr := errors.Join(serverErr, dumpErr, e.Close(ctx))

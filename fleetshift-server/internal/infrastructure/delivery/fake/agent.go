@@ -107,14 +107,25 @@ type inFlight struct {
 	generation domain.Generation
 }
 
+// releaseGateLocked unblocks any goroutine waiting on the current gate
+// before it is replaced or discarded. Callers must hold c.mu.
+func (c *Controller) releaseGateLocked() {
+	if c.gate != nil && !c.gate.released {
+		c.gate.released = true
+		close(c.gate.releaseCh)
+	}
+	c.gate = nil
+}
+
 // QueueSuccess sets the default success behavior for subsequent calls.
-// This is the initial mode after [New].
+// This is the initial mode after [New]. Any in-flight gated Deliver or
+// Remove is unblocked and completes successfully.
 func (c *Controller) QueueSuccess() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.releaseGateLocked()
 	c.mode = modeSuccess
 	c.transientRemaining = 0
-	c.gate = nil
 }
 
 // Gate causes the next Deliver or Remove to wait until [Controller.Release].
@@ -169,16 +180,17 @@ func (c *Controller) Release() error {
 
 // InjectTransientFailure causes the next n Deliver or Remove calls to
 // return an agent error (the product may retry). After n failures,
-// subsequent calls succeed.
+// subsequent calls succeed. Any in-flight gated call is unblocked and
+// completes successfully; the transient budget applies to later calls.
 func (c *Controller) InjectTransientFailure(n int) error {
 	if n < 1 {
 		return fmt.Errorf("fake: transient failure count must be >= 1, got %d", n)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.releaseGateLocked()
 	c.mode = modeTransient
 	c.transientRemaining = n
-	c.gate = nil
 	return nil
 }
 
@@ -279,7 +291,11 @@ func (a *Agent) handle(ctx context.Context, kind CallKind, target domain.TargetI
 		if c.gate != nil {
 			c.gate.inFlight = nil
 		}
-		c.mode = modeSuccess
+		// Preserve mode if QueueSuccess / InjectTransientFailure already
+		// switched away from the gate while this call was waiting.
+		if c.mode == modeGate {
+			c.mode = modeSuccess
+		}
 		c.mu.Unlock()
 	}
 

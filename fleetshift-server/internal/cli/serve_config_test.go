@@ -298,7 +298,8 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 			gotDB.Name != wantDB.Name ||
 			gotDB.DriverDSN != wantDB.DriverDSN ||
 			gotDB.Params.Encode() != wantDB.Params.Encode() {
-			t.Fatalf("Database = %#v, want %#v", got.Database, want.Database)
+			t.Fatalf("Database = %v (password_match=%t dsn_match=%t), want %v",
+				gotDB, gotDB.Password == wantDB.Password, gotDB.DriverDSN == wantDB.DriverDSN, wantDB)
 		}
 	default:
 		t.Fatalf("unexpected want database type %T", want.Database)

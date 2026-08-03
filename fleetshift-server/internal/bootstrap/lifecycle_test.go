@@ -557,7 +557,7 @@ func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
 	}
 }
 
-func TestLifecycle_WithSQLiteDBCallerRetainsOwnership(t *testing.T) {
+func TestLifecycle_WithSQLiteDBAndRegistryCallerRetainsOwnership(t *testing.T) {
 	db, sentinel, err := sqlite.OpenMemory(t.Name())
 	if err != nil {
 		t.Fatalf("OpenMemory: %v", err)
@@ -572,8 +572,8 @@ func TestLifecycle_WithSQLiteDBCallerRetainsOwnership(t *testing.T) {
 	}
 
 	srv := startTestServerWithConfig(t, ConfigInput{
-		DBPath: "memory", // not opened; handle comes from WithSQLiteDB
-	}, WithSQLiteDB(db))
+		DBPath: "memory", // not opened; handle comes from WithSQLiteDBAndRegistry
+	}, WithSQLiteDBAndRegistry(db, NewMemWorkflowRegistry()))
 
 	closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -591,7 +591,30 @@ func TestLifecycle_WithSQLiteDBCallerRetainsOwnership(t *testing.T) {
 	}
 }
 
-func TestOpenPersistence_WithSQLiteDBRequiresSQLite(t *testing.T) {
+func TestWithSQLiteDBAndRegistry_RequiresWorkflowRegistry(t *testing.T) {
+	db, sentinel, err := sqlite.OpenMemory(t.Name())
+	if err != nil {
+		t.Fatalf("OpenMemory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sentinel.Close()
+		_ = db.Close()
+	})
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for nil workflow registry")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "workflow registry is nil") {
+			t.Fatalf("panic = %#v, want workflow registry is nil", r)
+		}
+	}()
+	_ = WithSQLiteDBAndRegistry(db, nil)
+}
+
+func TestOpenPersistence_WithSQLiteDBAndRegistryRequiresSQLite(t *testing.T) {
 	db, sentinel, err := sqlite.OpenMemory(t.Name())
 	if err != nil {
 		t.Fatalf("OpenMemory: %v", err)

@@ -1,6 +1,7 @@
 package bootstrap_test
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -393,9 +394,33 @@ func assertDatabaseEqual(t *testing.T, got, want bootstrap.Database) {
 			gotDB.Name != wantDB.Name ||
 			gotDB.DriverDSN != wantDB.DriverDSN ||
 			gotDB.Params.Encode() != wantDB.Params.Encode() {
-			t.Fatalf("Postgres = %#v, want %#v", gotDB, wantDB)
+			t.Fatalf("Postgres = %v (password_match=%t dsn_match=%t), want %v",
+				gotDB, gotDB.Password == wantDB.Password, gotDB.DriverDSN == wantDB.DriverDSN, wantDB)
 		}
 	default:
 		t.Fatalf("unexpected want database type %T", want)
+	}
+}
+
+func TestPostgresStringRedactsSecrets(t *testing.T) {
+	const secret = "s3cr3t-password"
+	pg := bootstrap.Postgres{
+		Host:      "db.example",
+		Port:      5432,
+		User:      "fleet",
+		Password:  secret,
+		Name:      "fleetshift",
+		DriverDSN: "postgres://fleet:" + secret + "@db.example:5432/fleetshift",
+	}
+	for _, s := range []string{pg.String(), pg.GoString(), fmt.Sprintf("%v", pg), fmt.Sprintf("%#v", pg)} {
+		if strings.Contains(s, secret) {
+			t.Fatalf("formatted Postgres leaked secret: %q", s)
+		}
+		if strings.Contains(s, "DriverDSN") {
+			t.Fatalf("formatted Postgres included DriverDSN: %q", s)
+		}
+	}
+	if !strings.Contains(pg.String(), `Host:"db.example"`) || !strings.Contains(pg.String(), `User:"fleet"`) {
+		t.Fatalf("String() missing non-secret fields: %q", pg.String())
 	}
 }

@@ -42,8 +42,7 @@ func DumpToFile(db *sql.DB, path string) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat dump path: %w", err)
 	}
-	escaped := strings.ReplaceAll(path, "'", "''")
-	if _, err := db.Exec("VACUUM INTO '" + escaped + "'"); err != nil {
+	if _, err := db.Exec("VACUUM INTO ?", path); err != nil {
 		return fmt.Errorf("VACUUM INTO %s: %w", path, err)
 	}
 	return nil

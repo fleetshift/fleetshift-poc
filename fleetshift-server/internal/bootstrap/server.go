@@ -167,7 +167,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		srv.db = p.db
 		cleanups = append(cleanups, func() { _ = p.db.Close() })
 	}
-	// WithSQLiteDB: caller retains ownership; stores hold the *sql.DB.
+	// WithSQLiteDBAndRegistry: caller retains ownership; stores hold the *sql.DB.
 
 	// --- workflow registry ---
 	reg := o.workflowRegistry

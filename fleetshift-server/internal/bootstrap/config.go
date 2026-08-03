@@ -44,7 +44,7 @@ type Database interface {
 
 // SQLite selects SQLite persistence. Path is the filesystem path or DSN
 // passed to database/sql when Start opens the database. When
-// [WithSQLiteDB] is set, Path is not opened.
+// [WithSQLiteDBAndRegistry] is set, Path is not opened.
 type SQLite struct {
 	Path string
 }
@@ -63,11 +63,34 @@ type Postgres struct {
 	DriverDSN string
 }
 
+// String returns a log-safe representation that omits Password and DriverDSN.
+func (p Postgres) String() string {
+	return fmt.Sprintf("Postgres{Host:%q Port:%d User:%q Name:%q}", p.Host, p.Port, p.User, p.Name)
+}
+
+// GoString is the same redacted form used by %#v.
+func (p Postgres) GoString() string {
+	return p.String()
+}
+
 // database seals Database to this package.
 func (SQLite) database() {}
 
 // database seals Database to this package.
 func (Postgres) database() {}
+
+// databaseKind returns a log-safe label for db without formatting the value
+// (Postgres carries Password and DriverDSN).
+func databaseKind(db Database) string {
+	switch db.(type) {
+	case SQLite:
+		return "SQLite"
+	case Postgres:
+		return "Postgres"
+	default:
+		return "unknown"
+	}
+}
 
 // ConfigInput is the pure parse input: resolved edge values plus
 // explicit-selection metadata. It contains no flag pointers, file handles,
@@ -203,7 +226,7 @@ func (c Config) checkInvariants() error {
 			return fmt.Errorf("incomplete PostgreSQL configuration")
 		}
 	default:
-		return fmt.Errorf("unsupported database type %T", c.Database)
+		return fmt.Errorf("unsupported database type %s", databaseKind(c.Database))
 	}
 
 	if len(c.OIDCCABundle) > 0 {
