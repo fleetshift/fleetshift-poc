@@ -3,38 +3,32 @@
   "root": ".",
   "targets": {
     "build:all": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "task build:all"
-      },
       "dependsOn": ["server:build", "cli:build"]
     },
     "test:all": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "task test:all"
-      },
       "dependsOn": ["server:test", "cli:test"]
     },
     "test:deploy": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "task test:deploy"
+        "command": "bash deploy/scripts/test-gcphcp-defaults.sh"
       },
       "cache": true,
       "inputs": ["{workspaceRoot}/deploy/scripts/**/*"]
     },
     "protogen": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "task protogen"
-      },
       "dependsOn": ["proto:generate"]
     },
     "image:build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "task image:build"
+        "envFile": ".env",
+        "commands": [
+          "podman build -t quay.io/stolostron/fleetshift-server:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}} .",
+          "podman build -f Dockerfile.local -t quay.io/stolostron/fleetshift-server-local:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}} .",
+          "podman build -f Dockerfile.web -t quay.io/stolostron/fleetshift-web:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}} ."
+        ],
+        "parallel": false
       },
       "cache": false,
       "dependsOn": ["server:build"]
@@ -42,7 +36,8 @@
     "image:aio": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "task image:aio"
+        "envFile": ".env",
+        "command": "podman build -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:${IMAGE_TAG:-latest} --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}} ."
       },
       "cache": false,
       "dependsOn": ["image:build"]
@@ -50,7 +45,14 @@
     "image:push": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "task image:push"
+        "envFile": ".env",
+        "commands": [
+          "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
+          "podman push ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}"
+        ],
+        "parallel": false
       },
       "cache": false
     },
