@@ -24,6 +24,7 @@
         "command": "go test -count=1 ./...",
         "cwd": "fleetshift-server"
       },
+      "cache": false,
       "inputs": [
         "{projectRoot}/**/*.go",
         "{projectRoot}/go.mod",

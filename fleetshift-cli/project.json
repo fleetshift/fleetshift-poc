@@ -23,6 +23,7 @@
         "command": "go test -count=1 ./...",
         "cwd": "fleetshift-cli"
       },
+      "cache": false,
       "inputs": [
         "{projectRoot}/**/*.go",
         "{projectRoot}/go.mod",
