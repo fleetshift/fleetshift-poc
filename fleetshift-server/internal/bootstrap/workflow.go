@@ -30,7 +30,7 @@ func NewGoWorkflowRegistry(database Database, logger *slog.Logger) (*goworkflows
 			wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
 		)
 	default:
-		return nil, fmt.Errorf("unsupported database config %T", database)
+		return nil, fmt.Errorf("unsupported database config %s", databaseKind(database))
 	}
 	wfWorker := worker.New(wfBackend, nil)
 	wfClient := client.New(wfBackend)

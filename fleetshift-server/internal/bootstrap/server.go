@@ -158,12 +158,16 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	}
 
 	// --- persistence ---
-	p, err := openPersistence(cfg.Database)
+	p, err := openPersistence(cfg.Database, o.sqliteDB)
 	if err != nil {
 		return fail(err)
 	}
-	srv.db = p.db
-	cleanups = append(cleanups, func() { _ = p.db.Close() })
+	if o.sqliteDB == nil {
+		// Start owns databases it opens.
+		srv.db = p.db
+		cleanups = append(cleanups, func() { _ = p.db.Close() })
+	}
+	// WithSQLiteDBAndRegistry: caller retains ownership; stores hold the *sql.DB.
 
 	// --- workflow registry ---
 	reg := o.workflowRegistry
@@ -585,6 +589,7 @@ func (s *Server) shutdown() error {
 	}
 	if s.db != nil {
 		join(s.db.Close())
+		s.db = nil
 	}
 	return primary
 }

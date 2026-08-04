@@ -20,11 +20,16 @@ type persistence struct {
 }
 
 // openPersistence opens the selected database and constructs concrete stores.
-// activeResources starts empty and is populated as managed schemas activate.
-func openPersistence(database Database) (persistence, error) {
+// When openedSQLite is non-nil, Config must select SQLite and that handle is
+// used instead of opening Path. activeResources starts empty and is populated
+// as managed schemas activate.
+func openPersistence(database Database, openedSQLite *sql.DB) (persistence, error) {
 	activeResources := extensionresource.NewActiveResourceRegistry()
 	switch db := database.(type) {
 	case Postgres:
+		if openedSQLite != nil {
+			return persistence{}, fmt.Errorf("WithSQLiteDBAndRegistry requires SQLite config, got PostgreSQL")
+		}
 		sqlDB, err := pgstore.Open(db.DriverDSN)
 		if err != nil {
 			return persistence{}, fmt.Errorf("open database: %w", err)
@@ -37,9 +42,13 @@ func openPersistence(database Database) (persistence, error) {
 			activeResources: activeResources,
 		}, nil
 	case SQLite:
-		sqlDB, err := sqlite.Open(db.Path)
-		if err != nil {
-			return persistence{}, fmt.Errorf("open database: %w", err)
+		sqlDB := openedSQLite
+		if sqlDB == nil {
+			var err error
+			sqlDB, err = sqlite.Open(db.Path)
+			if err != nil {
+				return persistence{}, fmt.Errorf("open database: %w", err)
+			}
 		}
 		return persistence{
 			db:              sqlDB,
@@ -49,6 +58,6 @@ func openPersistence(database Database) (persistence, error) {
 			activeResources: activeResources,
 		}, nil
 	default:
-		return persistence{}, fmt.Errorf("unsupported database config %T", database)
+		return persistence{}, fmt.Errorf("unsupported database config %s", databaseKind(database))
 	}
 }

@@ -69,7 +69,7 @@ tasks:
       - go test -count=1 ./...
 
   test:server-integration:
-    desc: Docker integration tests
+    desc: Docker-heavy integration tests (requires container runtime; fails if missing)
     dir: fleetshift-server
     cmds:
       - go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/
