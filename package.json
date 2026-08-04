@@ -2,15 +2,15 @@
   "name": "fleetshift-poc",
   "private": true,
   "workspaces": [
-    "fleetshift-ui/gui",
-    "fleetshift-ui/common",
-    "fleetshift-ui/build-utils",
-    "fleetshift-ui/mock-ui-plugins"
+    "client/web",
+    "sdk/common",
+    "sdk/build-utils",
+    "extensions/core/client"
   ],
   "devDependencies": {
     "@module-federation/enhanced": "2.8.1",
     "@nx/docker": "^23.1.0",
-    "@nx/eslint": "^23.1.0",
+    "@nx/eslint": "^23.1.1",
     "@nx/playwright": "^23.1.0",
     "@playwright/experimental-ct-react": "^1.61.1",
     "@playwright/test": "^1.61.1",

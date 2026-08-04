@@ -76,6 +76,6 @@ For how to...
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.
 
-## fleetshift-ui
+## FleetShift UI
 
-This is the complete frontend web app for fleetshift. See fleetshift-ui/AGENTS.md for agent instructions.
+This is the complete frontend web app for fleetshift. See docs/ui/AGENTS.md for agent instructions.

@@ -8,24 +8,24 @@ FROM golang:1.25 AS fleetshift-builder
 WORKDIR /src
 
 # Copy go.mod/go.sum for both modules to cache deps
-# CLI has a replace directive pointing to ../fleetshift-server
-COPY fleetshift-server/go.mod fleetshift-server/go.sum ./fleetshift-server/
-COPY fleetshift-cli/go.mod fleetshift-cli/go.sum ./fleetshift-cli/
+# CLI has a replace directive pointing to ../server
+COPY server/go.mod server/go.sum ./server/
+COPY cli/go.mod cli/go.sum ./cli/
 RUN --mount=type=cache,target=/go/pkg/mod \
-    cd fleetshift-server && go mod download && \
-    cd ../fleetshift-cli && go mod download
+    cd server && go mod download && \
+    cd ../cli && go mod download
 
 # Copy all source (server, cli)
-COPY fleetshift-server/ ./fleetshift-server/
-COPY fleetshift-cli/ ./fleetshift-cli/
+COPY server/ ./server/
+COPY cli/ ./cli/
 
 # Build both binaries
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    cd fleetshift-server && CGO_ENABLED=0 go build -o /bin/fleetshift ./cmd/fleetshift
+    cd server && CGO_ENABLED=0 go build -o /bin/fleetshift ./cmd/fleetshift
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    cd fleetshift-cli && CGO_ENABLED=0 go build -o /bin/fleetctl ./cmd/fleetctl
+    cd cli && CGO_ENABLED=0 go build -o /bin/fleetctl ./cmd/fleetctl
 
 FROM ${HYPERSHIFT_IMAGE} AS hypershift
 

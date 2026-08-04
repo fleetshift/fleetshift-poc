@@ -15,8 +15,10 @@
 
 # Node / JS artifacts (web builder selectively COPYs what it needs)
 **/node_modules
-fleetshift-ui/**/dist
-fleetshift-ui/web
+client/**/dist
+sdk/**/dist
+extensions/**/dist
+/web
 
 # Repo areas not needed for builds
 bin
@@ -43,5 +45,5 @@ coverage.*
 *.db-wal
 
 # Server docs / test helpers not linked into the binary
-fleetshift-server/docs
-fleetshift-server/testserver
+server/docs
+server/testserver

@@ -1,0 +1,34 @@
+{
+  "name": "cli",
+  "root": "cli",
+  "projectType": "application",
+  "tags": ["lang:go", "scope:cli"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build -o ../bin/fleetctl ./cmd/fleetctl",
+        "cwd": "cli"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ],
+      "outputs": ["{workspaceRoot}/bin/fleetctl"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test -count=1 ./...",
+        "cwd": "cli"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    }
+  }
+}

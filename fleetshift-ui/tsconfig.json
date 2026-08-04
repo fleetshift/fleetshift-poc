@@ -1,8 +1,0 @@
-{
-  "extends": "../tsconfig.json",
-  "compilerOptions": {
-    "paths": {
-      "@fleetshift/build-utils": ["./build-utils/src/index.ts"]
-    }
-  }
-}

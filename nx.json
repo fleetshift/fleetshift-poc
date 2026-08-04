@@ -33,7 +33,7 @@
       "{projectRoot}/src/**/*.{css,scss}"
     ],
     "eslintConfig": [
-      "{workspaceRoot}/fleetshift-ui/eslint.config.mjs"
+      "{workspaceRoot}/eslint.config.mjs"
     ]
   },
   "targetDefaults": {

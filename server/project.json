@@ -1,0 +1,48 @@
+{
+  "name": "server",
+  "root": "server",
+  "projectType": "application",
+  "tags": ["lang:go", "scope:backend"],
+  "implicitDependencies": ["proto"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build -o ../bin/fleetshift ./cmd/fleetshift",
+        "cwd": "server"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ],
+      "outputs": ["{workspaceRoot}/bin/fleetshift"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test -count=1 ./...",
+        "cwd": "server"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    },
+    "test-integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/",
+          "go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/",
+          "go test -race -count=1 ./internal/addon/kubernetes/"
+        ],
+        "parallel": false,
+        "cwd": "server"
+      },
+      "cache": false
+    }
+  }
+}

@@ -4,11 +4,15 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "@fleetshift/common": path.resolve(__dirname, "fleetshift-ui/common/src"),
+      "@fleetshift/common": path.resolve(__dirname, "sdk/common/src"),
     },
   },
   test: {
-    include: ["./fleetshift-ui/*/src/**/__tests__/**/*.test.ts"],
+    include: [
+      "./sdk/*/src/**/__tests__/**/*.test.ts",
+      "./client/*/src/**/__tests__/**/*.test.ts",
+      "./extensions/**/src/**/__tests__/**/*.test.ts",
+    ],
     globals: true,
   },
 });

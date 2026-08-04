@@ -15,7 +15,7 @@
         "{workspaceRoot}/buf.gen.yaml"
       ],
       "outputs": [
-        "{workspaceRoot}/fleetshift-server/internal/api/gen"
+        "{workspaceRoot}/server/gen"
       ]
     }
   }
