@@ -18,7 +18,6 @@ import (
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
@@ -554,84 +553,6 @@ func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
 	}
 	if reg.registersBeforeStart < 8 {
 		t.Fatalf("registers before Start = %d, want at least 8 workflow registrations", reg.registersBeforeStart)
-	}
-}
-
-func TestLifecycle_WithSQLiteDBAndRegistryCallerRetainsOwnership(t *testing.T) {
-	db, sentinel, err := sqlite.OpenMemory(t.Name())
-	if err != nil {
-		t.Fatalf("OpenMemory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sentinel.Close()
-		_ = db.Close()
-	})
-
-	if _, err := db.Exec(`CREATE TABLE ownership_probe (id INTEGER PRIMARY KEY)`); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-
-	srv := startTestServerWithConfig(t, ConfigInput{
-		DBPath: "memory", // not opened; handle comes from WithSQLiteDBAndRegistry
-	}, WithSQLiteDBAndRegistry(db, NewMemWorkflowRegistry()))
-
-	closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := srv.Close(closeCtx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	// Injected DB must remain usable after Server.Close.
-	if err := db.Ping(); err != nil {
-		t.Fatalf("Ping after Server.Close: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "fleetshift.db")
-	if err := sqlite.DumpToFile(db, path); err != nil {
-		t.Fatalf("DumpToFile after Server.Close: %v", err)
-	}
-}
-
-func TestWithSQLiteDBAndRegistry_RequiresWorkflowRegistry(t *testing.T) {
-	db, sentinel, err := sqlite.OpenMemory(t.Name())
-	if err != nil {
-		t.Fatalf("OpenMemory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sentinel.Close()
-		_ = db.Close()
-	})
-
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic for nil workflow registry")
-		}
-		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, "workflow registry is nil") {
-			t.Fatalf("panic = %#v, want workflow registry is nil", r)
-		}
-	}()
-	_ = WithSQLiteDBAndRegistry(db, nil)
-}
-
-func TestOpenPersistence_WithSQLiteDBAndRegistryRequiresSQLite(t *testing.T) {
-	db, sentinel, err := sqlite.OpenMemory(t.Name())
-	if err != nil {
-		t.Fatalf("OpenMemory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sentinel.Close()
-		_ = db.Close()
-	})
-
-	_, err = openPersistence(Postgres{
-		Host:      "localhost",
-		Port:      5432,
-		Name:      "fleetshift",
-		DriverDSN: "postgres://localhost:5432/fleetshift",
-	}, db)
-	if err == nil {
-		t.Fatal("expected error injecting SQLite DB into Postgres config")
 	}
 }
 

@@ -37,13 +37,12 @@ import (
 
 // Provider is a fake OIDC identity provider for testing. It serves
 // OIDC discovery and JWKS endpoints over HTTPS and issues signed JWTs
-// programmatically via [Provider.Issue].
+// programmatically via [Provider.IssueToken].
 type Provider struct {
 	issuerURL  string
 	audience   string
 	caCertPEM  []byte
 	caCertPath string
-	caDir      string // owned temp dir when New created it; empty if caller-supplied
 	jwkPriv    jwk.Key
 	jwksJSON   []byte
 	server     *http.Server
@@ -52,7 +51,7 @@ type Provider struct {
 }
 
 // TokenClaims configures the claims embedded in a token issued by
-// [Provider.Issue].
+// [Provider.IssueToken].
 type TokenClaims struct {
 	Subject  string
 	Groups   []string
@@ -65,13 +64,13 @@ type TokenClaims struct {
 // Option configures a [Provider].
 type Option func(*providerConfig)
 
-// providerConfig holds options applied by [New].
+// providerConfig holds options applied by Start.
 type providerConfig struct {
 	audience      string
 	listenAddress string
 	issuerURL     string   // override; empty means derive from listen address
 	extraSANIPs   []net.IP // additional IP SANs for the server certificate
-	caDir         string   // optional; when empty New creates a temp dir
+	caDir         string   // required; owned by the calling test via TempDir
 }
 
 // WithAudience sets the default audience for issued tokens.
@@ -102,16 +101,9 @@ func WithIssuerURL(url string) Option {
 	return func(c *providerConfig) { c.issuerURL = url }
 }
 
-// WithCADir sets the directory used for the CA certificate PEM file.
-// When omitted, [New] creates and owns a temporary directory closed by
-// [Provider.Close].
-func WithCADir(dir string) Option {
-	return func(c *providerConfig) { c.caDir = dir }
-}
-
-// New creates and starts a fake OIDC provider. Callers must call
-// [Provider.Close] when finished. Prefer [Start] from tests.
-func New(opts ...Option) (*Provider, error) {
+// newProvider creates and starts a fake OIDC provider. caDir must be set
+// (Start supplies t.TempDir). Callers must call close when finished.
+func newProvider(opts ...Option) (*Provider, error) {
 	cfg := providerConfig{
 		audience:      "fleetshift",
 		listenAddress: "127.0.0.1:0",
@@ -167,22 +159,14 @@ func New(opts ...Option) (*Provider, error) {
 		Bytes: caCert.Raw,
 	})
 
-	caDir := cfg.caDir
-	ownedCADir := ""
-	if caDir == "" {
-		ownedCADir, err = os.MkdirTemp("", "oidctest-ca-*")
-		if err != nil {
-			return nil, fmt.Errorf("oidctest: create CA cert temp dir: %w", err)
-		}
-		caDir = ownedCADir
-	} else if err := os.MkdirAll(caDir, 0o755); err != nil {
+	if cfg.caDir == "" {
+		return nil, fmt.Errorf("oidctest: CA directory is required")
+	}
+	if err := os.MkdirAll(cfg.caDir, 0o755); err != nil {
 		return nil, fmt.Errorf("oidctest: create CA cert dir: %w", err)
 	}
-	caCertPath := filepath.Join(caDir, "ca.pem")
+	caCertPath := filepath.Join(cfg.caDir, "ca.pem")
 	if err := os.WriteFile(caCertPath, caCertPEM, 0o600); err != nil {
-		if ownedCADir != "" {
-			_ = os.RemoveAll(ownedCADir)
-		}
 		return nil, fmt.Errorf("oidctest: write CA cert: %w", err)
 	}
 
@@ -193,9 +177,6 @@ func New(opts ...Option) (*Provider, error) {
 
 	lis, err := net.Listen("tcp", cfg.listenAddress)
 	if err != nil {
-		if ownedCADir != "" {
-			_ = os.RemoveAll(ownedCADir)
-		}
 		return nil, fmt.Errorf("oidctest: listen on %s: %w", cfg.listenAddress, err)
 	}
 
@@ -226,7 +207,6 @@ func New(opts ...Option) (*Provider, error) {
 		audience:   cfg.audience,
 		caCertPEM:  caCertPEM,
 		caCertPath: caCertPath,
-		caDir:      ownedCADir,
 		jwkPriv:    jwkPriv,
 		jwksJSON:   jwksJSON,
 		listener:   lis,
@@ -253,35 +233,28 @@ func New(opts ...Option) (*Provider, error) {
 }
 
 // Start creates and starts a fake OIDC provider. The server is stopped
-// automatically when the test finishes. This is a thin [testing.T]
-// adapter over [New].
+// automatically when the test finishes. CA material lives under t.TempDir.
 func Start(t *testing.T, opts ...Option) *Provider {
 	t.Helper()
-	opts = append([]Option{WithCADir(t.TempDir())}, opts...)
-	p, err := New(opts...)
+	caDir := t.TempDir()
+	opts = append([]Option{func(c *providerConfig) { c.caDir = caDir }}, opts...)
+	p, err := newProvider(opts...)
 	if err != nil {
 		t.Fatalf("oidctest: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = p.Close()
+		_ = p.close()
 	})
 	return p
 }
 
-// Close stops the HTTPS server and removes any owned temporary CA
-// directory. It is safe to call more than once.
-func (p *Provider) Close() error {
-	var err error
-	if p.server != nil {
-		err = p.server.Close()
-		p.server = nil
+// close stops the HTTPS server. It is safe to call more than once.
+func (p *Provider) close() error {
+	if p.server == nil {
+		return nil
 	}
-	if p.caDir != "" {
-		if rmErr := os.RemoveAll(p.caDir); rmErr != nil && err == nil {
-			err = rmErr
-		}
-		p.caDir = ""
-	}
+	err := p.server.Close()
+	p.server = nil
 	return err
 }
 
@@ -328,8 +301,8 @@ func (p *Provider) OIDCConfig() domain.OIDCConfig {
 	}
 }
 
-// Issue creates a signed JWT with the given claims.
-func (p *Provider) Issue(claims TokenClaims) (string, error) {
+// issue creates a signed JWT with the given claims.
+func (p *Provider) issue(claims TokenClaims) (string, error) {
 	sub := claims.Subject
 	if sub == "" {
 		sub = "test-user"
@@ -373,11 +346,10 @@ func (p *Provider) Issue(claims TokenClaims) (string, error) {
 	return string(signed), nil
 }
 
-// IssueToken creates a signed JWT with the given claims. This is a thin
-// [testing.T] adapter over [Provider.Issue].
+// IssueToken creates a signed JWT with the given claims.
 func (p *Provider) IssueToken(t *testing.T, claims TokenClaims) string {
 	t.Helper()
-	token, err := p.Issue(claims)
+	token, err := p.issue(claims)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -22,30 +20,6 @@ import (
 // with SQLITE_LOCKED).
 func OpenMemory(name string) (*sql.DB, *sql.Conn, error) {
 	return openSharedMemoryDSN(sharedMemoryDSN(name))
-}
-
-// DumpToFile writes a consistent snapshot of db to path via VACUUM INTO.
-// The destination file must not already exist; parent directories are created.
-// db must remain open for the duration of the call.
-func DumpToFile(db *sql.DB, path string) error {
-	if db == nil {
-		return fmt.Errorf("sqlite: dump database is nil")
-	}
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("sqlite: dump path is required")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create dump directory: %w", err)
-	}
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("sqlite: dump path already exists: %s", path)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat dump path: %w", err)
-	}
-	if _, err := db.Exec("VACUUM INTO ?", path); err != nil {
-		return fmt.Errorf("VACUUM INTO %s: %w", path, err)
-	}
-	return nil
 }
 
 // sharedMemoryDSN returns a modernc.org/sqlite DSN for a named shared-cache
