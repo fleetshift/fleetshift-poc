@@ -4,7 +4,7 @@
   "sourceRoot": "extensions/kind/client/src",
   "projectType": "library",
   "tags": ["scope:ui", "type:lib", "federation:remote"],
-  "implicitDependencies": ["common", "build-utils", "@fleetshift/kind-server"],
+  "implicitDependencies": ["@fleetshift/kind-server"],
   "targets": {
     "build:client": {
       "executor": "nx:run-commands",
@@ -32,14 +32,6 @@
       ],
       "outputs": ["{projectRoot}/dist"],
       "dependsOn": ["common:build"]
-    },
-    "test:ct": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "playwright test",
-        "cwd": "extensions/kind/client"
-      },
-      "cache": false
     },
     "lint": {
       "executor": "@nx/eslint:lint",

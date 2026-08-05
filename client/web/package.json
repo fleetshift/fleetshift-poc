@@ -28,6 +28,7 @@
     "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
+    "@fleetshift/build-utils": "*",
     "@rspack/cli": "^2.0.8",
     "@rspack/core": "^2.0.8",
     "@types/react": "^19.1.0",

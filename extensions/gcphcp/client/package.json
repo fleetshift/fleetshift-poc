@@ -18,6 +18,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@fleetshift/build-utils": "*",
     "@module-federation/enhanced": "^2.8.1",
     "@openshift/dynamic-plugin-sdk": "^8.0.0",
     "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",

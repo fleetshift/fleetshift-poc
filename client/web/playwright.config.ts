@@ -1,5 +1,8 @@
+import { findWorkspaceRoot } from "@fleetshift/build-utils/findWorkspaceRoot";
 import { defineConfig, devices } from "@playwright/experimental-ct-react";
 import path from "path";
+
+const root = findWorkspaceRoot(import.meta.dirname);
 
 export default defineConfig({
   testDir: "./src",
@@ -16,10 +19,7 @@ export default defineConfig({
     ctViteConfig: {
       resolve: {
         alias: {
-          "@fleetshift/common": path.resolve(
-            import.meta.dirname,
-            "../common/src",
-          ),
+          "@fleetshift/common": path.resolve(root, "sdk/common/src"),
         },
       },
     },

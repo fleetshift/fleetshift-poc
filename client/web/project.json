@@ -4,7 +4,7 @@
   "sourceRoot": "client/web/src",
   "projectType": "application",
   "tags": ["scope:ui", "type:app"],
-  "implicitDependencies": ["common", "build-utils", "plugins", "@fleetshift/gcphcp-plugin", "@fleetshift/kind-plugin"],
+  "implicitDependencies": ["plugins", "@fleetshift/gcphcp-plugin", "@fleetshift/kind-plugin"],
   "targets": {
     "build": {
       "executor": "nx:run-commands",
@@ -52,8 +52,7 @@
       "options": {
         "command": "playwright test",
         "cwd": "client/web"
-      },
-      "cache": false
+      }
     },
     "lint:css": {
       "executor": "nx:run-commands",

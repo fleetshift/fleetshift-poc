@@ -4,7 +4,6 @@
   "sourceRoot": "extensions/core/client/src",
   "projectType": "library",
   "tags": ["scope:ui", "type:lib", "federation:remote"],
-  "implicitDependencies": ["common", "build-utils"],
   "targets": {
     "build": {
       "executor": "nx:run-commands",

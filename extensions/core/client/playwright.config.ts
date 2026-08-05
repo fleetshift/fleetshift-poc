@@ -1,5 +1,8 @@
+import { findWorkspaceRoot } from "@fleetshift/build-utils/findWorkspaceRoot";
 import { defineConfig, devices } from "@playwright/experimental-ct-react";
 import path from "path";
+
+const root = findWorkspaceRoot(import.meta.dirname);
 
 export default defineConfig({
   testDir: "./src",
@@ -16,25 +19,22 @@ export default defineConfig({
     ctViteConfig: {
       resolve: {
         alias: {
-          "@fleetshift/common": path.resolve(
-            import.meta.dirname,
-            "../common/src",
-          ),
+          "@fleetshift/common": path.resolve(root, "sdk/common/src"),
           "@data-driven-forms/pf4-component-mapper/form-template": path.resolve(
-            import.meta.dirname,
-            "../../node_modules/@data-driven-forms/pf4-component-mapper/esm/form-template/index.js",
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/form-template/index.js",
           ),
           "@data-driven-forms/pf4-component-mapper/text-field": path.resolve(
-            import.meta.dirname,
-            "../../node_modules/@data-driven-forms/pf4-component-mapper/esm/text-field/index.js",
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/text-field/index.js",
           ),
           "@data-driven-forms/pf4-component-mapper/wizard": path.resolve(
-            import.meta.dirname,
-            "../../node_modules/@data-driven-forms/pf4-component-mapper/esm/wizard/index.js",
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/wizard/index.js",
           ),
           "@data-driven-forms/pf4-component-mapper/select": path.resolve(
-            import.meta.dirname,
-            "../../node_modules/@data-driven-forms/pf4-component-mapper/esm/select/index.js",
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/select/index.js",
           ),
         },
         dedupe: [
