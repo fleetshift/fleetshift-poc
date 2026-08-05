@@ -93,5 +93,5 @@ The config file is watched for changes and hot-reloaded — if someone edits it,
 - Plugin discovery: `packages/mock-servers/src/k8s/client/discovery.ts`
 - Cluster registry: `packages/mock-servers/src/k8s/client/registry.ts`
 - Cluster persistence: `packages/mock-servers/src/k8s/client/persistence.ts`
-- Add Cluster UI: `packages/gui/src/pages/ClusterListPage/AddCluster/`
-- Debug page (discovery details): `packages/gui/src/pages/DebugPage.tsx`
+- Add Cluster UI: `packages/web/src/pages/ClusterListPage/AddCluster/`
+- Debug page (discovery details): `packages/web/src/pages/DebugPage.tsx`

@@ -51,7 +51,7 @@ This was implemented and works. The nav layout is a server-driven config — a l
 
 ## Key files
 
-- Nav layout tree (drag and drop): `packages/gui/src/components/NavLayoutTree/`
-- Nav layout utilities: `packages/gui/src/components/NavLayoutTree/utilities.ts`
-- Dashboard page: `packages/gui/src/pages/Dashboard.tsx`
+- Nav layout tree (drag and drop): `packages/web/src/components/NavLayoutTree/`
+- Nav layout utilities: `packages/web/src/components/NavLayoutTree/utilities.ts`
+- Dashboard page: `packages/web/src/pages/Dashboard.tsx`
 - User config/preferences persistence: `packages/mock-servers/src/routes/users.ts`

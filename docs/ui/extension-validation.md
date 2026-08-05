@@ -607,7 +607,7 @@ sequenceDiagram
 
 ## Debug Page
 
-The `/debug` page (`gui/src/pages/DebugPage.tsx`) gains a new accordion panel:
+The `/debug` page (`web/src/pages/DebugPage.tsx`) gains a new accordion panel:
 
 - **"Extension Validation"** panel showing:
   - Count: N validated, M rejected
@@ -639,7 +639,7 @@ The `/debug` page (`gui/src/pages/DebugPage.tsx`) gains a new accordion panel:
 1. Add `validation.ts` with runtime types (including `ValidationRejectionSource`, `SelfValidationCache`) to `common/src/` and re-export from `@fleetshift/common`. Plugins that own extension points need these types.
 2. Add `useValidatedExtensions.ts` hook in `common/src/` — implements both self-validation and provider-validation passes with caching. Available to any plugin, not just the shell.
 3. Add extension point `validate` CodeRef resolution logic (lookup extension point declaration from parent module, resolve `validate` CodeRef).
-4. Create a Scalprum shared store for validation results in `gui/` (shell exposes it). Add `useValidationResults` hook in `common/` — wraps the Scalprum store accessor, re-exported from `@fleetshift/common` so any plugin can read validation state without depending on React context or singletons.
+4. Create a Scalprum shared store for validation results in `web/` (shell exposes it). Add `useValidationResults` hook in `common/` — wraps the Scalprum store accessor, re-exported from `@fleetshift/common` so any plugin can read validation state without depending on React context or singletons.
 
 ### Phase 3: Consumption Site Migration
 

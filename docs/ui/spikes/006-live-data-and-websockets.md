@@ -83,5 +83,5 @@ The TypeScript server used in the POC exists only because a backend was needed t
 - K8s data transforms: `packages/mock-servers/src/k8s/transforms.ts`
 - Log streamer: `packages/mock-servers/src/k8s/logStreamer.ts`
 - WebSocket server: `packages/mock-servers/src/ws.ts`
-- Frontend event bus: `packages/gui/src/hooks/useInvalidationSocket.ts`
-- Shell API (plugin subscription): `packages/gui/src/App.tsx`
+- Frontend event bus: `packages/web/src/hooks/useInvalidationSocket.ts`
+- Shell API (plugin subscription): `packages/web/src/App.tsx`

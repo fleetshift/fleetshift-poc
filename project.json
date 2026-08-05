@@ -84,7 +84,7 @@
       "options": {
         "command": "node tools/merge-web.mjs"
       },
-      "dependsOn": ["gui:build", "ui:generate-registry"],
+      "dependsOn": ["web:build", "ui:generate-registry"],
       "cache": false,
       "outputs": ["{workspaceRoot}/web"]
     },
@@ -95,7 +95,7 @@
         "plugins:build",
         "@fleetshift/gcphcp-plugin:build:client",
         "@fleetshift/kind-plugin:build:client",
-        "gui:build",
+        "web:build",
         "ui:generate-registry",
         "ui:merge-web"
       ]
@@ -112,13 +112,13 @@
     },
     "ui:lint": {
       "dependsOn": [
-        "gui:lint",
+        "web:lint",
         "common:lint",
         "plugins:lint",
         "@fleetshift/gcphcp-plugin:lint",
         "@fleetshift/kind-plugin:lint",
         "build-utils:lint",
-        "gui:lint:css",
+        "web:lint:css",
         "plugins:lint:css",
         "@fleetshift/gcphcp-plugin:lint:css",
         "@fleetshift/kind-plugin:lint:css"

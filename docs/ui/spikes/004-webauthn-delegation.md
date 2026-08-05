@@ -66,8 +66,8 @@ Limitations of the POC:
 
 ## Key files
 
-- Passkey API client: `packages/gui/src/api/passkey.ts`
-- Passkey lifecycle hook: `packages/gui/src/hooks/usePasskey.ts`
-- WebAuthn utilities: `packages/gui/src/utils/webauthn.ts`
-- Grant Access UI: `packages/gui/src/pages/GrantAccessPage/`
+- Passkey API client: `packages/web/src/api/passkey.ts`
+- Passkey lifecycle hook: `packages/web/src/hooks/usePasskey.ts`
+- WebAuthn utilities: `packages/web/src/utils/webauthn.ts`
+- Grant Access UI: `packages/web/src/pages/GrantAccessPage/`
 - Server-side passkey routes: `packages/mock-servers/src/routes/passkey.ts`

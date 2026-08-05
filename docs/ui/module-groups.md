@@ -396,7 +396,7 @@ The flat `string[]` storage works for groups. Groups are treated as atomic dragg
 2. Update `generateNavLayout()` to emit nested `{ type: "group", children: [...] }` entries.
 3. Route generation: grouped modules get `/{groupId}/{moduleId}` paths.
 
-### Phase 3: Shell (gui)
+### Phase 3: Shell (web)
 
 1. Update `AppNav` to render `NavExpandable` for group entries in `navLayout`.
 2. Update router to handle group-prefixed routes (longest-path-first registration).

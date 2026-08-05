@@ -170,7 +170,7 @@ Both addons route to `ClustersModule` in `core-plugin` — the clusters detail p
 The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `fleetshift.render-search` exactly:
 
 ```typescript
-// gui/src/extensions/isSearchResultRendererExtension.ts
+// web/src/extensions/isSearchResultRendererExtension.ts
 
 export function isSearchResultRendererExtension(
   e: Extension,
@@ -332,7 +332,7 @@ Three render paths:
 `inventorySearch` is currently a plain async function. To consume resolved extensions, it becomes a hook that uses `useResolvedExtensions` from the SDK:
 
 ```typescript
-// gui/src/hooks/useInventorySearch.tsx
+// web/src/hooks/useInventorySearch.tsx
 
 function useInventorySearch(): {
   search: (term: string) => Promise<SearchResultItem[]>;
@@ -410,8 +410,8 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `build-utils/src/extensions/searchResultRenderer.ts` | Build | `RENDER_SEARCH_TYPE`, `createSearchResultRenderer`, types |
 | `build-utils/src/extensions/__tests__/searchResultRenderer.test.ts` | Build | Builder output, validation, `validateExtensionSet` integration |
 | `common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
-| `gui/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
-| `gui/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
+| `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
+| `web/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
 | `extensions/kind/client/src/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
 | `extensions/gcphcp/client/src/GcpHcpSearchResult.tsx` | Plugin | `resolveGcpHcpCluster`, `GcpHcpClusterIcon` re-export |
 
@@ -423,14 +423,14 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `build-utils/src/extensions/index.ts` | Build | Re-export builder, type constant, types |
 | `common/src/index.ts` | Common | Re-export `SearchResultRender`, `InventoryResource`, `SearchResultResolve` |
 | `extensions/kind/client/rspack.config.ts`, `extensions/gcphcp/client/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` per plugin |
-| `gui/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
-| `gui/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
+| `web/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
+| `web/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
 
 ### Deleted
 
 | File | Why |
 |------|-----|
-| `gui/src/components/Search/inventorySearch.ts` | Replaced by `useInventorySearch` hook |
+| `web/src/components/Search/inventorySearch.ts` | Replaced by `useInventorySearch` hook |
 
 ### Not changed
 

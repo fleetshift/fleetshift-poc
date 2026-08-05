@@ -36,7 +36,7 @@ These are cosmetic changes — they affect sidebar rendering and search grouping
 
 `NavOrderEditor.tsx` — flat DragDropSort over two lists (Main / Bottom). Calls `useNavPages()` to get entries, `useNavOrder()` to persist a flat `string[]` to IndexedDB. Groups appear as atomic items — no nesting UI.
 
-### NavLayoutTree (gui — built but not wired in)
+### NavLayoutTree (web — built but not wired in)
 
 `components/NavLayoutTree/` — full dnd-kit tree with:
 - `flattenLayout()` / `buildLayout()` — round-trip between `NavLayoutEntry[]` and `FlatNode[]`

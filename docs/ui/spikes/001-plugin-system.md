@@ -57,9 +57,9 @@ The shell tracks a "scope" — either "all clusters" or a specific cluster. Plug
 
 ## Key files
 
-- Shell setup: `packages/gui/src/App.tsx`
+- Shell setup: `packages/web/src/App.tsx`
 - Plugin build config: `packages/mock-ui-plugins/webpack.config.ts`
-- Extension type contracts: `packages/gui/src/utils/extensions.ts`
+- Extension type contracts: `packages/web/src/utils/extensions.ts`
 - Server config assembly: `packages/mock-servers/src/routes/users.ts`
 - Plugin registry loader: `packages/mock-servers/src/pluginRegistry.ts`
 - Build utils (PF transforms, shared module scanning): `packages/build-utils/src/`

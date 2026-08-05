@@ -83,8 +83,8 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Component tests (gui)
-        run: npx nx run gui:test:ct
+      - name: Component tests (web)
+        run: npx nx run web:test:ct
 
       - name: Component tests (plugins)
         run: npx nx run plugins:test:ct

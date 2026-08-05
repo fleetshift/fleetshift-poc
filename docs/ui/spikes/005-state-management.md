@@ -76,5 +76,5 @@ Limitations of the POC:
 - Cross-plugin usage (metrics → pods): `packages/mock-ui-plugins/src/plugins/observability-plugin/MetricsDashboard.tsx`
 - Cross-plugin usage (overview → nodes): `packages/mock-ui-plugins/src/plugins/core-plugin/ClusterOverview.tsx`
 - Plugin dependency declarations: `packages/mock-ui-plugins/webpack.config.ts`
-- Event bus (shared WebSocket): `packages/gui/src/hooks/useInvalidationSocket.ts`
-- Shell API object: `packages/gui/src/App.tsx`
+- Event bus (shared WebSocket): `packages/web/src/hooks/useInvalidationSocket.ts`
+- Shell API object: `packages/web/src/App.tsx`

@@ -49,7 +49,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install --include-workspace-root \
     -w @fleetshift/common \
     -w @fleetshift/build-utils \
-    -w @fleetshift/gui \
+    -w @fleetshift/web \
     -w @fleetshift/mock-ui-plugins \
     -w @fleetshift/gcphcp-plugin \
     -w @fleetshift/kind-plugin \
@@ -59,7 +59,7 @@ RUN --mount=type=cache,target=/root/.npm \
     && $NX run @fleetshift/gcphcp-plugin:build:ci \
     && $NX run @fleetshift/kind-plugin:build:ci \
     && node tools/generate-plugin-registry.mjs \
-    && $NX run gui:build \
+    && $NX run web:build \
     && node tools/merge-web.mjs
 
 # ── Stage 2: runtime (static assets only) ───────────────────────

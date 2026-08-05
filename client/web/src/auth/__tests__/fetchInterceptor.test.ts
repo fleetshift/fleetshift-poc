@@ -37,31 +37,31 @@ describe("GUI fetchInterceptor", () => {
 
   it("adds Authorization header to same-origin requests", async () => {
     const { installFetchInterceptor } = await loadModule();
-    installFetchInterceptor(fakeAuthRef("gui-token-abc"));
+    installFetchInterceptor(fakeAuthRef("web-token-abc"));
 
     await window.fetch("http://localhost:3000/api/v1/clusters");
 
     expect(mockOriginalFetch).toHaveBeenCalled();
     const [, init] = mockOriginalFetch.mock.calls[0];
     const headers = new Headers(init?.headers);
-    expect(headers.get("Authorization")).toBe("Bearer gui-token-abc");
+    expect(headers.get("Authorization")).toBe("Bearer web-token-abc");
   });
 
   it("adds Authorization header to relative path requests", async () => {
     const { installFetchInterceptor } = await loadModule();
-    installFetchInterceptor(fakeAuthRef("gui-token-abc"));
+    installFetchInterceptor(fakeAuthRef("web-token-abc"));
 
     await window.fetch("/v1/clusters");
 
     expect(mockOriginalFetch).toHaveBeenCalled();
     const [, init] = mockOriginalFetch.mock.calls[0];
     const headers = new Headers(init?.headers);
-    expect(headers.get("Authorization")).toBe("Bearer gui-token-abc");
+    expect(headers.get("Authorization")).toBe("Bearer web-token-abc");
   });
 
   it("does not add header for non-matching URLs", async () => {
     const { installFetchInterceptor } = await loadModule();
-    installFetchInterceptor(fakeAuthRef("gui-token-abc"));
+    installFetchInterceptor(fakeAuthRef("web-token-abc"));
 
     await window.fetch("https://example.com/other");
 

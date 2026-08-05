@@ -38,7 +38,7 @@ if (!watchOnly) {
   nx("@fleetshift/gcphcp-plugin:build:client");
   nx("@fleetshift/kind-plugin:build:client");
   nx("ui:generate-registry");
-  nx("gui:build");
+  nx("web:build");
   nx("ui:merge-web");
 }
 
@@ -95,7 +95,7 @@ configWatcher.on("change", (changedFile) => {
       kindPluginsWatch = spawnRspack(kindPluginsCwd);
     });
   } else if (changedFile === guiConfig) {
-    console.log("\ngui rspack.config.ts changed — restarting gui build...\n");
+    console.log("\ngui rspack.config.ts changed — restarting web build...\n");
     const prev = guiWatch;
     prev.kill();
     prev.on("close", () => {

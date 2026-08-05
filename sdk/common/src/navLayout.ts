@@ -76,7 +76,7 @@ export interface NavLayoutOverride {
  */
 export type StoredNavLayout = NavLayoutOverride | string[] | null;
 
-// --- tree utilities (used by NavLayoutEditor + gui NavLayoutTree) ---
+// --- tree utilities (used by NavLayoutEditor + web NavLayoutTree) ---
 
 /** Node kind enum — eliminates magic strings for FlatNode.kind values. */
 export enum NodeKind {

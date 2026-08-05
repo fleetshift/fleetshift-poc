@@ -18,7 +18,7 @@ export default {
   },
   overrides: [
     {
-      files: ["gui/src/**/*.scss", "gui/src/**/*.css"],
+      files: ["web/src/**/*.scss", "web/src/**/*.css"],
       rules: {
         "selector-class-pattern": pluginPattern("ome-", "ome-search, ome-search__menu"),
       },

@@ -1,5 +1,5 @@
 // FleetShift UI — Search Architecture
-// Source of truth: gui/src/components/Search/
+// Source of truth: web/src/components/Search/
 //
 // How global search leverages the feature contract to automatically
 // index plugin capabilities, build parent-child groupings, resolve

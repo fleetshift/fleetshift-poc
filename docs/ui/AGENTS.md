@@ -8,7 +8,7 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 ## Packages
 
-- `client/web` (`@fleetshift/gui`) — Shell SPA (routing, auth, search, layout). No business logic.
+- `client/web` (`@fleetshift/web`) — Shell SPA (routing, auth, search, layout). No business logic.
 - `extensions/core/client` (`@fleetshift/mock-ui-plugins`) — Core plugins under `src/plugins/<name>-plugin/`.
 - `extensions/gcphcp/client` (`@fleetshift/gcphcp-plugin`) — GCP HCP cluster provider plugin (separated from core).
 - `extensions/kind/client` (`@fleetshift/kind-plugin`) — Kind local cluster provider plugin (separated from core).
@@ -67,7 +67,7 @@ All CSS classes are scoped with a prefix to prevent collisions across MF boundar
 
 | Scope | Prefix | Example |
 |-------|--------|---------|
-| Shell (gui) | `ome-` | `ome-search`, `ome-search__menu`, `ome-search__menu--open` |
+| Shell (web) | `ome-` | `ome-search`, `ome-search__menu`, `ome-search__menu--open` |
 | Core plugin | `ome-core-` | `ome-core-clusters`, `ome-core-clusters__toolbar` |
 | Overview plugin | `ome-overview-` | `ome-overview-dashboard`, `ome-overview-capacity__bar` |
 | GCP HCP plugin | `ome-gcphcp-` | `ome-gcphcp-wizard`, `ome-gcphcp-wizard__step` |
@@ -77,7 +77,7 @@ All CSS classes are scoped with a prefix to prevent collisions across MF boundar
 | Kind plugin | `ome-kind-` | `ome-kind-wizard`, `ome-kind-wizard__step` |
 | Settings plugin | `ome-settings-` | `ome-settings-nav-order`, `ome-settings-nav-order__item` |
 
-Enforced by stylelint (`stylelint.config.mjs`) with per-plugin overrides. Run `npx nx run gui:lint:css` / `npx nx run plugins:lint:css` to check.
+Enforced by stylelint (`stylelint.config.mjs`) with per-plugin overrides. Run `npx nx run web:lint:css` / `npx nx run plugins:lint:css` to check.
 
 **PF utility classes first.** For simple spacing, font, color, display, flex — use PF utility classes (`pf-v6-u-mb-md`, `pf-v6-u-font-size-sm`, `pf-v6-u-text-color-subtle`, `pf-v6-u-display-flex`, `pf-v6-u-flex-1`, etc.) directly in `className`. Don't create a custom SCSS class just to set `margin-bottom: var(--pf-t--global--spacer--md)`. Custom `ome-*` classes are for multi-property styles, component-specific layouts (gap, grid), or things PF utilities don't cover.
 
@@ -127,9 +127,9 @@ npm workspaces are declared at the repo root. Run `npm install` from the repo ro
 # Via Nx (preferred — cached, dependency-aware):
 npx nx run common:build    # shared types/helpers
 npx nx run plugins:build   # MF remote plugins
-npx nx run gui:build       # SPA shell
-npx nx run gui:dev         # dev server (http://localhost:8085)
-npx nx run gui:dev:watch   # dev server with hot reload
+npx nx run web:build       # SPA shell
+npx nx run web:dev         # dev server (http://localhost:8085)
+npx nx run web:dev:watch   # dev server with hot reload
 npx nx run fleetshift-poc:ui:lint   # eslint + stylelint
 npx nx run fleetshift-poc:ui:test   # vitest
 ```

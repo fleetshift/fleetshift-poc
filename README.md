@@ -32,7 +32,7 @@ npx nx run-many -t test     # run target across all projects (parallel)
 npx nx affected -t test     # only test what changed
 ```
 
-Projects: `server`, `cli`, `proto`, `gui`, `common`, `build-utils`, `plugins`.
+Projects: `server`, `cli`, `proto`, `web`, `common`, `build-utils`, `plugins`.
 
 ## Build
 
@@ -41,7 +41,7 @@ npx nx run server:build     # server
 npx nx run cli:build        # fleetctl CLI
 npx nx run common:build     # shared UI types/helpers
 npx nx run plugins:build    # all MF remote plugins
-npx nx run gui:build        # SPA shell
+npx nx run web:build        # SPA shell
 npx nx run-many -t build    # build all (parallel, cached)
 
 # Or via Taskfile directly:
@@ -55,13 +55,13 @@ Builds are cached — unchanged sources skip recompilation entirely.
 ## UI Development
 
 ```bash
-npx nx run gui:dev          # dev server (http://localhost:8085)
-npx nx run gui:dev:watch    # dev server with hot reload
-npx nx run gui:test:ct      # component tests (playwright)
+npx nx run web:dev          # dev server (http://localhost:8085)
+npx nx run web:dev:watch    # dev server with hot reload
+npx nx run web:test:ct      # component tests (playwright)
 npx nx run plugins:test:ct  # plugin component tests
 ```
 
-UI packages: `gui` (SPA shell), `common` (shared types), `build-utils` (rspack helpers), `plugins` (12 MF remotes)
+UI packages: `web` (SPA shell), `common` (shared types), `build-utils` (rspack helpers), `plugins` (12 MF remotes)
 
 ## Test
 

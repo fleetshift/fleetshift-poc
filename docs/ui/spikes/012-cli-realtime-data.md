@@ -27,7 +27,7 @@ This is not implemented in the POC. The plumbing from spike 006 covers the proto
 
 ## Key files
 
-- GUI event bus (reference implementation): `packages/gui/src/hooks/useInvalidationSocket.ts`
+- GUI event bus (reference implementation): `packages/web/src/hooks/useInvalidationSocket.ts`
 - WebSocket server: `packages/mock-servers/src/ws.ts`
 - CLI fullscreen frame: `packages/cli/src/components/FullScreenFrame.tsx`
 - CLI scrolling frame: `packages/cli/src/components/ScrollingFrame.tsx`
