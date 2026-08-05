@@ -1,7 +1,10 @@
+import {
+  ClusterResource,
+  createResourceApi,
+  extractClusterId,
+  ResourceResult,
+} from "@fleetshift/common";
 import { createContext, useContext, useEffect, useState } from "react";
-
-import type { GcpHcpCluster } from "../gcphcp-plugin/api";
-import { extractClusterId, listGcpHcpClusters } from "../gcphcp-plugin/api";
 
 export interface DashboardCluster {
   id: string;
@@ -124,8 +127,10 @@ function getOrCreateEnrichment(
   return data;
 }
 
+const clusterApi = createResourceApi<ClusterResource>("-");
+
 function deriveStatus(
-  cluster: GcpHcpCluster,
+  cluster: ClusterResource,
 ): "healthy" | "degraded" | "critical" {
   if (cluster.reconciling) return "degraded";
   const s = cluster.state?.toLowerCase();
@@ -141,7 +146,9 @@ function deriveStatus(
   return "healthy";
 }
 
-function mapClusters(raw: GcpHcpCluster[]): DashboardCluster[] {
+function mapClusters(
+  raw: ResourceResult<ClusterResource>[],
+): DashboardCluster[] {
   const store = loadEnrichmentStore();
   const clusters = raw.map((c): DashboardCluster => {
     const id = extractClusterId(c.name);
@@ -152,10 +159,10 @@ function mapClusters(raw: GcpHcpCluster[]): DashboardCluster[] {
       provider: "gcp",
       region: enrichment.region,
       environment: enrichment.environment,
-      status: deriveStatus(c),
-      version: c.spec?.releaseVersion ?? "unknown",
-      state: c.state ?? "unknown",
-      reconciling: c.reconciling ?? false,
+      status: deriveStatus(c.resource),
+      version: c.resource.spec?.releaseVersion ?? "unknown",
+      state: c.resource.state ?? "unknown",
+      reconciling: c.resource.reconciling ?? false,
       lat: enrichment.lat,
       lng: enrichment.lng,
       cpuPercent: enrichment.cpuPercent,
@@ -180,7 +187,10 @@ export function useFleetData(): FleetData {
     let cancelled = false;
     async function load() {
       try {
-        const raw = await listGcpHcpClusters();
+        const raw = await clusterApi.searchAll({
+          filter:
+            'resourceType == "gcphcp.fleetshift.io/Cluster" || resourceType == "kind.fleetshift.io/Cluster"',
+        });
         if (!cancelled) {
           setClusters(mapClusters(raw));
           setError(null);

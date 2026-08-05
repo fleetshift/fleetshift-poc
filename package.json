@@ -5,7 +5,9 @@
     "client/web",
     "sdk/common",
     "sdk/build-utils",
-    "extensions/core/client"
+    "extensions/core/client",
+    "extensions/gcphcp/client",
+    "extensions/kind/client"
   ],
   "devDependencies": {
     "@module-federation/enhanced": "2.8.1",
@@ -30,5 +32,8 @@
     "stylelint-config-standard-scss": "^17.0.0",
     "typescript": "^6.0.0",
     "vitest": "^4.0.18"
+  },
+  "scripts": {
+    "nx": "nx"
   }
 }

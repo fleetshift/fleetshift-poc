@@ -1,0 +1,48 @@
+{
+  "name": "@fleetshift/kind-plugin",
+  "root": "extensions/kind/client",
+  "sourceRoot": "extensions/kind/client/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib", "federation:remote"],
+  "implicitDependencies": ["common", "build-utils", "@fleetshift/kind-server"],
+  "targets": {
+    "build:client": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build -w @fleetshift/kind-plugin"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["common:build"]
+    },
+    "build:ci": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build:ci -w @fleetshift/kind-plugin"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["common:build"]
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"]
+      }
+    },
+    "lint:css": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "stylelint 'src/**/*.{css,scss}' --config ../../../stylelint.config.mjs --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+        "cwd": "extensions/kind/client"
+      }
+    }
+  }
+}

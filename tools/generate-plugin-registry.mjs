@@ -3,8 +3,12 @@ import { resolve, dirname, relative, sep } from "path";
 import { fileURLToPath } from "url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const distDir = resolve(root, "extensions/core/client/dist");
-const outputDir = process.argv[2] ? resolve(process.argv[2]) : distDir;
+const distDirs = [
+  resolve(root, "extensions/core/client/dist"),
+  resolve(root, "extensions/gcphcp/client/dist"),
+  resolve(root, "extensions/kind/client/dist"),
+];
+const outputDir = process.argv[2] ? resolve(process.argv[2]) : distDirs[0];
 
 const pluginMeta = [
   { name: "management-plugin", key: "management", label: "Management", persona: "ops" },
@@ -43,9 +47,9 @@ function findManifests(dir, base) {
 }
 
 const registry = { assetsHost: "", plugins: {} };
-const manifests = findManifests(distDir, distDir);
+const manifests = distDirs.flatMap((dir) => findManifests(dir, dir));
 if (manifests.length === 0) {
-  throw new Error(`No plugin manifests found under ${distDir}`);
+  throw new Error(`No plugin manifests found under ${distDirs.join(", ")}`);
 }
 
 for (const { path: filePath, rel } of manifests) {

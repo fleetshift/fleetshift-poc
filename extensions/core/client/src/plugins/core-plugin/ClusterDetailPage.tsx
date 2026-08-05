@@ -1,9 +1,10 @@
 import "./ClusterDetailPage.scss";
 
-import type { ClusterDetailTabProps, ResourceResult } from "@fleetshift/common";
+import type { ClusterDetailTabProps, ClusterResource, ResourceResult } from "@fleetshift/common";
 import {
   createApiClient,
   createResourceApi,
+  extractClusterId,
   PluginLink,
   usePluginNavigate,
 } from "@fleetshift/common";
@@ -47,9 +48,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 
 import {
   buildAddonBasePath,
-  type ClusterResource,
   deriveClusterState,
-  extractClusterId,
   extractService,
   formatTime,
   isTransientState,

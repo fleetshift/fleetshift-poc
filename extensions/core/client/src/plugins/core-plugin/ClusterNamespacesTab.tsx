@@ -1,4 +1,4 @@
-import { PluginLink } from "@fleetshift/common";
+import { extractClusterId, PluginLink } from "@fleetshift/common";
 import {
   SkeletonTableBody,
   SkeletonTableHead,
@@ -29,11 +29,7 @@ import {
 import { Tbody, Td, Tr } from "@patternfly/react-table";
 import { useMemo } from "react";
 
-import {
-  extractClusterId,
-  formatAge,
-  useClusterResources,
-} from "./useClusterResources";
+import { formatAge, useClusterResources } from "./useClusterResources";
 
 interface NamespaceFilters {
   name: string;

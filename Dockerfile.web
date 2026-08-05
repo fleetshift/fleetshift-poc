@@ -20,6 +20,8 @@ COPY sdk/common/package.json sdk/common/
 COPY sdk/build-utils/package.json sdk/build-utils/
 COPY client/web/package.json client/web/
 COPY extensions/core/client/package.json extensions/core/client/
+COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/
+COPY extensions/kind/client/package.json extensions/kind/client/
 
 # Copy tsconfig chain
 COPY tsconfig.json ./
@@ -29,6 +31,8 @@ COPY sdk/common/ sdk/common/
 COPY sdk/build-utils/ sdk/build-utils/
 COPY client/web/ client/web/
 COPY extensions/core/client/ extensions/core/client/
+COPY extensions/gcphcp/client/ extensions/gcphcp/client/
+COPY extensions/kind/client/ extensions/kind/client/
 COPY tools/merge-web.mjs tools/merge-web.mjs
 COPY tools/generate-plugin-registry.mjs tools/generate-plugin-registry.mjs
 COPY tools/generate-icons.mjs tools/generate-icons.mjs
@@ -41,8 +45,12 @@ RUN --mount=type=cache,target=/root/.npm \
     -w @fleetshift/build-utils \
     -w @fleetshift/gui \
     -w @fleetshift/mock-ui-plugins \
+    -w @fleetshift/gcphcp-plugin \
+    -w @fleetshift/kind-plugin \
     && npm run build -w @fleetshift/common \
     && npm run build:ci -w @fleetshift/mock-ui-plugins \
+    && npm run build:ci -w @fleetshift/gcphcp-plugin \
+    && npm run build:ci -w @fleetshift/kind-plugin \
     && node tools/generate-plugin-registry.mjs \
     && npm run build -w @fleetshift/gui \
     && node tools/merge-web.mjs

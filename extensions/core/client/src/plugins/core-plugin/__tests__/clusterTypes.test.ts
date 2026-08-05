@@ -1,10 +1,9 @@
+import { ClusterResource, extractClusterId } from "@fleetshift/common";
 import { describe, expect, it } from "vitest";
 
-import type { ClusterResource } from "../clusterTypes";
 import {
   buildAddonBasePath,
   deriveClusterState,
-  extractClusterId,
   extractService,
   isFailureState,
   isHealthyState,

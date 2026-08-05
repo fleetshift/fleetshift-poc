@@ -131,7 +131,7 @@ createSearchResultRenderer({
 ```
 
 ```typescript
-// src/plugins/kind-plugin/KindSearchResult.tsx
+// extensions/kind/client/src/KindSearchResult.tsx
 export function resolveKindCluster(resource: InventoryResource): SearchResultRender {
   const clusterId = resource.resource.name.split("/").pop() ?? resource.resource.name;
   return {
@@ -412,8 +412,8 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
 | `gui/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
 | `gui/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
-| `mock-ui-plugins/src/plugins/kind-plugin/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
-| `mock-ui-plugins/src/plugins/gcphcp-plugin/GcpHcpSearchResult.tsx` | Plugin | `resolveGcpHcpCluster`, `GcpHcpClusterIcon` re-export |
+| `extensions/kind/client/src/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
+| `extensions/gcphcp/client/src/GcpHcpSearchResult.tsx` | Plugin | `resolveGcpHcpCluster`, `GcpHcpClusterIcon` re-export |
 
 ### Modified
 
@@ -422,7 +422,7 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `build-utils/src/extensions/validate.ts` | Build | `case RENDER_SEARCH_TYPE` in validation switch |
 | `build-utils/src/extensions/index.ts` | Build | Re-export builder, type constant, types |
 | `common/src/index.ts` | Common | Re-export `SearchResultRender`, `InventoryResource`, `SearchResultResolve` |
-| `mock-ui-plugins/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` for both plugins |
+| `extensions/kind/client/rspack.config.ts`, `extensions/gcphcp/client/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` per plugin |
 | `gui/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
 | `gui/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
 

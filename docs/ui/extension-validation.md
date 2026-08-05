@@ -410,7 +410,7 @@ createModule({
 
 ### Self-validation function (extension-provided)
 
-New file exposed via `exposedModules: { GcpHcpValidation: "./src/plugins/gcphcp-plugin/validate.ts" }`:
+New file exposed via `exposedModules: { GcpHcpValidation: "./src/validate.ts" }` (in `extensions/gcphcp/client/rspack.config.ts`):
 
 ```typescript
 import type { ExtensionValidationResult } from "@fleetshift/build-utils";
@@ -647,7 +647,7 @@ The `/debug` page (`gui/src/pages/DebugPage.tsx`) gains a new accordion panel:
 2. Update `AppNav.tsx` to use `useValidatedExtensions(isModuleExtension)`.
 3. Update `useSetupExtensions.ts` to use `useValidatedExtensions(isSetupExtension)`.
 
-### Phase 4: Plugin Updates (mock-ui-plugins)
+### Phase 4: Plugin Updates (extension packages)
 
 1. Add `isValidExtension` CodeRef to **all** extensions across all plugins (module, module-group, setup, cluster-provider, onboarding-action).
 2. Implement self-validation functions and expose them in `exposedModules`. For simple types, a trivial `() => ({ valid: true })` is acceptable.

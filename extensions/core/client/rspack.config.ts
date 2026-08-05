@@ -260,84 +260,6 @@ const RoutingPlugin = new FleetshiftPlugin({
   },
 });
 
-const GcpHcpPlugin = new FleetshiftPlugin({
-  extensions: [
-    createClusterProvider({
-      id: "gcphcp",
-      label: "GCP Hosted Control Plane",
-      description:
-        "Create a managed OpenShift cluster on Google Cloud Platform.",
-      keywords: [
-        "gcp",
-        "google cloud",
-        "hosted control plane",
-        "managed",
-        "hcp",
-      ],
-      to: { search: "?create=gcphcp" },
-      icon: { $codeRef: "GcpHcpProviderCard.GcpHcpIcon" },
-      card: { $codeRef: "GcpHcpProviderCard.default" },
-      wizard: { $codeRef: "CreateGcpHcpWizard.default" },
-      searchIcon: { $codeRef: "GcpHcpIcon.default" },
-    }),
-    createOnboardingAction({
-      id: "gcphcp-connect",
-      label: "GCP Hosted Control Plane",
-      description: "Connect your GCP project to create managed HCP clusters.",
-      icon: { $codeRef: "GcpHcpIcon.default" },
-      card: { $codeRef: "GcpHcpOnboardingCard.default" },
-      form: { $codeRef: "GcpHcpConnectionForm.default" },
-      overviewCta: "Integrate your first addon",
-      category: "fleetshift.cluster-provider",
-    }),
-    createSearchResultRenderer({
-      id: "gcphcp-cluster-renderer",
-      label: "GCP HCP Cluster",
-      resourceType: "gcphcp.fleetshift.io/Cluster",
-      resolve: { $codeRef: "GcpHcpSearchResult.resolveGcpHcpCluster" },
-      icon: { $codeRef: "GcpHcpSearchResult.GcpHcpClusterIcon" },
-    }),
-    createClusterDetailTab({
-      id: "gcphcp-events",
-      label: "Events",
-      title: "Events",
-      eventKey: "events",
-      priority: 50,
-      service: "gcphcp.fleetshift.io",
-      component: { $codeRef: "GcpHcpDeliveryEventsTab.default" },
-    }),
-  ],
-  sharedModules,
-  entryScriptFilename: "plugins/gcphcp/gcphcp-plugin.[contenthash].js",
-  pluginManifestFilename: "plugins/gcphcp/gcphcp-plugin-manifest.json",
-  moduleFederationSettings: mfOverride,
-  pluginMetadata: {
-    name: "gcphcp-plugin",
-    version: "1.0.0",
-    exposedModules: {
-      GcpHcpProviderCard: p(
-        "./src/plugins/gcphcp-plugin/GcpHcpProviderCard.tsx",
-      ),
-      CreateGcpHcpWizard: p(
-        "./src/plugins/gcphcp-plugin/CreateGcpHcpWizard.tsx",
-      ),
-      GcpHcpIcon: p("./src/plugins/gcphcp-plugin/GcpHcpIcon.tsx"),
-      GcpHcpOnboardingCard: p(
-        "./src/plugins/gcphcp-plugin/GcpHcpOnboardingCard.tsx",
-      ),
-      GcpHcpConnectionForm: p(
-        "./src/plugins/gcphcp-plugin/GcpHcpConnectionForm.tsx",
-      ),
-      GcpHcpSearchResult: p(
-        "./src/plugins/gcphcp-plugin/GcpHcpSearchResult.tsx",
-      ),
-      GcpHcpDeliveryEventsTab: p(
-        "./src/plugins/gcphcp-plugin/GcpHcpDeliveryEventsTab.tsx",
-      ),
-    },
-  },
-});
-
 const OverviewPlugin = new FleetshiftPlugin({
   extensions: [
     createModule({
@@ -361,45 +283,6 @@ const OverviewPlugin = new FleetshiftPlugin({
         "./src/plugins/overview-plugin/OverviewDashboard.tsx",
       ),
       OverviewIcon: p("./src/plugins/overview-plugin/OverviewIcon.tsx"),
-    },
-  },
-});
-
-const KindPlugin = new FleetshiftPlugin({
-  extensions: [
-    createClusterProvider({
-      id: "kind",
-      label: "Kind",
-      description: "Create a local Kind cluster for development and testing.",
-      keywords: ["kind", "local", "development", "testing"],
-      to: { search: "?create=kind" },
-      icon: { $codeRef: "KindProviderCard.KindIcon" },
-      card: { $codeRef: "KindProviderCard.default" },
-      wizard: { $codeRef: "CreateClusterWizard.default" },
-      searchIcon: { $codeRef: "KindIcon.default" },
-    }),
-    createSearchResultRenderer({
-      id: "kind-cluster-renderer",
-      label: "Kind Cluster",
-      resourceType: "kind.fleetshift.io/Cluster",
-      resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
-      icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
-    }),
-  ],
-  sharedModules,
-  entryScriptFilename: "plugins/kind/kind-plugin.[contenthash].js",
-  pluginManifestFilename: "plugins/kind/kind-plugin-manifest.json",
-  moduleFederationSettings: mfOverride,
-  pluginMetadata: {
-    name: "kind-plugin",
-    version: "1.0.0",
-    exposedModules: {
-      KindProviderCard: p("./src/plugins/kind-plugin/KindProviderCard.tsx"),
-      CreateClusterWizard: p(
-        "./src/plugins/kind-plugin/CreateClusterWizard.tsx",
-      ),
-      KindIcon: p("./src/plugins/kind-plugin/KindIcon.tsx"),
-      KindSearchResult: p("./src/plugins/kind-plugin/KindSearchResult.tsx"),
     },
   },
 });
@@ -840,7 +723,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       KindOnboarding: p(
         "./src/plugins/addon-demo-plugin/providers/KindOnboarding.tsx",
       ),
-      KindOnboardingIcon: p("./src/plugins/kind-plugin/KindIcon.tsx"),
+      KindOnboardingIcon: p("./src/plugins/addon-demo-plugin/icons/KindIcon.tsx"),
       // Module pages
       SecurityPage: p(
         "./src/plugins/addon-demo-plugin/security/SecurityPage.tsx",
@@ -888,8 +771,6 @@ const pluginConfigs = [
   { plugin: CorePlugin, key: "core" },
   { plugin: SigningPlugin, key: "signing" },
   { plugin: RoutingPlugin, key: "routing" },
-  { plugin: GcpHcpPlugin, key: "gcphcp" },
-  { plugin: KindPlugin, key: "kind" },
   { plugin: SetupPlugin, key: "setup" },
   { plugin: ConfigurationPlugin, key: "configuration" },
   { plugin: VirtualizationPlugin, key: "virtualization" },

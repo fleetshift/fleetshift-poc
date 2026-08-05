@@ -1,39 +1,4 @@
-import type { ResourceResult } from "@fleetshift/common";
-
-export interface ClusterCondition {
-  status: string;
-  reason?: string;
-  message?: string;
-  lastTransitionTime?: string;
-}
-
-export interface NodepoolSpec {
-  id: string;
-  replicas: number;
-  instanceType: string;
-  rootVolumeSize?: number;
-  rootVolumeType?: string;
-  autoRepair?: boolean;
-  upgradeType?: string;
-}
-
-export interface ClusterResource {
-  name: string;
-  uid: string;
-  state?: string;
-  reconciling?: boolean;
-  createTime?: string;
-  updateTime?: string;
-  pauseReason?: string;
-  conditions?: Record<string, ClusterCondition>;
-  observation?: Record<string, unknown>;
-  spec?: {
-    releaseVersion?: string;
-    nodepools?: NodepoolSpec[];
-    endpointAccess?: string;
-    channelGroup?: string;
-  };
-}
+import type { ClusterResource, ResourceResult } from "@fleetshift/common";
 
 export interface ClusterRow {
   result: ResourceResult<ClusterResource>;
@@ -89,10 +54,6 @@ export function isTransientState(state: string | undefined): boolean {
 export function formatTime(iso: string | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString();
-}
-
-export function extractClusterId(resourceName: string): string {
-  return resourceName.replace(/^clusters\//, "");
 }
 
 export function extractService(canonicalName: string): string {

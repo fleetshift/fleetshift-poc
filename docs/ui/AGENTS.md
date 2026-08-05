@@ -9,9 +9,11 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 ## Packages
 
 - `client/web` (`@fleetshift/gui`) — Shell SPA (routing, auth, search, layout). No business logic.
-- `extensions/core/client` (`@fleetshift/mock-ui-plugins`) — All plugins under `src/plugins/<name>-plugin/`.
+- `extensions/core/client` (`@fleetshift/mock-ui-plugins`) — Core plugins under `src/plugins/<name>-plugin/`.
+- `extensions/gcphcp/client` (`@fleetshift/gcphcp-plugin`) — GCP HCP cluster provider plugin (separated from core).
+- `extensions/kind/client` (`@fleetshift/kind-plugin`) — Kind local cluster provider plugin (separated from core).
 - `sdk/common` (`@fleetshift/common`) — Shared types, utils, cross-plugin hooks. Dual CJS/ESM.
-- `sdk/build-utils` (`@fleetshift/build-utils`) — Webpack helpers (PF transforms, ts-loader). No build step.
+- `sdk/build-utils` (`@fleetshift/build-utils`) — Rspack helpers (PF transforms, FleetshiftPlugin). No build step.
 - `e2e` — Playwright tests.
 
 ## Components
@@ -33,7 +35,7 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 - Unit tests for edge cases and bug candidates, not happy-path snapshots.
 - Tests next to code (`__tests__/` or `.test.ts`). Vitest + `@testing-library/react`.
-- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `client/web/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `extensions/core/client/src/plugins/gcphcp-plugin/__tests__/` for patterns.
+- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `client/web/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `extensions/gcphcp/client/src/__tests__/` for patterns.
 - E2E in `e2e`, Playwright.
 
 ### Playwright CT notes
@@ -44,7 +46,7 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 ## Data Driven Forms (DDF)
 
-Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`. See `extensions/core/client/src/plugins/gcphcp-plugin/CreateGcpHcpWizard.tsx` for reference implementation.
+Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`. See `extensions/gcphcp/client/src/CreateGcpHcpWizard.tsx` for reference implementation.
 
 - **Custom components**: DDF's pf4-component-mapper components are PF4-era. For PF6 controls (FormSelect, etc.), create custom DDF components using `useFieldApi` from `react-form-renderer`. Register in `componentMapper` with a custom string key. See `ddfComponents/DdfFormSelect.tsx`.
 - **Wizard steps**: Use `nextStep: "step-name"` to chain steps (without it, DDF shows "Submit" instead of "Next"). The DDF wizard step template uses PF4 class `pf-c-form`. Override with `StepTemplate` using `<div className="pf-v6-c-form">` — not `<Form>` to avoid form-in-form since `FormTemplate` already wraps in `<form>`.
@@ -105,7 +107,7 @@ import clsx from "clsx";
 ## Plugins
 
 - Registered as `DynamicRemotePlugin` in `rspack.config.ts`.
-- Directory: `src/plugins/<name>-plugin/` — components, `api.ts`, hooks.
+- Core plugins: `extensions/core/client/src/plugins/<name>-plugin/`. Separated plugins (gcphcp, kind): `extensions/<name>/client/src/` with own `rspack.config.ts` and `package.json`.
 - Extensions declare UI capabilities; Go backend reads manifests for navigation.
 - Shared deps (react, PF, scalprum, oidc) are MF singletons. New shared dep → update `sharedModules`.
 - `ScalprumComponent` `module` must match `exposedModules` key exactly — no `./` prefix.

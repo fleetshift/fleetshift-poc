@@ -1,0 +1,34 @@
+{
+  "name": "@fleetshift/kind-server",
+  "root": "extensions/kind/server",
+  "projectType": "library",
+  "tags": ["lang:go", "scope:backend", "type:extension"],
+  "implicitDependencies": ["server"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'no-op: kind server plugin not yet implemented'",
+        "cwd": "extensions/kind/server"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'no-op: kind server plugin not yet implemented'",
+        "cwd": "extensions/kind/server"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    }
+  }
+}

@@ -132,11 +132,6 @@ async function create<T extends keyof EntityResponseMap, P = unknown>(
     },
   });
 }
-
-export function extractClusterId(name: string): string {
-  return name.replace(/^clusters\//, "");
-}
-
 export async function listGcpHcpClusters(): Promise<GcpHcpCluster[]> {
   const res = await list("clusters");
   return res.clusters ?? [];

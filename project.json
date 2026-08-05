@@ -70,11 +70,13 @@
       "options": {
         "command": "node tools/generate-plugin-registry.mjs"
       },
-      "dependsOn": ["plugins:build"],
+      "dependsOn": ["plugins:build", "@fleetshift/gcphcp-plugin:build:client", "@fleetshift/kind-plugin:build:client"],
       "cache": true,
       "inputs": [
         "{workspaceRoot}/tools/generate-plugin-registry.mjs",
-        "{workspaceRoot}/extensions/core/client/dist/**/*"
+        "{workspaceRoot}/extensions/core/client/dist/**/*",
+        "{workspaceRoot}/extensions/gcphcp/client/dist/**/*",
+        "{workspaceRoot}/extensions/kind/client/dist/**/*"
       ]
     },
     "ui:merge-web": {
@@ -91,6 +93,8 @@
         "ui:generate-icons",
         "common:build",
         "plugins:build",
+        "@fleetshift/gcphcp-plugin:build:client",
+        "@fleetshift/kind-plugin:build:client",
         "gui:build",
         "ui:generate-registry",
         "ui:merge-web"
@@ -111,9 +115,13 @@
         "gui:lint",
         "common:lint",
         "plugins:lint",
+        "@fleetshift/gcphcp-plugin:lint",
+        "@fleetshift/kind-plugin:lint",
         "build-utils:lint",
         "gui:lint:css",
-        "plugins:lint:css"
+        "plugins:lint:css",
+        "@fleetshift/gcphcp-plugin:lint:css",
+        "@fleetshift/kind-plugin:lint:css"
       ]
     },
     "pd:up": {

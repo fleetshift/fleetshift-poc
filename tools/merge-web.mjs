@@ -5,7 +5,11 @@ import { execFileSync } from "child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const webDir = resolve(root, "web");
-const pluginsDist = resolve(root, "extensions/core/client/dist");
+const pluginDistDirs = [
+  resolve(root, "extensions/core/client/dist"),
+  resolve(root, "extensions/gcphcp/client/dist"),
+  resolve(root, "extensions/kind/client/dist"),
+];
 const guiDist = resolve(root, "client/web/dist");
 const incremental = process.argv.includes("--incremental");
 
@@ -18,14 +22,19 @@ if (!incremental) {
   }
 }
 
-const hasPluginManifests =
-  existsSync(pluginsDist) &&
-  readdirSync(pluginsDist, { recursive: true }).some((p) =>
+let hasAnyManifests = false;
+for (const dist of pluginDistDirs) {
+  if (!existsSync(dist)) continue;
+  const hasManifests = readdirSync(dist, { recursive: true }).some((p) =>
     String(p).endsWith("-manifest.json"),
   );
+  if (hasManifests) {
+    cpSync(dist, webDir, { recursive: true, force: true });
+    hasAnyManifests = true;
+  }
+}
 
-if (hasPluginManifests) {
-  cpSync(pluginsDist, webDir, { recursive: true, force: true });
+if (hasAnyManifests) {
   // Generate registry into web/ directly (not dist/) to avoid re-triggering the watcher
   execFileSync("node", [resolve(root, "tools/generate-plugin-registry.mjs"), webDir], {
     cwd: root,
