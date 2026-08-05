@@ -1,4 +1,8 @@
 export {
+  createCommonModuleReplacementPlugin,
+  createCommonTransformImport,
+} from "./createCommonImportConfig";
+export {
   createPfModuleReplacementPlugin,
   createPfTransformImport,
 } from "./createPfImportConfig";
@@ -30,4 +34,5 @@ export {
   FleetshiftPlugin,
   RENDER_SEARCH_TYPE,
 } from "./extensions";
+export { default as getCommonDynamicModules } from "./getCommonDynamicModules";
 export { default as getDynamicModules } from "./getDynamicModules";

@@ -33,7 +33,7 @@ const config: Configuration = {
     chunkFilename: "shell/[name].js",
     clean: true,
   },
-  mode: "development",
+  mode: (process.env.NODE_ENV === "development" ? "development" : "production"),
   stats: {
     preset: "normal",
     colors: true,

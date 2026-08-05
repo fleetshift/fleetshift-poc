@@ -1,11 +1,14 @@
 import {
   createClusterDetailTab,
   createClusterProvider,
+  createCommonModuleReplacementPlugin,
+  createCommonTransformImport,
   createOnboardingAction,
   createPfModuleReplacementPlugin,
   createPfTransformImport,
   createSearchResultRenderer,
   FleetshiftPlugin,
+  getCommonDynamicModules,
   getDynamicModules,
 } from "@fleetshift/build-utils";
 import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
@@ -13,11 +16,15 @@ import type { Configuration } from "@rspack/core";
 import rspack from "@rspack/core";
 import path from "path";
 import { fileURLToPath } from "url";
+// @ts-ignore
+import { BundleAnalyzerPlugin } from "webpack-bundle-analyzer";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(configDir, "..");
 const pfSharedModules = getDynamicModules(configDir, uiRoot);
+const commonSharedModules = getCommonDynamicModules();
 const pfTransformImport = createPfTransformImport();
+const commonTransformImport = createCommonTransformImport();
 
 const swcLoaderRule = {
   test: /\.tsx?$/,
@@ -29,17 +36,13 @@ const swcLoaderRule = {
       // TODO: enable reactCompiler: true when rspack >= 2.1.0
       transform: { react: { runtime: "automatic" as const } },
     },
-    transformImport: pfTransformImport,
+    transformImport: [...pfTransformImport, commonTransformImport],
   },
   type: "javascript/auto" as const,
 };
 
 const sharedModules = {
   react: { singleton: true, requiredVersion: "*" },
-  "@fleetshift/common": {
-    requiredVersion: "*",
-    version: "*",
-  },
   "react-dom": { singleton: true, requiredVersion: "*" },
   "@scalprum/core": { singleton: true, requiredVersion: "*" },
   "@scalprum/react-core": { singleton: true, requiredVersion: "*" },
@@ -51,6 +54,7 @@ const sharedModules = {
   "react-router-dom": { singleton: true, requiredVersion: "*" },
   "react/jsx-runtime": { singleton: true, requiredVersion: "^19" },
   ...pfSharedModules,
+  ...commonSharedModules,
 };
 
 class ModuleFederationPlugin extends BaseMFPlugin {
@@ -147,7 +151,7 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
     assetModuleFilename: `plugins/${key}/assets/[hash][ext]`,
     uniqueName: key,
   },
-  mode: "development" as const,
+  mode: (process.env.NODE_ENV === "development" ? "development" : "production") as Configuration["mode"],
   ignoreWarnings: [/Plugin base URL/, /Plugin has no extensions/],
   stats: {
     preset: "normal",
@@ -161,6 +165,7 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
       "process.env.DRAGGABLE_DEBUG": "false",
     }),
     createPfModuleReplacementPlugin(uiRoot),
+    createCommonModuleReplacementPlugin(),
     new rspack.NormalModuleReplacementPlugin(
       /^@patternfly\/react-core\/dist\/esm\/(components|helpers|layouts)(\/|$)/,
       (resource) => {
@@ -178,6 +183,13 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
         resource.request = resource.request.replace(/\.(js|mjs)$/, "");
       },
     ),
+    ...(process.env.ANALYZE_BUNDLE === "true"
+      ? [
+          new BundleAnalyzerPlugin({
+            // analyzerMode: "json",
+          }),
+        ]
+      : []),
   ],
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
