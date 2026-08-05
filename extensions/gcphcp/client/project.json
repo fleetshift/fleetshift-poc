@@ -9,7 +9,8 @@
     "build:client": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run build -w @fleetshift/gcphcp-plugin"
+        "command": "rm -rf dist node_modules/.cache && rspack build",
+        "cwd": "extensions/gcphcp/client"
       },
       "inputs": [
         "{projectRoot}/src/**/*",
@@ -22,7 +23,8 @@
     "build:ci": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run build:ci -w @fleetshift/gcphcp-plugin"
+        "command": "rspack build",
+        "cwd": "extensions/gcphcp/client"
       },
       "inputs": [
         "{projectRoot}/src/**/*",
@@ -30,6 +32,14 @@
       ],
       "outputs": ["{projectRoot}/dist"],
       "dependsOn": ["common:build"]
+    },
+    "test:ct": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "playwright test",
+        "cwd": "extensions/gcphcp/client"
+      },
+      "cache": false
     },
     "lint": {
       "executor": "@nx/eslint:lint",

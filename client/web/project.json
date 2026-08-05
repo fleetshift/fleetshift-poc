@@ -9,7 +9,8 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run build -w @fleetshift/gui"
+        "command": "rspack build",
+        "cwd": "client/web"
       },
       "inputs": [
         "{projectRoot}/src/**/*",
@@ -45,6 +46,14 @@
         "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"],
         "fix": true
       }
+    },
+    "test:ct": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "playwright test",
+        "cwd": "client/web"
+      },
+      "cache": false
     },
     "lint:css": {
       "executor": "nx:run-commands",

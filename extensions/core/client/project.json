@@ -9,7 +9,8 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run build -w @fleetshift/mock-ui-plugins"
+        "command": "rm -rf dist node_modules/.cache && rspack build",
+        "cwd": "extensions/core/client"
       },
       "inputs": [
         "{projectRoot}/src/**/*",
@@ -22,7 +23,8 @@
     "build:ci": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run build:ci -w @fleetshift/mock-ui-plugins"
+        "command": "rm -rf dist node_modules/.cache && for name in overview management core signing routing setup configuration virtualization addon-demo settings; do echo \"--- $name ---\" && rspack build --config-name $name || exit 1; done",
+        "cwd": "extensions/core/client"
       },
       "inputs": [
         "{projectRoot}/src/**/*",
@@ -30,6 +32,14 @@
       ],
       "outputs": ["{projectRoot}/dist"],
       "dependsOn": ["common:build"]
+    },
+    "test:ct": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "playwright test",
+        "cwd": "extensions/core/client"
+      },
+      "cache": false
     },
     "lint": {
       "executor": "@nx/eslint:lint",

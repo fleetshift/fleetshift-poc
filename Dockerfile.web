@@ -14,14 +14,20 @@ WORKDIR /build
 
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
-# Copy package manifests for layer caching
-COPY package.json package-lock.json ./
-COPY sdk/common/package.json sdk/common/
-COPY sdk/build-utils/package.json sdk/build-utils/
-COPY client/web/package.json client/web/
-COPY extensions/core/client/package.json extensions/core/client/
-COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/
-COPY extensions/kind/client/package.json extensions/kind/client/
+# Copy package manifests and Nx config for layer caching
+COPY package.json package-lock.json nx.json project.json ./
+COPY sdk/common/package.json sdk/common/project.json sdk/common/
+COPY sdk/build-utils/package.json sdk/build-utils/project.json sdk/build-utils/
+COPY client/web/package.json client/web/project.json client/web/
+COPY extensions/core/client/package.json extensions/core/client/project.json extensions/core/client/
+COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/project.json extensions/gcphcp/client/
+COPY extensions/gcphcp/server/project.json extensions/gcphcp/server/
+COPY extensions/kind/client/package.json extensions/kind/client/project.json extensions/kind/client/
+COPY extensions/kind/server/project.json extensions/kind/server/
+# Non-UI project.json files needed for Nx project graph resolution
+COPY server/project.json server/
+COPY cli/project.json cli/
+COPY proto/project.json proto/
 
 # Copy tsconfig chain
 COPY tsconfig.json ./
@@ -47,12 +53,13 @@ RUN --mount=type=cache,target=/root/.npm \
     -w @fleetshift/mock-ui-plugins \
     -w @fleetshift/gcphcp-plugin \
     -w @fleetshift/kind-plugin \
-    && npm run build -w @fleetshift/common \
-    && npm run build:ci -w @fleetshift/mock-ui-plugins \
-    && npm run build:ci -w @fleetshift/gcphcp-plugin \
-    && npm run build:ci -w @fleetshift/kind-plugin \
+    && NX=./node_modules/.bin/nx \
+    && $NX run common:build \
+    && $NX run plugins:build:ci \
+    && $NX run @fleetshift/gcphcp-plugin:build:ci \
+    && $NX run @fleetshift/kind-plugin:build:ci \
     && node tools/generate-plugin-registry.mjs \
-    && npm run build -w @fleetshift/gui \
+    && $NX run gui:build \
     && node tools/merge-web.mjs
 
 # ── Stage 2: runtime (static assets only) ───────────────────────
