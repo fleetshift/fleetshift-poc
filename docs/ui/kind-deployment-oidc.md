@@ -68,8 +68,8 @@ kind get kubeconfig --name <cluster-name> | kubectl --kubeconfig /dev/stdin get 
 **Fix (Go backend):** Added `CONTAINER_HOST` env var support. When set, the kind agent rewrites `localhost`/`127.0.0.1` in the issuer URL to the configured host before injecting into the kubeadm config. Token validation on the platform side continues using the original URL.
 
 **Files changed:**
-- `fleetshift-server/internal/addon/kind/agent.go` — Added `WithContainerHost` option and `rewriteIssuerForDocker` method
-- `fleetshift-server/internal/cli/serve.go` — Reads `CONTAINER_HOST` env var
+- `server/internal/addon/kind/agent.go` — Added `WithContainerHost` option and `rewriteIssuerForDocker` method
+- `server/internal/cli/serve.go` — Reads `CONTAINER_HOST` env var
 
 ### Issue 3: Workflow replay with stale payloads
 

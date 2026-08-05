@@ -244,7 +244,7 @@ The backend's `generateNavLayout()` function scans manifests for `fleetshift.mod
 
 `pluginPages` is unchanged — it still lists every module as a flat page entry (id, title, path, scope, module, pluginKey). The grouping is a nav concern, not a routing concern. The shell's router registers all pages flat; the nav component renders the hierarchy from `navLayout`.
 
-**Affected code:** `generatePluginPages` and `generateNavLayout` in `fleetshift-server/internal/transport/http/uiconfig.go`. The `handleUserConfig` handler at `GET /api/ui/user-config` returns both `pluginPages` and `navLayout` to the shell. Route path generation for grouped modules changes from `{pluginKey}/{moduleId}` to `{groupId}/{moduleId}`.
+**Affected code:** `generatePluginPages` and `generateNavLayout` in `server/internal/transport/http/uiconfig.go`. The `handleUserConfig` handler at `GET /api/ui/user-config` returns both `pluginPages` and `navLayout` to the shell. Route path generation for grouped modules changes from `{pluginKey}/{moduleId}` to `{groupId}/{moduleId}`.
 
 ## Shell: Navigation Rendering
 

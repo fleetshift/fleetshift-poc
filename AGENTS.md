@@ -66,13 +66,13 @@ Read the relevant docs below **before** writing or modifying code in this module
 
 For how to...
 
-- decide what logic to put where (layering, service boundaries, method signatures), see fleetshift-server/docs/internal-architecture.md
-- implement instrumentation (observability: tracing, logging, metrics), see fleetshift-server/docs/observer-pattern.md
-- decide what package to use, see fleetshift-server/docs/package-structure.md
-- write tests, see fleetshift-server/docs/testing.md
-- write durable workflows and integrate with durable computing libraries, see fleetshift-server/docs/durable-workflows.md
-- write or modify constructors, see fleetshift-server/docs/constructors.md
-- write domain objects (aggregates, entities, values, where invariants belong, snapshot persistence), see fleetshift-server/docs/domain.md
+- decide what logic to put where (layering, service boundaries, method signatures), see server/docs/internal-architecture.md
+- implement instrumentation (observability: tracing, logging, metrics), see server/docs/observer-pattern.md
+- decide what package to use, see server/docs/package-structure.md
+- write tests, see server/docs/testing.md
+- write durable workflows and integrate with durable computing libraries, see server/docs/durable-workflows.md
+- write or modify constructors, see server/docs/constructors.md
+- write domain objects (aggregates, entities, values, where invariants belong, snapshot persistence), see server/docs/domain.md
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.
 

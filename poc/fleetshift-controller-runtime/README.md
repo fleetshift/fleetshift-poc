@@ -98,11 +98,11 @@ go run ./example
 
 | POC | Production |
 |-----|------------|
-| `contract.DeliveryAgent` / `DeliveryReporter` | `fleetshift-server/internal/domain` interfaces |
+| `contract.DeliveryAgent` / `DeliveryReporter` | `server/internal/domain` interfaces |
 | `platform.Fake` | orchestration + `DeliveryReportService` |
 | `provider.Provider` | in-process addon or fleetlet Delivery channel adapter |
 | `fsruntime` store | could be Postgres (pgruntime), SQLite, or a thin cache over fleetlet streams |
-| Example target type `gcphcp` | real `fleetshift-server/internal/addon/gcphcp` |
+| Example target type `gcphcp` | real `server/internal/addon/gcphcp` |
 
 The reconciler in this POC only simulates apply. A next step would replace
 the simulated work with the same phase machine gcphcp uses, while keeping

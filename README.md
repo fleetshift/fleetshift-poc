@@ -18,7 +18,7 @@ Deployment-specific prerequisites (podman, oc, kind, etc.) are listed in each de
 npm install                 # install all workspace dependencies (from repo root)
 ```
 
-All UI packages are npm workspaces declared at the root. A single `npm install` at the repo root handles everything — no separate install inside `fleetshift-ui/`.
+All UI packages are npm workspaces declared at the root. A single `npm install` at the repo root handles everything — no separate install needed per package.
 
 ## Monorepo
 
@@ -37,7 +37,7 @@ Projects: `server`, `cli`, `proto`, `gui`, `common`, `build-utils`, `plugins`.
 ## Build
 
 ```bash
-npx nx run server:build     # fleetshift-server
+npx nx run server:build     # server
 npx nx run cli:build        # fleetctl CLI
 npx nx run common:build     # shared UI types/helpers
 npx nx run plugins:build    # all MF remote plugins

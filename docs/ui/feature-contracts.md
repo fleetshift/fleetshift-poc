@@ -322,7 +322,7 @@ If an extension declares a relative `to` but the target feature's page has no `<
 
 The Go backend currently composes page IDs with a dash (`fmt.Sprintf("%s-%s", entry.Key, strings.ToLower(moduleName))`). This must change to a dot separator (`%s.%s`) to match the `{key}.{id}` format. The dot makes the boundary between plugin key and extension ID unambiguous — with dashes, `"day-one-create-cluster"` could split multiple ways.
 
-Affected code: `generatePluginPages` in `fleetshift-server/internal/transport/http/uiconfig.go`. The nav layout and user-config responses will reflect the new format automatically since they derive from the same function.
+Affected code: `generatePluginPages` in `server/internal/transport/http/uiconfig.go`. The nav layout and user-config responses will reflect the new format automatically since they derive from the same function.
 
 ## Open Questions
 
