@@ -174,6 +174,13 @@ validates that checkpoint against its delivery-log branch, updates its cache,
 and retries with a proof from the corrected position. Reapplying the same
 signed generation is idempotent.
 
+The agent can also inject a transport failure before accepting a push. In that
+case neither the agent nor the manager's acknowledged checkpoint advances, but
+the normally authorized delivery remains committed in the manager's log for a
+later retry. The catch-up test uses this failure mode for ordinary client
+traffic, then retries one selected record and confirms that the manager sends
+only that record with the logarithmic consistency and inclusion proofs.
+
 ### Rotation
 
 1. The old continuity key signs an authorization binding the predecessor
@@ -211,6 +218,7 @@ signed generation is idempotent.
 | A successor-key delivery is appended before its rotation marker | Rejected because the successor state is valid only after the marker |
 | A historical delivery is presented after rotation | Accepted when its key event, retiring marker, current history head, and log inclusion all verify |
 | Retired key signs at or after a marker already accepted by an agent | Rejected by that agent |
+| Delivery push fails before the agent accepts it | Both sides retain the prior acknowledged checkpoint; a later manager retry catches up with selective proofs |
 | Agent accepts and applies a delivery but its acknowledgement is lost | Manager retains its older checkpoint; retry recovers the agent's newer checkpoint and idempotently succeeds |
 | Resource manager presents a fork from an older delivery checkpoint | Rejected by an established agent that retained the newer checkpoint |
 | Resource manager presents a map branch rooted before the agent's retained map root | Rejected by the established agent |

@@ -28,6 +28,7 @@ var (
 	// the agent and resource manager.
 	ErrAcknowledgementLost = errors.New("delivery acknowledgement was lost")
 	ErrCheckpointStale     = errors.New("manager used a stale agent checkpoint")
+	ErrDeliveryUnavailable = errors.New("delivery did not reach the agent")
 )
 
 // CheckpointStaleError tells the manager that proof construction started from
@@ -47,6 +48,16 @@ func (e *CheckpointStaleError) Unwrap() error {
 
 func (e *CheckpointStaleError) LatestCheckpoint() protocol.Checkpoint {
 	return e.checkpoint
+}
+
+// DeliveryAttempt is test-observable transport metadata for the most recent
+// manager-facing push. It intentionally excludes delivery content and proofs.
+type DeliveryAttempt struct {
+	RecordIndex            uint64
+	Checkpoint             protocol.Checkpoint
+	ConsistencyProofHashes int
+	EntryIndexes           []uint64
+	InclusionProofHashes   []int
 }
 
 type Config struct {
@@ -85,8 +96,10 @@ type Agent struct {
 	appliedDigests     map[string]string
 	generations        map[string]uint64
 
+	failBeforeAccepting      uint64
 	loseNextAcknowledgement  bool
 	staleCheckpointResponses uint64
+	lastDeliveryAttempt      *DeliveryAttempt
 }
 
 func New(config Config) (*Agent, error) {
@@ -133,6 +146,14 @@ func (a *Agent) HistoryHead(identityID string) (protocol.KeyHistoryHead, bool) {
 	return head, ok
 }
 
+// FailNextDeliveriesBeforeAccepting injects transport failures before the
+// agent verifies, retains, or applies the next count delivery attempts.
+func (a *Agent) FailNextDeliveriesBeforeAccepting(count uint64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.failBeforeAccepting += count
+}
+
 // LoseNextAcknowledgement injects a one-shot failure after the next delivery
 // has been verified, applied, and retained in the local checkpoint.
 func (a *Agent) LoseNextAcknowledgement() {
@@ -145,6 +166,20 @@ func (a *Agent) StaleCheckpointResponses() uint64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.staleCheckpointResponses
+}
+
+// LastDeliveryAttempt returns a copy of the most recent manager-facing push
+// summary so tests can assert selective disclosure without exposing proofs.
+func (a *Agent) LastDeliveryAttempt() (DeliveryAttempt, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.lastDeliveryAttempt == nil {
+		return DeliveryAttempt{}, false
+	}
+	out := *a.lastDeliveryAttempt
+	out.EntryIndexes = append([]uint64(nil), out.EntryIndexes...)
+	out.InclusionProofHashes = append([]int(nil), out.InclusionProofHashes...)
+	return out, true
 }
 
 // SyncMap validates a batch transactionally. Each update proves an old leaf
@@ -369,6 +404,12 @@ func (a *Agent) Deliver(record protocol.DeliveryRecord, update protocol.Delivery
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	attempt := summarizeDeliveryAttempt(record, update)
+	a.lastDeliveryAttempt = &attempt
+	if a.failBeforeAccepting > 0 {
+		a.failBeforeAccepting--
+		return ErrDeliveryUnavailable
+	}
 	if err := a.advanceDeliveryLogLocked(update); err != nil {
 		a.staleCheckpointResponses++
 		return &CheckpointStaleError{checkpoint: a.deliveryCheckpoint, cause: err}
@@ -383,7 +424,23 @@ func (a *Agent) Deliver(record protocol.DeliveryRecord, update protocol.Delivery
 	return nil
 }
 
-// ReceiveDelivery exposes strict verifier behavior to the compromise tests.
+func summarizeDeliveryAttempt(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) DeliveryAttempt {
+	attempt := DeliveryAttempt{
+		RecordIndex:            record.Index,
+		Checkpoint:             update.Checkpoint,
+		ConsistencyProofHashes: len(update.ConsistencyProof),
+		EntryIndexes:           make([]uint64, len(update.Entries)),
+		InclusionProofHashes:   make([]int, len(update.Entries)),
+	}
+	for i := range update.Entries {
+		attempt.EntryIndexes[i] = update.Entries[i].Record.Index
+		attempt.InclusionProofHashes[i] = len(update.Entries[i].InclusionProof)
+	}
+	return attempt
+}
+
+// ReceiveDelivery exposes strict verifier behavior to low-level and compromise
+// tests.
 // Unlike Deliver, it reports an invalid checkpoint transition as ErrLogFork
 // rather than participating in the manager/agent checkpoint-recovery exchange.
 func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error {

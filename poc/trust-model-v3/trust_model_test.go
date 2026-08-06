@@ -97,38 +97,57 @@ func TestDeliveryLogCatchUpSelectivelyDisclosesTargetedRecord(t *testing.T) {
 	s := newEnrolledScenario(t)
 
 	anchor := mustSignDelivery(t, s.controlledClient, "catch-up-anchor", 1, []byte(`{"position":0}`))
-	anchorRecord, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), anchor)
-	if err != nil {
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), anchor); err != nil {
 		t.Fatalf("submit checkpoint anchor: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(anchorRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, anchorRecord.Index)); err != nil {
-		t.Fatalf("receive checkpoint anchor: %v", err)
+	anchorCheckpoint, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok {
+		t.Fatal("manager did not record the anchor checkpoint")
 	}
 
+	s.agent.FailNextDeliveriesBeforeAccepting(64)
 	var selected protocol.DeliveryRecord
 	for i := 0; i < 64; i++ {
 		delivery := mustSignDelivery(t, s.controlledClient, fmt.Sprintf("catch-up-%d", i), 1, []byte(fmt.Sprintf(`{"position":%d}`, i+1)))
-		record := s.manager.Compromised().AppendDelivery(delivery)
+		record, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), delivery)
+		if !errors.Is(err, deliveryagent.ErrDeliveryUnavailable) {
+			t.Fatalf("submit catch-up delivery %d error = %v, want ErrDeliveryUnavailable", i, err)
+		}
 		if i == 31 {
 			selected = record
 		}
 	}
-
-	update := mustDeliveryLogUpdate(t, s.manager, s.agent, selected.Index)
-	if got, want := len(update.Entries), 1; got != want {
-		t.Fatalf("disclosed records = %d, want %d", got, want)
+	if got, _ := s.manager.AgentCheckpoint(testTarget); got != anchorCheckpoint {
+		t.Fatalf("manager checkpoint advanced across failed pushes: got %#v, want %#v", got, anchorCheckpoint)
 	}
-	if got := len(update.ConsistencyProof); got == 0 || got > 7 {
+	if got := s.agent.DeliveryCheckpoint(); got != anchorCheckpoint {
+		t.Fatalf("agent checkpoint advanced across pre-accept failures: got %#v, want %#v", got, anchorCheckpoint)
+	}
+
+	if err := s.manager.RetryDelivery(selected.Index); err != nil {
+		t.Fatalf("manager retry selectively disclosed historical delivery: %v", err)
+	}
+	attempt, ok := s.agent.LastDeliveryAttempt()
+	if !ok {
+		t.Fatal("agent did not retain the manager delivery-attempt summary")
+	}
+	if got, want := attempt.EntryIndexes, []uint64{selected.Index}; !equalIndexes(got, want) {
+		t.Fatalf("disclosed delivery-log indexes = %v, want %v", got, want)
+	}
+	if got := attempt.ConsistencyProofHashes; got == 0 || got > 7 {
 		t.Fatalf("1-to-65 consistency proof has %d hashes, want 1..7", got)
 	}
-	if got := len(update.Entries[0].InclusionProof); got == 0 || got > 7 {
+	if got := attempt.InclusionProofHashes[0]; got == 0 || got > 7 {
 		t.Fatalf("selected inclusion proof has %d hashes, want 1..7", got)
-	}
-	if err := s.agent.ReceiveDelivery(selected, update); err != nil {
-		t.Fatalf("receive selectively disclosed historical delivery: %v", err)
 	}
 	if got, want := s.agent.DeliveryCheckpoint().Size, uint64(65); got != want {
 		t.Fatalf("delivery checkpoint size = %d, want %d", got, want)
+	}
+	if _, ok := s.agent.Applied("catch-up-31"); !ok {
+		t.Fatal("selected catch-up delivery was not applied")
+	}
+	if _, ok := s.agent.Applied("catch-up-0"); ok {
+		t.Fatal("unrelated catch-up delivery was disclosed and applied")
 	}
 }
 
@@ -400,12 +419,8 @@ func TestContinuityKeyRotation(t *testing.T) {
 	s := newEnrolledScenario(t)
 
 	before := mustSignDelivery(t, s.controlledClient, "before-rotation", 1, []byte(`{"version":1}`))
-	beforeRecord, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), before)
-	if err != nil {
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), before); err != nil {
 		t.Fatalf("submit pre-rotation delivery: %v", err)
-	}
-	if err := s.agent.ReceiveDelivery(beforeRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, beforeRecord.Index)); err != nil {
-		t.Fatalf("receive pre-rotation delivery: %v", err)
 	}
 
 	// Signing time is deliberately irrelevant to the cutoff. This delivery is
@@ -428,12 +443,8 @@ func TestContinuityKeyRotation(t *testing.T) {
 	}
 
 	after := mustSignDelivery(t, rotatedClient, "after-rotation", 1, []byte(`{"version":2}`))
-	afterRecord, err := s.manager.SubmitDelivery(rotatedClient.IdentityID(), after)
-	if err != nil {
+	if _, err := s.manager.SubmitDelivery(rotatedClient.IdentityID(), after); err != nil {
 		t.Fatalf("submit post-rotation delivery: %v", err)
-	}
-	if err := s.agent.ReceiveDelivery(afterRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, commit.Marker.Index, afterRecord.Index)); err != nil {
-		t.Fatalf("receive post-rotation delivery: %v", err)
 	}
 
 	retiredRecord := s.manager.Compromised().AppendDelivery(queuedOld)
@@ -470,7 +481,7 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 	}
 
 	historical := mustSignDelivery(t, s.controlledClient, "historical", 1, []byte(`{"version":1}`))
-	historicalRecord := s.manager.Compromised().AppendDelivery(historical)
+	historicalRecord := mustSubmitUndelivered(t, s.manager, s.controlledClient.IdentityID(), historical)
 	rotation, rotatedClient, err := s.controlledClient.PrepareRotation()
 	if err != nil {
 		t.Fatalf("prepare rotation: %v", err)
@@ -480,7 +491,7 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 		t.Fatalf("submit rotation: %v", err)
 	}
 	current := mustSignDelivery(t, rotatedClient, "current", 1, []byte(`{"version":2}`))
-	currentRecord := s.manager.Compromised().AppendDelivery(current)
+	currentRecord := mustSubmitUndelivered(t, s.manager, rotatedClient.IdentityID(), current)
 
 	// This agent learns the latest map leaf and Merkle-proven history in one
 	// catch-up. It can then validate deliveries on either side of the marker.
@@ -497,15 +508,17 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 	if got, want := head.CurrentStateDigest, rotatedClient.ContinuityStateDigest(); got != want {
 		t.Fatalf("current state digest = %q, want %q", got, want)
 	}
-	if err := s.agent.AdvanceDeliveryLog(mustDeliveryLogUpdate(t, s.manager, s.agent, historicalRecord.Index, commit.Marker.Index, currentRecord.Index)); err != nil {
-		t.Fatalf("advance delivery log: %v", err)
+	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
+		t.Fatalf("register delivery agent: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(historicalRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, historicalRecord.Index)); err != nil {
-		t.Fatalf("verify historical delivery from current key history: %v", err)
+	if err := s.manager.RetryDelivery(historicalRecord.Index); err != nil {
+		t.Fatalf("manager deliver historical state using its retiring-marker proof: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(currentRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, currentRecord.Index)); err != nil {
-		t.Fatalf("verify current delivery from current key history: %v", err)
+	assertLastDeliveryAttemptIndexes(t, s.agent, commit.Marker.Index, historicalRecord.Index)
+	if err := s.manager.RetryDelivery(currentRecord.Index); err != nil {
+		t.Fatalf("manager deliver current state using its establishing-marker proof: %v", err)
 	}
+	assertLastDeliveryAttemptIndexes(t, s.agent, commit.Marker.Index, currentRecord.Index)
 }
 
 func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
@@ -524,7 +537,7 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 		t.Fatalf("submit first rotation: %v", err)
 	}
 	middle := mustSignDelivery(t, middleClient, "middle-valid", 1, []byte(`{"state":1}`))
-	middleRecord := s.manager.Compromised().AppendDelivery(middle)
+	middleRecord := mustSubmitUndelivered(t, s.manager, middleClient.IdentityID(), middle)
 	queuedMiddle := mustSignDelivery(t, middleClient, "middle-too-late", 1, []byte(`{"state":"late"}`))
 
 	secondRotation, currentClient, err := middleClient.PrepareRotation()
@@ -537,32 +550,25 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 	}
 	lateMiddleRecord := s.manager.Compromised().AppendDelivery(queuedMiddle)
 	current := mustSignDelivery(t, currentClient, "middle-successor", 1, []byte(`{"state":2}`))
-	currentRecord := s.manager.Compromised().AppendDelivery(current)
+	currentRecord := mustSubmitUndelivered(t, s.manager, currentClient.IdentityID(), current)
 
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
 		t.Fatalf("sync full key history: %v", err)
 	}
-	if err := s.agent.AdvanceDeliveryLog(mustDeliveryLogUpdate(
-		t,
-		s.manager,
-		s.agent,
-		firstCommit.Marker.Index,
-		middleRecord.Index,
-		secondCommit.Marker.Index,
-		lateMiddleRecord.Index,
-		currentRecord.Index,
-	)); err != nil {
-		t.Fatalf("advance full delivery log: %v", err)
+	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
+		t.Fatalf("register delivery agent: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(middleRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, middleRecord.Index)); err != nil {
-		t.Fatalf("verify middle-state delivery between markers: %v", err)
+	if err := s.manager.RetryDelivery(middleRecord.Index); err != nil {
+		t.Fatalf("manager deliver middle state using both adjacent-marker proofs: %v", err)
 	}
+	assertLastDeliveryAttemptIndexes(t, s.agent, firstCommit.Marker.Index, secondCommit.Marker.Index, middleRecord.Index)
 	if err := s.agent.ReceiveDelivery(lateMiddleRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, lateMiddleRecord.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
 		t.Fatalf("middle-state delivery after retiring marker error = %v, want ErrSigningState", err)
 	}
-	if err := s.agent.ReceiveDelivery(currentRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, currentRecord.Index)); err != nil {
-		t.Fatalf("verify successor delivery: %v", err)
+	if err := s.manager.RetryDelivery(currentRecord.Index); err != nil {
+		t.Fatalf("manager deliver successor state: %v", err)
 	}
+	assertLastDeliveryAttemptIndexes(t, s.agent, secondCommit.Marker.Index, currentRecord.Index)
 }
 
 func TestDeferredRotationMarkerMustBeProvenBeforeHistoricalDelivery(t *testing.T) {
@@ -572,7 +578,7 @@ func TestDeferredRotationMarkerMustBeProvenBeforeHistoricalDelivery(t *testing.T
 		t.Fatalf("submit enrollment: %v", err)
 	}
 	historical := mustSignDelivery(t, s.controlledClient, "deferred-marker", 1, []byte(`{"version":1}`))
-	historicalRecord := s.manager.Compromised().AppendDelivery(historical)
+	historicalRecord := mustSubmitUndelivered(t, s.manager, s.controlledClient.IdentityID(), historical)
 	rotation, _, err := s.controlledClient.PrepareRotation()
 	if err != nil {
 		t.Fatalf("prepare rotation: %v", err)
@@ -630,9 +636,6 @@ func TestRotationRejectsNonRotationCutoffRecord(t *testing.T) {
 	priorRecord, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), prior)
 	if err != nil {
 		t.Fatalf("submit prior delivery: %v", err)
-	}
-	if err := s.agent.ReceiveDelivery(priorRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, priorRecord.Index)); err != nil {
-		t.Fatalf("receive prior delivery: %v", err)
 	}
 
 	rotation, _, err := s.controlledClient.PrepareRotation()
@@ -754,9 +757,9 @@ func TestRotationCutoffIsLocalToAgentsThatObservedIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit initial delivery: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(initialRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, initialRecord.Index)); err != nil {
-		t.Fatalf("current agent receive initial delivery: %v", err)
-	}
+	// The second verifier is deliberately not the manager's active target route;
+	// seed the common pre-rotation view before testing selective compromised
+	// routing to the two locally witnessed histories.
 	if err := staleAgent.ReceiveDelivery(initialRecord, mustDeliveryLogUpdate(t, s.manager, staleAgent, initialRecord.Index)); err != nil {
 		t.Fatalf("stale agent receive initial delivery: %v", err)
 	}
@@ -788,12 +791,8 @@ func TestEstablishedAgentRejectsDeliveryLogFork(t *testing.T) {
 	oldCheckpoint := s.manager.DeliveryCheckpoint()
 
 	first := mustSignDelivery(t, s.controlledClient, "main-branch", 1, []byte(`{"branch":"main"}`))
-	firstRecord, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), first)
-	if err != nil {
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), first); err != nil {
 		t.Fatalf("submit main delivery: %v", err)
-	}
-	if err := s.agent.ReceiveDelivery(firstRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, firstRecord.Index)); err != nil {
-		t.Fatalf("receive main delivery: %v", err)
 	}
 
 	forked := mustSignDelivery(t, s.controlledClient, "fork", 1, []byte(`{"branch":"fork"}`))
@@ -942,6 +941,38 @@ func mustSignDeliveryAs(t *testing.T, signingClient *client.Client, identityID, 
 		t.Fatalf("sign delivery as another identity: %v", err)
 	}
 	return signed
+}
+
+func mustSubmitUndelivered(t *testing.T, manager *resourcemanager.Manager, callerID string, delivery protocol.SignedDelivery) protocol.DeliveryRecord {
+	t.Helper()
+	record, err := manager.SubmitDelivery(callerID, delivery)
+	if !errors.Is(err, resourcemanager.ErrAgentUnavailable) {
+		t.Fatalf("submit delivery without a registered agent error = %v, want ErrAgentUnavailable", err)
+	}
+	return record
+}
+
+func assertLastDeliveryAttemptIndexes(t *testing.T, agent *deliveryagent.Agent, want ...uint64) {
+	t.Helper()
+	attempt, ok := agent.LastDeliveryAttempt()
+	if !ok {
+		t.Fatal("agent did not retain the manager delivery-attempt summary")
+	}
+	if !equalIndexes(attempt.EntryIndexes, want) {
+		t.Fatalf("disclosed delivery-log indexes = %v, want %v", attempt.EntryIndexes, want)
+	}
+}
+
+func equalIndexes(got, want []uint64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func mustDeliveryLogUpdate(t *testing.T, manager *resourcemanager.Manager, agent *deliveryagent.Agent, indexes ...uint64) protocol.DeliveryLogUpdate {
