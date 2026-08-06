@@ -22,7 +22,32 @@ var (
 	ErrMapFork      = errors.New("authenticated map update does not extend retained root")
 	ErrLogFork      = errors.New("delivery does not extend retained checkpoint")
 	ErrGeneration   = errors.New("delivery generation is stale or conflicting")
+
+	// ErrAcknowledgementLost is a test fault injected after an otherwise
+	// successful, locally retained delivery. It models a response lost between
+	// the agent and resource manager.
+	ErrAcknowledgementLost = errors.New("delivery acknowledgement was lost")
+	ErrCheckpointStale     = errors.New("manager used a stale agent checkpoint")
 )
+
+// CheckpointStaleError tells the manager that proof construction started from
+// an older checkpoint than this agent currently retains.
+type CheckpointStaleError struct {
+	checkpoint protocol.Checkpoint
+	cause      error
+}
+
+func (e *CheckpointStaleError) Error() string {
+	return fmt.Sprintf("%v: agent is at checkpoint size %d: %v", ErrCheckpointStale, e.checkpoint.Size, e.cause)
+}
+
+func (e *CheckpointStaleError) Unwrap() error {
+	return ErrCheckpointStale
+}
+
+func (e *CheckpointStaleError) LatestCheckpoint() protocol.Checkpoint {
+	return e.checkpoint
+}
 
 type Config struct {
 	TenantID     string
@@ -59,6 +84,9 @@ type Agent struct {
 	applied            map[string]protocol.SignedDelivery
 	appliedDigests     map[string]string
 	generations        map[string]uint64
+
+	loseNextAcknowledgement  bool
+	staleCheckpointResponses uint64
 }
 
 func New(config Config) (*Agent, error) {
@@ -103,6 +131,20 @@ func (a *Agent) HistoryHead(identityID string) (protocol.KeyHistoryHead, bool) {
 	defer a.mu.Unlock()
 	head, ok := a.historyHeads[identityID]
 	return head, ok
+}
+
+// LoseNextAcknowledgement injects a one-shot failure after the next delivery
+// has been verified, applied, and retained in the local checkpoint.
+func (a *Agent) LoseNextAcknowledgement() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.loseNextAcknowledgement = true
+}
+
+func (a *Agent) StaleCheckpointResponses() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.staleCheckpointResponses
 }
 
 // SyncMap validates a batch transactionally. Each update proves an old leaf
@@ -320,9 +362,30 @@ func (a *Agent) advanceDeliveryLogLocked(update protocol.DeliveryLogUpdate) erro
 	return nil
 }
 
-// ReceiveDelivery verifies inclusion in the accepted delivery log and then
-// evaluates provenance. The update authenticates the checkpoint transition
-// and selectively discloses the delivery (and any relevant rotation markers).
+// Deliver is the manager-facing push operation. When the manager constructs a
+// proof from an obsolete checkpoint, the agent returns its newer checkpoint so
+// the manager can validate that checkpoint and retry. A nil result is the ack.
+func (a *Agent) Deliver(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if err := a.advanceDeliveryLogLocked(update); err != nil {
+		a.staleCheckpointResponses++
+		return &CheckpointStaleError{checkpoint: a.deliveryCheckpoint, cause: err}
+	}
+	if err := a.receiveIncludedDeliveryLocked(record); err != nil {
+		return err
+	}
+	if a.loseNextAcknowledgement {
+		a.loseNextAcknowledgement = false
+		return ErrAcknowledgementLost
+	}
+	return nil
+}
+
+// ReceiveDelivery exposes strict verifier behavior to the compromise tests.
+// Unlike Deliver, it reports an invalid checkpoint transition as ErrLogFork
+// rather than participating in the manager/agent checkpoint-recovery exchange.
 func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -330,6 +393,10 @@ func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord, update protocol.
 	if err := a.advanceDeliveryLogLocked(update); err != nil {
 		return err
 	}
+	return a.receiveIncludedDeliveryLocked(record)
+}
+
+func (a *Agent) receiveIncludedDeliveryLocked(record protocol.DeliveryRecord) error {
 	if err := a.verifyIncludedRecord(record); err != nil {
 		return err
 	}

@@ -192,8 +192,10 @@ func (c *Client) SignDeliveryAs(identityID, stateDigest string, delivery Deliver
 		return protocol.SignedDelivery{}, errors.New("target, fulfillment, and action are required")
 	}
 	attestation := protocol.ContentAttestation{
-		Protocol:           protocol.DeliveryProtocol,
-		TenantID:           c.config.TenantID,
+		Protocol: protocol.DeliveryProtocol,
+		TenantID: c.config.TenantID,
+		// commentary: should we sign over digests? Or original values? or both?
+		// for readability / debug / diagnostic, primarily.
 		IdentityID:         identityID,
 		SigningStateDigest: stateDigest,
 		TargetID:           delivery.TargetID,

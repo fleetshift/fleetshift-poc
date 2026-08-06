@@ -127,8 +127,9 @@ This stands in for the authoritative input/derivation/output/removal model in
 `poc/attestation/hybrid` and `poc/attestation/sigstore_tuf_bundle`. Device and
 session delegation are collapsed into the continuity key. There is no trust
 manifest rotation, TUF, DSSE/in-toto envelope, TSA, tombstone, recovery,
-semantic exception set, apply loop, durable acknowledgement, or external fork
-witness yet.
+semantic exception set, external apply loop, durable persistence, or external
+fork witness yet. The in-process push and acknowledgement model exercises
+retry semantics, but both manager and agent state still live only in memory.
 
 The resource manager's `Authorizer` is intentionally an interface boundary,
 not another identity system in this POC. It makes the distinction between
@@ -155,12 +156,23 @@ ordinary platform permission and delivery-agent provenance explicit.
 1. The client signs the simple content attestation.
 2. The resource manager performs its normal authorization check and appends a
    delivery record.
-3. The resource manager returns an RFC 6962 consistency proof from the agent's
-   retained checkpoint and inclusion proofs for only the delivery and any
-   uncached marker leaves relevant to it.
-4. The delivery agent verifies those proofs, the content digest and signature
-   under the claimed continuity state, the marker-bounded validity interval,
-   and stale-generation fencing.
+3. The resource manager constructs an RFC 6962 consistency proof from its last
+   checkpoint acknowledged by that target's agent. It includes only the
+   delivery and the rotation-marker leaves bounding its signing state.
+4. The resource manager pushes the record and proofs through an in-process
+   delivery-agent interface.
+5. The delivery agent verifies the proofs, content digest and signature,
+   marker-bounded validity interval, and stale-generation fencing, then applies
+   the POC's in-memory content state and acknowledges.
+6. Only after that acknowledgement does the resource manager advance its
+   per-agent checkpoint.
+
+The agent can inject a lost acknowledgement after it has updated its local
+state. On retry, the manager initially constructs a proof from its older cached
+checkpoint. The agent responds with its newer retained checkpoint; the manager
+validates that checkpoint against its delivery-log branch, updates its cache,
+and retries with a proof from the corrected position. Reapplying the same
+signed generation is idempotent.
 
 ### Rotation
 
@@ -199,6 +211,7 @@ ordinary platform permission and delivery-agent provenance explicit.
 | A successor-key delivery is appended before its rotation marker | Rejected because the successor state is valid only after the marker |
 | A historical delivery is presented after rotation | Accepted when its key event, retiring marker, current history head, and log inclusion all verify |
 | Retired key signs at or after a marker already accepted by an agent | Rejected by that agent |
+| Agent accepts and applies a delivery but its acknowledgement is lost | Manager retains its older checkpoint; retry recovers the agent's newer checkpoint and idempotently succeeds |
 | Resource manager presents a fork from an older delivery checkpoint | Rejected by an established agent that retained the newer checkpoint |
 | Resource manager presents a map branch rooted before the agent's retained map root | Rejected by the established agent |
 | Resource manager bypasses its own RBAC but forwards a genuine, otherwise valid user signature | Accepted by the agent; complete RBAC is intentionally not reproduced there |
@@ -226,8 +239,8 @@ required.
 | Path | Purpose |
 | --- | --- |
 | `client/` | Controlled-client OIDC flow, continuity key, delivery signing, and rotation |
-| `resourcemanager/` | Ordinary authorization, ordered storage, courier behavior, and explicit compromise harness |
-| `deliveryagent/` | Stateful target-side OIDC, key-history, signature, marker, log, and generation verification |
+| `resourcemanager/` | Ordinary authorization, ordered storage, in-process push routing, per-agent acknowledged checkpoints, and explicit compromise harness |
+| `deliveryagent/` | Stateful target-side OIDC, key-history, signature, marker, log, generation verification, and delivery fault injection |
 | `protocol/` | Purpose-separated messages, signatures, digests, RFC 6962 log proofs, and sparse-map leaf updates |
 | `internal/merklelog/` | In-memory storage adapter around `transparency-dev/merkle` |
 | `internal/sparsemap/` | In-memory storage and proof adapter around Trillian SMT and CONIKS primitives |

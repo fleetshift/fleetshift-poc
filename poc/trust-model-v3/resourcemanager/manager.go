@@ -19,7 +19,10 @@ const (
 	ActionDeliver = "deliver"
 )
 
-var ErrUnauthorized = errors.New("resource-manager authorization denied")
+var (
+	ErrUnauthorized     = errors.New("resource-manager authorization denied")
+	ErrAgentUnavailable = errors.New("delivery agent is unavailable")
+)
 
 type AuthorizationRequest struct {
 	TenantID string
@@ -29,6 +32,29 @@ type AuthorizationRequest struct {
 }
 
 type Authorizer func(AuthorizationRequest) error
+
+// DeliveryAgent is the manager-side view of a target delivery agent. A nil
+// error is the acknowledgement that the agent durably accepted the supplied
+// log checkpoint and delivery.
+type DeliveryAgent interface {
+	Deliver(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error
+}
+
+// staleCheckpointError is returned by an agent when a request was constructed
+// from an older manager-side checkpoint than the agent has already retained.
+// Keeping this as a behavioral interface avoids coupling the manager to one
+// in-process delivery-agent implementation.
+type staleCheckpointError interface {
+	error
+	LatestCheckpoint() protocol.Checkpoint
+}
+
+type agentRoute struct {
+	mu sync.Mutex
+
+	agent      DeliveryAgent
+	checkpoint protocol.Checkpoint
+}
 
 // RotationCommit is the resource manager's atomic result for a rotation. The
 // marker's position in the delivery log is the key-validity boundary; the
@@ -51,6 +77,7 @@ type Manager struct {
 	states         map[string]protocol.ContinuityState
 	deliveries     []protocol.DeliveryRecord
 	deliveryTree   *merklelog.Tree
+	agents         map[string]*agentRoute
 }
 
 func New(tenantID string, authorizer Authorizer) *Manager {
@@ -69,7 +96,41 @@ func New(tenantID string, authorizer Authorizer) *Manager {
 		historyRecords: make(map[string][]protocol.KeyEventRecord),
 		states:         make(map[string]protocol.ContinuityState),
 		deliveryTree:   merklelog.New(),
+		agents:         make(map[string]*agentRoute),
 	}
+}
+
+// RegisterAgent installs the delivery route for one target. The manager starts
+// with an empty acknowledged checkpoint; an already-running agent can correct
+// that view on the first push.
+func (m *Manager) RegisterAgent(targetID string, agent DeliveryAgent) error {
+	if targetID == "" || agent == nil {
+		return errors.New("target ID and delivery agent are required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.agents[targetID]; exists {
+		return fmt.Errorf("delivery agent for target %q is already registered", targetID)
+	}
+	m.agents[targetID] = &agentRoute{
+		agent:      agent,
+		checkpoint: protocol.EmptyCheckpoint(),
+	}
+	return nil
+}
+
+// AgentCheckpoint returns the latest checkpoint acknowledged by the agent for
+// targetID. It intentionally does not query the agent's local state.
+func (m *Manager) AgentCheckpoint(targetID string) (protocol.Checkpoint, bool) {
+	m.mu.RLock()
+	route, ok := m.agents[targetID]
+	m.mu.RUnlock()
+	if !ok {
+		return protocol.Checkpoint{}, false
+	}
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	return route.checkpoint, true
 }
 
 func (m *Manager) SubmitEnrollment(enrollment protocol.EnrollmentPackage) (protocol.AuthenticatedMapUpdate, error) {
@@ -122,7 +183,132 @@ func (m *Manager) SubmitDelivery(callerID string, delivery protocol.SignedDelive
 	}); err != nil {
 		return protocol.DeliveryRecord{}, fmt.Errorf("%w: %v", ErrUnauthorized, err)
 	}
-	return m.appendDelivery(delivery)
+	record, err := m.appendDelivery(delivery)
+	if err != nil {
+		return protocol.DeliveryRecord{}, err
+	}
+	if err := m.pushDelivery(record); err != nil {
+		return record, fmt.Errorf("push delivery to target %q: %w", attestation.TargetID, err)
+	}
+	return record, nil
+}
+
+// RetryDelivery pushes an already committed delivery without appending a new
+// log record or repeating the original caller authorization decision.
+func (m *Manager) RetryDelivery(index uint64) error {
+	m.mu.RLock()
+	size := len(m.deliveries)
+	if index >= uint64(size) {
+		m.mu.RUnlock()
+		return fmt.Errorf("delivery-log index %d is beyond size %d", index, size)
+	}
+	record := cloneDeliveryRecord(m.deliveries[index])
+	m.mu.RUnlock()
+	if record.Event.Kind != protocol.DeliveryLogEventDelivery || record.Event.Delivery == nil {
+		return fmt.Errorf("delivery-log index %d is not a delivery", index)
+	}
+	if err := m.pushDelivery(record); err != nil {
+		return fmt.Errorf("retry delivery-log index %d: %w", index, err)
+	}
+	return nil
+}
+
+func (m *Manager) pushDelivery(record protocol.DeliveryRecord) error {
+	if record.Event.Delivery == nil {
+		return errors.New("delivery record has no signed delivery")
+	}
+	targetID := record.Event.Delivery.Attestation.TargetID
+	m.mu.RLock()
+	route, ok := m.agents[targetID]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w for target %q", ErrAgentUnavailable, targetID)
+	}
+
+	// The target delivery contract permits only one in-flight delivery per
+	// fulfillment. Serializing this POC's target route also ensures checkpoint
+	// construction and acknowledgement recording cannot race one another.
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	for {
+		m.mu.RLock()
+		indexes := m.deliveryProofIndexesLocked(record)
+		update, err := deliveryLogUpdate(m.deliveryTree, m.deliveries, route.checkpoint, indexes...)
+		m.mu.RUnlock()
+		if err != nil {
+			return fmt.Errorf("construct proof from acknowledged agent checkpoint: %w", err)
+		}
+
+		if err := route.agent.Deliver(record, update); err != nil {
+			var stale staleCheckpointError
+			if !errors.As(err, &stale) {
+				return err
+			}
+			latest := stale.LatestCheckpoint()
+			if latest.Size <= route.checkpoint.Size {
+				return err
+			}
+			if err := m.validateAgentCheckpoint(latest); err != nil {
+				return fmt.Errorf("agent reported an invalid newer checkpoint: %w", err)
+			}
+			route.checkpoint = latest
+			continue
+		}
+
+		// A successful call is the acknowledgement. The manager records exactly
+		// the checkpoint whose consistency and inclusion proofs were delivered.
+		route.checkpoint = update.Checkpoint
+		return nil
+	}
+}
+
+func (m *Manager) validateAgentCheckpoint(checkpoint protocol.Checkpoint) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	want, err := checkpointAt(m.deliveryTree, checkpoint.Size)
+	if err != nil {
+		return err
+	}
+	if checkpoint != want {
+		return errors.New("checkpoint is not on the retained delivery-log branch")
+	}
+	return nil
+}
+
+// deliveryProofIndexesLocked selects the delivery plus the rotation markers
+// that bound its signing state. The consistency proof commits all undisclosed
+// intervening leaves, so no other delivery records need to be sent.
+func (m *Manager) deliveryProofIndexesLocked(record protocol.DeliveryRecord) []uint64 {
+	delivery := record.Event.Delivery
+	if delivery == nil {
+		return []uint64{record.Index}
+	}
+	history := m.historyRecords[delivery.Attestation.IdentityID]
+	indexes := make([]uint64, 0, 3)
+	for i := range history {
+		if history[i].ResultingStateDigest != delivery.Attestation.SigningStateDigest {
+			continue
+		}
+		if marker := history[i].Event.RotationMarker; marker != nil {
+			indexes = appendUniqueIndex(indexes, marker.Index)
+		}
+		if i+1 < len(history) {
+			if marker := history[i+1].Event.RotationMarker; marker != nil {
+				indexes = appendUniqueIndex(indexes, marker.Index)
+			}
+		}
+		break
+	}
+	return appendUniqueIndex(indexes, record.Index)
+}
+
+func appendUniqueIndex(indexes []uint64, index uint64) []uint64 {
+	for _, existing := range indexes {
+		if existing == index {
+			return indexes
+		}
+	}
+	return append(indexes, index)
 }
 
 func (m *Manager) DeliveryCheckpoint() protocol.Checkpoint {

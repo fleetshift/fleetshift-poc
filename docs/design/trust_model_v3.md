@@ -718,6 +718,8 @@ Other delivery agents do not receive the delivery.
 
 The delivery agent's reported map root and delivery-log checkpoint are authoritative for selecting the map-update chain and log consistency proof. The resource manager may cache the last acknowledged state for efficiency, but loss or corruption of that cache affects availability only: the agent can report its retained roots again.
 
+The normal delivery acknowledgement advances the resource manager's cached checkpoint for that agent to the exact log root and size accepted by the request. If the agent durably accepts a delivery but its acknowledgement is lost, the manager's cache remains behind. A retry may therefore carry a consistency proof rooted at an older checkpoint than the agent currently retains. The agent responds with its newer retained checkpoint; the manager authenticates that checkpoint against its delivery-log branch, updates the cache, and reconstructs the request from the corrected position. The delivery itself remains idempotent, so the retry is safe whether the first attempt stopped after durable acceptance or after completed application.
+
 ### Delivery-log scope
 
 The recommended profile uses one ordered log per tenant. This serializes commitment assignment within a tenant, but it gives every key transition one ordering domain across all targets that key may authorize. A workspace, project, or fulfillment log is possible only if its checkpoints are anchored into a tenant-wide ordering structure or the transition protocol places and proves a marker in every applicable log. The performance and storage trade-offs remain to be validated against the actual scale range.

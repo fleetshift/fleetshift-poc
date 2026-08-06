@@ -218,6 +218,9 @@ type DeliveryLogUpdate struct {
 	Entries          []DeliveryLogEntryProof `json:"entries,omitempty"`
 }
 
+// commentary: That this includes index makes the log pre-ordered.
+// This makes it difficult to reuse Tessera, if we want to, and may not be necessary.
+// Though it looks like Tessera may be not a good fit for other reasons.
 func NewDeliveryRecord(index uint64, event DeliveryLogEvent) (DeliveryRecord, error) {
 	record := DeliveryRecord{
 		Index: index,
@@ -231,6 +234,7 @@ func NewDeliveryRecord(index uint64, event DeliveryLogEvent) (DeliveryRecord, er
 	return record, nil
 }
 
+// VerifyDeliveryRecord checks the DeliveryRecord's claimed hash matches its data.
 func VerifyDeliveryRecord(record DeliveryRecord) ([]byte, error) {
 	data, err := json.Marshal(deliveryRecordMaterial(record))
 	if err != nil {

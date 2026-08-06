@@ -31,19 +31,65 @@ func TestNewEnrollmentAndSignedDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resource manager submit delivery: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, s.agent, record.Index)); err != nil {
-		t.Fatalf("delivery agent receive delivery: %v", err)
-	}
 
 	applied, ok := s.agent.Applied("fulfillment-1")
 	if !ok {
-		t.Fatal("delivery agent did not retain the applied delivery")
+		t.Fatal("resource manager did not push the delivery to the agent")
 	}
 	if got, want := string(applied.Content), `{"replicas":3}`; got != want {
 		t.Fatalf("applied content = %s, want %s", got, want)
 	}
+	managerCheckpoint, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok {
+		t.Fatal("resource manager did not retain an agent checkpoint")
+	}
+	if got, want := managerCheckpoint, s.agent.DeliveryCheckpoint(); got != want {
+		t.Fatalf("resource-manager agent checkpoint = %#v, want %#v", got, want)
+	}
+	if got, want := managerCheckpoint.Size, record.Index+1; got != want {
+		t.Fatalf("resource-manager agent checkpoint size = %d, want %d", got, want)
+	}
 	if got := s.provider.SuccessfulCodeExchanges(); got != 1 {
 		t.Fatalf("OIDC authorization-code exchanges = %d, want 1", got)
+	}
+}
+
+func TestManagerRetryRecoversWhenAgentAppliedButAcknowledgementWasLost(t *testing.T) {
+	s := newEnrolledScenario(t)
+
+	first := mustSignDelivery(t, s.controlledClient, "ack-anchor", 1, []byte(`{"position":1}`))
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), first); err != nil {
+		t.Fatalf("submit checkpoint anchor: %v", err)
+	}
+	managerBefore, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok {
+		t.Fatal("resource manager did not retain the anchor checkpoint")
+	}
+
+	s.agent.LoseNextAcknowledgement()
+	second := mustSignDelivery(t, s.controlledClient, "lost-ack", 1, []byte(`{"position":2}`))
+	record, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), second)
+	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
+		t.Fatalf("submit with lost acknowledgement error = %v, want ErrAcknowledgementLost", err)
+	}
+	if _, ok := s.agent.Applied("lost-ack"); !ok {
+		t.Fatal("agent did not apply delivery before losing its acknowledgement")
+	}
+	if got := s.agent.DeliveryCheckpoint(); got == managerBefore {
+		t.Fatalf("agent checkpoint = %#v, want it ahead of manager checkpoint %#v", got, managerBefore)
+	}
+	if got, _ := s.manager.AgentCheckpoint(testTarget); got != managerBefore {
+		t.Fatalf("manager advanced checkpoint without acknowledgement: got %#v, want %#v", got, managerBefore)
+	}
+
+	if err := s.manager.RetryDelivery(record.Index); err != nil {
+		t.Fatalf("retry delivery after lost acknowledgement: %v", err)
+	}
+	if got, want := s.manager.AgentCheckpoint(testTarget); !want || got != s.agent.DeliveryCheckpoint() {
+		t.Fatalf("manager checkpoint after retry = %#v, %t; want agent checkpoint %#v", got, want, s.agent.DeliveryCheckpoint())
+	}
+	if got, want := s.agent.StaleCheckpointResponses(), uint64(1); got != want {
+		t.Fatalf("agent stale-checkpoint responses = %d, want %d", got, want)
 	}
 }
 
@@ -62,10 +108,7 @@ func TestDeliveryLogCatchUpSelectivelyDisclosesTargetedRecord(t *testing.T) {
 	var selected protocol.DeliveryRecord
 	for i := 0; i < 64; i++ {
 		delivery := mustSignDelivery(t, s.controlledClient, fmt.Sprintf("catch-up-%d", i), 1, []byte(fmt.Sprintf(`{"position":%d}`, i+1)))
-		record, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), delivery)
-		if err != nil {
-			t.Fatalf("submit catch-up delivery %d: %v", i, err)
-		}
+		record := s.manager.Compromised().AppendDelivery(delivery)
 		if i == 31 {
 			selected = record
 		}
@@ -427,10 +470,7 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 	}
 
 	historical := mustSignDelivery(t, s.controlledClient, "historical", 1, []byte(`{"version":1}`))
-	historicalRecord, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), historical)
-	if err != nil {
-		t.Fatalf("submit historical delivery: %v", err)
-	}
+	historicalRecord := s.manager.Compromised().AppendDelivery(historical)
 	rotation, rotatedClient, err := s.controlledClient.PrepareRotation()
 	if err != nil {
 		t.Fatalf("prepare rotation: %v", err)
@@ -440,10 +480,7 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 		t.Fatalf("submit rotation: %v", err)
 	}
 	current := mustSignDelivery(t, rotatedClient, "current", 1, []byte(`{"version":2}`))
-	currentRecord, err := s.manager.SubmitDelivery(rotatedClient.IdentityID(), current)
-	if err != nil {
-		t.Fatalf("submit current delivery: %v", err)
-	}
+	currentRecord := s.manager.Compromised().AppendDelivery(current)
 
 	// This agent learns the latest map leaf and Merkle-proven history in one
 	// catch-up. It can then validate deliveries on either side of the marker.
@@ -487,10 +524,7 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 		t.Fatalf("submit first rotation: %v", err)
 	}
 	middle := mustSignDelivery(t, middleClient, "middle-valid", 1, []byte(`{"state":1}`))
-	middleRecord, err := s.manager.SubmitDelivery(middleClient.IdentityID(), middle)
-	if err != nil {
-		t.Fatalf("submit middle-state delivery: %v", err)
-	}
+	middleRecord := s.manager.Compromised().AppendDelivery(middle)
 	queuedMiddle := mustSignDelivery(t, middleClient, "middle-too-late", 1, []byte(`{"state":"late"}`))
 
 	secondRotation, currentClient, err := middleClient.PrepareRotation()
@@ -503,10 +537,7 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 	}
 	lateMiddleRecord := s.manager.Compromised().AppendDelivery(queuedMiddle)
 	current := mustSignDelivery(t, currentClient, "middle-successor", 1, []byte(`{"state":2}`))
-	currentRecord, err := s.manager.SubmitDelivery(currentClient.IdentityID(), current)
-	if err != nil {
-		t.Fatalf("submit current-state delivery: %v", err)
-	}
+	currentRecord := s.manager.Compromised().AppendDelivery(current)
 
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
 		t.Fatalf("sync full key history: %v", err)
@@ -541,10 +572,7 @@ func TestDeferredRotationMarkerMustBeProvenBeforeHistoricalDelivery(t *testing.T
 		t.Fatalf("submit enrollment: %v", err)
 	}
 	historical := mustSignDelivery(t, s.controlledClient, "deferred-marker", 1, []byte(`{"version":1}`))
-	historicalRecord, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), historical)
-	if err != nil {
-		t.Fatalf("submit historical delivery: %v", err)
-	}
+	historicalRecord := s.manager.Compromised().AppendDelivery(historical)
 	rotation, _, err := s.controlledClient.PrepareRotation()
 	if err != nil {
 		t.Fatalf("prepare rotation: %v", err)
@@ -855,6 +883,9 @@ func newEnrolledScenarioWithAuthorizer(t *testing.T, authorizer resourcemanager.
 	}
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
 		t.Fatalf("sync enrollment: %v", err)
+	}
+	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
+		t.Fatalf("register delivery agent: %v", err)
 	}
 	return s
 }
