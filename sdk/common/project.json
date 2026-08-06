@@ -1,0 +1,38 @@
+{
+  "name": "common",
+  "root": "sdk/common",
+  "sourceRoot": "sdk/common/src",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:lib"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json && echo '{\"type\":\"module\"}' > dist/esm/package.json && node scripts/generate-dynamic-modules.mjs",
+        "cwd": "sdk/common"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["fleetshift-poc:ui:generate-icons"]
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"]
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx vitest run --config vitest.config.ts"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{workspaceRoot}/vitest.config.ts"
+      ]
+    }
+  }
+}

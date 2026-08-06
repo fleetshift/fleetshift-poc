@@ -59,42 +59,43 @@
     "ui:generate-icons": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node scripts/generate-icons.mjs",
-        "cwd": "fleetshift-ui"
+        "command": "node tools/generate-icons.mjs"
       },
       "cache": true,
-      "inputs": ["{workspaceRoot}/fleetshift-ui/scripts/generate-icons.mjs"],
-      "outputs": ["{workspaceRoot}/fleetshift-ui/common/src/generated/pf-icons.json"]
+      "inputs": ["{workspaceRoot}/tools/generate-icons.mjs"],
+      "outputs": ["{workspaceRoot}/sdk/common/src/generated/pf-icons.json"]
     },
     "ui:generate-registry": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node scripts/generate-plugin-registry.mjs",
-        "cwd": "fleetshift-ui"
+        "command": "node tools/generate-plugin-registry.mjs"
       },
-      "dependsOn": ["plugins:build"],
+      "dependsOn": ["plugins:build", "@fleetshift/gcphcp-plugin:build:client", "@fleetshift/kind-plugin:build:client"],
       "cache": true,
       "inputs": [
-        "{workspaceRoot}/fleetshift-ui/scripts/generate-plugin-registry.mjs",
-        "{workspaceRoot}/fleetshift-ui/mock-ui-plugins/dist/**/*"
+        "{workspaceRoot}/tools/generate-plugin-registry.mjs",
+        "{workspaceRoot}/extensions/core/client/dist/**/*",
+        "{workspaceRoot}/extensions/gcphcp/client/dist/**/*",
+        "{workspaceRoot}/extensions/kind/client/dist/**/*"
       ]
     },
     "ui:merge-web": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node scripts/merge-web.mjs",
-        "cwd": "fleetshift-ui"
+        "command": "node tools/merge-web.mjs"
       },
-      "dependsOn": ["gui:build", "ui:generate-registry"],
+      "dependsOn": ["web:build", "ui:generate-registry"],
       "cache": false,
-      "outputs": ["{workspaceRoot}/fleetshift-ui/web"]
+      "outputs": ["{workspaceRoot}/web"]
     },
     "ui:build": {
       "dependsOn": [
         "ui:generate-icons",
         "common:build",
         "plugins:build",
-        "gui:build",
+        "@fleetshift/gcphcp-plugin:build:client",
+        "@fleetshift/kind-plugin:build:client",
+        "web:build",
         "ui:generate-registry",
         "ui:merge-web"
       ]
@@ -102,8 +103,7 @@
     "ui:dev": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node scripts/dev.mjs",
-        "cwd": "fleetshift-ui"
+        "command": "node tools/dev.mjs"
       },
       "cache": false
     },
@@ -112,12 +112,16 @@
     },
     "ui:lint": {
       "dependsOn": [
-        "gui:lint",
+        "web:lint",
         "common:lint",
         "plugins:lint",
+        "@fleetshift/gcphcp-plugin:lint",
+        "@fleetshift/kind-plugin:lint",
         "build-utils:lint",
-        "gui:lint:css",
-        "plugins:lint:css"
+        "web:lint:css",
+        "plugins:lint:css",
+        "@fleetshift/gcphcp-plugin:lint:css",
+        "@fleetshift/kind-plugin:lint:css"
       ]
     },
     "pd:up": {

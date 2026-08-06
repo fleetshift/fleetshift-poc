@@ -33,7 +33,7 @@
       "{projectRoot}/src/**/*.{css,scss}"
     ],
     "eslintConfig": [
-      "{workspaceRoot}/fleetshift-ui/eslint.config.mjs"
+      "{workspaceRoot}/eslint.config.mjs"
     ]
   },
   "targetDefaults": {
@@ -50,6 +50,10 @@
     "lint:css": {
       "cache": true,
       "inputs": ["uiStyles"]
+    },
+    "test:ct": {
+      "cache": true,
+      "dependsOn": ["^build"]
     }
   }
 }

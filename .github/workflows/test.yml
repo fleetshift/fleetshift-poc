@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [fleetshift-server, fleetshift-cli]
+        module: [server, cli]
 
     steps:
       - name: Checkout
@@ -33,7 +33,7 @@ jobs:
           cache-dependency-path: "**/go.sum"
 
       - name: Detect Docker host address for kind OIDC tests
-        if: matrix.module == 'fleetshift-server'
+        if: matrix.module == 'server'
         run: echo "KIND_HOST_ADDR=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')" >> "$GITHUB_ENV"
 
       - name: Run all unit tests
@@ -41,17 +41,17 @@ jobs:
         run: go test -count=1 -timeout 15m ./...
 
       - name: Run kind docker integration tests
-        if: matrix.module == 'fleetshift-server'
+        if: matrix.module == 'server'
         working-directory: ${{ matrix.module }}
         run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/
 
       - name: Run kubernetes docker integration tests
-        if: matrix.module == 'fleetshift-server'
+        if: matrix.module == 'server'
         working-directory: ${{ matrix.module }}
         run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/
 
       - name: Run kubernetes race tests
-        if: matrix.module == 'fleetshift-server'
+        if: matrix.module == 'server'
         working-directory: ${{ matrix.module }}
         run: go test -race -count=1 ./internal/addon/kubernetes/
 
@@ -83,8 +83,8 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Component tests (gui)
-        run: npx nx run gui:test:ct
+      - name: Component tests (web)
+        run: npx nx run web:test:ct
 
       - name: Component tests (plugins)
         run: npx nx run plugins:test:ct

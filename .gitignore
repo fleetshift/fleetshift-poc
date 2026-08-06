@@ -73,5 +73,12 @@ deploy/podman/.certs/
 .claude/worktrees
 .claude/settings.local.json
 
-# js
+# JS / UI build artifacts
 node_modules/
+**/dist/
+/web/
+.cache
+test-results/
+playwright-report/
+.mf/
+sdk/common/src/generated/pf-icons.json

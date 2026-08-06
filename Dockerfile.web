@@ -14,25 +14,34 @@ WORKDIR /build
 
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
-# Copy package manifests for layer caching
-COPY package.json package-lock.json ./
-COPY fleetshift-ui/common/package.json fleetshift-ui/common/
-COPY fleetshift-ui/build-utils/package.json fleetshift-ui/build-utils/
-COPY fleetshift-ui/gui/package.json fleetshift-ui/gui/
-COPY fleetshift-ui/mock-ui-plugins/package.json fleetshift-ui/mock-ui-plugins/
+# Copy package manifests and Nx config for layer caching
+COPY package.json package-lock.json nx.json project.json ./
+COPY sdk/common/package.json sdk/common/project.json sdk/common/
+COPY sdk/build-utils/package.json sdk/build-utils/project.json sdk/build-utils/
+COPY client/web/package.json client/web/project.json client/web/
+COPY extensions/core/client/package.json extensions/core/client/project.json extensions/core/client/
+COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/project.json extensions/gcphcp/client/
+COPY extensions/gcphcp/server/project.json extensions/gcphcp/server/
+COPY extensions/kind/client/package.json extensions/kind/client/project.json extensions/kind/client/
+COPY extensions/kind/server/project.json extensions/kind/server/
+# Non-UI project.json files needed for Nx project graph resolution
+COPY server/project.json server/
+COPY cli/project.json cli/
+COPY proto/project.json proto/
 
 # Copy tsconfig chain
 COPY tsconfig.json ./
-COPY fleetshift-ui/tsconfig.json fleetshift-ui/
 
 # Copy all source
-COPY fleetshift-ui/common/ fleetshift-ui/common/
-COPY fleetshift-ui/build-utils/ fleetshift-ui/build-utils/
-COPY fleetshift-ui/gui/ fleetshift-ui/gui/
-COPY fleetshift-ui/mock-ui-plugins/ fleetshift-ui/mock-ui-plugins/
-COPY fleetshift-ui/scripts/merge-web.mjs fleetshift-ui/scripts/merge-web.mjs
-COPY fleetshift-ui/scripts/generate-plugin-registry.mjs fleetshift-ui/scripts/generate-plugin-registry.mjs
-COPY fleetshift-ui/scripts/generate-icons.mjs fleetshift-ui/scripts/generate-icons.mjs
+COPY sdk/common/ sdk/common/
+COPY sdk/build-utils/ sdk/build-utils/
+COPY client/web/ client/web/
+COPY extensions/core/client/ extensions/core/client/
+COPY extensions/gcphcp/client/ extensions/gcphcp/client/
+COPY extensions/kind/client/ extensions/kind/client/
+COPY tools/merge-web.mjs tools/merge-web.mjs
+COPY tools/generate-plugin-registry.mjs tools/generate-plugin-registry.mjs
+COPY tools/generate-icons.mjs tools/generate-icons.mjs
 
 # Install + build in one RUN so node_modules cache mount is available throughout
 RUN --mount=type=cache,target=/root/.npm \
@@ -40,17 +49,22 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install --include-workspace-root \
     -w @fleetshift/common \
     -w @fleetshift/build-utils \
-    -w @fleetshift/gui \
+    -w @fleetshift/web \
     -w @fleetshift/mock-ui-plugins \
-    && npm run build -w @fleetshift/common \
-    && npm run build:ci -w @fleetshift/mock-ui-plugins \
-    && node fleetshift-ui/scripts/generate-plugin-registry.mjs \
-    && npm run build -w @fleetshift/gui \
-    && node fleetshift-ui/scripts/merge-web.mjs
+    -w @fleetshift/gcphcp-plugin \
+    -w @fleetshift/kind-plugin \
+    && NX=./node_modules/.bin/nx \
+    && $NX run common:build \
+    && $NX run plugins:build:ci \
+    && $NX run @fleetshift/gcphcp-plugin:build:ci \
+    && $NX run @fleetshift/kind-plugin:build:ci \
+    && node tools/generate-plugin-registry.mjs \
+    && $NX run web:build \
+    && node tools/merge-web.mjs
 
 # ── Stage 2: runtime (static assets only) ───────────────────────
 FROM registry.access.redhat.com/ubi9-micro:latest
 
-COPY --from=builder /build/fleetshift-ui/web/ /srv/web/
+COPY --from=builder /build/web/ /srv/web/
 
 CMD ["cp", "-a", "/srv/web/.", "/output/"]

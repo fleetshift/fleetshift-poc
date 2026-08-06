@@ -37,13 +37,13 @@ tasks:
 
   build:server:
     desc: Build the server binary
-    dir: fleetshift-server
+    dir: server
     cmds:
       - go build -o ../bin/fleetshift ./cmd/fleetshift
 
   build:cli:
     desc: Build the fleetctl CLI binary
-    dir: fleetshift-cli
+    dir: cli
     cmds:
       - go build -o ../bin/fleetctl ./cmd/fleetctl
 
@@ -58,19 +58,19 @@ tasks:
 
   test:server:
     desc: Run server tests
-    dir: fleetshift-server
+    dir: server
     cmds:
       - go test -count=1 ./...
 
   test:cli:
     desc: Run CLI tests
-    dir: fleetshift-cli
+    dir: cli
     cmds:
       - go test -count=1 ./...
 
   test:server-integration:
     desc: Docker-heavy integration tests (requires container runtime; fails if missing)
-    dir: fleetshift-server
+    dir: server
     cmds:
       - go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/
       - go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/

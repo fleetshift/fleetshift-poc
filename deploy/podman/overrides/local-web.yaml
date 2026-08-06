@@ -24,4 +24,4 @@ services:
       - /tmp:/tmp
       - fleetshift-data:/data
       - ./.certs/ca.crt:/certs/ca.crt:ro
-      - ${UI_DIR:-../../../fleetshift-user-interface}/web:/srv/web:ro
+      - ${UI_DIR:-../..}/web:/srv/web:ro

@@ -1,0 +1,29 @@
+{
+  "name": "@fleetshift/common",
+  "description": "Shared types and fetch helpers for FleetShift packages.",
+  "version": "0.0.0",
+  "private": true,
+  "sideEffects": false,
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json",
+    "./dist/dynamic/*": "./dist/dynamic/*/index.js",
+    "./generated/pf-icons.json": "./src/generated/pf-icons.json"
+  },
+  "scripts": {},
+  "dependencies": {
+    "@scalprum/react-core": "^0.13.0",
+    "react": "^19.1.0",
+    "react-router-dom": "^7.13.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0"
+  }
+}
