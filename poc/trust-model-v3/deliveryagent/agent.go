@@ -50,7 +50,6 @@ type Agent struct {
 
 	mapRoot            string
 	deliveryCheckpoint protocol.Checkpoint
-	deliveryRoots      map[uint64]string
 	deliveryRecords    map[uint64]observedLogRecord
 	historyHeads       map[string]protocol.KeyHistoryHead
 	states             map[string]protocol.ContinuityState
@@ -67,7 +66,7 @@ func New(config Config) (*Agent, error) {
 		return nil, errors.New("tenant, target, OIDC issuer, and OIDC client ID are required")
 	}
 	empty := protocol.EmptyCheckpoint()
-	emptyMapRoot, err := protocol.KeyHistoryMapRoot(nil)
+	emptyMapRoot, err := protocol.KeyHistoryMapRoot(config.TenantID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("initialize authenticated map: %w", err)
 	}
@@ -75,7 +74,6 @@ func New(config Config) (*Agent, error) {
 		config:             config,
 		mapRoot:            emptyMapRoot,
 		deliveryCheckpoint: empty,
-		deliveryRoots:      map[uint64]string{0: empty.Root},
 		deliveryRecords:    make(map[uint64]observedLogRecord),
 		historyHeads:       make(map[string]protocol.KeyHistoryHead),
 		states:             make(map[string]protocol.ContinuityState),
@@ -141,7 +139,7 @@ func (a *Agent) SyncMap(ctx context.Context, updates []protocol.AuthenticatedMap
 		if update.PreviousHead != previousHead {
 			return fmt.Errorf("%w: key history does not start at retained head", ErrMapFork)
 		}
-		nextHead, err := protocol.VerifyAuthenticatedMapUpdate(mapRoot, mapUpdate)
+		nextHead, err := protocol.VerifyAuthenticatedMapUpdate(a.config.TenantID, mapRoot, mapUpdate)
 		if err != nil {
 			if errors.Is(err, protocol.ErrInvalidMapProof) {
 				return fmt.Errorf("%w: %v", ErrMapFork, err)
@@ -293,49 +291,46 @@ func (a *Agent) verifyRotation(rotation protocol.RotationPackage, previousHead p
 	return intent.PreviousStateDigest, newState, newDigest, nil
 }
 
-// AdvanceDeliveryLog pins an append-only continuation without applying its
-// delivery events. This models the consistency and inclusion evidence that a
-// Merkle implementation would verify and allows a historical delivery to be
-// evaluated only after a later rotation marker has been proven.
-func (a *Agent) AdvanceDeliveryLog(records []protocol.DeliveryRecord) error {
+// AdvanceDeliveryLog pins an RFC 6962 append-only continuation without
+// applying its delivery events. The update may selectively disclose records
+// (such as rotation markers) whose inclusion the agent needs to remember.
+func (a *Agent) AdvanceDeliveryLog(update protocol.DeliveryLogUpdate) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	checkpoint := a.deliveryCheckpoint
-	roots := cloneStringByUintMap(a.deliveryRoots)
-	observed := cloneObservedRecords(a.deliveryRecords)
-	for _, record := range records {
-		nextCheckpoint, err := protocol.VerifyDeliveryRecord(checkpoint, record)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrLogFork, err)
-		}
-		roots[nextCheckpoint.Size] = nextCheckpoint.Root
-		observed[record.Index] = observeRecord(record)
-		checkpoint = nextCheckpoint
+	return a.advanceDeliveryLogLocked(update)
+}
+
+func (a *Agent) advanceDeliveryLogLocked(update protocol.DeliveryLogUpdate) error {
+	if err := protocol.VerifyDeliveryLogUpdate(a.deliveryCheckpoint, update); err != nil {
+		return fmt.Errorf("%w: %v", ErrLogFork, err)
 	}
-	a.deliveryCheckpoint = checkpoint
-	a.deliveryRoots = roots
+
+	observed := cloneObservedRecords(a.deliveryRecords)
+	for _, entry := range update.Entries {
+		next := observeRecord(entry.Record)
+		if previous, exists := observed[entry.Record.Index]; exists && previous != next {
+			return fmt.Errorf("%w: disclosed record at index %d conflicts with an earlier proof", ErrLogFork, entry.Record.Index)
+		}
+		observed[entry.Record.Index] = next
+	}
+
+	a.deliveryCheckpoint = update.Checkpoint
 	a.deliveryRecords = observed
 	return nil
 }
 
 // ReceiveDelivery verifies inclusion in the accepted delivery log and then
-// evaluates provenance. For convenience, a record that is exactly next in the
-// log is pinned first; callers use AdvanceDeliveryLog when intervening records
-// or later cutoff markers are part of the proof.
-func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord) error {
+// evaluates provenance. The update authenticates the checkpoint transition
+// and selectively discloses the delivery (and any relevant rotation markers).
+func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if record.Index == a.deliveryCheckpoint.Size {
-		nextCheckpoint, err := protocol.VerifyDeliveryRecord(a.deliveryCheckpoint, record)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrLogFork, err)
-		}
-		a.deliveryCheckpoint = nextCheckpoint
-		a.deliveryRoots[nextCheckpoint.Size] = nextCheckpoint.Root
-		a.deliveryRecords[record.Index] = observeRecord(record)
-	} else if err := a.verifyIncludedRecord(record); err != nil {
+	if err := a.advanceDeliveryLogLocked(update); err != nil {
+		return err
+	}
+	if err := a.verifyIncludedRecord(record); err != nil {
 		return err
 	}
 
@@ -406,16 +401,11 @@ func (a *Agent) verifyIncludedRecord(record protocol.DeliveryRecord) error {
 	if record.Index >= a.deliveryCheckpoint.Size {
 		return fmt.Errorf("%w: delivery index %d is beyond accepted size %d", ErrLogFork, record.Index, a.deliveryCheckpoint.Size)
 	}
-	previousRoot, ok := a.deliveryRoots[record.Index]
-	if !ok {
-		return fmt.Errorf("%w: previous root for delivery index %d is unavailable", ErrLogFork, record.Index)
-	}
-	next, err := protocol.VerifyDeliveryRecord(protocol.Checkpoint{Size: record.Index, Root: previousRoot}, record)
-	if err != nil {
+	if _, err := protocol.VerifyDeliveryRecord(record); err != nil {
 		return fmt.Errorf("%w: %v", ErrLogFork, err)
 	}
-	acceptedRoot, ok := a.deliveryRoots[next.Size]
-	if !ok || next.Root != acceptedRoot {
+	accepted, ok := a.deliveryRecords[record.Index]
+	if !ok || accepted != observeRecord(record) {
 		return fmt.Errorf("%w: delivery record is absent from accepted log history", ErrLogFork)
 	}
 	return nil
@@ -482,14 +472,6 @@ func cloneBoundaries(in map[string]validityBoundary) map[string]validityBoundary
 
 func cloneMarkers(in map[string]protocol.DeliveryLogReference) map[string]protocol.DeliveryLogReference {
 	out := make(map[string]protocol.DeliveryLogReference, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneStringByUintMap(in map[uint64]string) map[uint64]string {
-	out := make(map[uint64]string, len(in))
 	for key, value := range in {
 		out[key] = value
 	}

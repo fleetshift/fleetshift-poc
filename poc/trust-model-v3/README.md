@@ -27,9 +27,10 @@ controlled client
                v
 resource manager
   - performs ordinary API authorization through an Authorizer hook
-  - serializes deliveries and rotation markers in one tenant log
-  - derives direct sparse-map leaf-update proofs for key-history heads
-  - routes the exact records and evidence to the target
+  - serializes deliveries and rotation markers in one RFC 6962 tenant log
+  - maintains RFC 6962 per-identity key histories
+  - derives direct CONIKS sparse-map leaf-update proofs for history heads
+  - routes selected records and compact proofs to the target
   - has an explicit CompromisedManager attack harness in the tests
                |
                | untrusted records and evidence
@@ -50,22 +51,62 @@ real one-time authorization-code exchange with state, nonce, PKCE S256,
 issuer, audience, expiry, and a signed ID token. The resource manager never
 mints or rewrites that token.
 
+## Merkle implementation choices
+
+The prototype instantiates all three authenticated structures from the design:
+
+- the tenant delivery log is an RFC 6962 Merkle log with inclusion and
+  consistency proofs;
+- each identity's key-event history is a separate RFC 6962 Merkle log with
+  inclusion and consistency proofs; and
+- the history-head map is a 256-level, tenant-separated CONIKS sparse Merkle
+  tree with direct absence, membership, and leaf-replacement proofs.
+
+The two logs use
+[`transparency-dev/merkle`](https://github.com/transparency-dev/merkle) for RFC
+6962 hashing, compact frontiers, proof construction, and proof verification.
+FleetShift code supplies only an in-memory node store and the small adapter
+needed to retrieve historical roots. Tests compare every retained test-vector
+root and proof against the library's own verifier.
+
+The map uses Trillian's
+[`merkle/smt`](https://pkg.go.dev/github.com/google/trillian/merkle/smt) writer
+and HStar3 reconstruction plus its
+[`merkle/coniks`](https://pkg.go.dev/github.com/google/trillian/merkle/coniks)
+position-bound hashing. FleetShift code supplies the in-memory node accessor,
+proof serialization, and the small absent-leaf reconstruction needed because
+the package does not expose a standalone current-tree proof verifier. The
+implementation cross-checks every generated replacement root against the
+Trillian writer, uses full SHA-256 tenant binding in sparse-map keys in
+addition to the CONIKS tree ID, and rejects non-canonical or incorrectly sized
+hashes and paths.
+
+[`Tessera`](https://github.com/transparency-dev/tessera) is deliberately not
+embedded here. It is a production transparency-log runtime and storage layer,
+whereas this POC needs an immediate, in-memory append inside the resource
+manager's rotation transaction. Tessera is the preferred candidate when this
+experiment grows durable tiled storage, checkpoint publication, and witnesses;
+the RFC 6962 roots and proofs exercised here keep that storage migration
+conceptually aligned.
+
+The full Trillian log service is also not used. That project is in maintenance
+mode and recommends Tessera for new transparency logs; this POC imports only
+the focused sparse-Merkle and CONIKS library packages.
+
 ## Deliberate simplifications
 
-The prototype uses one in-memory append-only delivery slice, an ordinary
-catch-up sequence of authenticated-map updates, and one linear SHA-256
-key-event chain per identity. The delivery checkpoint and history head are only
-`(record count, last record hash)`. The authenticated map is a 256-level sparse
-Merkle tree: each update proves the old leaf or its absence under the agent's
-retained root, then reuses the same sibling path to compute the root with only
-that leaf replaced. The manager rebuilds paths in memory and sends all 256
-siblings rather than compressing default subtrees.
+Merkle nodes and protocol records remain in memory. The manager rebuilds a
+principal's small key-history tree when creating its next proof and sends all
+256 sparse-map siblings rather than compressing canonical empty subtrees.
+Delivery-log updates, by contrast, disclose only requested leaves: unrelated
+intervening deliveries are represented solely by the logarithmic consistency
+and inclusion paths.
 
 The map-update sequence is not an authenticated log. Its records are merely a
 way to find the chain of individually verified root transitions needed by a
-stale agent. Production Merkle logs, compressed sparse-map proofs, Tessera,
-tiles, durable storage, and skip proofs can replace the remaining linear
-mechanisms without changing the cutoff-free signed rotation authorization.
+stale agent. Persistent tiles, compressed sparse-map proofs, batched history
+extensions, durable storage, and skip proofs can improve scale without
+changing the cutoff-free signed rotation authorization.
 
 Signatures and hashes currently use Go's deterministic encoding of fixed JSON
 structs. That is sufficient to test this single-language model, but it is not
@@ -114,10 +155,12 @@ ordinary platform permission and delivery-agent provenance explicit.
 1. The client signs the simple content attestation.
 2. The resource manager performs its normal authorization check and appends a
    delivery record.
-3. The delivery agent proves the record is in an append-only extension of its
-   retained log, verifies the content digest and signature under the claimed
-   continuity state, applies the marker-bounded validity interval, and fences
-   stale generations.
+3. The resource manager returns an RFC 6962 consistency proof from the agent's
+   retained checkpoint and inclusion proofs for only the delivery and any
+   uncached marker leaves relevant to it.
+4. The delivery agent verifies those proofs, the content digest and signature
+   under the claimed continuity state, the marker-bounded validity interval,
+   and stale-generation fencing.
 
 ### Rotation
 
@@ -160,9 +203,12 @@ ordinary platform permission and delivery-agent provenance explicit.
 | Resource manager presents a map branch rooted before the agent's retained map root | Rejected by the established agent |
 | Resource manager bypasses its own RBAC but forwards a genuine, otherwise valid user signature | Accepted by the agent; complete RBAC is intentionally not reproduced there |
 | Resource manager withholds rotation from one agent, then uses a compromised old key | The rotated agent rejects; the stale agent accepts on its local pre-rotation view |
+| Resource manager tampers with a log root, leaf, inclusion path, consistency path, map sibling, or history proof | Rejected by the corresponding retained-root proof verification |
+| A busy delivery log contains unrelated intervening leaves | The agent advances with logarithmic proofs and receives only selected delivery and marker records |
 
-The last two rows are tests, not disclaimers hidden outside the executable
-model. They establish the precise boundary of the additional guarantee.
+The RBAC-bypass and stale-agent rows are tests, not disclaimers hidden outside
+the executable model. They establish the precise boundary of the additional
+guarantee.
 
 ## Run it
 
@@ -182,7 +228,9 @@ required.
 | `client/` | Controlled-client OIDC flow, continuity key, delivery signing, and rotation |
 | `resourcemanager/` | Ordinary authorization, ordered storage, courier behavior, and explicit compromise harness |
 | `deliveryagent/` | Stateful target-side OIDC, key-history, signature, marker, log, and generation verification |
-| `protocol/` | Purpose-separated messages, signatures, digests, sparse-map leaf-update proofs, and linear history/delivery chains |
+| `protocol/` | Purpose-separated messages, signatures, digests, RFC 6962 log proofs, and sparse-map leaf updates |
+| `internal/merklelog/` | In-memory storage adapter around `transparency-dev/merkle` |
+| `internal/sparsemap/` | In-memory storage and proof adapter around Trillian SMT and CONIKS primitives |
 | `internal/testoidc/` | Minimal TLS OIDC authorization-code provider |
 | `trust_model_test.go` | End-to-end guarantees and accepted limitations across all three roles |
 
@@ -198,9 +246,9 @@ required.
    optional OIDC reanchor paths.
 5. Add semantic exceptions for invalid key events so one bad principal does
    not halt an agent's map-update batch.
-6. Replace the linear history and delivery chains with compact Merkle proofs,
-   compress default sparse-map siblings, and add selective delivery; then
-   compare a small Merkle implementation with Tessera.
+6. Move RFC 6962 node storage to persistent tiles, evaluate Tessera for the
+   delivery-log runtime, compress default sparse-map siblings, and batch
+   per-principal history extensions.
 7. Add proactive checkpoint distribution and optional peer comparison to show
    how the stale-agent window changes without making gossip mandatory.
 8. Model the trust and delivery state machines formally and fuzz canonical

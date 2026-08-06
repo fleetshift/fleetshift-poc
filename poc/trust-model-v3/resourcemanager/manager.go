@@ -4,10 +4,12 @@
 package resourcemanager
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
 
+	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/merklelog"
 	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/protocol"
 )
 
@@ -42,27 +44,31 @@ type Manager struct {
 	tenantID   string
 	authorizer Authorizer
 
-	mapRoot    string
-	mapUpdates []protocol.AuthenticatedMapUpdate
-	histories  map[string]protocol.KeyHistoryHead
-	states     map[string]protocol.ContinuityState
-	deliveries []protocol.DeliveryRecord
+	mapRoot        string
+	mapUpdates     []protocol.AuthenticatedMapUpdate
+	histories      map[string]protocol.KeyHistoryHead
+	historyRecords map[string][]protocol.KeyEventRecord
+	states         map[string]protocol.ContinuityState
+	deliveries     []protocol.DeliveryRecord
+	deliveryTree   *merklelog.Tree
 }
 
 func New(tenantID string, authorizer Authorizer) *Manager {
 	if authorizer == nil {
 		authorizer = func(AuthorizationRequest) error { return nil }
 	}
-	emptyMapRoot, err := protocol.KeyHistoryMapRoot(nil)
+	emptyMapRoot, err := protocol.KeyHistoryMapRoot(tenantID, nil)
 	if err != nil {
 		panic(err) // The fixed map representation is always JSON encodable.
 	}
 	return &Manager{
-		tenantID:   tenantID,
-		authorizer: authorizer,
-		mapRoot:    emptyMapRoot,
-		histories:  make(map[string]protocol.KeyHistoryHead),
-		states:     make(map[string]protocol.ContinuityState),
+		tenantID:       tenantID,
+		authorizer:     authorizer,
+		mapRoot:        emptyMapRoot,
+		histories:      make(map[string]protocol.KeyHistoryHead),
+		historyRecords: make(map[string][]protocol.KeyEventRecord),
+		states:         make(map[string]protocol.ContinuityState),
+		deliveryTree:   merklelog.New(),
 	}
 }
 
@@ -122,7 +128,11 @@ func (m *Manager) SubmitDelivery(callerID string, delivery protocol.SignedDelive
 func (m *Manager) DeliveryCheckpoint() protocol.Checkpoint {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return deliveryCheckpoint(m.deliveries)
+	checkpoint, err := checkpointAt(m.deliveryTree, m.deliveryTree.Size())
+	if err != nil {
+		panic(err) // In-memory tree state is maintained under the same lock.
+	}
+	return checkpoint
 }
 
 // MapUpdatesAfter returns the ordinary catch-up sequence rooted at root. The
@@ -152,18 +162,57 @@ func (m *Manager) MapUpdatesAfter(root string) []protocol.AuthenticatedMapUpdate
 	return out
 }
 
-func (m *Manager) DeliveryRecordsAfter(checkpoint protocol.Checkpoint) []protocol.DeliveryRecord {
+// DeliveryLogUpdate returns a compact consistency proof from checkpoint to the
+// current tenant log and inclusion proofs for only the requested indexes.
+func (m *Manager) DeliveryLogUpdate(checkpoint protocol.Checkpoint, indexes ...uint64) (protocol.DeliveryLogUpdate, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if checkpoint.Size >= uint64(len(m.deliveries)) {
-		return nil
+	return deliveryLogUpdate(m.deliveryTree, m.deliveries, checkpoint, indexes...)
+}
+
+func deliveryLogUpdate(tree *merklelog.Tree, records []protocol.DeliveryRecord, previous protocol.Checkpoint, indexes ...uint64) (protocol.DeliveryLogUpdate, error) {
+	if previous.Size > tree.Size() {
+		return protocol.DeliveryLogUpdate{}, fmt.Errorf("checkpoint size %d is beyond log size %d", previous.Size, tree.Size())
 	}
-	records := m.deliveries[checkpoint.Size:]
-	out := make([]protocol.DeliveryRecord, len(records))
-	for i := range records {
-		out[i] = cloneDeliveryRecord(records[i])
+	wantPrevious, err := checkpointAt(tree, previous.Size)
+	if err != nil {
+		return protocol.DeliveryLogUpdate{}, err
 	}
-	return out
+	if previous != wantPrevious {
+		return protocol.DeliveryLogUpdate{}, errors.New("checkpoint is not on the retained delivery-log branch")
+	}
+	current, err := checkpointAt(tree, tree.Size())
+	if err != nil {
+		return protocol.DeliveryLogUpdate{}, err
+	}
+	consistency, err := tree.ConsistencyProof(previous.Size, current.Size)
+	if err != nil {
+		return protocol.DeliveryLogUpdate{}, fmt.Errorf("construct delivery-log consistency proof: %w", err)
+	}
+	update := protocol.DeliveryLogUpdate{
+		Checkpoint:       current,
+		ConsistencyProof: protocol.EncodeProof(consistency),
+		Entries:          make([]protocol.DeliveryLogEntryProof, 0, len(indexes)),
+	}
+	seen := make(map[uint64]struct{}, len(indexes))
+	for _, index := range indexes {
+		if _, duplicate := seen[index]; duplicate {
+			return protocol.DeliveryLogUpdate{}, fmt.Errorf("delivery-log index %d requested more than once", index)
+		}
+		seen[index] = struct{}{}
+		if index >= uint64(len(records)) || index >= current.Size {
+			return protocol.DeliveryLogUpdate{}, fmt.Errorf("delivery-log index %d is beyond size %d", index, current.Size)
+		}
+		inclusion, err := tree.InclusionProof(index, current.Size)
+		if err != nil {
+			return protocol.DeliveryLogUpdate{}, fmt.Errorf("construct inclusion proof for index %d: %w", index, err)
+		}
+		update.Entries = append(update.Entries, protocol.DeliveryLogEntryProof{
+			Record:         cloneDeliveryRecord(records[index]),
+			InclusionProof: protocol.EncodeProof(inclusion),
+		})
+	}
+	return update, nil
 }
 
 func (m *Manager) Compromised() *CompromisedManager {
@@ -215,13 +264,15 @@ func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (Rotat
 		return RotationCommit{}, err
 	}
 
-	m.deliveries = append(m.deliveries, marker)
+	if err := m.appendDeliveryRecordLocked(marker); err != nil {
+		return RotationCommit{}, fmt.Errorf("append rotation marker: %w", err)
+	}
 	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, state, mapUpdate)
 	return RotationCommit{Marker: cloneDeliveryRecord(marker), MapUpdate: cloneAuthenticatedMapUpdate(mapUpdate)}, nil
 }
 
 func (m *Manager) newRotationMarkerLocked(rotation protocol.RotationPackage) (protocol.DeliveryRecord, error) {
-	return protocol.NewDeliveryRecord(deliveryCheckpoint(m.deliveries), protocol.DeliveryLogEvent{
+	return protocol.NewDeliveryRecord(m.deliveryTree.Size(), protocol.DeliveryLogEvent{
 		Kind:     protocol.DeliveryLogEventRotation,
 		Rotation: cloneRotation(&rotation),
 	})
@@ -249,11 +300,11 @@ func (m *Manager) prepareKeyHistoryUpdateLocked(identityID, stateDigest string, 
 	if !ok {
 		previousHead = protocol.EmptyKeyHistoryHead(identityID)
 	}
-	historyUpdate, err := protocol.NewKeyHistoryUpdate(previousHead, stateDigest, keyEvent)
+	historyUpdate, err := protocol.NewKeyHistoryUpdate(previousHead, m.historyRecords[identityID], stateDigest, keyEvent)
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, protocol.KeyHistoryHead{}, fmt.Errorf("build key-history update: %w", err)
 	}
-	mapUpdate, err := protocol.NewAuthenticatedMapUpdate(m.histories, historyUpdate)
+	mapUpdate, err := protocol.NewAuthenticatedMapUpdate(m.tenantID, m.histories, historyUpdate)
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, protocol.KeyHistoryHead{}, fmt.Errorf("build authenticated-map update: %w", err)
 	}
@@ -267,21 +318,43 @@ func (m *Manager) commitKeyHistoryLocked(identityID string, head protocol.KeyHis
 	m.mapUpdates = append(m.mapUpdates, cloneAuthenticatedMapUpdate(update))
 	m.mapRoot = update.Root
 	m.histories[identityID] = head
+	m.historyRecords[identityID] = append(m.historyRecords[identityID], cloneKeyEventRecord(update.KeyHistory.Event))
 	m.states[identityID] = cloneState(state)
 }
 
 func (m *Manager) appendDelivery(delivery protocol.SignedDelivery) (protocol.DeliveryRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	record, err := protocol.NewDeliveryRecord(deliveryCheckpoint(m.deliveries), protocol.DeliveryLogEvent{
+	record, err := protocol.NewDeliveryRecord(m.deliveryTree.Size(), protocol.DeliveryLogEvent{
 		Kind:     protocol.DeliveryLogEventDelivery,
 		Delivery: pointerTo(cloneDelivery(delivery)),
 	})
 	if err != nil {
 		return protocol.DeliveryRecord{}, fmt.Errorf("append delivery record: %w", err)
 	}
-	m.deliveries = append(m.deliveries, record)
+	if err := m.appendDeliveryRecordLocked(record); err != nil {
+		return protocol.DeliveryRecord{}, fmt.Errorf("append delivery Merkle leaf: %w", err)
+	}
 	return cloneDeliveryRecord(record), nil
+}
+
+func (m *Manager) appendDeliveryRecordLocked(record protocol.DeliveryRecord) error {
+	if record.Index != m.deliveryTree.Size() || record.Index != uint64(len(m.deliveries)) {
+		return fmt.Errorf("delivery-log record index %d does not continue size %d", record.Index, m.deliveryTree.Size())
+	}
+	leafHash, err := protocol.VerifyDeliveryRecord(record)
+	if err != nil {
+		return err
+	}
+	index, appendedHash, err := m.deliveryTree.AppendHash(leafHash)
+	if err != nil {
+		return err
+	}
+	if index != record.Index || !bytes.Equal(appendedHash, leafHash) {
+		return errors.New("delivery-log tree appended a different leaf")
+	}
+	m.deliveries = append(m.deliveries, cloneDeliveryRecord(record))
+	return nil
 }
 
 // CompromisedManager is an explicit attack harness. It exposes what arbitrary
@@ -318,7 +391,9 @@ func (c *CompromisedManager) AppendRotationMarker(rotation protocol.RotationPack
 	if err != nil {
 		panic(err)
 	}
-	c.manager.deliveries = append(c.manager.deliveries, marker)
+	if err := c.manager.appendDeliveryRecordLocked(marker); err != nil {
+		panic(err)
+	}
 	return cloneDeliveryRecord(marker)
 }
 
@@ -346,15 +421,44 @@ func (c *CompromisedManager) AppendDelivery(delivery protocol.SignedDelivery) pr
 // ForgeDeliveryAt constructs a valid structural record on an older checkpoint
 // without changing the manager's main branch. An established agent should
 // reject it because it is absent from that agent's retained log history.
-func (c *CompromisedManager) ForgeDeliveryAt(checkpoint protocol.Checkpoint, delivery protocol.SignedDelivery) protocol.DeliveryRecord {
-	record, err := protocol.NewDeliveryRecord(checkpoint, protocol.DeliveryLogEvent{
+func (c *CompromisedManager) ForgeDeliveryAt(checkpoint protocol.Checkpoint, delivery protocol.SignedDelivery) (protocol.DeliveryRecord, protocol.DeliveryLogUpdate) {
+	c.manager.mu.RLock()
+	defer c.manager.mu.RUnlock()
+	if checkpoint.Size > uint64(len(c.manager.deliveries)) {
+		panic("fork checkpoint is beyond manager delivery log")
+	}
+	forkTree := merklelog.New()
+	forkRecords := make([]protocol.DeliveryRecord, 0, checkpoint.Size+1)
+	for _, retained := range c.manager.deliveries[:checkpoint.Size] {
+		leafHash, err := protocol.VerifyDeliveryRecord(retained)
+		if err != nil {
+			panic(err)
+		}
+		if _, _, err := forkTree.AppendHash(leafHash); err != nil {
+			panic(err)
+		}
+		forkRecords = append(forkRecords, cloneDeliveryRecord(retained))
+	}
+	record, err := protocol.NewDeliveryRecord(checkpoint.Size, protocol.DeliveryLogEvent{
 		Kind:     protocol.DeliveryLogEventDelivery,
 		Delivery: pointerTo(cloneDelivery(delivery)),
 	})
 	if err != nil {
 		panic(err)
 	}
-	return record
+	leafHash, err := protocol.VerifyDeliveryRecord(record)
+	if err != nil {
+		panic(err)
+	}
+	if _, _, err := forkTree.AppendHash(leafHash); err != nil {
+		panic(err)
+	}
+	forkRecords = append(forkRecords, record)
+	update, err := deliveryLogUpdate(forkTree, forkRecords, checkpoint, record.Index)
+	if err != nil {
+		panic(err)
+	}
+	return cloneDeliveryRecord(record), update
 }
 
 // ForgeEnrollmentFromEmptyMap constructs a structurally valid authenticated-
@@ -370,14 +474,14 @@ func (c *CompromisedManager) ForgeEnrollmentFromEmptyMap(enrollment protocol.Enr
 	if err != nil {
 		panic(err)
 	}
-	update, err := protocol.NewKeyHistoryUpdate(protocol.EmptyKeyHistoryHead(enrollment.IdentityID), stateDigest, protocol.KeyEvent{
+	update, err := protocol.NewKeyHistoryUpdate(protocol.EmptyKeyHistoryHead(enrollment.IdentityID), nil, stateDigest, protocol.KeyEvent{
 		Kind:       protocol.KeyEventEnrollment,
 		Enrollment: cloneEnrollment(&enrollment),
 	})
 	if err != nil {
 		panic(err)
 	}
-	mapUpdate, err := protocol.NewAuthenticatedMapUpdate(nil, update)
+	mapUpdate, err := protocol.NewAuthenticatedMapUpdate(enrollment.Intent.TenantID, nil, update)
 	if err != nil {
 		panic(err)
 	}
@@ -400,11 +504,12 @@ func successorState(rotation protocol.RotationPackage) (protocol.ContinuityState
 	return state, digest, nil
 }
 
-func deliveryCheckpoint(records []protocol.DeliveryRecord) protocol.Checkpoint {
-	if len(records) == 0 {
-		return protocol.EmptyCheckpoint()
+func checkpointAt(tree *merklelog.Tree, size uint64) (protocol.Checkpoint, error) {
+	root, err := tree.RootAt(size)
+	if err != nil {
+		return protocol.Checkpoint{}, err
 	}
-	return records[len(records)-1].Checkpoint()
+	return protocol.NewCheckpoint(size, root)
 }
 
 func cloneEnrollment(in *protocol.EnrollmentPackage) *protocol.EnrollmentPackage {
@@ -458,7 +563,15 @@ func cloneKeyHistoryUpdate(in *protocol.KeyHistoryUpdate) *protocol.KeyHistoryUp
 	}
 	out := *in
 	out.Event.Event = cloneKeyEvent(in.Event.Event)
+	out.InclusionProof = append([]string(nil), in.InclusionProof...)
+	out.ConsistencyProof = append([]string(nil), in.ConsistencyProof...)
 	return &out
+}
+
+func cloneKeyEventRecord(in protocol.KeyEventRecord) protocol.KeyEventRecord {
+	out := in
+	out.Event = cloneKeyEvent(in.Event)
+	return out
 }
 
 func cloneAuthenticatedMapUpdate(in protocol.AuthenticatedMapUpdate) protocol.AuthenticatedMapUpdate {
