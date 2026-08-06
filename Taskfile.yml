@@ -80,7 +80,7 @@ tasks:
 
   test:stress:
     desc: "Stress test orchestration loop (env: STRESS_RATE, STRESS_DURATION, STRESS_DEPLOYMENTS, STRESS_ACK_DELAY_MIN/MAX, STRESS_COMPLETION_DELAY_MIN/MAX, STRESS_FAILURE_RATE, STRESS_POSTGRES_MAX_CONNS, STRESS_WORKFLOW_POLLERS)"
-    dir: fleetshift-server
+    dir: server
     cmds:
       # Needed only on Linux hosts using rootless Podman; silently fails elsewhere.
       - cmd: systemctl --user restart podman.socket 2>/dev/null || true

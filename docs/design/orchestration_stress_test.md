@@ -22,9 +22,9 @@ The test runs entirely inside `go test` with a Postgres testcontainer
 
 | File | Responsibility |
 |------|----------------|
-| `fleetshift-server/internal/application/stress_test.go` | Test entry point, workload runner, drain phase, convergence loop |
-| `fleetshift-server/internal/application/stress_harness_test.go` | Configuration, mock delivery agent, fulfillment observer, Pareto distribution, pool stats sampler |
-| `fleetshift-server/internal/application/stress_report_test.go` | Latency distributions, generation convergence, JSON results dump |
+| `server/internal/application/stress_test.go` | Test entry point, workload runner, drain phase, convergence loop |
+| `server/internal/application/stress_harness_test.go` | Configuration, mock delivery agent, fulfillment observer, Pareto distribution, pool stats sampler |
+| `server/internal/application/stress_report_test.go` | Latency distributions, generation convergence, JSON results dump |
 | `scripts/plot_stress.py` | Plots Mutation_to_Dispatch latency from JSON results dump |
 
 
@@ -226,7 +226,7 @@ uv run --with matplotlib python3 scripts/plot_stress.py /tmp/stress-results-*.js
 uv run --with matplotlib python3 scripts/plot_stress.py /tmp/stress-results-*.json --last-gen
 ```
 
-## Open questions
+## What's next
 
 - **SELECT ... FOR UPDATE on fulfillment rows**: read-modify-write cycles
   on the fulfillment table are the primary source of contention. Row-level
@@ -242,7 +242,6 @@ uv run --with matplotlib python3 scripts/plot_stress.py /tmp/stress-results-*.js
 - **Configurable dispatch preemption**: the current `dispatchAndAwait`
   blocks until the in-flight delivery completes, which dominates
   mutation-to-dispatch latency under generation pressure (see finding 5).
-  A configurable preemption policy (e.g. periodic timeout that abandons
-  the current delivery and redispatches the latest generation) could
-  reduce convergence latency for use cases that tolerate multiple
-  generations in-flight on the agent side.
+  A configurable preemption policy—such as aborting stale deliveries to dispatch the latest generation via dedicated request types, or applying configurable timeouts—would give clients necessary control over dispatch behavior. Prior art from projects like OCM, ACM, and KubeFleet should inform this design. Additionally, the policy must gracefully handle non-terminating agent failures, particularly in Kubernetes environments where reconciliation can loop indefinitely until custom resource manifests are patched. _(Note: OME currently differentiates between terminal and non-terminal errors for retry handling.)_
+- **Test harness enhancements**: Upgrade the test harness to support heterogeneous deployment workloads (e.g., combinations of quick, slow, heavy, and light tasks) in defined proportions. Deployment manifests can be used to inject behavioral parameters into the DelayedDeliveryAgent, such as ACK delays, completion latencies, and synthetic error conditions.
+- **Integrate with E2E testing**: extend scripted-delivery add-on to support stress/performance testing. See [OME-279](https://redhat.atlassian.net/browse/OME-279)

@@ -31,6 +31,18 @@
         "{projectRoot}/go.sum"
       ]
     },
+    "test-stress": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "systemctl --user restart podman.socket 2>/dev/null || true",
+          "go test -tags stress -count=1 -run TestStress -v -timeout 0 ./internal/application/"
+        ],
+        "parallel": false,
+        "cwd": "server"
+      },
+      "cache": false
+    },
     "test-integration": {
       "executor": "nx:run-commands",
       "options": {
