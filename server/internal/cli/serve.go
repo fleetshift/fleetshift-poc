@@ -47,6 +47,10 @@ func newServeCmd() *cobra.Command {
 			return runServe(cmd.Context(), f, sel)
 		},
 	}
+
+	// use DEX's default issuer URL as default, if no external IDP configured.
+	oidcAuthority := envOrDefault("OIDC_ISSUER_URL", "http://localhost:5556/dex")
+
 	cmd.Flags().StringVar(&f.grpcAddr, "grpc-addr", ":50051", "gRPC listen address")
 	cmd.Flags().StringVar(&f.httpAddr, "http-addr", ":8080", "HTTP/JSON gateway listen address")
 	cmd.Flags().StringVar(&f.dbPath, "db", bootstrap.DefaultSQLitePath, "SQLite database path")
@@ -57,7 +61,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuers (for kind clusters trusting self-signed or local CAs)")
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
-	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
+	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", oidcAuthority, "OIDC authority URL for the frontend UI")
 	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
 	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
@@ -79,6 +83,8 @@ func runServe(ctx context.Context, f *serveFlags, sel serveSelections) error {
 	if err != nil {
 		return err
 	}
+
+	logger.Info("starting fleetshift server")
 
 	srv, err := bootstrap.Start(signalCtx, cfg, logger)
 	if err != nil {

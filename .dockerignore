@@ -24,6 +24,7 @@ extensions/**/dist
 bin
 **/bin/
 poc
+!poc/dex-idp
 docs
 # Exclude deploy harnesses from the image build context, but keep
 # deploy/scripts/ (renderer + all-in-one entrypoint for Dockerfile.fleetshift).

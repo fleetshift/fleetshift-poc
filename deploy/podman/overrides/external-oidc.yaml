@@ -1,4 +1,9 @@
 services:
+  fleetshift-server:
+    environment:
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL}
+      OIDC_UI_CLIENT_ID: ${OIDC_UI_CLIENT_ID:-fleetshift-ui}
+
   auth-setup:
     image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server-local:latest}
     entrypoint: ["/bin/sh", "-c"]

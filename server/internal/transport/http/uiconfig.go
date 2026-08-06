@@ -106,7 +106,9 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 	oidc := oidcConfig{
 		Authority: opts.OIDCAuthority,
 		ClientID:  opts.OIDCUIClientID,
-		Scope:     "openid profile email roles",
+		Scope:     "openid profile email",
+		// Dex does not support the roles claim
+		// Scope:     "openid profile email roles",
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {

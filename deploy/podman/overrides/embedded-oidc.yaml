@@ -1,0 +1,6 @@
+services:
+  fleetshift-server:
+    ports:
+      - "5556:5556"
+    environment:
+      EMBEDDED_IDP: "true"

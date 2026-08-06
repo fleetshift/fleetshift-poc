@@ -9,7 +9,7 @@ vars:
     sh: 'grep "^DEV=" .active-deploy 2>/dev/null | cut -d= -f2 || true'
   RESOLVED_DEPLOY_MODE: '{{if empty .DEPLOY_MODE_INPUT}}demo{{else}}{{.DEPLOY_MODE_INPUT}}{{end}}'
   RESOLVED_DB: '{{if not (empty .DB_INPUT)}}{{.DB_INPUT}}{{else if not (empty .ACTIVE_DB)}}{{.ACTIVE_DB}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}postgres{{else}}sqlite{{end}}'
-  RESOLVED_AUTH: '{{if not (empty .AUTH_INPUT)}}{{.AUTH_INPUT}}{{else if not (empty .ACTIVE_AUTH)}}{{.ACTIVE_AUTH}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}external{{else}}local{{end}}'
+  RESOLVED_AUTH: '{{if not (empty .AUTH_INPUT)}}{{.AUTH_INPUT}}{{else if not (empty .ACTIVE_AUTH)}}{{.ACTIVE_AUTH}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}external{{else}}embedded{{end}}'
   DEV: '{{if not (empty .DEV_INPUT)}}{{.DEV_INPUT}}{{else if not (empty .ACTIVE_DEV)}}{{.ACTIVE_DEV}}{{else}}false{{end}}'
   LOCAL_WEB: '{{.LOCAL_WEB | default "false"}}'
   UI_SETUP: '{{.UI_SETUP | default "false"}}'
@@ -21,7 +21,7 @@ vars:
         *) echo "false" ;;
       esac
   RESOLVED_GCPHCP_CONFIG: '{{.ROOT_DIR}}/deploy/podman/.gcphcp.yaml'
-  RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else}}https://{{.KC_HOSTNAME | default "keycloak"}}:{{.KC_HTTPS_PORT | default "8443"}}/auth/realms/fleetshift{{end}}'
+  RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else if eq .RESOLVED_AUTH "embedded"}}http://localhost:5556/dex{{else}}https://{{.KC_HOSTNAME | default "keycloak"}}:{{.KC_HTTPS_PORT | default "8443"}}/auth/realms/fleetshift{{end}}'
   RESOLVED_SERVER_ADDONS: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}kind,kubernetes,gcphcp{{else}}kind,kubernetes{{end}}'
   RESOLVED_DB_FLAG:
     sh: |
@@ -30,7 +30,7 @@ vars:
       else
         echo "--db=/data/fleetshift.db"
       fi
-  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml'
+  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else if eq .RESOLVED_AUTH "embedded"}}embedded-oidc{{else}}external-oidc{{end}}.yaml'
   RESOLVED_PODMAN_SOCKET:
     sh: './scripts/detect-podman-socket.sh'
 
@@ -92,8 +92,8 @@ tasks:
         msg: "DEPLOY_MODE must be demo or prod, got: {{.RESOLVED_DEPLOY_MODE}}"
       - sh: echo "{{.RESOLVED_DB}}" | grep -qE '^(sqlite|postgres)$'
         msg: "DB must be sqlite or postgres, got: {{.RESOLVED_DB}}"
-      - sh: echo "{{.RESOLVED_AUTH}}" | grep -qE '^(local|external)$'
-        msg: "AUTH must be local or external, got: {{.RESOLVED_AUTH}}"
+      - sh: echo "{{.RESOLVED_AUTH}}" | grep -qE '^(local|external|embedded)$'
+        msg: "AUTH must be local, external, or embedded, got: {{.RESOLVED_AUTH}}"
       - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
         msg: "OIDC_ISSUER_URL is required when AUTH=external"
       - sh: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}[ "{{.RESOLVED_AUTH}}" = "external" ]{{else}}true{{end}}'

@@ -49,6 +49,8 @@ function KeycloakAuthInner({ children }: { children: ReactNode }) {
   const oidc = useOidcAuth();
   const oidcRef = useRef(oidc);
   oidcRef.current = oidc;
+  console.log({ ...oidc });
+  console.log("error:", oidc.error);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
