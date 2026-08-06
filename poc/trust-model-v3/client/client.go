@@ -113,13 +113,17 @@ func (c *Client) Enroll(ctx context.Context, loginHint string) (protocol.Enrollm
 
 	return protocol.EnrollmentPackage{
 		Intent:              intent,
+		IdentityID:          identityID,
 		ContinuityPublicKey: append([]byte(nil), c.publicKey...),
 		ProofOfPossession:   proof,
 		IDToken:             idToken,
 	}, nil
 }
 
-func (c *Client) PrepareRotation(cutoff protocol.Checkpoint) (protocol.RotationPackage, *Client, error) {
+// PrepareRotation authorizes a successor key without accepting a cutoff from
+// the resource manager. The exact cutoff is the position at which this package
+// is later serialized as a rotation marker in the tenant delivery log.
+func (c *Client) PrepareRotation() (protocol.RotationPackage, *Client, error) {
 	if c.identityID == "" {
 		return protocol.RotationPackage{}, nil, errors.New("client is not enrolled")
 	}
@@ -134,7 +138,6 @@ func (c *Client) PrepareRotation(cutoff protocol.Checkpoint) (protocol.RotationP
 		PreviousStateDigest:    c.stateDigest,
 		NewGeneration:          c.state.Generation + 1,
 		NewContinuityKeyDigest: protocol.DigestBytes(newPublicKey),
-		DeliveryCutoff:         cutoff,
 	}
 	oldSignature, err := protocol.Sign(c.privateKey, "continuity-rotation-old-key/v1", intent)
 	if err != nil {

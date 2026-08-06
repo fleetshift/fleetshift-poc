@@ -8,8 +8,9 @@ It asks:
 
 > Can a delivery agent bind a standard OIDC login to a client-held continuity
 > key, accept only content signed by that key, and enforce a locally observed
-> key-rotation cutoff while the resource manager authorizes, orders, stores,
-> and couriers requests without originating their cryptographic provenance?
+> log-serialized key-rotation boundary while the resource manager authorizes,
+> orders, stores, and couriers requests without originating their cryptographic
+> provenance?
 
 The tests demonstrate that the answer is yes, subject to the deliberately
 local history and controlled-client limitations in the design.
@@ -26,7 +27,8 @@ controlled client
                v
 resource manager
   - performs ordinary API authorization through an Authorizer hook
-  - stores plain ordered trust and delivery records
+  - serializes deliveries and rotation markers in one tenant log
+  - derives direct sparse-map leaf-update proofs for key-history heads
   - routes the exact records and evidence to the target
   - has an explicit CompromisedManager attack harness in the tests
                |
@@ -35,9 +37,9 @@ resource manager
 delivery agent
   - is provisioned with tenant, target, OIDC issuer, and enrollment client ID
   - independently fetches OIDC discovery and JWKS
-  - verifies nonce binding, key proof of possession, signatures, continuity,
-    delivery ordering, rotation cutoffs, target binding, and generation
-  - retains local trust and delivery checkpoints
+  - verifies nonce binding, key proof of possession, signatures, key-history
+    extension, map roots, marker ordering, target binding, and generation
+  - retains its accepted map root and delivery-log checkpoint
 ```
 
 The local OIDC provider is supporting infrastructure, not a FleetShift role.
@@ -50,12 +52,20 @@ mints or rewrites that token.
 
 ## Deliberate simplifications
 
-The prototype uses two in-memory append-only slices with linear SHA-256 hash
-chains. A checkpoint is only `(record count, last record hash)`. Every agent
-receives each intervening record rather than a compact consistency proof. A
-Merkle log, Tessera, tiles, durable storage, and skip proofs can replace this
-mechanism later without changing the signed enrollment, rotation, or delivery
-objects.
+The prototype uses one in-memory append-only delivery slice, an ordinary
+catch-up sequence of authenticated-map updates, and one linear SHA-256
+key-event chain per identity. The delivery checkpoint and history head are only
+`(record count, last record hash)`. The authenticated map is a 256-level sparse
+Merkle tree: each update proves the old leaf or its absence under the agent's
+retained root, then reuses the same sibling path to compute the root with only
+that leaf replaced. The manager rebuilds paths in memory and sends all 256
+siblings rather than compressing default subtrees.
+
+The map-update sequence is not an authenticated log. Its records are merely a
+way to find the chain of individually verified root transitions needed by a
+stale agent. Production Merkle logs, compressed sparse-map proofs, Tessera,
+tiles, durable storage, and skip proofs can replace the remaining linear
+mechanisms without changing the cutoff-free signed rotation authorization.
 
 Signatures and hashes currently use Go's deterministic encoding of fixed JSON
 structs. That is sufficient to test this single-language model, but it is not
@@ -93,30 +103,37 @@ ordinary platform permission and delivery-agent provenance explicit.
 3. The client completes authorization code + PKCE and verifies the returned ID
    token through discovery and JWKS.
 4. The client proves possession of the continuity key by signing the intent.
-5. The resource manager appends and forwards the package.
+5. The resource manager creates the first per-identity key event and advances
+   the authenticated map to its history head.
 6. The delivery agent repeats ID-token validation, checks the nonce and proof
-   of possession, derives `identity_id = H(tenant, iss, sub)`, and records the
-   initial continuity state.
+   of possession, derives `identity_id = H(tenant, iss, sub)`, verifies the map
+   update, and records the initial continuity state and history head.
 
 ### Delivery
 
 1. The client signs the simple content attestation.
 2. The resource manager performs its normal authorization check and appends a
    delivery record.
-3. The delivery agent pins the structural log record, verifies the content
-   digest and signature under the claimed continuity state, applies the
-   state's validity interval, and fences stale generations.
+3. The delivery agent proves the record is in an append-only extension of its
+   retained log, verifies the content digest and signature under the claimed
+   continuity state, applies the marker-bounded validity interval, and fences
+   stale generations.
 
 ### Rotation
 
-1. The client obtains the current delivery checkpoint as a rotation barrier.
-2. The old continuity key signs a transition binding the predecessor state,
-   new-key digest, new generation, and exact cutoff checkpoint.
-3. The new key signs the same transition as proof of possession.
-4. An agent accepts the transition only if the cutoff belongs to delivery
-   history that agent has already observed.
-5. The old state is valid below the cutoff; the new state is valid at and
-   above it.
+1. The old continuity key signs an authorization binding the predecessor
+   state, new-key digest, and new generation; it signs no manager checkpoint.
+2. The new key signs the same authorization as proof of possession.
+3. Under one sequencer lock, the resource manager appends that package as a
+   rotation marker in the tenant delivery log and creates the next per-user
+   key event referencing the exact marker index and hash.
+4. The authenticated map advances from the previous key-history head to the
+   append-only successor head using a direct old-root-to-new-root leaf proof.
+5. An agent may accept this structural map update before reaching the marker,
+   but it cannot use either side of the affected key interval until the exact
+   marker is proven in its accepted delivery-log history.
+6. If the marker occupies index `C`, the old state is valid for delivery
+   indexes below `C`; the new state is valid for indexes above `C`.
 
 ## Security cases pinned by tests
 
@@ -124,15 +141,23 @@ ordinary platform permission and delivery-agent provenance explicit.
 | --- | --- |
 | Resource manager substitutes only the enrollment public key | Rejected by the nonce-bound key digest |
 | Resource manager replaces the full key binding and supplies valid attacker proof of possession with the old ID token | Rejected by the ID-token nonce |
+| Resource manager places a genuine enrollment under another authenticated-map identity key | Rejected because the map key must equal the identity derived from the nonce-bound ID token |
 | Resource manager replays an already accepted enrollment | Rejected because the identity is already enrolled |
 | Resource manager signs a delivery with its own key while claiming the user's identity | Rejected by continuity-key verification |
 | Resource manager changes content or delivery metadata after the user signs | Rejected by the content digest or signature |
 | Resource manager fabricates a rotation with attacker-controlled old and new signatures | Rejected because the current continuity key did not authorize it |
 | Resource manager substitutes the new key in a genuine transition | Rejected by the signed new-key digest and proof of possession |
 | A transition lacks proof of possession by the genuine new key | Rejected even though the old key authorized the transition |
-| Retired key signs at or after a cutoff already accepted by an agent | Rejected by that agent |
+| Resource manager reuses an ordinary delivery record as an early cutoff | Rejected because the key event must reference the exact matching rotation-marker leaf |
+| Resource manager references a genuine marker carrying a different rotation package | Rejected because the marker leaf and per-user key event must commit the same authorization |
+| Successive key events reuse or move backward to an earlier marker | Rejected because marker positions for an identity must strictly advance |
+| Agent advances the authenticated map before it has observed the marker | Permitted structurally, but deliveries depending on that boundary fail closed until marker inclusion is proven |
+| An old-key delivery is signed before rotation but appended after the marker | Rejected because log position, not unprovable signature creation time, determines validity |
+| A successor-key delivery is appended before its rotation marker | Rejected because the successor state is valid only after the marker |
+| A historical delivery is presented after rotation | Accepted when its key event, retiring marker, current history head, and log inclusion all verify |
+| Retired key signs at or after a marker already accepted by an agent | Rejected by that agent |
 | Resource manager presents a fork from an older delivery checkpoint | Rejected by an established agent that retained the newer checkpoint |
-| Resource manager presents a fork from an older trust checkpoint | Rejected by an established agent that retained the newer checkpoint |
+| Resource manager presents a map branch rooted before the agent's retained map root | Rejected by the established agent |
 | Resource manager bypasses its own RBAC but forwards a genuine, otherwise valid user signature | Accepted by the agent; complete RBAC is intentionally not reproduced there |
 | Resource manager withholds rotation from one agent, then uses a compromised old key | The rotated agent rejects; the stale agent accepts on its local pre-rotation view |
 
@@ -156,8 +181,8 @@ required.
 | --- | --- |
 | `client/` | Controlled-client OIDC flow, continuity key, delivery signing, and rotation |
 | `resourcemanager/` | Ordinary authorization, ordered storage, courier behavior, and explicit compromise harness |
-| `deliveryagent/` | Stateful target-side OIDC, continuity, signature, cutoff, log, and generation verification |
-| `protocol/` | Deterministically encoded purpose-separated messages, signatures, digests, and linear record chains |
+| `deliveryagent/` | Stateful target-side OIDC, key-history, signature, marker, log, and generation verification |
+| `protocol/` | Purpose-separated messages, signatures, digests, sparse-map leaf-update proofs, and linear history/delivery chains |
 | `internal/testoidc/` | Minimal TLS OIDC authorization-code provider |
 | `trust_model_test.go` | End-to-end guarantees and accepted limitations across all three roles |
 
@@ -171,10 +196,11 @@ required.
    Sigstore Bundle and in-toto/DSSE types while retaining these exact tests.
 4. Add device and session delegation, identity tombstones, recovery, and the
    optional OIDC reanchor paths.
-5. Add semantic exceptions for invalid trust events so one bad principal does
-   not halt an agent's entire trust stream.
-6. Replace linear chains with compact append proofs and selective delivery,
-   then compare a small Merkle implementation with Tessera.
+5. Add semantic exceptions for invalid key events so one bad principal does
+   not halt an agent's map-update batch.
+6. Replace the linear history and delivery chains with compact Merkle proofs,
+   compress default sparse-map siblings, and add selective delivery; then
+   compare a small Merkle implementation with Tessera.
 7. Add proactive checkpoint distribution and optional peer comparison to show
    how the stale-agent window changes without making gossip mandatory.
 8. Model the trust and delivery state machines formally and fuzz canonical
