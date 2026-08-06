@@ -157,6 +157,30 @@ type KeyEventRecord struct {
 	Hash                 string   `json:"hash"`
 }
 
+// VerifyKeyEventRecord checks the record's RFC 6962 leaf hash and returns the
+// validated leaf hash for append-only storage adapters.
+func VerifyKeyEventRecord(record KeyEventRecord) ([]byte, error) {
+	_, leafHash, err := verifiedKeyEventLeaf(record)
+	return leafHash, err
+}
+
+// KeyEventInclusionProof authenticates one selectively retrieved identity
+// event under a KeyHistoryHead.
+type KeyEventInclusionProof struct {
+	Event          KeyEventRecord `json:"event"`
+	InclusionProof []string       `json:"inclusion_proof"`
+}
+
+// ExceptionalEvent is the rare durable semantic state needed when a
+// structurally committed event fails validation. Identity and sequence make
+// descendant checks possible without retrieving the complete identity log.
+type ExceptionalEvent struct {
+	IdentityID           string `json:"identity_id"`
+	Sequence             uint64 `json:"sequence"`
+	EventDigest          string `json:"event_digest"`
+	ResultingStateDigest string `json:"resulting_state_digest"`
+}
+
 // KeyHistoryHead is the authenticated-map value for a federated identity.
 // Root and Size commit the append-only event history; CurrentStateDigest is a
 // compact lookup hint whose value is also committed by the latest event.
@@ -183,29 +207,32 @@ type KeyHistoryUpdate struct {
 // against the verifier's retained root. Reusing that exact path with the new
 // key-history head produces Root and proves that no other leaf changed.
 type AuthenticatedMapUpdate struct {
-	PreviousRoot    string           `json:"previous_root"`
-	Root            string           `json:"root"`
-	PreviousHead    *KeyHistoryHead  `json:"previous_head,omitempty"`
-	KeyHistory      KeyHistoryUpdate `json:"key_history"`
-	SiblingHashes   []string         `json:"sibling_hashes"`
-	SemanticHistory []KeyEventRecord `json:"semantic_history"`
-	RotationRecords []DeliveryRecord `json:"rotation_records,omitempty"`
+	PreviousRoot   string                  `json:"previous_root"`
+	Root           string                  `json:"root"`
+	PreviousHead   *KeyHistoryHead         `json:"previous_head,omitempty"`
+	KeyHistory     KeyHistoryUpdate        `json:"key_history"`
+	SiblingBitmap  []byte                  `json:"sibling_bitmap"`
+	SiblingHashes  []string                `json:"sibling_hashes,omitempty"`
+	Predecessor    *KeyEventInclusionProof `json:"predecessor,omitempty"`
+	RotationRecord *DeliveryRecord         `json:"rotation_record,omitempty"`
 }
 
 // KeyHistoryMapProof proves that Head is the current value for one identity
 // under a tenant's accepted sparse-map root.
 type KeyHistoryMapProof struct {
 	Head          KeyHistoryHead `json:"head"`
-	SiblingHashes []string       `json:"sibling_hashes"`
+	SiblingBitmap []byte         `json:"sibling_bitmap"`
+	SiblingHashes []string       `json:"sibling_hashes,omitempty"`
 }
 
 // IdentityTrustProof puts identity-local storage and proof assembly on the
-// manager. A verifier authenticates History through Map and reconstructs all
-// continuity states ephemerally for the delivery being checked.
+// manager. A verifier authenticates the current head through Map and
+// reconstructs only the signing state plus its immediate successor when that
+// state is historical.
 type IdentityTrustProof struct {
-	Map             KeyHistoryMapProof `json:"map"`
-	History         []KeyEventRecord   `json:"history"`
-	RotationRecords []DeliveryRecord   `json:"rotation_records,omitempty"`
+	Map            KeyHistoryMapProof      `json:"map"`
+	SigningEvent   KeyEventInclusionProof  `json:"signing_event"`
+	SuccessorEvent *KeyEventInclusionProof `json:"successor_event,omitempty"`
 }
 
 type DeliveryLogEvent struct {
@@ -360,9 +387,74 @@ func EmptyKeyHistoryHead(identityID string) KeyHistoryHead {
 	}
 }
 
+// NewKeyEventRecord constructs the next identity-local event and its RFC 6962
+// leaf hash without loading any prior event bodies. A proof-store adapter can
+// append the returned hash to its retained compact frontier, then pass the
+// resulting root and proofs to NewKeyHistoryUpdateFromAppend.
+func NewKeyEventRecord(previous KeyHistoryHead, resultingStateDigest string, event KeyEvent) (KeyEventRecord, []byte, error) {
+	if _, err := validateKeyHistoryHead(previous); err != nil {
+		return KeyEventRecord{}, nil, fmt.Errorf("%w: malformed previous head: %v", ErrInvalidKeyHistory, err)
+	}
+	if resultingStateDigest == "" {
+		return KeyEventRecord{}, nil, fmt.Errorf("%w: resulting state digest is required", ErrInvalidKeyHistory)
+	}
+	if previous.Size == math.MaxUint64 {
+		return KeyEventRecord{}, nil, fmt.Errorf("%w: key history is at maximum uint64 size", ErrInvalidKeyHistory)
+	}
+	record := KeyEventRecord{
+		IdentityID:           previous.IdentityID,
+		Sequence:             previous.Size,
+		Event:                event,
+		ResultingStateDigest: resultingStateDigest,
+	}
+	data, err := json.Marshal(keyEventRecordMaterial(record))
+	if err != nil {
+		return KeyEventRecord{}, nil, fmt.Errorf("%w: encode key-event leaf: %v", ErrInvalidKeyHistory, err)
+	}
+	leafHash := rfc6962.DefaultHasher.HashLeaf(data)
+	record.Hash = encodeHash(leafHash)
+	return record, leafHash, nil
+}
+
+// NewKeyHistoryUpdateFromAppend assembles a wire update from one newly stored
+// event plus proof-store output. It is the production-shaped constructor: no
+// historical event bodies are required, and the supplied inclusion and
+// consistency proofs are reverified before the update is returned.
+func NewKeyHistoryUpdateFromAppend(previous KeyHistoryHead, record KeyEventRecord, successorRoot []byte, inclusion, consistency [][]byte) (KeyHistoryUpdate, error) {
+	if _, err := validateKeyHistoryHead(previous); err != nil {
+		return KeyHistoryUpdate{}, fmt.Errorf("%w: malformed previous head: %v", ErrInvalidKeyHistory, err)
+	}
+	if previous.Size == math.MaxUint64 {
+		return KeyHistoryUpdate{}, fmt.Errorf("%w: key history is at maximum uint64 size", ErrInvalidKeyHistory)
+	}
+	checkpoint, err := NewCheckpoint(previous.Size+1, successorRoot)
+	if err != nil {
+		return KeyHistoryUpdate{}, fmt.Errorf("%w: successor root: %v", ErrInvalidKeyHistory, err)
+	}
+	update := KeyHistoryUpdate{
+		PreviousHead: previous,
+		Event:        record,
+		Head: KeyHistoryHead{
+			Protocol:           KeyHistoryHeadProtocol,
+			IdentityID:         previous.IdentityID,
+			Size:               checkpoint.Size,
+			Root:               checkpoint.Root,
+			CurrentStateDigest: record.ResultingStateDigest,
+		},
+		InclusionProof:   encodeProof(inclusion),
+		ConsistencyProof: encodeProof(consistency),
+	}
+	if _, err := VerifyKeyHistoryUpdate(previous, update); err != nil {
+		return KeyHistoryUpdate{}, err
+	}
+	return update, nil
+}
+
 // NewKeyHistoryUpdate builds one append to an RFC 6962 per-identity key-event
 // log. retainedRecords are the manager's stored prefix; generated proofs, not
-// those records, are sent to verifiers.
+// those records, are sent to verifiers. It is a convenience constructor for
+// fixtures; managers should retain a proof-store frontier and use
+// NewKeyHistoryUpdateFromAppend instead of replaying the prefix.
 func NewKeyHistoryUpdate(previous KeyHistoryHead, retainedRecords []KeyEventRecord, resultingStateDigest string, event KeyEvent) (KeyHistoryUpdate, error) {
 	if _, err := validateKeyHistoryHead(previous); err != nil {
 		return KeyHistoryUpdate{}, fmt.Errorf("%w: malformed previous head: %v", ErrInvalidKeyHistory, err)
@@ -403,24 +495,17 @@ func NewKeyHistoryUpdate(previous KeyHistoryHead, retainedRecords []KeyEventReco
 		return KeyHistoryUpdate{}, fmt.Errorf("%w: retained records do not reconstruct previous history root", ErrInvalidKeyHistory)
 	}
 
-	record := KeyEventRecord{
-		IdentityID:           previous.IdentityID,
-		Sequence:             previous.Size,
-		Event:                event,
-		ResultingStateDigest: resultingStateDigest,
-	}
-	data, err := json.Marshal(keyEventRecordMaterial(record))
+	record, leafHash, err := NewKeyEventRecord(previous, resultingStateDigest, event)
 	if err != nil {
-		return KeyHistoryUpdate{}, fmt.Errorf("%w: encode key-event leaf: %v", ErrInvalidKeyHistory, err)
+		return KeyHistoryUpdate{}, err
 	}
-	index, leafHash, err := tree.Append(data)
+	index, appendedHash, err := tree.AppendHash(leafHash)
 	if err != nil {
 		return KeyHistoryUpdate{}, fmt.Errorf("%w: append key-event leaf: %v", ErrInvalidKeyHistory, err)
 	}
-	if index != record.Sequence {
+	if index != record.Sequence || !bytes.Equal(appendedHash, leafHash) {
 		return KeyHistoryUpdate{}, fmt.Errorf("%w: key event assigned index %d, want %d", ErrInvalidKeyHistory, index, record.Sequence)
 	}
-	record.Hash = encodeHash(leafHash)
 	root, err := tree.Root()
 	if err != nil {
 		return KeyHistoryUpdate{}, fmt.Errorf("%w: compute key-history root: %v", ErrInvalidKeyHistory, err)
@@ -433,20 +518,7 @@ func NewKeyHistoryUpdate(previous KeyHistoryHead, retainedRecords []KeyEventReco
 	if err != nil {
 		return KeyHistoryUpdate{}, fmt.Errorf("%w: construct key-history consistency proof: %v", ErrInvalidKeyHistory, err)
 	}
-	head := KeyHistoryHead{
-		Protocol:           KeyHistoryHeadProtocol,
-		IdentityID:         previous.IdentityID,
-		Size:               previous.Size + 1,
-		Root:               encodeHash(root),
-		CurrentStateDigest: resultingStateDigest,
-	}
-	return KeyHistoryUpdate{
-		PreviousHead:     previous,
-		Event:            record,
-		Head:             head,
-		InclusionProof:   encodeProof(inclusion),
-		ConsistencyProof: encodeProof(consistency),
-	}, nil
+	return NewKeyHistoryUpdateFromAppend(previous, record, root, inclusion, consistency)
 }
 
 func VerifyKeyHistoryUpdate(previous KeyHistoryHead, update KeyHistoryUpdate) (KeyHistoryHead, error) {
@@ -518,9 +590,8 @@ func VerifyKeyHistoryUpdate(previous KeyHistoryHead, update KeyHistoryUpdate) (K
 }
 
 // VerifyKeyHistoryRecords reconstructs the complete identity-local Merkle log
-// and verifies that it produces head. Keeping this proof material on the
-// manager lets a verifier reconstruct continuity state only while checking an
-// update or delivery.
+// and verifies that it produces head. It is an audit and fixture helper, not a
+// production proof-assembly path.
 func VerifyKeyHistoryRecords(head KeyHistoryHead, records []KeyEventRecord) error {
 	root, err := validateKeyHistoryHead(head)
 	if err != nil {
@@ -565,8 +636,74 @@ func VerifyKeyHistoryRecords(head KeyHistoryHead, records []KeyEventRecord) erro
 	return nil
 }
 
+// NewKeyEventInclusionProof is a fixture convenience that rebuilds a retained
+// history before selecting one event with logarithmic authentication to
+// head.Root. Production managers should use indexed event and Merkle-node
+// reads, as resourcemanager.Manager does.
+func NewKeyEventInclusionProof(head KeyHistoryHead, records []KeyEventRecord, sequence uint64) (KeyEventInclusionProof, error) {
+	if err := VerifyKeyHistoryRecords(head, records); err != nil {
+		return KeyEventInclusionProof{}, err
+	}
+	if sequence >= head.Size {
+		return KeyEventInclusionProof{}, fmt.Errorf("%w: key-event sequence %d is beyond history size %d", ErrInvalidKeyHistory, sequence, head.Size)
+	}
+	tree := merklelog.New()
+	for _, record := range records {
+		data, _, err := verifiedKeyEventLeaf(record)
+		if err != nil {
+			return KeyEventInclusionProof{}, err
+		}
+		if _, _, err := tree.Append(data); err != nil {
+			return KeyEventInclusionProof{}, fmt.Errorf("%w: rebuild history for inclusion proof: %v", ErrInvalidKeyHistory, err)
+		}
+	}
+	inclusion, err := tree.InclusionProof(sequence, head.Size)
+	if err != nil {
+		return KeyEventInclusionProof{}, fmt.Errorf("%w: construct key-event inclusion proof: %v", ErrInvalidKeyHistory, err)
+	}
+	return KeyEventInclusionProof{
+		Event:          cloneKeyEventRecord(records[sequence]),
+		InclusionProof: encodeProof(inclusion),
+	}, nil
+}
+
+// VerifyKeyEventInclusionProof authenticates one selectively disclosed event
+// against an accepted identity history head.
+func VerifyKeyEventInclusionProof(head KeyHistoryHead, eventProof KeyEventInclusionProof) error {
+	root, err := validateKeyHistoryHead(head)
+	if err != nil {
+		return fmt.Errorf("%w: malformed head: %v", ErrInvalidKeyHistory, err)
+	}
+	record := eventProof.Event
+	if record.IdentityID != head.IdentityID || record.Sequence >= head.Size {
+		return fmt.Errorf("%w: selected event does not belong to accepted history", ErrInvalidKeyHistory)
+	}
+	_, leafHash, err := verifiedKeyEventLeaf(record)
+	if err != nil {
+		return err
+	}
+	inclusion, err := decodeProof(eventProof.InclusionProof)
+	if err != nil {
+		return fmt.Errorf("%w: selected-event inclusion proof: %v", ErrInvalidKeyHistory, err)
+	}
+	if err := proof.VerifyInclusion(
+		rfc6962.DefaultHasher,
+		record.Sequence,
+		head.Size,
+		leafHash,
+		inclusion,
+		root,
+	); err != nil {
+		return fmt.Errorf("%w: selected-event inclusion proof: %v", ErrInvalidKeyHistory, err)
+	}
+	return nil
+}
+
 // NewAuthenticatedMapUpdate constructs the CONIKS sparse-map proof for
-// replacing the one identity leaf changed by historyUpdate.
+// replacing the one identity leaf changed by historyUpdate. It rebuilds the
+// map from heads as a fixture convenience; production-shaped managers should
+// retain a versioned sparse-node store and call
+// NewAuthenticatedMapUpdateFromProof.
 func NewAuthenticatedMapUpdate(tenantID string, heads map[string]KeyHistoryHead, historyUpdate KeyHistoryUpdate) (AuthenticatedMapUpdate, error) {
 	if tenantID == "" {
 		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: tenant is required", ErrInvalidMapProof)
@@ -589,51 +726,99 @@ func NewAuthenticatedMapUpdate(tenantID string, heads map[string]KeyHistoryHead,
 		return AuthenticatedMapUpdate{}, err
 	}
 	key := keyHistoryMapKey(tenantID, identityID)
-	siblingHashes, err := tree.Proof(key[:])
+	siblingBitmap, siblingHashes, err := tree.CompressedProof(key[:])
 	if err != nil {
 		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: construct sparse-map proof: %v", ErrInvalidMapProof, err)
 	}
 	var previousLeaf *KeyHistoryHead
-	var previousValueHash []byte
 	if exists {
 		previous := previousHead
 		previousLeaf = &previous
-		previousValueHash, err = keyHistoryMapValueHash(previous)
-		if err != nil {
-			return AuthenticatedMapUpdate{}, err
-		}
 	}
-	previousRoot := tree.Root()
-	verifiedPreviousRoot, err := sparsemap.RootFromProof(tenantID, key[:], previousValueHash, siblingHashes)
+	update, err := NewAuthenticatedMapUpdateFromProof(
+		tenantID,
+		encodeHash(tree.Root()),
+		previousLeaf,
+		historyUpdate,
+		siblingBitmap,
+		siblingHashes,
+	)
 	if err != nil {
-		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: reconstruct previous sparse-map root: %v", ErrInvalidMapProof, err)
-	}
-	if !bytes.Equal(verifiedPreviousRoot, previousRoot) {
-		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: generated previous leaf proof does not reconstruct the map root", ErrInvalidMapProof)
+		return AuthenticatedMapUpdate{}, err
 	}
 	nextValueHash, err := keyHistoryMapValueHash(historyUpdate.Head)
 	if err != nil {
 		return AuthenticatedMapUpdate{}, err
 	}
-	provenRoot, err := sparsemap.RootFromProof(tenantID, key[:], nextValueHash, siblingHashes)
-	if err != nil {
-		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: reconstruct successor sparse-map root: %v", ErrInvalidMapProof, err)
-	}
 	root, err := tree.Set(key[:], nextValueHash)
 	if err != nil {
 		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: write successor sparse-map leaf: %v", ErrInvalidMapProof, err)
 	}
-	if !bytes.Equal(provenRoot, root) {
+	claimedRoot, err := decodeHash(update.Root)
+	if err != nil || !bytes.Equal(claimedRoot, root) {
 		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: sparse-map writer and replacement proof produced different roots", ErrInvalidMapProof)
 	}
-	update := AuthenticatedMapUpdate{
-		PreviousRoot:  encodeHash(previousRoot),
-		Root:          encodeHash(root),
-		KeyHistory:    historyUpdate,
-		PreviousHead:  previousLeaf,
-		SiblingHashes: encodeProof(siblingHashes),
-	}
 	return update, nil
+}
+
+// NewAuthenticatedMapUpdateFromProof assembles and revalidates a one-leaf map
+// replacement from a retained compressed sibling path. It requires no other
+// identities' heads and is the intended proof-store boundary for the server.
+func NewAuthenticatedMapUpdateFromProof(tenantID, currentRoot string, previousHead *KeyHistoryHead, historyUpdate KeyHistoryUpdate, siblingBitmap []byte, siblingHashes [][]byte) (AuthenticatedMapUpdate, error) {
+	if tenantID == "" {
+		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: tenant is required", ErrInvalidMapProof)
+	}
+	identityID := historyUpdate.Event.IdentityID
+	if previousHead == nil {
+		if historyUpdate.PreviousHead != EmptyKeyHistoryHead(identityID) {
+			return AuthenticatedMapUpdate{}, fmt.Errorf("%w: absent map leaf does not start at empty key history", ErrInvalidKeyHistory)
+		}
+	} else if *previousHead != historyUpdate.PreviousHead {
+		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: previous map leaf and key-history head differ", ErrInvalidKeyHistory)
+	}
+	if _, err := VerifyKeyHistoryUpdate(historyUpdate.PreviousHead, historyUpdate); err != nil {
+		return AuthenticatedMapUpdate{}, err
+	}
+	acceptedRoot, err := decodeHash(currentRoot)
+	if err != nil {
+		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: retained map root: %v", ErrInvalidMapProof, err)
+	}
+	key := keyHistoryMapKey(tenantID, identityID)
+	var previousValueHash []byte
+	if previousHead != nil {
+		previousValueHash, err = keyHistoryMapValueHash(*previousHead)
+		if err != nil {
+			return AuthenticatedMapUpdate{}, err
+		}
+	}
+	provedPreviousRoot, err := sparsemap.RootFromCompressedProof(tenantID, key[:], previousValueHash, siblingBitmap, siblingHashes)
+	if err != nil {
+		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: reconstruct previous sparse-map root: %v", ErrInvalidMapProof, err)
+	}
+	if !bytes.Equal(provedPreviousRoot, acceptedRoot) {
+		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: previous leaf proof does not reconstruct the retained map root", ErrInvalidMapProof)
+	}
+	nextValueHash, err := keyHistoryMapValueHash(historyUpdate.Head)
+	if err != nil {
+		return AuthenticatedMapUpdate{}, err
+	}
+	provedRoot, err := sparsemap.RootFromCompressedProof(tenantID, key[:], nextValueHash, siblingBitmap, siblingHashes)
+	if err != nil {
+		return AuthenticatedMapUpdate{}, fmt.Errorf("%w: reconstruct successor sparse-map root: %v", ErrInvalidMapProof, err)
+	}
+	var previousLeaf *KeyHistoryHead
+	if previousHead != nil {
+		copy := *previousHead
+		previousLeaf = &copy
+	}
+	return AuthenticatedMapUpdate{
+		PreviousRoot:  currentRoot,
+		Root:          encodeHash(provedRoot),
+		PreviousHead:  previousLeaf,
+		KeyHistory:    historyUpdate,
+		SiblingBitmap: append([]byte(nil), siblingBitmap...),
+		SiblingHashes: encodeProof(siblingHashes),
+	}, nil
 }
 
 // VerifyAuthenticatedMapUpdate verifies both proof layers: the identity-local
@@ -674,7 +859,7 @@ func VerifyAuthenticatedMapUpdate(tenantID, currentRoot string, update Authentic
 			return KeyHistoryHead{}, err
 		}
 	}
-	computedPreviousRoot, err := sparsemap.RootFromProof(tenantID, key[:], previousValueHash, siblings)
+	computedPreviousRoot, err := sparsemap.RootFromCompressedProof(tenantID, key[:], previousValueHash, update.SiblingBitmap, siblings)
 	if err != nil {
 		return KeyHistoryHead{}, fmt.Errorf("%w: previous leaf proof: %v", ErrInvalidMapProof, err)
 	}
@@ -685,7 +870,7 @@ func VerifyAuthenticatedMapUpdate(tenantID, currentRoot string, update Authentic
 	if err != nil {
 		return KeyHistoryHead{}, err
 	}
-	computedRoot, err := sparsemap.RootFromProof(tenantID, key[:], nextValueHash, siblings)
+	computedRoot, err := sparsemap.RootFromCompressedProof(tenantID, key[:], nextValueHash, update.SiblingBitmap, siblings)
 	if err != nil {
 		return KeyHistoryHead{}, fmt.Errorf("%w: successor leaf proof: %v", ErrInvalidMapProof, err)
 	}
@@ -713,7 +898,9 @@ func KeyHistoryMapRoot(tenantID string, heads map[string]KeyHistoryHead) (string
 
 // NewKeyHistoryMapProof constructs a membership proof for identityID's
 // current key-history head. The manager retains heads; the verifier retains
-// only the root against which this proof is checked.
+// only the root against which this proof is checked. It rebuilds the map as a
+// fixture convenience; managers with a versioned node store should call
+// NewKeyHistoryMapProofFromProof.
 func NewKeyHistoryMapProof(tenantID string, heads map[string]KeyHistoryHead, identityID string) (KeyHistoryMapProof, error) {
 	head, ok := heads[identityID]
 	if !ok {
@@ -724,11 +911,25 @@ func NewKeyHistoryMapProof(tenantID string, heads map[string]KeyHistoryHead, ide
 		return KeyHistoryMapProof{}, err
 	}
 	key := keyHistoryMapKey(tenantID, identityID)
-	siblings, err := tree.Proof(key[:])
+	bitmap, siblings, err := tree.CompressedProof(key[:])
 	if err != nil {
 		return KeyHistoryMapProof{}, fmt.Errorf("%w: construct membership proof: %v", ErrInvalidMapProof, err)
 	}
-	return KeyHistoryMapProof{Head: head, SiblingHashes: encodeProof(siblings)}, nil
+	return NewKeyHistoryMapProofFromProof(tenantID, encodeHash(tree.Root()), head, bitmap, siblings)
+}
+
+// NewKeyHistoryMapProofFromProof assembles and validates one membership proof
+// returned by a versioned sparse-node store. No other identity leaf is loaded.
+func NewKeyHistoryMapProofFromProof(tenantID, currentRoot string, head KeyHistoryHead, siblingBitmap []byte, siblingHashes [][]byte) (KeyHistoryMapProof, error) {
+	mapProof := KeyHistoryMapProof{
+		Head:          head,
+		SiblingBitmap: append([]byte(nil), siblingBitmap...),
+		SiblingHashes: encodeProof(siblingHashes),
+	}
+	if err := VerifyKeyHistoryMapProof(tenantID, currentRoot, mapProof); err != nil {
+		return KeyHistoryMapProof{}, err
+	}
+	return mapProof, nil
 }
 
 // VerifyKeyHistoryMapProof authenticates one current identity head without
@@ -750,7 +951,7 @@ func VerifyKeyHistoryMapProof(tenantID, currentRoot string, mapProof KeyHistoryM
 	if err != nil {
 		return err
 	}
-	computed, err := sparsemap.RootFromProof(tenantID, key[:], valueHash, siblings)
+	computed, err := sparsemap.RootFromCompressedProof(tenantID, key[:], valueHash, mapProof.SiblingBitmap, siblings)
 	if err != nil {
 		return fmt.Errorf("%w: membership proof: %v", ErrInvalidMapProof, err)
 	}
@@ -779,6 +980,23 @@ func buildKeyHistoryMap(tenantID string, heads map[string]KeyHistoryHead) (*spar
 		}
 	}
 	return tree, nil
+}
+
+// KeyHistoryMapKey returns the tenant-separated 32-byte sparse-map key for an
+// identity. It is exported for proof-store adapters; callers should treat the
+// returned bytes as opaque.
+func KeyHistoryMapKey(tenantID, identityID string) []byte {
+	key := keyHistoryMapKey(tenantID, identityID)
+	return append([]byte(nil), key[:]...)
+}
+
+// KeyHistoryMapValueHash returns the canonical 32-byte sparse-map value for a
+// key-history head. It is exported for proof-store adapters.
+func KeyHistoryMapValueHash(head KeyHistoryHead) ([]byte, error) {
+	if _, err := validateKeyHistoryHead(head); err != nil {
+		return nil, fmt.Errorf("%w: malformed key-history map value: %v", ErrInvalidMapProof, err)
+	}
+	return keyHistoryMapValueHash(head)
 }
 
 func keyHistoryMapValueHash(head KeyHistoryHead) ([]byte, error) {
@@ -899,6 +1117,29 @@ func keyEventRecordMaterial(record KeyEventRecord) any {
 	}{"fleetshift.dev/trust-v3/key-history-leaf/v1", record.IdentityID, record.Sequence, record.Event, record.ResultingStateDigest}
 }
 
+func cloneKeyEventRecord(in KeyEventRecord) KeyEventRecord {
+	out := in
+	out.Event = in.Event
+	if in.Event.Enrollment != nil {
+		enrollment := *in.Event.Enrollment
+		enrollment.ContinuityPublicKey = append([]byte(nil), in.Event.Enrollment.ContinuityPublicKey...)
+		enrollment.ProofOfPossession = append([]byte(nil), in.Event.Enrollment.ProofOfPossession...)
+		out.Event.Enrollment = &enrollment
+	}
+	if in.Event.Rotation != nil {
+		rotation := *in.Event.Rotation
+		rotation.NewContinuityPublicKey = append([]byte(nil), in.Event.Rotation.NewContinuityPublicKey...)
+		rotation.SignatureByOldKey = append([]byte(nil), in.Event.Rotation.SignatureByOldKey...)
+		rotation.ProofByNewKey = append([]byte(nil), in.Event.Rotation.ProofByNewKey...)
+		out.Event.Rotation = &rotation
+	}
+	if in.Event.RotationMarker != nil {
+		marker := *in.Event.RotationMarker
+		out.Event.RotationMarker = &marker
+	}
+	return out
+}
+
 func verifiedKeyEventLeaf(record KeyEventRecord) ([]byte, []byte, error) {
 	data, err := json.Marshal(keyEventRecordMaterial(record))
 	if err != nil {
@@ -945,6 +1186,15 @@ func validateKeyHistoryHead(head KeyHistoryHead) ([]byte, error) {
 
 func encodeHash(hash []byte) string {
 	return "sha256:" + hex.EncodeToString(hash)
+}
+
+// EncodeHash returns the canonical wire encoding for a SHA-256 hash produced
+// by a retained proof store.
+func EncodeHash(hash []byte) (string, error) {
+	if len(hash) != sha256.Size {
+		return "", fmt.Errorf("SHA-256 hash has length %d, want %d", len(hash), sha256.Size)
+	}
+	return encodeHash(hash), nil
 }
 
 func decodeHash(encoded string) ([]byte, error) {

@@ -81,6 +81,118 @@ func TestProofAuthenticatesAbsenceMembershipAndReplacement(t *testing.T) {
 	}
 }
 
+func TestCompressedProofOmitsCanonicalEmptySiblings(t *testing.T) {
+	tree := New("tenant-acme")
+	aliceKey := sha256.Sum256([]byte("alice"))
+	aliceValue := sha256.Sum256([]byte("alice-value"))
+	bobKey := sha256.Sum256([]byte("bob"))
+	bobValue := sha256.Sum256([]byte("bob-value"))
+	carolKey := sha256.Sum256([]byte("carol"))
+	carolValue := sha256.Sum256([]byte("carol-value"))
+	for _, entry := range []struct {
+		key   [sha256.Size]byte
+		value [sha256.Size]byte
+	}{{aliceKey, aliceValue}, {bobKey, bobValue}, {carolKey, carolValue}} {
+		if _, err := tree.Set(entry.key[:], entry.value[:]); err != nil {
+			t.Fatalf("set sparse-map leaf: %v", err)
+		}
+	}
+
+	bitmap, hashes, err := tree.CompressedProof(aliceKey[:])
+	if err != nil {
+		t.Fatalf("compressed proof: %v", err)
+	}
+	if got, want := len(bitmap), ProofBitmapSize; got != want {
+		t.Fatalf("bitmap length = %d, want %d", got, want)
+	}
+	if got, max := len(hashes), 2; got > max {
+		t.Fatalf("non-empty sibling hashes = %d, want <= %d", got, max)
+	}
+	if len(hashes) >= Height {
+		t.Fatalf("compressed proof retained all %d sparse siblings", len(hashes))
+	}
+	root, err := RootFromCompressedProof("tenant-acme", aliceKey[:], aliceValue[:], bitmap, hashes)
+	if err != nil {
+		t.Fatalf("reconstruct compressed proof: %v", err)
+	}
+	if !bytes.Equal(root, tree.Root()) {
+		t.Fatalf("compressed proof root = %x, want %x", root, tree.Root())
+	}
+
+	tamperedBitmap := append([]byte(nil), bitmap...)
+	tamperedBitmap[0] ^= 0x80
+	if _, err := RootFromCompressedProof("tenant-acme", aliceKey[:], aliceValue[:], tamperedBitmap, hashes); err == nil {
+		t.Fatal("bitmap/hash-count mismatch unexpectedly verified")
+	}
+}
+
+func TestPendingSetRetainsHistoricalProofVersions(t *testing.T) {
+	tree := New("tenant-acme")
+	aliceKey := sha256.Sum256([]byte("alice"))
+	aliceValue := sha256.Sum256([]byte("alice-value"))
+	bobKey := sha256.Sum256([]byte("bob"))
+	bobValue := sha256.Sum256([]byte("bob-value"))
+	emptyRoot := tree.Root()
+
+	pendingAlice, err := tree.BeginSet(aliceKey[:], aliceValue[:])
+	if err != nil {
+		t.Fatalf("begin Alice set: %v", err)
+	}
+	aliceRoot := pendingAlice.Root()
+	if got, want := pendingAlice.Revision(), uint64(1); got != want {
+		t.Fatalf("pending revision = %d, want %d", got, want)
+	}
+	if got, want := tree.Revision(), uint64(0); got != want {
+		t.Fatalf("tree advanced before commit: revision = %d, want %d", got, want)
+	}
+	if !bytes.Equal(tree.Root(), emptyRoot) {
+		t.Fatal("tree root changed before pending set committed")
+	}
+	if err := pendingAlice.Commit(); err != nil {
+		t.Fatalf("commit Alice set: %v", err)
+	}
+	if err := pendingAlice.Commit(); err == nil {
+		t.Fatal("pending set committed twice")
+	}
+
+	pendingBob, err := tree.BeginSet(bobKey[:], bobValue[:])
+	if err != nil {
+		t.Fatalf("begin Bob set: %v", err)
+	}
+	if err := pendingBob.Commit(); err != nil {
+		t.Fatalf("commit Bob set: %v", err)
+	}
+	if got, want := tree.Revision(), uint64(2); got != want {
+		t.Fatalf("tree revision = %d, want %d", got, want)
+	}
+
+	root0, err := tree.RootAt(0)
+	if err != nil {
+		t.Fatalf("root at revision 0: %v", err)
+	}
+	root1, err := tree.RootAt(1)
+	if err != nil {
+		t.Fatalf("root at revision 1: %v", err)
+	}
+	if !bytes.Equal(root0, emptyRoot) || !bytes.Equal(root1, aliceRoot) {
+		t.Fatalf("historical roots = (%x, %x), want (%x, %x)", root0, root1, emptyRoot, aliceRoot)
+	}
+	bitmap, siblings, err := tree.CompressedProofAt(1, aliceKey[:])
+	if err != nil {
+		t.Fatalf("Alice proof at revision 1: %v", err)
+	}
+	proven, err := RootFromCompressedProof("tenant-acme", aliceKey[:], aliceValue[:], bitmap, siblings)
+	if err != nil {
+		t.Fatalf("verify Alice proof at revision 1: %v", err)
+	}
+	if !bytes.Equal(proven, aliceRoot) {
+		t.Fatalf("historical proof root = %x, want %x", proven, aliceRoot)
+	}
+	if _, err := tree.RootAt(3); err == nil {
+		t.Fatal("future map revision unexpectedly has a root")
+	}
+}
+
 func TestRootIsIndependentOfInsertionOrderAndDomainSeparated(t *testing.T) {
 	aliceKey := sha256.Sum256([]byte("alice"))
 	aliceValue := sha256.Sum256([]byte("alice-value"))

@@ -94,37 +94,92 @@ The full Trillian log service is also not used. That project is in maintenance
 mode and recommends Tessera for new transparency logs; this POC imports only
 the focused sparse-Merkle and CONIKS library packages.
 
-## Deliberate simplifications
+## Storage and proof profile
 
-Merkle nodes and protocol records remain in memory. The manager rebuilds a
-principal's small key-history tree when creating its next proof and sends all
-256 sparse-map siblings rather than compressing canonical empty subtrees.
-Delivery-log updates, by contrast, disclose only requested leaves: unrelated
-intervening deliveries are represented solely by the logarithmic consistency
-and inclusion paths.
+Merkle nodes and protocol records remain in memory, but the access and wire
+shapes deliberately match the intended server design:
 
-This POC deliberately chooses the minimum-state verifier profile. Every map
-update carries the changed identity's complete authenticated semantic history,
-and every delivery carries a membership proof for the identity's current head
-plus that history. The agent reconstructs continuity states and validity
-boundaries only for the duration of verification; it does not retain a
-per-identity head, state, boundary, or observed-record database. This makes
-manager proofs larger than an anchored/cached profile, but directly exercises
-the intended storage asymmetry. Durable semantic anchors and optional caches
-can reduce proof size later without becoming authority accidentally.
+- a key-history append uses its retained compact frontier and changed Merkle
+  nodes; it does not retrieve or replay earlier event bodies;
+- the versioned sparse map reads and writes one 256-level path; it does not
+  scan the identity-head table and retains old node versions so it can prove a
+  leaf under an older root held by an agent;
+- a sparse-map proof carries a fixed 32-byte presence bitmap plus only the
+  non-empty sibling hashes, omitting position-derived canonical empty nodes;
+- a rotation map update carries the new event, its append/consistency proof,
+  one authenticated immediate-predecessor event, and the exact marker record;
+- a delivery carries one authenticated signing event and, only for a
+  historical signing state, its immediate successor event; and
+- a delivery-log update discloses only the delivery and its zero, one, or two
+  adjacent rotation markers. Unrelated leaves are represented by logarithmic
+  consistency and inclusion paths.
 
-Acceptance of a root means every newly introduced non-exception event was
-semantically checked at advancement time. Later proofs reconstruct those
-accepted states without contacting the OIDC provider or requiring the original
-ID token to remain unexpired; an event digest in the exception set makes its
-entire descendant chain unusable. The manager can assemble membership proofs
-for either its latest root or an older root deliberately retained by an agent.
+The POC deliberately chooses the minimum-state verifier profile. The agent's
+complete cryptographic trust state is the accepted map root, delivery-log
+checkpoint, and a bounded set of rare structured exceptions containing
+identity, event sequence, event digest, and resulting-state digest. It retains
+no per-identity head, public key, continuity state, marker boundary, history
+path, or observed-log-record database. Content and generation maps model
+application effects and are not verifier trust state.
+
+Acceptance of a root means every newly introduced event was semantically
+checked at advancement time or was atomically recorded as an exception. Later
+selective proofs reconstruct only the state needed for one delivery; they rely
+on that locally retained root-plus-exceptions invariant rather than replaying
+the complete chain or contacting the OIDC provider. An exception for an
+identity makes its entire descendant chain unusable. The manager can assemble
+membership proofs for either its latest root or an older root deliberately
+retained by an agent.
 
 The map-update sequence is not an authenticated log. Its records are merely a
 way to find the chain of individually verified root transitions needed by a
-stale agent. Persistent tiles, compressed sparse-map proofs, batched history
-extensions, durable storage, and skip proofs can improve scale without
-changing the cutoff-free signed rotation authorization.
+stale agent. Persistent tiles, batched history extensions, durable storage,
+compaction, and skip proofs can improve scale without changing the cutoff-free
+signed rotation authorization.
+
+### Portable contracts and bounds
+
+The server port should preserve these proof contracts rather than translating
+the POC's in-memory collections literally:
+
+```text
+VerifierCheckpoint {
+    map_root
+    delivery_log_checkpoint
+    exceptions[] { identity_id, sequence, event_digest, state_digest }
+}
+
+MapAdvanceEvidence {
+    previous_root, successor_root
+    previous_head_or_absence
+    sibling_bitmap, non_empty_sibling_hashes
+    key_history_append { new_event, successor_head, inclusion, consistency }
+    predecessor_event?  // exactly previous_head.size - 1 for rotation
+    rotation_record?    // exact index/hash/package referenced by new_event
+}
+
+DeliveryIdentityEvidence {
+    current_head_and_compressed_map_membership
+    signing_event
+    successor_event?    // exactly signing_event.sequence + 1
+}
+```
+
+For an identity history of size `h`, a map update reads one old event body for
+a rotation and writes one new body; its history hashes are `O(log h)`. A
+delivery reads one event body for a current signer or two for a historical
+signer, each with an `O(log h)` membership path. A sparse-map path always
+performs the fixed 256-level reconstruction, but sends only a 32-byte bitmap
+and `k` non-empty hashes (`0 <= k <= 256`). Batching or sparse multi-proofs can
+share branches across several identities later; there is no further
+single-proof omission available without changing the proof encoding or hash
+topology.
+
+The manager-side storage interface therefore needs direct indexes from map
+root to map revision, identity and revision to history head, and state digest
+to event sequence. Event bodies and Merkle nodes are separate reads. This is
+what keeps proof construction bounded even though the manager still owns the
+ordinary user/state database.
 
 Signatures and hashes currently use Go's deterministic encoding of fixed JSON
 structs. That is sufficient to test this single-language model, but it is not
@@ -167,10 +222,9 @@ ordinary platform permission and delivery-agent provenance explicit.
 5. The resource manager creates the first per-identity key event and advances
    the authenticated map to its history head.
 6. The delivery agent repeats ID-token validation, checks the nonce and proof
-   of possession, derives `identity_id = H(tenant, iss, sub)`, verifies the map
-   update and supplied semantic history, then retains only the successor map
-   root (or that root plus the event digest if the authenticated event is an
-   exception).
+   of possession, derives `identity_id = H(tenant, iss, sub)`, and verifies the
+   map update. It then retains only the successor map root, or that root plus a
+   structured exception if the authenticated event is invalid.
 
 ### Delivery
 
@@ -180,8 +234,9 @@ ordinary platform permission and delivery-agent provenance explicit.
 3. The resource manager constructs an RFC 6962 consistency proof from its last
    checkpoint acknowledged by that target's agent. It includes only the
    delivery and the rotation-marker leaves bounding its signing state.
-4. It also constructs a current sparse-map membership proof and supplies the
-   identity's authenticated key history and referenced marker records.
+4. It also constructs a compressed sparse-map membership proof and supplies
+   only the signing event plus its immediate successor when the signer is
+   historical. Those events identify the adjacent marker records to prove.
 5. The resource manager pushes the record and proofs through an in-process
    delivery-agent interface.
 6. The delivery agent reconstructs the identity's states ephemerally, verifies
@@ -240,7 +295,7 @@ only that record with the logarithmic consistency and inclusion proofs.
 | Agent advances the authenticated map before it has observed the marker | Permitted structurally, but deliveries depending on that boundary fail closed until marker inclusion is proven |
 | An old-key delivery is signed before rotation but appended after the marker | Rejected because log position, not unprovable signature creation time, determines validity |
 | A successor-key delivery is appended before its rotation marker | Rejected because the successor state is valid only after the marker |
-| A historical delivery is presented after rotation | Accepted when its key event, retiring marker, current history head, and log inclusion all verify |
+| A historical delivery is presented after rotation | Accepted when its signing event, immediate successor, adjacent markers, current history head, and log inclusions verify |
 | Retired key signs at or after a marker already accepted by an agent | Rejected by that agent |
 | Delivery push fails before the agent accepts it | Both sides retain the prior acknowledged checkpoint; a later manager retry catches up with selective proofs |
 | Agent accepts and applies a delivery but its acknowledgement is lost | Manager retains its older checkpoint; retry recovers the agent's newer checkpoint and idempotently succeeds |
@@ -250,8 +305,11 @@ only that record with the logarithmic consistency and inclusion proofs.
 | Resource manager withholds rotation from one agent, then uses a compromised old key | The rotated agent rejects; the stale agent accepts on its local pre-rotation view |
 | Resource manager tampers with a log root, leaf, inclusion path, consistency path, map sibling, or history proof | Rejected by the corresponding retained-root proof verification |
 | A busy delivery log contains unrelated intervening leaves | The agent advances with logarithmic proofs and receives only selected delivery and marker records |
+| A long identity history is used for a delivery | The manager pushes only the signing event and optional immediate successor, each with a logarithmic inclusion proof |
+| A sparse map contains mostly empty branches | The proof sends a 32-byte bitmap and only non-empty siblings |
 | Many users enroll successfully | Agent trust-state size remains constant; no per-user head or state is retained |
 | One authenticated key event is semantically invalid | Its digest enters the bounded exception set and unrelated valid map updates can continue |
+| More events descend from an already exceptional identity | The Agent may advance structurally without consuming another exception slot; the identity remains unusable |
 | A new invalid event arrives when the exception set is full | The agent refuses that successor map root |
 
 The RBAC-bypass and stale-agent rows are tests, not disclaimers hidden outside
@@ -287,16 +345,16 @@ required.
 1. Persist delivery-agent checkpoints and pending work, then inject crashes at
    every write boundary to prove acknowledgement and retry invariants.
 2. Add the trust-manifest update-policy profiles and role-separated TUF root or
-   delegated metadata before adding storage scale optimizations.
+   delegated metadata.
 3. Replace the simple content attestation's encoding with the existing
    Sigstore Bundle and in-toto/DSSE types while retaining these exact tests.
 4. Add device and session delegation, identity tombstones, recovery, and the
    optional OIDC reanchor paths.
-5. Add explicit exception resolution/reanchor and durable semantic-anchor
-   profiles, comparing their proof-size savings with the minimum-state profile.
-6. Move RFC 6962 node storage to persistent tiles, evaluate Tessera for the
-   delivery-log runtime, compress default sparse-map siblings, and batch
-   per-principal history extensions.
+5. Add explicit exception resolution/reanchor; keep any optional semantic-anchor
+   or cache profile separate from this minimum-state baseline.
+6. Port the versioned sparse nodes and RFC 6962 frontier/node interfaces to
+   durable storage, evaluate Tessera for the delivery-log runtime, compact old
+   map versions, and batch per-principal history extensions.
 7. Add proactive checkpoint distribution and optional peer comparison to show
    how the stale-agent window changes without making gossip mandatory.
 8. Model the trust and delivery state machines formally and fuzz canonical

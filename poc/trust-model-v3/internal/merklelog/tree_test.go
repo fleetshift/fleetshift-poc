@@ -176,6 +176,66 @@ func TestTreeDoesNotExposeMutableHashStorage(t *testing.T) {
 	}
 }
 
+func TestPendingAppendBuildsProofsWithoutMutatingTree(t *testing.T) {
+	tree := New()
+	for i := 0; i < 7; i++ {
+		if _, _, err := tree.Append([]byte(fmt.Sprintf("leaf-%d", i))); err != nil {
+			t.Fatalf("Append(%d): %v", i, err)
+		}
+	}
+	beforeRoot, err := tree.Root()
+	if err != nil {
+		t.Fatalf("root before pending append: %v", err)
+	}
+
+	leafHash := rfc6962.DefaultHasher.HashLeaf([]byte("leaf-7"))
+	pending, err := tree.BeginAppendHash(leafHash)
+	if err != nil {
+		t.Fatalf("begin append: %v", err)
+	}
+	if got, want := pending.Size(), uint64(8); got != want {
+		t.Fatalf("pending size = %d, want %d", got, want)
+	}
+	if got, want := tree.Size(), uint64(7); got != want {
+		t.Fatalf("tree changed before commit: size = %d, want %d", got, want)
+	}
+	if root, err := tree.Root(); err != nil || !bytes.Equal(root, beforeRoot) {
+		t.Fatalf("tree changed before commit: root = %x, err = %v", root, err)
+	}
+
+	pendingRoot, err := pending.Root()
+	if err != nil {
+		t.Fatalf("pending root: %v", err)
+	}
+	inclusion, err := pending.InclusionProof(7, 8)
+	if err != nil {
+		t.Fatalf("pending inclusion proof: %v", err)
+	}
+	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, 7, 8, leafHash, inclusion, pendingRoot); err != nil {
+		t.Fatalf("verify pending inclusion: %v", err)
+	}
+	consistency, err := pending.ConsistencyProof(7, 8)
+	if err != nil {
+		t.Fatalf("pending consistency proof: %v", err)
+	}
+	if err := proof.VerifyConsistency(rfc6962.DefaultHasher, 7, 8, consistency, beforeRoot, pendingRoot); err != nil {
+		t.Fatalf("verify pending consistency: %v", err)
+	}
+
+	if err := pending.Commit(); err != nil {
+		t.Fatalf("commit pending append: %v", err)
+	}
+	if got, want := tree.Size(), uint64(8); got != want {
+		t.Fatalf("committed size = %d, want %d", got, want)
+	}
+	if root, err := tree.Root(); err != nil || !bytes.Equal(root, pendingRoot) {
+		t.Fatalf("committed root = %x, want %x, err = %v", root, pendingRoot, err)
+	}
+	if err := pending.Commit(); err == nil {
+		t.Fatal("pending append committed twice")
+	}
+}
+
 func FuzzTreeProofs(f *testing.F) {
 	f.Add(uint8(8), uint8(3), uint8(5))
 	f.Add(uint8(31), uint8(0), uint8(30))

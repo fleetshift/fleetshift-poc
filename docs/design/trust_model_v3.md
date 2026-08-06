@@ -223,6 +223,19 @@ The resource manager stores the actual state object separately:
 
 To advance from one map root to the next, a delivery agent verifies both the changed principal's append-only history extension and the direct sparse-map leaf-update proof described above. For catch-up across several changes, it verifies a chain in which each successor root is the next proof's `previous_root`. An arbitrary new map root supplied by the resource manager is never sufficient by itself.
 
+In the recommended streaming-validation profile, one history extension does not carry the principal's complete history. It carries:
+
+- the new event and its membership proof under the successor history head;
+- an append-only consistency proof from the previous history head;
+- for a rotation, one membership proof selecting the immediate predecessor event under the previous head; and
+- the exact delivery-log marker record referenced by the new event. Marker inclusion in the accepted delivery-log branch may be proven then or deferred until a delivery depends on it.
+
+The immediate predecessor is sufficient to reconstruct the currently accepted state, verify the old-key authorization, verify new-key possession, and enforce generation and marker monotonicity. The accepted map root plus the exception index records the result of that semantic validation, so earlier event bodies do not need to be replayed or stored by the delivery agent.
+
+Sparse-map paths should omit canonical empty subtrees. For a 256-level SHA-256 map, the portable encoding is a 256-bit (32-byte) sibling-presence bitmap followed by only the selected non-empty 32-byte hashes in leaf-to-root order. Empty hashes are position-derived during reconstruction. This removes their bandwidth and storage cost while preserving the fixed 256-level verification topology.
+
+The resource manager should retain proof-oriented indexes rather than rebuild either authenticated structure from application rows. A practical storage boundary provides versioned sparse-map node reads by `(map revision, node position)`, one-path leaf replacement, a per-principal compact history frontier, indexed event-body reads by sequence or state digest, and Merkle-node reads for inclusion and consistency proofs. Map advancement then touches one sparse path and `O(log h)` history nodes; delivery proof assembly reads one or two event bodies rather than the whole identity history.
+
 ### 4.2 Ordered durable-delivery log
 
 The delivery log is an append-only Merkle event log containing compact commitments to infrastructure deliveries and key-rotation markers.
@@ -275,21 +288,25 @@ TenantVerifierState {
     tenant_id
 
     trust_map_root
-    exceptional_event_digests
-    durable_semantic_anchors
+    exceptional_events[] {
+        identity_id
+        event_sequence
+        event_digest
+        resulting_state_digest
+    }
 
     delivery_log_size
     delivery_log_root
 }
 ```
 
-The map root identifies the structural map version accepted by this verifier. The semantic fields identify which parts of that structurally committed state have actually been validated and may be used as authority. `durable_semantic_anchors` contains only history heads, event roots, or state digests whose required transition and marker policy the verifier has already validated and on which evidence-retention decisions depend.
+The recommended minimum-state profile gives the retained map root a precise local semantic meaning: every map transition leading to that root was structurally verified and its newly introduced event was semantically validated, except for identities listed in `exceptional_events`. Recording a new exception and advancing to its successor root must be crash-consistent. An exception blocks the affected event and all descendants for that identity; later descendant updates need not consume additional exception entries.
 
-The delivery agent may additionally cache:
+This invariant makes the root plus rare exception index the semantic checkpoint. The agent does not need a user database of heads, states, public keys, boundaries, history paths, or previously disclosed log records. When checking a delivery, it authenticates the selectively supplied event bodies under the retained root and reconstructs the needed state ephemerally. It does not repeat time-sensitive OIDC checks that already succeeded while advancing the map, but it does recheck deterministic bindings, hashes, key possession, and the delivery signature.
 
-`identity_id -> last semantically validated key-history head and state digest`
+The exception fields are deliberately enough to diagnose the exact failure and reject the principal's descendants without retrieving its history. If the bounded exception set has no room for a newly invalid principal event, the agent must refuse that successor root. Valid updates and descendants of an already recorded exceptional identity do not require new entries.
 
-That cache is an optimization, not an authority source: losing it causes revalidation from retained evidence. If an implementation intends to delete predecessor evidence because a state or history prefix was already validated, the corresponding head, event root, or state digest is no longer merely a cache entry; it must first be promoted into `durable_semantic_anchors` and protected with the rest of the checkpoint.
+An implementation may additionally cache `identity_id -> head/state/boundaries` for performance, but that cache is neither required nor authoritative. A different profile may retain durable semantic anchors to support trusted bootstrap snapshots or evidence garbage collection without replaying streamed updates. Those anchors are an optional storage/retention trade-off, not part of the minimum-state online profile.
 
 The checkpoint does not need to be signed when it remains in trusted local storage. Signing does not prevent rollback to an older correctly signed checkpoint.
 
@@ -460,23 +477,23 @@ A delivery agent maintains the semantic portion of `TenantVerifierState` approxi
 
 ```text
 SemanticTrustState {
-    exceptional_event_digests
-    durable_semantic_anchors
+    exceptional_events[] {
+        identity_id
+        event_sequence
+        event_digest
+        resulting_state_digest
+    }
 }
 ```
 
-There is no tenant-wide semantic watermark because there is no global trust-event log. An event is usable when the agent either validates its evidence when needed or has retained a durable semantic anchor that can safely replace that validation. The exception set identifies enrollment, recovery, or transition events that were structurally committed but did not validate. Keying exceptions by event or state digest preserves the exact dependency that failed; an implementation may additionally maintain a principal index or an authenticated exception structure for scale.
+There is no tenant-wide semantic watermark because there is no global trust-event log. In the recommended online profile, an event becomes part of the accepted semantic baseline when the agent validates it while advancing the authenticated map. The exception set identifies enrollment, recovery, or transition events that were structurally committed but did not validate. Each exception includes a principal index as well as event and state digests, so the agent can reject every descendant without loading that principal's history. An authenticated exception structure is possible if the rare bounded set ever becomes large enough to justify one.
 
 For example:
 
 ```text
 Alice State4:
-    required anchor and transitions validated
+    introducing transitions validated while advancing the retained map root
     trusted
-
-Bob State9:
-    current event structurally committed but not semantically evaluated
-    unknown
 
 Carol State0:
     enrollment event exceptional
@@ -493,15 +510,15 @@ usable_signing_state(state) =
     AND
     the state's key event is proven in that append-only history
     AND
-    its trust anchor and required descendant transitions were validated now
-        or are covered by a durable semantic anchor
+    the accepted root was reached by semantically validating each introducing
+        event or atomically recording an exception
     AND
-    neither the anchor nor a required descendant transition is exceptional
+    the identity has no unresolved exceptional ancestor
     AND
     every delivery-log marker needed to bound the delivery position is proven
 ```
 
-This allows Alice’s and Bob’s unrelated trust state to continue advancing even if Carol’s enrollment is invalid.
+This allows Alice’s unrelated trust state to continue advancing even if Carol’s enrollment is invalid.
 
 A state descending from an exceptional enrollment or transition remains untrusted:
 
@@ -535,7 +552,7 @@ Historical delivery validity is evaluated against:
 
 - the delivery commitment’s log position;
 - the key event and adjacent rotation markers that make its state valid at that position;
-- the delivery agent’s previously accepted map root, delivery-log checkpoint, and semantic anchors.
+- the delivery agent’s previously accepted map root, exception index, and delivery-log checkpoint.
 
 Therefore, a malicious or invalid current-state update can:
 
@@ -684,9 +701,12 @@ This proposal adds continuity evidence for the user-signing portion of that pack
 - the signing identity and continuity-state digest;
 - the session and device public keys and their signed delegations, when the selected hierarchy uses them;
 - an authenticated-map proof for the identity's current key-history head;
-- membership or extension proofs from the relevant enrollment, reanchor, and transition events to that head;
-- the continuity states and public keys committed by those events; and
+- a membership proof for the event that produced the signing state;
+- only when that state is historical, a membership proof for its immediate successor event;
+- the continuity states and public keys reconstructed from those one or two events; and
 - delivery-log inclusion and consistency evidence for the delivery and every adjacent rotation marker needed to bound its position.
+
+For the baseline continuity-key profile, delivery evidence therefore contains at most two identity event bodies regardless of history length. Device or session delegation adds the independently required delegation objects; it does not require replay of unrelated continuity events.
 
 The complete delivery package cryptographically binds the tenant, target, fulfillment, delivery identity, generation, action, authoritative attestation root, and signing context. The exact encoding may reuse the `DeliveryPackage`, Sigstore Bundle, in-toto Statement, and DSSE structures from the existing POC rather than creating a parallel FleetShift-only envelope.
 
@@ -708,9 +728,12 @@ Normal application retry and idempotency behavior may still be used.
   - the current delivery-log root and size;
   - a consistency proof from the delivery agent’s prior log root;
   - the chain of direct sparse-map leaf-update proofs from the agent's retained map root, when the map must advance;
-  - the identity's current key-history head and authenticated-map proof;
-  - the current or historical key events, states, and per-identity history proofs needed for this signer;
-  - inclusion evidence for each uncached rotation marker bounding this signing state.
+  - the identity's current key-history head and compressed authenticated-map membership proof;
+  - the signing event and its per-identity history membership proof;
+  - the immediate successor event and membership proof only when the signing event is not current; and
+  - inclusion evidence for the zero, one, or two rotation markers referenced by those adjacent events.
+
+The manager finds the signing event through a state-digest-to-sequence index, reads at most two event bodies, and constructs their proofs from retained history nodes. It reads one versioned sparse-map path for the agent's exact retained root. Neither operation scans all events for the identity or all identities in the tenant.
 
 The delivery agent verifies the evidence independently.
 
@@ -733,8 +756,8 @@ For a user-signed delivery, the delivery agent:
 3. Recomputes the delivery-package digest and commitment.
 4. Advances the tenant trust map through direct leaf-update proofs rooted at its retained map root.
 5. Verifies the authenticated-map proof for the user’s current key-history head.
-6. Verifies append-only history evidence from a semantically trusted anchor to that head.
-7. Validates the enrollment, reanchor, and continuity transitions needed for the claimed current or historical signing state.
+6. Verifies membership of the signing event and, for a historical state, its exact immediate successor under that head.
+7. Rejects an identity with an unresolved exception and reconstructs the one or two supplied states, relying on the retained root-plus-exceptions invariant for semantic checks performed during map advancement.
 8. Verifies inclusion of the adjacent rotation markers needed to establish the state's validity interval at the delivery index.
 9. Verifies the continuity-key authorization of the device.
 10. Verifies the device-key authorization of the session.
@@ -789,6 +812,8 @@ KeyEvent7To8 {
 
 That event extends the user's append-only key history. The authenticated-map leaf advances from the old history head to the new head by reusing the old leaf's sibling path; the same update carries the per-user history-extension proof.
 
+To validate this transition without retaining the user's previous state, the update also selects the immediate predecessor event with a membership proof under the old history head. That one event reconstructs the accepted old public key, generation, state digest, and preceding marker. The agent verifies the old-key signature, new-key proof of possession, successor digest, next generation, and strictly increasing marker, then discards both event bodies after advancing its root. No earlier key event is needed for this map transition.
+
 The marker creates the logical validity boundary:
 
 ```
@@ -807,7 +832,7 @@ Concurrent authorizations from the same predecessor are competing branches, not 
 
 ### 13.1 Deferred marker validation
 
-A delivery agent may receive the authenticated-map update before its delivery-log checkpoint reaches `C`. It may verify the old-key authorization, new-key proof of possession, per-user history extension, and direct map leaf-update proof and store the marker reference as pending. This advances structural trust state without yet making the boundary semantically usable.
+A delivery agent may receive the authenticated-map update before its delivery-log checkpoint reaches `C`. It may verify the old-key authorization, new-key proof of possession, per-user history extension, direct map leaf-update proof, and the marker record's exact hash and package without yet proving that marker under its accepted delivery-log checkpoint. This advances trust state without making the boundary usable for a delivery. The minimum-state profile need not retain the marker reference separately: the accepted history root commits it, and the manager re-supplies the selectively proven adjacent event and marker inclusion when a delivery depends on that boundary.
 
 If the agent's accepted delivery-log checkpoint is already beyond `C`, it should validate the marker eagerly and reject a mismatched leaf, package, or branch. Otherwise it may defer the inclusion check. Before accepting any delivery whose signing-state interval depends on that rotation—whether before or after `C`—it must prove the exact marker's inclusion in an append-only extension of its retained delivery-log checkpoint. A rejected delivery can be retried after the marker proof arrives.
 
@@ -823,7 +848,7 @@ The old public key is supplied as evidence, either:
 - from a content-addressed evidence store operated by the resource manager;
 - or both.
 
-The delivery agent trusts the old key only after verifying its event membership and authorization history up to the current authenticated head or a durable semantic anchor.
+The delivery agent trusts the old key only after verifying its producing event under the current authenticated head, confirming that the identity has no unresolved exception, and applying the semantic meaning of its locally accepted root.
 
 Suppose an old delivery was signed through:
 
@@ -837,37 +862,32 @@ Session key S12
 Delivery X
 ```
 
-The evidence includes:
+The baseline evidence includes:
 
-- public key S12;
-- its device-signed session authorization;
-- public key D3;
-- its continuity-signed device authorization;
-- public key C7;
-- historical continuity state State7;
-- later state State8;
-- transition State7 -> State8;
-- current key-history head and authenticated-map proof;
-- a key-history membership proof for State7's event and its successor transition;
-- delivery-log inclusion for Delivery X and the marker retiring State7.
+- public key S12 and its device-signed session authorization;
+- public key D3 and its continuity-signed device authorization;
+- the current key-history head and compressed authenticated-map proof;
+- the one key event that produced State7 and its history membership proof;
+- because State7 is historical, the immediate successor event that produced State8 and its history membership proof; and
+- delivery-log inclusion for Delivery X and the markers referenced by those two events.
 
 The delivery agent checks:
 
 ```
-H(C7) == State7.continuity_key_digest
-H(State7) == State8.predecessor_state_digest
-C7 authorized State8
-KeyEvent(State7 -> State8) is included under the current history head
-DeliveryIndex(X) < MarkerIndex(State7 -> State8)
+SigningEvent.resulting_state_digest == H(State7)
+SigningEvent is included under the current history head
+SuccessorEvent.sequence == SigningEvent.sequence + 1
+SuccessorEvent.rotation.previous_state_digest == H(State7)
+SuccessorEvent is included under the same current history head
+MarkerIndex(establishing State7) < DeliveryIndex(X)
+DeliveryIndex(X) < MarkerIndex(retiring State7)
 ```
 
-For a middle-generation key, the evidence also proves the preceding marker that made the state valid, so its interval is bounded on both sides. For the latest key, only its preceding marker is needed. For the initial key, only its retiring marker is needed. Marker proofs already retained by the verifier need not be resent.
+The successor event is sufficient to identify the first transition that retires the signing state; no later transition is relevant to its interval. The signing event itself identifies the marker that established a non-initial state. Consequently a middle-generation key needs two event bodies, the latest key needs one, and the initial key plus its successor also needs two. History length does not change this bound. Each event membership path remains `O(log h)`.
 
-For several rotations, the supplied event and state proof continues until it reaches either:
+This selective rule depends on the streaming-validation invariant: the agent semantically checked every introducing event while advancing to its retained root and recorded exceptions durably. A cold verifier bootstrapped directly to a snapshot must receive an equivalently trusted semantic baseline; a bare map root does not create this invariant. An optional anchored profile may use a durable semantic snapshot instead, but does not change the adjacent-event delivery shape once that baseline is established.
 
-- a history head, event root, or state the delivery agent previously validated;
-- the initial nonce-bound enrollment;
-- or another trusted semantic snapshot.
+The minimum-state verifier does not retain marker records, so the manager resends the zero, one, or two adjacent marker inclusions on each delivery. An optional cache may omit already proven markers without changing authority.
 
 The per-user history establishes which events bound the key's validity interval. The ordered delivery log establishes that the delivery commitment falls inside that interval.
 
@@ -1023,11 +1043,11 @@ A delivery agent that has been idle receives:
 
 - a consistency proof from its old delivery-log root to the current root, compact at `O(log n)`;
 - an inclusion proof for the one targeted delivery;
-- inclusion proofs for any uncached rotation markers bounding the delivery's signing state;
+- inclusion proofs for the zero, one, or two rotation markers bounding the delivery's signing state;
 - a chain of direct authenticated-map leaf updates starting at its retained map root; and
-- the relevant per-identity key-history extension or membership proofs.
+- one compressed current-head map proof, one signing-event membership proof, and an immediate-successor membership proof only for a historical signer.
 
-It does not receive intervening unrelated log leaves.
+It does not receive intervening unrelated log leaves, unrelated identities, or the rest of the signing identity's event history.
 
 Authenticated-map updates should be substantially less frequent than deliveries. They may be delivered:
 
@@ -1284,32 +1304,42 @@ Trust-state verification:
     verifier retains its previously accepted trust-map root
     each update proves the old leaf under that root and computes the successor
         root by replacing only that leaf and reusing the sibling path
+    sparse path uses a 32-byte presence bitmap and only non-empty siblings
     structural map membership alone does not grant authority
     map leaf commits current per-user key-history head and state digest
-    per-user history membership and extension are proven append-only
-    user events, state, and needed markers are semantically validated before use
-    validated user, device, and session evidence is cached by digest
-    heads, events, or states relied on for compaction become durable anchors
-    map, history, marker, and transition evidence is supplied only on cold use,
-        cache loss, or relevant trust-state change
+    each new event has append-only inclusion and consistency evidence
+    rotation update additionally proves only its immediate predecessor event
+    verifier semantically validates each introducing event during map advance
+    invalid event is atomically indexed as a structured principal exception
+    accepted root plus exception index is the semantic checkpoint
+    event bodies, states, keys, heads, and marker boundaries are discarded
+
+Resource-manager proof storage:
+    versioned sparse nodes answer one path at an agent's retained map root
+    sparse leaf replacement reads and writes one 256-level path
+    per-user compact frontier appends without replaying old event bodies
+    state-digest index locates a signing event directly
+    event membership reads one body plus O(log h) Merkle nodes
+    generated wire proofs are assembled on demand and need not be persisted
 
 Per delivery agent:
     checkpoints for every tenant it serves:
         trust-map root
-        semantic exceptions and durable anchors
+        bounded structured semantic exceptions
         delivery-log size and root
+    no required per-user verifier database
     optional per-identity, device, and session validation cache
 
 Historical verification:
     old keys and authorization objects are content-addressed and deduplicated
     evidence is retained while referenced by current or retained deliveries,
         or while needed to validate a supported transition
-    a verifier may compact predecessor evidence after durably recording a
-        semantically validated successor anchor
     independent OIDC reanchor is optional and explicitly weakens cold-verifier
         continuity to current IdP/account control
     current map proof authenticates the latest per-user history head
-    history proof authenticates the historical key and adjacent transitions
+    signing-event proof authenticates the historical key
+    immediate-successor proof identifies its retirement boundary when needed
+    at most two continuity event bodies are sent regardless of history length
     delivery and marker inclusion prove the delivery falls in the key interval
     unreferenced semantic history is garbage-collected
 

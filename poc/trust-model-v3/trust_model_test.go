@@ -230,7 +230,7 @@ func TestVerifierTrustCheckpointDoesNotScaleWithEnrolledIdentities(t *testing.T)
 	}
 
 	checkpoint := s.agent.VerifierCheckpoint()
-	if got := len(checkpoint.ExceptionalEventDigests); got != 0 {
+	if got := len(checkpoint.Exceptions); got != 0 {
 		t.Fatalf("exceptional event digests = %d, want 0", got)
 	}
 	after, err := json.Marshal(checkpoint)
@@ -287,8 +287,18 @@ func TestExceptionCapacityBlocksFurtherMapAdvancement(t *testing.T) {
 	if got, want := agent.MapRoot(), first.Root; got != want {
 		t.Fatalf("map root after retained exception = %q, want %q", got, want)
 	}
-	if got := len(agent.VerifierCheckpoint().ExceptionalEventDigests); got != 1 {
+	if got := len(agent.VerifierCheckpoint().Exceptions); got != 1 {
 		t.Fatalf("exceptional event digests = %d, want 1", got)
+	}
+	exception := agent.VerifierCheckpoint().Exceptions[0]
+	if got, want := exception.IdentityID, first.KeyHistory.Event.IdentityID; got != want {
+		t.Fatalf("exception identity = %q, want %q", got, want)
+	}
+	if got, want := exception.Sequence, first.KeyHistory.Event.Sequence; got != want {
+		t.Fatalf("exception sequence = %d, want %d", got, want)
+	}
+	if got, want := exception.EventDigest, first.KeyHistory.Event.Hash; got != want {
+		t.Fatalf("exception digest = %q, want %q", got, want)
 	}
 	validClient, err := client.New(client.Config{
 		TenantID:     testTenant,
@@ -321,6 +331,52 @@ func TestExceptionCapacityBlocksFurtherMapAdvancement(t *testing.T) {
 	}
 	if got, want := agent.MapRoot(), validUpdate.Root; got != want {
 		t.Fatalf("map root advanced after exception capacity filled: got %q, want %q", got, want)
+	}
+}
+
+func TestExceptionalIdentityDescendantsReuseOneExceptionSlot(t *testing.T) {
+	s := newScenario(t)
+	agent, err := deliveryagent.New(deliveryagent.Config{
+		TenantID:          testTenant,
+		TargetID:          testTarget,
+		OIDCIssuer:        s.provider.Issuer(),
+		OIDCClientID:      testOIDCClient,
+		HTTPClient:        s.provider.HTTPClient(),
+		ExceptionCapacity: 1,
+	})
+	if err != nil {
+		t.Fatalf("new capacity-limited delivery agent: %v", err)
+	}
+
+	enrollment := mustEnroll(t, s.controlledClient)
+	attacker, err := client.New(client.Config{TenantID: testTenant})
+	if err != nil {
+		t.Fatalf("new attacker client: %v", err)
+	}
+	enrollment.ContinuityPublicKey = attacker.ContinuityPublicKey()
+	invalidEnrollment := s.manager.Compromised().AppendEnrollment(enrollment)
+	if err := agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(agent.MapRoot())); !errors.Is(err, deliveryagent.ErrEnrollment) {
+		t.Fatalf("sync invalid enrollment error = %v, want ErrEnrollment", err)
+	}
+	if got, want := agent.MapRoot(), invalidEnrollment.Root; got != want {
+		t.Fatalf("map root after invalid enrollment = %q, want %q", got, want)
+	}
+
+	// This rotation is structurally append-only but descends from the already
+	// exceptional enrollment. It must not consume another exception slot.
+	rotation, _, err := s.controlledClient.PrepareRotation()
+	if err != nil {
+		t.Fatalf("prepare descendant rotation: %v", err)
+	}
+	descendant := s.manager.Compromised().AppendRotation(rotation)
+	if err := agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(agent.MapRoot())); err != nil {
+		t.Fatalf("sync descendant of exceptional identity: %v", err)
+	}
+	if got, want := agent.MapRoot(), descendant.MapUpdate.Root; got != want {
+		t.Fatalf("map root after exceptional descendant = %q, want %q", got, want)
+	}
+	if got := len(agent.VerifierCheckpoint().Exceptions); got != 1 {
+		t.Fatalf("exception entries after descendant = %d, want 1", got)
 	}
 }
 
@@ -453,8 +509,11 @@ func TestAuthenticatedMapUpdateReusesUnchangedSiblingPath(t *testing.T) {
 	if got, want := update.PreviousRoot, oldRoot; got != want {
 		t.Fatalf("previous map root = %q, want %q", got, want)
 	}
-	if got, want := len(update.SiblingHashes), 256; got != want {
-		t.Fatalf("sibling hashes = %d, want %d", got, want)
+	if got, want := len(update.SiblingBitmap), 32; got != want {
+		t.Fatalf("sibling bitmap = %d bytes, want %d", got, want)
+	}
+	if got, want := len(update.SiblingHashes), 1; got != want {
+		t.Fatalf("non-empty sibling hashes = %d, want %d", got, want)
 	}
 	nextHeads := map[string]protocol.KeyHistoryHead{
 		alice: aliceRotation.Head,
@@ -476,6 +535,7 @@ func TestAuthenticatedMapUpdateReusesUnchangedSiblingPath(t *testing.T) {
 	}
 
 	tampered := update
+	tampered.SiblingBitmap = append([]byte(nil), update.SiblingBitmap...)
 	tampered.SiblingHashes = append([]string(nil), update.SiblingHashes...)
 	tampered.SiblingHashes[0] = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	if _, err := protocol.VerifyAuthenticatedMapUpdate(testTenant, oldRoot, tampered); err == nil {
@@ -580,7 +640,7 @@ func TestCompromisedResourceManagerCannotTamperIdentityTrustProof(t *testing.T) 
 		signed := mustSignDelivery(t, s.controlledClient, "tampered-map-proof", 1, []byte(`{"approved":true}`))
 		record := s.manager.Compromised().AppendDelivery(signed)
 		proof := mustDeliveryProof(t, s.manager, s.agent, record, record.Index)
-		proof.Identity.Map.SiblingHashes[0] = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+		proof.Identity.Map.Head.Root = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
 		if err := s.agent.ReceiveDelivery(record, proof); !errors.Is(err, deliveryagent.ErrSigningState) {
 			t.Fatalf("tampered map-membership proof error = %v, want ErrSigningState", err)
@@ -592,7 +652,7 @@ func TestCompromisedResourceManagerCannotTamperIdentityTrustProof(t *testing.T) 
 		signed := mustSignDelivery(t, s.controlledClient, "tampered-history-proof", 1, []byte(`{"approved":true}`))
 		record := s.manager.Compromised().AppendDelivery(signed)
 		proof := mustDeliveryProof(t, s.manager, s.agent, record, record.Index)
-		proof.Identity.History[0].Event.Enrollment.ContinuityPublicKey[0] ^= 0xff
+		proof.Identity.SigningEvent.Event.Event.Enrollment.ContinuityPublicKey[0] ^= 0xff
 
 		if err := s.agent.ReceiveDelivery(record, proof); !errors.Is(err, deliveryagent.ErrSigningState) {
 			t.Fatalf("tampered key-history proof error = %v, want ErrSigningState", err)
@@ -707,7 +767,7 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 		t.Fatalf("sync key history: %v", err)
 	}
 	s.provider.Close()
-	identityProof, err := s.manager.IdentityTrustProof(s.controlledClient.IdentityID())
+	identityProof, err := s.manager.IdentityTrustProof(s.controlledClient.IdentityID(), rotatedClient.ContinuityStateDigest())
 	if err != nil {
 		t.Fatalf("build current identity proof: %v", err)
 	}
@@ -725,10 +785,12 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 		t.Fatalf("manager deliver historical state using its retiring-marker proof: %v", err)
 	}
 	assertLastDeliveryAttemptIndexes(t, s.agent, commit.Marker.Index, historicalRecord.Index)
+	assertLastIdentityProofSequences(t, s.agent, 0, 1)
 	if err := s.manager.RetryDelivery(currentRecord.Index); err != nil {
 		t.Fatalf("manager deliver current state using its establishing-marker proof: %v", err)
 	}
 	assertLastDeliveryAttemptIndexes(t, s.agent, commit.Marker.Index, currentRecord.Index)
+	assertLastIdentityProofSequences(t, s.agent, 1)
 }
 
 func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
@@ -763,7 +825,7 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 	currentRecord := mustSubmitUndelivered(t, s.manager, currentClient.IdentityID(), current)
 
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
-		t.Fatalf("sync full key history: %v", err)
+		t.Fatalf("sync key-history updates: %v", err)
 	}
 	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
 		t.Fatalf("register delivery agent: %v", err)
@@ -772,6 +834,7 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 		t.Fatalf("manager deliver middle state using both adjacent-marker proofs: %v", err)
 	}
 	assertLastDeliveryAttemptIndexes(t, s.agent, firstCommit.Marker.Index, secondCommit.Marker.Index, middleRecord.Index)
+	assertLastIdentityProofSequences(t, s.agent, 1, 2)
 	if err := s.agent.ReceiveDelivery(lateMiddleRecord, mustDeliveryProof(t, s.manager, s.agent, lateMiddleRecord, lateMiddleRecord.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
 		t.Fatalf("middle-state delivery after retiring marker error = %v, want ErrSigningState", err)
 	}
@@ -779,6 +842,104 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 		t.Fatalf("manager deliver successor state: %v", err)
 	}
 	assertLastDeliveryAttemptIndexes(t, s.agent, secondCommit.Marker.Index, currentRecord.Index)
+	assertLastIdentityProofSequences(t, s.agent, 2)
+}
+
+func TestIdentityTrustProofSelectsAtMostSigningAndSuccessorEvents(t *testing.T) {
+	s := newScenario(t)
+	enrollment := mustEnroll(t, s.controlledClient)
+	if _, err := s.manager.SubmitEnrollment(enrollment); err != nil {
+		t.Fatalf("submit enrollment: %v", err)
+	}
+
+	controlledClient := s.controlledClient
+	stateDigests := []string{controlledClient.ContinuityStateDigest()}
+	var middleRecord protocol.DeliveryRecord
+	for generation := 1; generation <= 8; generation++ {
+		rotation, successor, err := controlledClient.PrepareRotation()
+		if err != nil {
+			t.Fatalf("prepare rotation %d: %v", generation, err)
+		}
+		commit, err := s.manager.SubmitRotation(controlledClient.IdentityID(), rotation)
+		if err != nil {
+			t.Fatalf("submit rotation %d: %v", generation, err)
+		}
+		if commit.MapUpdate.Predecessor == nil {
+			t.Fatalf("rotation %d map update has no predecessor-event proof", generation)
+		}
+		if got, want := commit.MapUpdate.Predecessor.Event.Sequence, uint64(generation-1); got != want {
+			t.Fatalf("rotation %d predecessor sequence = %d, want %d", generation, got, want)
+		}
+		if commit.MapUpdate.RotationRecord == nil {
+			t.Fatalf("rotation %d map update has no marker record", generation)
+		}
+		controlledClient = successor
+		stateDigests = append(stateDigests, successor.ContinuityStateDigest())
+		if generation == 4 {
+			middleDelivery := mustSignDelivery(t, controlledClient, "long-history-middle", 1, []byte(`{"generation":4}`))
+			middleRecord = mustSubmitUndelivered(t, s.manager, controlledClient.IdentityID(), middleDelivery)
+		}
+	}
+	currentDelivery := mustSignDelivery(t, controlledClient, "long-history-current", 1, []byte(`{"generation":8}`))
+	currentRecord := mustSubmitUndelivered(t, s.manager, controlledClient.IdentityID(), currentDelivery)
+	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
+		t.Fatalf("sync long key history: %v", err)
+	}
+
+	middle, err := s.manager.IdentityTrustProof(s.controlledClient.IdentityID(), stateDigests[4])
+	if err != nil {
+		t.Fatalf("construct middle-state proof: %v", err)
+	}
+	if got, want := middle.SigningEvent.Event.Sequence, uint64(4); got != want {
+		t.Fatalf("middle signing-event sequence = %d, want %d", got, want)
+	}
+	if middle.SuccessorEvent == nil {
+		t.Fatal("middle-state proof has no retiring successor event")
+	}
+	if got, want := middle.SuccessorEvent.Event.Sequence, uint64(5); got != want {
+		t.Fatalf("middle successor sequence = %d, want %d", got, want)
+	}
+	if got := len(middle.SigningEvent.InclusionProof); got > 4 {
+		t.Fatalf("middle signing-event proof has %d hashes, want <= 4", got)
+	}
+	if got := len(middle.SuccessorEvent.InclusionProof); got > 4 {
+		t.Fatalf("middle successor-event proof has %d hashes, want <= 4", got)
+	}
+
+	current, err := s.manager.IdentityTrustProof(s.controlledClient.IdentityID(), stateDigests[8])
+	if err != nil {
+		t.Fatalf("construct current-state proof: %v", err)
+	}
+	if got, want := current.SigningEvent.Event.Sequence, uint64(8); got != want {
+		t.Fatalf("current signing-event sequence = %d, want %d", got, want)
+	}
+	if current.SuccessorEvent != nil {
+		t.Fatalf("current-state proof unexpectedly contains successor event at sequence %d", current.SuccessorEvent.Event.Sequence)
+	}
+	if got, want := len(current.Map.SiblingBitmap), 32; got != want {
+		t.Fatalf("map sibling bitmap = %d bytes, want %d", got, want)
+	}
+	if got := len(current.Map.SiblingHashes); got != 0 {
+		t.Fatalf("single-identity map proof contains %d non-empty sibling hashes, want 0", got)
+	}
+
+	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
+		t.Fatalf("register delivery agent: %v", err)
+	}
+	if err := s.manager.RetryDelivery(middleRecord.Index); err != nil {
+		t.Fatalf("push middle delivery from long history: %v", err)
+	}
+	assertLastIdentityProofSequences(t, s.agent, 4, 5)
+	middleAttempt, _ := s.agent.LastDeliveryAttempt()
+	for i, count := range middleAttempt.IdentityInclusionProofHashes {
+		if count > 4 {
+			t.Fatalf("pushed middle identity proof %d has %d hashes, want <= 4", i, count)
+		}
+	}
+	if err := s.manager.RetryDelivery(currentRecord.Index); err != nil {
+		t.Fatalf("push current delivery from long history: %v", err)
+	}
+	assertLastIdentityProofSequences(t, s.agent, 8)
 }
 
 func TestDeferredRotationMarkerMustBeProvenBeforeHistoricalDelivery(t *testing.T) {
@@ -1173,6 +1334,23 @@ func assertLastDeliveryAttemptIndexes(t *testing.T, agent *deliveryagent.Agent, 
 	}
 }
 
+func assertLastIdentityProofSequences(t *testing.T, agent *deliveryagent.Agent, want ...uint64) {
+	t.Helper()
+	attempt, ok := agent.LastDeliveryAttempt()
+	if !ok {
+		t.Fatal("agent did not retain the manager delivery-attempt summary")
+	}
+	if !equalIndexes(attempt.IdentityEventSequences, want) {
+		t.Fatalf("disclosed identity-event sequences = %v, want %v", attempt.IdentityEventSequences, want)
+	}
+	if got, want := attempt.MapSiblingBitmapBytes, 32; got != want {
+		t.Fatalf("map sibling bitmap = %d bytes, want %d", got, want)
+	}
+	if got := attempt.MapSiblingHashes; got != 0 {
+		t.Fatalf("single-identity delivery proof disclosed %d non-empty map siblings, want 0", got)
+	}
+}
+
 func equalIndexes(got, want []uint64) bool {
 	if len(got) != len(want) {
 		return false
@@ -1199,7 +1377,7 @@ func mustDeliveryProof(t *testing.T, manager *resourcemanager.Manager, agent *de
 	if record.Event.Delivery == nil {
 		t.Fatal("delivery proof requested for a non-delivery record")
 	}
-	identityProof, err := manager.IdentityTrustProofAt(record.Event.Delivery.Attestation.IdentityID, agent.MapRoot())
+	identityProof, err := manager.IdentityTrustProofAt(record.Event.Delivery.Attestation.IdentityID, record.Event.Delivery.Attestation.SigningStateDigest, agent.MapRoot())
 	if err != nil {
 		t.Fatalf("build identity trust proof: %v", err)
 	}

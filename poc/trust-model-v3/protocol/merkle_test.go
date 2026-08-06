@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/merklelog"
+	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/sparsemap"
 )
 
 func TestKeyHistoryUpdateHasMerkleInclusionAndConsistencyProofs(t *testing.T) {
@@ -67,6 +68,55 @@ func TestKeyHistoryUpdateHasMerkleInclusionAndConsistencyProofs(t *testing.T) {
 	}
 }
 
+func TestKeyHistoryUpdateCanBeAssembledFromAppendOnlyProofStore(t *testing.T) {
+	identityID := "identity-alice"
+	previous := EmptyKeyHistoryHead(identityID)
+	first, err := NewKeyHistoryUpdate(previous, nil, "state-0", KeyEvent{Kind: KeyEventEnrollment})
+	if err != nil {
+		t.Fatalf("first update: %v", err)
+	}
+
+	tree := merklelog.New()
+	firstLeaf, err := VerifyKeyEventRecord(first.Event)
+	if err != nil {
+		t.Fatalf("verify first event: %v", err)
+	}
+	if _, _, err := tree.AppendHash(firstLeaf); err != nil {
+		t.Fatalf("seed proof store: %v", err)
+	}
+	record, leafHash, err := NewKeyEventRecord(first.Head, "state-1", KeyEvent{Kind: KeyEventRotation})
+	if err != nil {
+		t.Fatalf("construct event record: %v", err)
+	}
+	pending, err := tree.BeginAppendHash(leafHash)
+	if err != nil {
+		t.Fatalf("begin proof-store append: %v", err)
+	}
+	root, err := pending.Root()
+	if err != nil {
+		t.Fatalf("successor root: %v", err)
+	}
+	inclusion, err := pending.InclusionProof(record.Sequence, pending.Size())
+	if err != nil {
+		t.Fatalf("successor inclusion proof: %v", err)
+	}
+	consistency, err := pending.ConsistencyProof(first.Head.Size, pending.Size())
+	if err != nil {
+		t.Fatalf("successor consistency proof: %v", err)
+	}
+
+	second, err := NewKeyHistoryUpdateFromAppend(first.Head, record, root, inclusion, consistency)
+	if err != nil {
+		t.Fatalf("assemble update from append proof: %v", err)
+	}
+	if _, err := VerifyKeyHistoryUpdate(first.Head, second); err != nil {
+		t.Fatalf("verify assembled update: %v", err)
+	}
+	if got, want := tree.Size(), uint64(1); got != want {
+		t.Fatalf("proof store changed while assembling update: size = %d, want %d", got, want)
+	}
+}
+
 func TestKeyHistoryMerkleProofsStayLogarithmic(t *testing.T) {
 	identityID := "identity-alice"
 	head := EmptyKeyHistoryHead(identityID)
@@ -87,6 +137,40 @@ func TestKeyHistoryMerkleProofsStayLogarithmic(t *testing.T) {
 		}
 		records = append(records, update.Event)
 		head = update.Head
+	}
+}
+
+func TestKeyEventInclusionProofAuthenticatesOneSelectedEvent(t *testing.T) {
+	identityID := "identity-alice"
+	head := EmptyKeyHistoryHead(identityID)
+	records := make([]KeyEventRecord, 0, 16)
+	for i := 0; i < 16; i++ {
+		update, err := NewKeyHistoryUpdate(head, records, fmt.Sprintf("state-%d", i), KeyEvent{Kind: KeyEventRotation})
+		if err != nil {
+			t.Fatalf("append key event %d: %v", i, err)
+		}
+		records = append(records, update.Event)
+		head = update.Head
+	}
+
+	selected, err := NewKeyEventInclusionProof(head, records, 7)
+	if err != nil {
+		t.Fatalf("construct selected-event proof: %v", err)
+	}
+	if got, want := selected.Event.Sequence, uint64(7); got != want {
+		t.Fatalf("selected sequence = %d, want %d", got, want)
+	}
+	if got := len(selected.InclusionProof); got > 4 {
+		t.Fatalf("selected-event inclusion proof has %d hashes, want <= 4", got)
+	}
+	if err := VerifyKeyEventInclusionProof(head, selected); err != nil {
+		t.Fatalf("verify selected-event proof: %v", err)
+	}
+
+	tampered := selected
+	tampered.Event.ResultingStateDigest = "attacker-state"
+	if err := VerifyKeyEventInclusionProof(head, tampered); !errors.Is(err, ErrInvalidKeyHistory) {
+		t.Fatalf("tampered selected-event error = %v, want ErrInvalidKeyHistory", err)
 	}
 }
 
@@ -213,8 +297,11 @@ func TestAuthenticatedMapUsesTenantSeparatedCONIKSSparseTree(t *testing.T) {
 	if update.PreviousRoot != oldRoot {
 		t.Fatalf("previous root = %q, want %q", update.PreviousRoot, oldRoot)
 	}
-	if len(update.SiblingHashes) != 256 {
-		t.Fatalf("sibling path = %d hashes, want 256", len(update.SiblingHashes))
+	if got, want := len(update.SiblingBitmap), 32; got != want {
+		t.Fatalf("sibling bitmap = %d bytes, want %d", got, want)
+	}
+	if got, want := len(update.SiblingHashes), 1; got != want {
+		t.Fatalf("non-empty sibling path = %d hashes, want %d", got, want)
 	}
 	nextHead, err := VerifyAuthenticatedMapUpdate("tenant-acme", oldRoot, update)
 	if err != nil {
@@ -247,6 +334,66 @@ func TestAuthenticatedMapUsesTenantSeparatedCONIKSSparseTree(t *testing.T) {
 	}
 	if _, err := VerifyAuthenticatedMapUpdate("tenant-other", oldRoot, update); !errors.Is(err, ErrInvalidMapProof) {
 		t.Fatalf("cross-tenant proof error = %v, want ErrInvalidMapProof", err)
+	}
+}
+
+func TestAuthenticatedMapProofsCanBeAssembledFromVersionedNodeStore(t *testing.T) {
+	const tenantID = "tenant-acme"
+	alice := "identity-alice"
+	bob := "identity-bob"
+	aliceEnrollment, err := NewKeyHistoryUpdate(EmptyKeyHistoryHead(alice), nil, "alice-0", KeyEvent{Kind: KeyEventEnrollment})
+	if err != nil {
+		t.Fatalf("Alice enrollment: %v", err)
+	}
+	bobEnrollment, err := NewKeyHistoryUpdate(EmptyKeyHistoryHead(bob), nil, "bob-0", KeyEvent{Kind: KeyEventEnrollment})
+	if err != nil {
+		t.Fatalf("Bob enrollment: %v", err)
+	}
+	aliceRotation, err := NewKeyHistoryUpdate(aliceEnrollment.Head, []KeyEventRecord{aliceEnrollment.Event}, "alice-1", KeyEvent{Kind: KeyEventRotation})
+	if err != nil {
+		t.Fatalf("Alice rotation: %v", err)
+	}
+
+	mapTree := sparsemap.New(tenantID)
+	for _, head := range []KeyHistoryHead{aliceEnrollment.Head, bobEnrollment.Head} {
+		key := KeyHistoryMapKey(tenantID, head.IdentityID)
+		valueHash, err := KeyHistoryMapValueHash(head)
+		if err != nil {
+			t.Fatalf("value hash for %q: %v", head.IdentityID, err)
+		}
+		if _, err := mapTree.Set(key, valueHash); err != nil {
+			t.Fatalf("store map head for %q: %v", head.IdentityID, err)
+		}
+	}
+	root := encodeHash(mapTree.Root())
+	aliceKey := KeyHistoryMapKey(tenantID, alice)
+	bitmap, siblings, err := mapTree.CompressedProof(aliceKey)
+	if err != nil {
+		t.Fatalf("Alice sparse-map path: %v", err)
+	}
+	previousHead := aliceEnrollment.Head
+	update, err := NewAuthenticatedMapUpdateFromProof(tenantID, root, &previousHead, aliceRotation, bitmap, siblings)
+	if err != nil {
+		t.Fatalf("assemble map update from node store: %v", err)
+	}
+	nextValueHash, err := KeyHistoryMapValueHash(aliceRotation.Head)
+	if err != nil {
+		t.Fatalf("successor value hash: %v", err)
+	}
+	pending, err := mapTree.BeginSet(aliceKey, nextValueHash)
+	if err != nil {
+		t.Fatalf("prepare sparse-map write: %v", err)
+	}
+	if got, want := update.Root, encodeHash(pending.Root()); got != want {
+		t.Fatalf("proved successor root = %q, writer root %q", got, want)
+	}
+
+	membership, err := NewKeyHistoryMapProofFromProof(tenantID, root, aliceEnrollment.Head, bitmap, siblings)
+	if err != nil {
+		t.Fatalf("assemble membership proof from node store: %v", err)
+	}
+	if err := VerifyKeyHistoryMapProof(tenantID, root, membership); err != nil {
+		t.Fatalf("verify assembled membership proof: %v", err)
 	}
 }
 
@@ -307,6 +454,7 @@ func cloneDeliveryLogUpdateForTest(in DeliveryLogUpdate) DeliveryLogUpdate {
 
 func cloneAuthenticatedMapUpdateForTest(in AuthenticatedMapUpdate) AuthenticatedMapUpdate {
 	out := in
+	out.SiblingBitmap = append([]byte(nil), in.SiblingBitmap...)
 	out.SiblingHashes = append([]string(nil), in.SiblingHashes...)
 	out.KeyHistory = cloneKeyHistoryUpdateForTest(in.KeyHistory)
 	return out

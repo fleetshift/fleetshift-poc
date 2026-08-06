@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/merklelog"
+	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/sparsemap"
 	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/protocol"
 )
 
@@ -65,6 +67,18 @@ type RotationCommit struct {
 	MapUpdate protocol.AuthenticatedMapUpdate
 }
 
+type historyHeadVersion struct {
+	mapRevision uint64
+	head        protocol.KeyHistoryHead
+}
+
+type preparedKeyHistoryUpdate struct {
+	update        protocol.AuthenticatedMapUpdate
+	historyTree   *merklelog.Tree
+	historyAppend *merklelog.PendingAppend
+	mapAppend     *sparsemap.PendingSet
+}
+
 type Manager struct {
 	mu sync.RWMutex
 
@@ -73,8 +87,13 @@ type Manager struct {
 
 	mapRoot        string
 	mapUpdates     []protocol.AuthenticatedMapUpdate
+	mapTree        *sparsemap.Tree
+	mapRevisions   map[string]uint64
 	histories      map[string]protocol.KeyHistoryHead
+	headVersions   map[string][]historyHeadVersion
 	historyRecords map[string][]protocol.KeyEventRecord
+	historyTrees   map[string]*merklelog.Tree
+	stateEvents    map[string]map[string]uint64
 	deliveries     []protocol.DeliveryRecord
 	deliveryTree   *merklelog.Tree
 	agents         map[string]*agentRoute
@@ -88,12 +107,22 @@ func New(tenantID string, authorizer Authorizer) *Manager {
 	if err != nil {
 		panic(err) // The fixed map representation is always JSON encodable.
 	}
+	mapTree := sparsemap.New(tenantID)
+	storedMapRoot, err := protocol.EncodeHash(mapTree.Root())
+	if err != nil || storedMapRoot != emptyMapRoot {
+		panic("protocol and sparse-map store disagree on the empty root")
+	}
 	return &Manager{
 		tenantID:       tenantID,
 		authorizer:     authorizer,
 		mapRoot:        emptyMapRoot,
+		mapTree:        mapTree,
+		mapRevisions:   map[string]uint64{emptyMapRoot: 0},
 		histories:      make(map[string]protocol.KeyHistoryHead),
+		headVersions:   make(map[string][]historyHeadVersion),
 		historyRecords: make(map[string][]protocol.KeyEventRecord),
+		historyTrees:   make(map[string]*merklelog.Tree),
+		stateEvents:    make(map[string]map[string]uint64),
 		deliveryTree:   merklelog.New(),
 		agents:         make(map[string]*agentRoute),
 	}
@@ -232,8 +261,12 @@ func (m *Manager) pushDelivery(record protocol.DeliveryRecord) error {
 	for {
 		mapRoot := route.agent.MapRoot()
 		m.mu.RLock()
-		identityProof, identityErr := m.identityTrustProofAtLocked(record.Event.Delivery.Attestation.IdentityID, mapRoot)
-		indexes := deliveryProofIndexes(record, identityProof.History)
+		identityProof, identityErr := m.identityTrustProofAtLocked(
+			record.Event.Delivery.Attestation.IdentityID,
+			record.Event.Delivery.Attestation.SigningStateDigest,
+			mapRoot,
+		)
+		indexes := deliveryProofIndexes(record, identityProof)
 		update, err := deliveryLogUpdate(m.deliveryTree, m.deliveries, route.checkpoint, indexes...)
 		m.mu.RUnlock()
 		if err != nil {
@@ -282,25 +315,19 @@ func (m *Manager) validateAgentCheckpoint(checkpoint protocol.Checkpoint) error 
 // deliveryProofIndexes selects the delivery plus the rotation markers that
 // bound its signing state under the verifier's accepted identity history. The
 // consistency proof commits all undisclosed intervening leaves.
-func deliveryProofIndexes(record protocol.DeliveryRecord, history []protocol.KeyEventRecord) []uint64 {
+func deliveryProofIndexes(record protocol.DeliveryRecord, identityProof protocol.IdentityTrustProof) []uint64 {
 	delivery := record.Event.Delivery
 	if delivery == nil {
 		return []uint64{record.Index}
 	}
 	indexes := make([]uint64, 0, 3)
-	for i := range history {
-		if history[i].ResultingStateDigest != delivery.Attestation.SigningStateDigest {
-			continue
-		}
-		if marker := history[i].Event.RotationMarker; marker != nil {
+	if marker := identityProof.SigningEvent.Event.Event.RotationMarker; marker != nil {
+		indexes = appendUniqueIndex(indexes, marker.Index)
+	}
+	if identityProof.SuccessorEvent != nil {
+		if marker := identityProof.SuccessorEvent.Event.Event.RotationMarker; marker != nil {
 			indexes = appendUniqueIndex(indexes, marker.Index)
 		}
-		if i+1 < len(history) {
-			if marker := history[i+1].Event.RotationMarker; marker != nil {
-				indexes = appendUniqueIndex(indexes, marker.Index)
-			}
-		}
-		break
 	}
 	return appendUniqueIndex(indexes, record.Index)
 }
@@ -359,56 +386,94 @@ func (m *Manager) DeliveryLogUpdate(checkpoint protocol.Checkpoint, indexes ...u
 	return deliveryLogUpdate(m.deliveryTree, m.deliveries, checkpoint, indexes...)
 }
 
-// IdentityTrustProof returns the manager-assembled proof that identityID's
-// complete continuity history is the current leaf under the authenticated map.
-// The agent can validate it without retaining any per-identity state.
-func (m *Manager) IdentityTrustProof(identityID string) (protocol.IdentityTrustProof, error) {
+// IdentityTrustProof returns the manager-assembled proof for one signing state:
+// its event, optional immediate successor, and the current authenticated head.
+func (m *Manager) IdentityTrustProof(identityID, signingStateDigest string) (protocol.IdentityTrustProof, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.identityTrustProofAtLocked(identityID, m.mapRoot)
+	return m.identityTrustProofAtLocked(identityID, signingStateDigest, m.mapRoot)
 }
 
 // IdentityTrustProofAt assembles a proof for a verifier that intentionally
 // retains an older accepted map root.
-func (m *Manager) IdentityTrustProofAt(identityID, root string) (protocol.IdentityTrustProof, error) {
+func (m *Manager) IdentityTrustProofAt(identityID, signingStateDigest, root string) (protocol.IdentityTrustProof, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.identityTrustProofAtLocked(identityID, root)
+	return m.identityTrustProofAtLocked(identityID, signingStateDigest, root)
 }
 
-func (m *Manager) identityTrustProofAtLocked(identityID, root string) (protocol.IdentityTrustProof, error) {
-	heads := make(map[string]protocol.KeyHistoryHead)
-	var history []protocol.KeyEventRecord
-	emptyRoot, err := protocol.KeyHistoryMapRoot(m.tenantID, nil)
+func (m *Manager) identityTrustProofAtLocked(identityID, signingStateDigest, root string) (protocol.IdentityTrustProof, error) {
+	revision, ok := m.mapRevisions[root]
+	if !ok {
+		return protocol.IdentityTrustProof{}, fmt.Errorf("map root %q is not retained", root)
+	}
+	versions := m.headVersions[identityID]
+	position := sort.Search(len(versions), func(i int) bool {
+		return versions[i].mapRevision > revision
+	})
+	if position == 0 {
+		return protocol.IdentityTrustProof{}, fmt.Errorf("identity %q has no key-history head under map root %q", identityID, root)
+	}
+	head := versions[position-1].head
+	mapKey := protocol.KeyHistoryMapKey(m.tenantID, identityID)
+	bitmap, siblings, err := m.mapTree.CompressedProofAt(revision, mapKey)
+	if err != nil {
+		return protocol.IdentityTrustProof{}, fmt.Errorf("read map membership path at revision %d: %w", revision, err)
+	}
+	mapProof, err := protocol.NewKeyHistoryMapProofFromProof(m.tenantID, root, head, bitmap, siblings)
 	if err != nil {
 		return protocol.IdentityTrustProof{}, err
 	}
-	if root != emptyRoot {
-		found := false
-		for _, update := range m.mapUpdates {
-			head := update.KeyHistory.Head
-			heads[head.IdentityID] = head
-			if head.IdentityID == identityID {
-				history = cloneKeyEventRecords(update.SemanticHistory)
-			}
-			if update.Root == root {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return protocol.IdentityTrustProof{}, fmt.Errorf("map root %q is not retained", root)
-		}
+	if head.Size > uint64(len(m.historyRecords[identityID])) {
+		return protocol.IdentityTrustProof{}, fmt.Errorf("retained history for %q has %d events, head requires %d", identityID, len(m.historyRecords[identityID]), head.Size)
 	}
-	mapProof, err := protocol.NewKeyHistoryMapProof(m.tenantID, heads, identityID)
+	sequence, ok := m.stateEvents[identityID][signingStateDigest]
+	if !ok || sequence >= head.Size || m.historyRecords[identityID][sequence].ResultingStateDigest != signingStateDigest {
+		return protocol.IdentityTrustProof{}, fmt.Errorf("signing state %q is not present under map root %q", signingStateDigest, root)
+	}
+	signingEvent, err := m.keyEventProofLocked(head, sequence)
 	if err != nil {
 		return protocol.IdentityTrustProof{}, err
+	}
+	var successor *protocol.KeyEventInclusionProof
+	if sequence+1 < head.Size {
+		proof, err := m.keyEventProofLocked(head, sequence+1)
+		if err != nil {
+			return protocol.IdentityTrustProof{}, err
+		}
+		successor = &proof
 	}
 	return protocol.IdentityTrustProof{
-		Map:             mapProof,
-		History:         history,
-		RotationRecords: m.rotationRecordsLocked(history),
+		Map:            mapProof,
+		SigningEvent:   signingEvent,
+		SuccessorEvent: successor,
 	}, nil
+}
+
+// keyEventProofLocked performs one indexed event read plus logarithmic Merkle
+// node reads. It deliberately does not load or replay the identity's event
+// bodies, matching the retrieval shape expected from the server's proof store.
+func (m *Manager) keyEventProofLocked(head protocol.KeyHistoryHead, sequence uint64) (protocol.KeyEventInclusionProof, error) {
+	records := m.historyRecords[head.IdentityID]
+	if sequence >= head.Size || sequence >= uint64(len(records)) {
+		return protocol.KeyEventInclusionProof{}, fmt.Errorf("key-event sequence %d is unavailable under history size %d", sequence, head.Size)
+	}
+	tree := m.historyTrees[head.IdentityID]
+	if tree == nil || head.Size > tree.Size() {
+		return protocol.KeyEventInclusionProof{}, fmt.Errorf("key-history proof nodes for %q at size %d are unavailable", head.IdentityID, head.Size)
+	}
+	inclusion, err := tree.InclusionProof(sequence, head.Size)
+	if err != nil {
+		return protocol.KeyEventInclusionProof{}, err
+	}
+	eventProof := protocol.KeyEventInclusionProof{
+		Event:          cloneKeyEventRecord(records[sequence]),
+		InclusionProof: protocol.EncodeProof(inclusion),
+	}
+	if err := protocol.VerifyKeyEventInclusionProof(head, eventProof); err != nil {
+		return protocol.KeyEventInclusionProof{}, fmt.Errorf("constructed key-event proof did not verify: %w", err)
+	}
+	return eventProof, nil
 }
 
 func deliveryLogUpdate(tree *merklelog.Tree, records []protocol.DeliveryRecord, previous protocol.Checkpoint, indexes ...uint64) (protocol.DeliveryLogUpdate, error) {
@@ -472,15 +537,17 @@ func (m *Manager) appendEnrollmentLocked(enrollment protocol.EnrollmentPackage) 
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, fmt.Errorf("digest enrolled state: %w", err)
 	}
-	mapUpdate, head, err := m.prepareKeyHistoryUpdateLocked(enrollment.IdentityID, stateDigest, protocol.KeyEvent{
+	prepared, err := m.prepareKeyHistoryUpdateLocked(enrollment.IdentityID, stateDigest, protocol.KeyEvent{
 		Kind:       protocol.KeyEventEnrollment,
 		Enrollment: cloneEnrollment(&enrollment),
 	})
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	m.commitKeyHistoryLocked(enrollment.IdentityID, head, mapUpdate)
-	return cloneAuthenticatedMapUpdate(mapUpdate), nil
+	if err := m.commitKeyHistoryLocked(enrollment.IdentityID, prepared); err != nil {
+		return protocol.AuthenticatedMapUpdate{}, err
+	}
+	return cloneAuthenticatedMapUpdate(prepared.update), nil
 }
 
 // appendRotationLocked computes the marker and map update before mutating
@@ -496,7 +563,7 @@ func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (Rotat
 	if err != nil {
 		return RotationCommit{}, fmt.Errorf("build rotation marker: %w", err)
 	}
-	mapUpdate, head, err := m.prepareKeyHistoryUpdateLocked(rotation.Intent.IdentityID, stateDigest, protocol.KeyEvent{
+	prepared, err := m.prepareKeyHistoryUpdateLocked(rotation.Intent.IdentityID, stateDigest, protocol.KeyEvent{
 		Kind:           protocol.KeyEventRotation,
 		Rotation:       cloneRotation(&rotation),
 		RotationMarker: pointerTo(marker.Reference()),
@@ -505,14 +572,17 @@ func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (Rotat
 		return RotationCommit{}, err
 	}
 	// The marker is appended atomically below, so it is not yet discoverable in
-	// m.deliveries when the otherwise self-contained semantic proof is built.
-	mapUpdate.RotationRecords = append(mapUpdate.RotationRecords, cloneDeliveryRecord(marker))
+	// m.deliveries when the selective semantic proof is built.
+	markerEvidence := cloneDeliveryRecord(marker)
+	prepared.update.RotationRecord = &markerEvidence
 
 	if err := m.appendDeliveryRecordLocked(marker); err != nil {
 		return RotationCommit{}, fmt.Errorf("append rotation marker: %w", err)
 	}
-	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, mapUpdate)
-	return RotationCommit{Marker: cloneDeliveryRecord(marker), MapUpdate: cloneAuthenticatedMapUpdate(mapUpdate)}, nil
+	if err := m.commitKeyHistoryLocked(rotation.Intent.IdentityID, prepared); err != nil {
+		return RotationCommit{}, err
+	}
+	return RotationCommit{Marker: cloneDeliveryRecord(marker), MapUpdate: cloneAuthenticatedMapUpdate(prepared.update)}, nil
 }
 
 func (m *Manager) newRotationMarkerLocked(rotation protocol.RotationPackage) (protocol.DeliveryRecord, error) {
@@ -527,7 +597,7 @@ func (m *Manager) appendRotationMapUpdateLocked(rotation protocol.RotationPackag
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	mapUpdate, head, err := m.prepareKeyHistoryUpdateLocked(rotation.Intent.IdentityID, stateDigest, protocol.KeyEvent{
+	prepared, err := m.prepareKeyHistoryUpdateLocked(rotation.Intent.IdentityID, stateDigest, protocol.KeyEvent{
 		Kind:           protocol.KeyEventRotation,
 		Rotation:       cloneRotation(&rotation),
 		RotationMarker: pointerTo(marker),
@@ -535,60 +605,176 @@ func (m *Manager) appendRotationMapUpdateLocked(rotation protocol.RotationPackag
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, mapUpdate)
-	return cloneAuthenticatedMapUpdate(mapUpdate), nil
+	if err := m.commitKeyHistoryLocked(rotation.Intent.IdentityID, prepared); err != nil {
+		return protocol.AuthenticatedMapUpdate{}, err
+	}
+	return cloneAuthenticatedMapUpdate(prepared.update), nil
 }
 
-func (m *Manager) prepareKeyHistoryUpdateLocked(identityID, stateDigest string, keyEvent protocol.KeyEvent) (protocol.AuthenticatedMapUpdate, protocol.KeyHistoryHead, error) {
-	previousHead, ok := m.histories[identityID]
-	if !ok {
+func (m *Manager) prepareKeyHistoryUpdateLocked(identityID, stateDigest string, keyEvent protocol.KeyEvent) (preparedKeyHistoryUpdate, error) {
+	previousHead, exists := m.histories[identityID]
+	if !exists {
 		previousHead = protocol.EmptyKeyHistoryHead(identityID)
 	}
-	historyUpdate, err := protocol.NewKeyHistoryUpdate(previousHead, m.historyRecords[identityID], stateDigest, keyEvent)
+	historyTree := m.historyTrees[identityID]
+	if historyTree == nil {
+		if exists {
+			return preparedKeyHistoryUpdate{}, fmt.Errorf("key-history proof store for %q is unavailable", identityID)
+		}
+		historyTree = merklelog.New()
+	}
+	if historyTree.Size() != previousHead.Size {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("key-history proof store for %q has size %d, head has size %d", identityID, historyTree.Size(), previousHead.Size)
+	}
+	previousHistoryRoot, err := historyTree.Root()
 	if err != nil {
-		return protocol.AuthenticatedMapUpdate{}, protocol.KeyHistoryHead{}, fmt.Errorf("build key-history update: %w", err)
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("read previous key-history root: %w", err)
 	}
-	mapUpdate, err := protocol.NewAuthenticatedMapUpdate(m.tenantID, m.histories, historyUpdate)
+	previousCheckpoint, err := protocol.NewCheckpoint(previousHead.Size, previousHistoryRoot)
+	if err != nil || previousCheckpoint.Root != previousHead.Root {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("key-history proof store for %q does not match retained head", identityID)
+	}
+
+	event, leafHash, err := protocol.NewKeyEventRecord(previousHead, stateDigest, keyEvent)
 	if err != nil {
-		return protocol.AuthenticatedMapUpdate{}, protocol.KeyHistoryHead{}, fmt.Errorf("build authenticated-map update: %w", err)
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("build key event: %w", err)
 	}
-	if mapUpdate.PreviousRoot != m.mapRoot {
-		return protocol.AuthenticatedMapUpdate{}, protocol.KeyHistoryHead{}, fmt.Errorf("authenticated-map state mismatch: proof starts at %q, manager has %q", mapUpdate.PreviousRoot, m.mapRoot)
+	historyAppend, err := historyTree.BeginAppendHash(leafHash)
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("prepare key-history append: %w", err)
 	}
-	mapUpdate.SemanticHistory = append(cloneKeyEventRecords(m.historyRecords[identityID]), cloneKeyEventRecord(historyUpdate.Event))
-	mapUpdate.RotationRecords = m.rotationRecordsLocked(mapUpdate.SemanticHistory)
-	return mapUpdate, historyUpdate.Head, nil
+	successorHistoryRoot, err := historyAppend.Root()
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, err
+	}
+	inclusion, err := historyAppend.InclusionProof(event.Sequence, historyAppend.Size())
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("build key-event inclusion proof: %w", err)
+	}
+	consistency, err := historyAppend.ConsistencyProof(previousHead.Size, historyAppend.Size())
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("build key-history consistency proof: %w", err)
+	}
+	historyUpdate, err := protocol.NewKeyHistoryUpdateFromAppend(previousHead, event, successorHistoryRoot, inclusion, consistency)
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("build key-history update: %w", err)
+	}
+
+	mapKey := protocol.KeyHistoryMapKey(m.tenantID, identityID)
+	siblingBitmap, siblingHashes, err := m.mapTree.CompressedProof(mapKey)
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("read authenticated-map path: %w", err)
+	}
+	var previousLeaf *protocol.KeyHistoryHead
+	if exists {
+		leaf := previousHead
+		previousLeaf = &leaf
+	}
+	mapUpdate, err := protocol.NewAuthenticatedMapUpdateFromProof(
+		m.tenantID,
+		m.mapRoot,
+		previousLeaf,
+		historyUpdate,
+		siblingBitmap,
+		siblingHashes,
+	)
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("build authenticated-map update: %w", err)
+	}
+	nextMapValue, err := protocol.KeyHistoryMapValueHash(historyUpdate.Head)
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, err
+	}
+	mapAppend, err := m.mapTree.BeginSet(mapKey, nextMapValue)
+	if err != nil {
+		return preparedKeyHistoryUpdate{}, fmt.Errorf("prepare authenticated-map write: %w", err)
+	}
+	prospectiveMapRoot, err := protocol.EncodeHash(mapAppend.Root())
+	if err != nil || prospectiveMapRoot != mapUpdate.Root {
+		return preparedKeyHistoryUpdate{}, errors.New("authenticated-map proof and node store produced different successor roots")
+	}
+
+	if previousHead.Size > 0 {
+		predecessor, err := m.keyEventProofLocked(previousHead, previousHead.Size-1)
+		if err != nil {
+			return preparedKeyHistoryUpdate{}, fmt.Errorf("build predecessor-event proof: %w", err)
+		}
+		mapUpdate.Predecessor = &predecessor
+	}
+	if marker := keyEvent.RotationMarker; marker != nil && marker.Index < uint64(len(m.deliveries)) {
+		record := m.deliveries[marker.Index]
+		if record.Hash == marker.Hash {
+			markerEvidence := cloneDeliveryRecord(record)
+			mapUpdate.RotationRecord = &markerEvidence
+		}
+	}
+	return preparedKeyHistoryUpdate{
+		update:        mapUpdate,
+		historyTree:   historyTree,
+		historyAppend: historyAppend,
+		mapAppend:     mapAppend,
+	}, nil
 }
 
-func (m *Manager) commitKeyHistoryLocked(identityID string, head protocol.KeyHistoryHead, update protocol.AuthenticatedMapUpdate) {
+func (m *Manager) commitKeyHistoryLocked(identityID string, prepared preparedKeyHistoryUpdate) error {
+	update := prepared.update
+	head := update.KeyHistory.Head
+	event := cloneKeyEventRecord(update.KeyHistory.Event)
+	if update.PreviousRoot != m.mapRoot || event.IdentityID != identityID || head.IdentityID != identityID {
+		return errors.New("prepared key-history update no longer matches manager state")
+	}
+	if _, err := protocol.VerifyAuthenticatedMapUpdate(m.tenantID, m.mapRoot, update); err != nil {
+		return fmt.Errorf("verify prepared authenticated-map update: %w", err)
+	}
+	if current := m.historyTrees[identityID]; current != nil && current != prepared.historyTree {
+		return errors.New("key-history proof store changed before commit")
+	}
+	if prepared.historyTree == nil || prepared.historyAppend == nil || prepared.mapAppend == nil {
+		return errors.New("prepared key-history storage transaction is incomplete")
+	}
+	if prepared.historyTree.Size() != event.Sequence || prepared.historyAppend.Size() != head.Size {
+		return errors.New("prepared key-history append has the wrong size")
+	}
+	historyRoot, err := prepared.historyAppend.Root()
+	if err != nil {
+		return fmt.Errorf("read prepared key-history root: %w", err)
+	}
+	historyCheckpoint, err := protocol.NewCheckpoint(head.Size, historyRoot)
+	if err != nil || historyCheckpoint.Root != head.Root {
+		return errors.New("prepared key-history proof store does not match successor head")
+	}
+	mapRoot, err := protocol.EncodeHash(prepared.mapAppend.Root())
+	if err != nil || mapRoot != update.Root || prepared.mapAppend.Revision() != m.mapTree.Revision()+1 {
+		return errors.New("prepared sparse-map write does not match successor root or revision")
+	}
+
+	// Both transactions have been completely validated under the sequencer
+	// lock. Production storage performs these commits with the marker append in
+	// one database transaction (or an equivalent ordered durable protocol).
+	if err := prepared.historyAppend.Commit(); err != nil {
+		return fmt.Errorf("commit key-history proof nodes: %w", err)
+	}
+	if err := prepared.mapAppend.Commit(); err != nil {
+		return fmt.Errorf("commit authenticated-map proof nodes: %w", err)
+	}
+
+	m.historyTrees[identityID] = prepared.historyTree
 	m.mapUpdates = append(m.mapUpdates, cloneAuthenticatedMapUpdate(update))
 	m.mapRoot = update.Root
+	m.mapRevisions[update.Root] = m.mapTree.Revision()
 	m.histories[identityID] = head
-	m.historyRecords[identityID] = append(m.historyRecords[identityID], cloneKeyEventRecord(update.KeyHistory.Event))
-}
-
-func (m *Manager) rotationRecordsLocked(history []protocol.KeyEventRecord) []protocol.DeliveryRecord {
-	records := make([]protocol.DeliveryRecord, 0)
-	seen := make(map[protocol.DeliveryLogReference]struct{})
-	for _, event := range history {
-		marker := event.Event.RotationMarker
-		if marker == nil {
-			continue
-		}
-		if _, exists := seen[*marker]; exists {
-			continue
-		}
-		if marker.Index >= uint64(len(m.deliveries)) {
-			continue
-		}
-		record := m.deliveries[marker.Index]
-		if record.Hash != marker.Hash {
-			continue
-		}
-		records = append(records, cloneDeliveryRecord(record))
-		seen[*marker] = struct{}{}
+	m.headVersions[identityID] = append(m.headVersions[identityID], historyHeadVersion{
+		mapRevision: m.mapTree.Revision(),
+		head:        head,
+	})
+	m.historyRecords[identityID] = append(m.historyRecords[identityID], event)
+	if m.stateEvents[identityID] == nil {
+		m.stateEvents[identityID] = make(map[string]uint64)
 	}
-	return records
+	if _, exists := m.stateEvents[identityID][event.ResultingStateDigest]; !exists {
+		m.stateEvents[identityID][event.ResultingStateDigest] = event.Sequence
+	}
+	return nil
 }
 
 func (m *Manager) appendDelivery(delivery protocol.SignedDelivery) (protocol.DeliveryRecord, error) {
@@ -837,12 +1023,14 @@ func cloneKeyEventRecord(in protocol.KeyEventRecord) protocol.KeyEventRecord {
 	return out
 }
 
-func cloneKeyEventRecords(in []protocol.KeyEventRecord) []protocol.KeyEventRecord {
-	out := make([]protocol.KeyEventRecord, len(in))
-	for i := range in {
-		out[i] = cloneKeyEventRecord(in[i])
+func cloneKeyEventInclusionProof(in *protocol.KeyEventInclusionProof) *protocol.KeyEventInclusionProof {
+	if in == nil {
+		return nil
 	}
-	return out
+	out := *in
+	out.Event = cloneKeyEventRecord(in.Event)
+	out.InclusionProof = append([]string(nil), in.InclusionProof...)
+	return &out
 }
 
 func cloneAuthenticatedMapUpdate(in protocol.AuthenticatedMapUpdate) protocol.AuthenticatedMapUpdate {
@@ -852,11 +1040,12 @@ func cloneAuthenticatedMapUpdate(in protocol.AuthenticatedMapUpdate) protocol.Au
 		out.PreviousHead = &previousHead
 	}
 	out.KeyHistory = *cloneKeyHistoryUpdate(&in.KeyHistory)
+	out.SiblingBitmap = append([]byte(nil), in.SiblingBitmap...)
 	out.SiblingHashes = append([]string(nil), in.SiblingHashes...)
-	out.SemanticHistory = cloneKeyEventRecords(in.SemanticHistory)
-	out.RotationRecords = make([]protocol.DeliveryRecord, len(in.RotationRecords))
-	for i := range in.RotationRecords {
-		out.RotationRecords[i] = cloneDeliveryRecord(in.RotationRecords[i])
+	out.Predecessor = cloneKeyEventInclusionProof(in.Predecessor)
+	if in.RotationRecord != nil {
+		record := cloneDeliveryRecord(*in.RotationRecord)
+		out.RotationRecord = &record
 	}
 	return out
 }
