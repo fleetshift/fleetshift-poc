@@ -8,20 +8,22 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 
 	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/protocol"
 )
 
 var (
-	ErrEnrollment   = errors.New("enrollment verification failed")
-	ErrRotation     = errors.New("rotation verification failed")
-	ErrSignature    = errors.New("delivery signature verification failed")
-	ErrAttestation  = errors.New("content attestation verification failed")
-	ErrSigningState = errors.New("signing state is not valid at delivery position")
-	ErrMapFork      = errors.New("authenticated map update does not extend retained root")
-	ErrLogFork      = errors.New("delivery does not extend retained checkpoint")
-	ErrGeneration   = errors.New("delivery generation is stale or conflicting")
+	ErrEnrollment        = errors.New("enrollment verification failed")
+	ErrRotation          = errors.New("rotation verification failed")
+	ErrSignature         = errors.New("delivery signature verification failed")
+	ErrAttestation       = errors.New("content attestation verification failed")
+	ErrSigningState      = errors.New("signing state is not valid at delivery position")
+	ErrMapFork           = errors.New("authenticated map update does not extend retained root")
+	ErrLogFork           = errors.New("delivery does not extend retained checkpoint")
+	ErrGeneration        = errors.New("delivery generation is stale or conflicting")
+	ErrExceptionCapacity = errors.New("exception capacity prevents map advancement")
 
 	// ErrAcknowledgementLost is a test fault injected after an otherwise
 	// successful, locally retained delivery. It models a response lost between
@@ -30,6 +32,8 @@ var (
 	ErrCheckpointStale     = errors.New("manager used a stale agent checkpoint")
 	ErrDeliveryUnavailable = errors.New("delivery did not reach the agent")
 )
+
+var errExceptionalAncestor = errors.New("history already contains an exceptional event")
 
 // CheckpointStaleError tells the manager that proof construction started from
 // an older checkpoint than this agent currently retains.
@@ -61,11 +65,12 @@ type DeliveryAttempt struct {
 }
 
 type Config struct {
-	TenantID     string
-	TargetID     string
-	OIDCIssuer   string
-	OIDCClientID string
-	HTTPClient   *http.Client
+	TenantID          string
+	TargetID          string
+	OIDCIssuer        string
+	OIDCClientID      string
+	HTTPClient        *http.Client
+	ExceptionCapacity int
 }
 
 type validityBoundary struct {
@@ -86,15 +91,14 @@ type Agent struct {
 
 	mapRoot            string
 	deliveryCheckpoint protocol.Checkpoint
-	deliveryRecords    map[uint64]observedLogRecord
-	historyHeads       map[string]protocol.KeyHistoryHead
-	states             map[string]protocol.ContinuityState
-	validFrom          map[string]validityBoundary
-	validBefore        map[string]validityBoundary
-	lastMarkers        map[string]protocol.DeliveryLogReference
-	applied            map[string]protocol.SignedDelivery
-	appliedDigests     map[string]string
-	generations        map[string]uint64
+	exceptionCapacity  int
+	exceptionalEvents  map[string]struct{}
+
+	// The following maps model delivery application state, not verifier trust
+	// state. A real agent would persist the resulting effects in its own domain.
+	applied        map[string]protocol.SignedDelivery
+	appliedDigests map[string]string
+	generations    map[string]uint64
 
 	failBeforeAccepting      uint64
 	loseNextAcknowledgement  bool
@@ -106,6 +110,12 @@ func New(config Config) (*Agent, error) {
 	if config.TenantID == "" || config.TargetID == "" || config.OIDCIssuer == "" || config.OIDCClientID == "" {
 		return nil, errors.New("tenant, target, OIDC issuer, and OIDC client ID are required")
 	}
+	if config.ExceptionCapacity < 0 {
+		return nil, errors.New("exception capacity cannot be negative")
+	}
+	if config.ExceptionCapacity == 0 {
+		config.ExceptionCapacity = 64
+	}
 	empty := protocol.EmptyCheckpoint()
 	emptyMapRoot, err := protocol.KeyHistoryMapRoot(config.TenantID, nil)
 	if err != nil {
@@ -115,16 +125,36 @@ func New(config Config) (*Agent, error) {
 		config:             config,
 		mapRoot:            emptyMapRoot,
 		deliveryCheckpoint: empty,
-		deliveryRecords:    make(map[uint64]observedLogRecord),
-		historyHeads:       make(map[string]protocol.KeyHistoryHead),
-		states:             make(map[string]protocol.ContinuityState),
-		validFrom:          make(map[string]validityBoundary),
-		validBefore:        make(map[string]validityBoundary),
-		lastMarkers:        make(map[string]protocol.DeliveryLogReference),
+		exceptionCapacity:  config.ExceptionCapacity,
+		exceptionalEvents:  make(map[string]struct{}),
 		applied:            make(map[string]protocol.SignedDelivery),
 		appliedDigests:     make(map[string]string),
 		generations:        make(map[string]uint64),
 	}, nil
+}
+
+// VerifierCheckpoint is the complete durable cryptographic trust state. Its
+// size is independent of the number of enrolled identities; only exceptional
+// events consume additional bounded space.
+type VerifierCheckpoint struct {
+	MapRoot                 string              `json:"map_root"`
+	DeliveryLogCheckpoint   protocol.Checkpoint `json:"delivery_log_checkpoint"`
+	ExceptionalEventDigests []string            `json:"exceptional_event_digests,omitempty"`
+}
+
+func (a *Agent) VerifierCheckpoint() VerifierCheckpoint {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	digests := make([]string, 0, len(a.exceptionalEvents))
+	for digest := range a.exceptionalEvents {
+		digests = append(digests, digest)
+	}
+	sort.Strings(digests)
+	return VerifierCheckpoint{
+		MapRoot:                 a.mapRoot,
+		DeliveryLogCheckpoint:   a.deliveryCheckpoint,
+		ExceptionalEventDigests: digests,
+	}
 }
 
 func (a *Agent) MapRoot() string {
@@ -137,13 +167,6 @@ func (a *Agent) DeliveryCheckpoint() protocol.Checkpoint {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.deliveryCheckpoint
-}
-
-func (a *Agent) HistoryHead(identityID string) (protocol.KeyHistoryHead, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	head, ok := a.historyHeads[identityID]
-	return head, ok
 }
 
 // FailNextDeliveriesBeforeAccepting injects transport failures before the
@@ -182,40 +205,24 @@ func (a *Agent) LastDeliveryAttempt() (DeliveryAttempt, bool) {
 	return out, true
 }
 
-// SyncMap validates a batch transactionally. Each update proves an old leaf
-// (or its absence) against the retained sparse-map root, then reuses the same
-// sibling path to authenticate a successor root with only that leaf replaced.
+// SyncMap validates a batch transactionally. AuthenticatedMapUpdate carries
+// the changed identity's complete semantic history so the agent can validate
+// it without retaining a per-identity head or continuity state. Objectively
+// invalid events are recorded as bounded exceptions before their successor
+// root is accepted.
 func (a *Agent) SyncMap(ctx context.Context, updates []protocol.AuthenticatedMapUpdate) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	mapRoot := a.mapRoot
-	historyHeads := cloneHeads(a.historyHeads)
-	states := cloneStates(a.states)
-	validFrom := cloneBoundaries(a.validFrom)
-	validBefore := cloneBoundaries(a.validBefore)
-	lastMarkers := cloneMarkers(a.lastMarkers)
+	exceptions := cloneExceptions(a.exceptionalEvents)
+	var semanticErr error
 
 	for _, mapUpdate := range updates {
 		if mapUpdate.PreviousRoot != mapRoot {
 			return fmt.Errorf("%w: update starts at root %q, want %q", ErrMapFork, mapUpdate.PreviousRoot, mapRoot)
 		}
 		update := mapUpdate.KeyHistory
-		identityID := update.Event.IdentityID
-		previousHead, exists := historyHeads[identityID]
-		if exists {
-			if mapUpdate.PreviousHead == nil || *mapUpdate.PreviousHead != previousHead {
-				return fmt.Errorf("%w: previous leaf differs from retained key-history head", ErrMapFork)
-			}
-		} else {
-			if mapUpdate.PreviousHead != nil {
-				return fmt.Errorf("%w: map proof contains an unexpected previous leaf", ErrMapFork)
-			}
-			previousHead = protocol.EmptyKeyHistoryHead(identityID)
-		}
-		if update.PreviousHead != previousHead {
-			return fmt.Errorf("%w: key history does not start at retained head", ErrMapFork)
-		}
 		nextHead, err := protocol.VerifyAuthenticatedMapUpdate(a.config.TenantID, mapRoot, mapUpdate)
 		if err != nil {
 			if errors.Is(err, protocol.ErrInvalidMapProof) {
@@ -223,70 +230,37 @@ func (a *Agent) SyncMap(ctx context.Context, updates []protocol.AuthenticatedMap
 			}
 			return fmt.Errorf("%w: %v", keyEventError(update.Event.Event.Kind), err)
 		}
-
-		switch keyEvent := update.Event.Event; keyEvent.Kind {
-		case protocol.KeyEventEnrollment:
-			if previousHead.Size != 0 {
-				return fmt.Errorf("%w: identity is already enrolled", ErrEnrollment)
-			}
-			if keyEvent.Enrollment == nil || keyEvent.Rotation != nil || keyEvent.RotationMarker != nil {
-				return fmt.Errorf("%w: malformed enrollment event", ErrEnrollment)
-			}
-			state, digest, err := a.verifyEnrollment(ctx, *keyEvent.Enrollment)
-			if err != nil {
-				return fmt.Errorf("%w: %v", ErrEnrollment, err)
-			}
-			if state.IdentityID != identityID || digest != update.Event.ResultingStateDigest || digest != nextHead.CurrentStateDigest {
-				return fmt.Errorf("%w: enrollment does not produce committed key-history head", ErrEnrollment)
-			}
-			states[digest] = state
-
-		case protocol.KeyEventRotation:
-			if previousHead.Size == 0 || keyEvent.Rotation == nil || keyEvent.RotationMarker == nil || keyEvent.Enrollment != nil {
-				return fmt.Errorf("%w: malformed rotation event", ErrRotation)
-			}
-			oldDigest, newState, newDigest, err := a.verifyRotation(*keyEvent.Rotation, previousHead, states)
-			if err != nil {
-				return fmt.Errorf("%w: %v", ErrRotation, err)
-			}
-			if newDigest != update.Event.ResultingStateDigest || newDigest != nextHead.CurrentStateDigest {
-				return fmt.Errorf("%w: rotation does not produce committed key-history head", ErrRotation)
-			}
-			marker := *keyEvent.RotationMarker
-			if marker.Hash == "" {
-				return fmt.Errorf("%w: rotation marker hash is required", ErrRotation)
-			}
-			if previousMarker, ok := lastMarkers[identityID]; ok && marker.Index <= previousMarker.Index {
-				return fmt.Errorf("%w: rotation marker does not advance past index %d", ErrRotation, previousMarker.Index)
-			}
-			rotationDigest, err := protocol.ObjectDigest(*keyEvent.Rotation)
-			if err != nil {
-				return fmt.Errorf("%w: digest rotation marker: %v", ErrRotation, err)
-			}
-			boundary := validityBoundary{Marker: marker, RotationDigest: rotationDigest}
-			if a.deliveryCheckpoint.Size > marker.Index && !a.boundaryVerified(boundary) {
-				return fmt.Errorf("%w: referenced rotation marker is not present in accepted delivery history", ErrRotation)
-			}
-			states[newDigest] = newState
-			validBefore[oldDigest] = boundary
-			validFrom[newDigest] = boundary
-			lastMarkers[identityID] = marker
-
-		default:
-			return fmt.Errorf("%w: unknown key event kind %q", ErrRotation, keyEvent.Kind)
+		if err := protocol.VerifyKeyHistoryRecords(nextHead, mapUpdate.SemanticHistory); err != nil {
+			// Missing or malformed proof material is not evidence that the
+			// authenticated event itself is bad. Refuse advancement and allow
+			// the manager to retry with a complete history.
+			return fmt.Errorf("%w: semantic history proof: %v", keyEventError(update.Event.Event.Kind), err)
 		}
-
-		historyHeads[identityID] = nextHead
+		_, exceptionalDigest, err := a.validateHistory(ctx, nextHead, mapUpdate.SemanticHistory, mapUpdate.RotationRecords, true, false)
+		if err != nil {
+			if errors.Is(err, errExceptionalAncestor) {
+				mapRoot = mapUpdate.Root
+				continue
+			}
+			if exceptionalDigest == "" {
+				return err
+			}
+			if _, exists := exceptions[exceptionalDigest]; !exists {
+				if len(exceptions) >= a.exceptionCapacity {
+					return fmt.Errorf("%w: capacity %d is full", ErrExceptionCapacity, a.exceptionCapacity)
+				}
+				exceptions[exceptionalDigest] = struct{}{}
+			}
+			if semanticErr == nil {
+				semanticErr = err
+			}
+		}
 		mapRoot = mapUpdate.Root
 	}
 
 	a.mapRoot = mapRoot
-	a.historyHeads = historyHeads
-	a.states = states
-	a.validFrom = validFrom
-	a.validBefore = validBefore
-	a.lastMarkers = lastMarkers
-	return nil
+	a.exceptionalEvents = exceptions
+	return semanticErr
 }
 
 func (a *Agent) verifyEnrollment(ctx context.Context, enrollment protocol.EnrollmentPackage) (protocol.ContinuityState, string, error) {
@@ -329,29 +303,184 @@ func (a *Agent) verifyEnrollment(ctx context.Context, enrollment protocol.Enroll
 	return state, digest, nil
 }
 
-func (a *Agent) verifyRotation(rotation protocol.RotationPackage, previousHead protocol.KeyHistoryHead, states map[string]protocol.ContinuityState) (string, protocol.ContinuityState, string, error) {
+type validatedHistory struct {
+	states      map[string]protocol.ContinuityState
+	validFrom   map[string]validityBoundary
+	validBefore map[string]validityBoundary
+}
+
+// validateHistory reconstructs continuity states and key-validity boundaries
+// ephemerally. exceptionalDigest is non-empty only when the supplied,
+// authenticated event is objectively invalid and may safely enter the bounded
+// exception set; missing proof material is retryable and is never made sticky.
+func (a *Agent) validateHistory(
+	ctx context.Context,
+	head protocol.KeyHistoryHead,
+	history []protocol.KeyEventRecord,
+	rotationRecords []protocol.DeliveryRecord,
+	useAcceptedPrefix bool,
+	rejectExceptions bool,
+) (validatedHistory, string, error) {
+	validated := validatedHistory{
+		states:      make(map[string]protocol.ContinuityState, len(history)),
+		validFrom:   make(map[string]validityBoundary),
+		validBefore: make(map[string]validityBoundary),
+	}
+	if err := protocol.VerifyKeyHistoryRecords(head, history); err != nil {
+		return validated, "", fmt.Errorf("%w: %v", ErrSigningState, err)
+	}
+	records := make(map[protocol.DeliveryLogReference]protocol.DeliveryRecord, len(rotationRecords))
+	for _, record := range rotationRecords {
+		if _, err := protocol.VerifyDeliveryRecord(record); err != nil {
+			return validated, "", fmt.Errorf("%w: malformed rotation-marker evidence: %v", ErrRotation, err)
+		}
+		records[record.Reference()] = record
+	}
+
+	var currentState protocol.ContinuityState
+	var currentDigest string
+	var previousMarker *protocol.DeliveryLogReference
+	for i, record := range history {
+		_, exceptional := a.exceptionalEvents[record.Hash]
+		if exceptional {
+			if rejectExceptions {
+				return validated, "", fmt.Errorf("%w: key event %s is in the exceptional-event set", ErrSigningState, record.Hash)
+			}
+			return validated, "", fmt.Errorf("%w: %s", errExceptionalAncestor, record.Hash)
+		}
+		useAcceptedSemantics := useAcceptedPrefix && i < len(history)-1 || rejectExceptions
+		keyEvent := record.Event
+		switch keyEvent.Kind {
+		case protocol.KeyEventEnrollment:
+			if i != 0 {
+				return validated, record.Hash, fmt.Errorf("%w: identity is already enrolled", ErrEnrollment)
+			}
+			if keyEvent.Enrollment == nil || keyEvent.Rotation != nil || keyEvent.RotationMarker != nil {
+				return validated, record.Hash, fmt.Errorf("%w: malformed enrollment event", ErrEnrollment)
+			}
+			var state protocol.ContinuityState
+			var digest string
+			var err error
+			if useAcceptedSemantics {
+				state, digest, err = a.reconstructAcceptedEnrollment(*keyEvent.Enrollment)
+			} else {
+				state, digest, err = a.verifyEnrollment(ctx, *keyEvent.Enrollment)
+			}
+			if err != nil {
+				if errors.Is(err, errOIDCEvidenceUnavailable) {
+					return validated, "", fmt.Errorf("%w: %v", ErrEnrollment, err)
+				}
+				return validated, record.Hash, fmt.Errorf("%w: %v", ErrEnrollment, err)
+			}
+			if state.IdentityID != head.IdentityID || digest != record.ResultingStateDigest {
+				return validated, record.Hash, fmt.Errorf("%w: enrollment does not produce committed key-history state", ErrEnrollment)
+			}
+			currentState, currentDigest = state, digest
+			validated.states[digest] = state
+
+		case protocol.KeyEventRotation:
+			if i == 0 || keyEvent.Rotation == nil || keyEvent.RotationMarker == nil || keyEvent.Enrollment != nil {
+				return validated, record.Hash, fmt.Errorf("%w: malformed rotation event", ErrRotation)
+			}
+			newState, newDigest, err := a.verifyRotation(*keyEvent.Rotation, currentState, currentDigest)
+			if err != nil {
+				return validated, record.Hash, fmt.Errorf("%w: %v", ErrRotation, err)
+			}
+			if newDigest != record.ResultingStateDigest {
+				return validated, record.Hash, fmt.Errorf("%w: rotation does not produce committed key-history state", ErrRotation)
+			}
+			marker := *keyEvent.RotationMarker
+			if marker.Hash == "" {
+				return validated, record.Hash, fmt.Errorf("%w: rotation marker hash is required", ErrRotation)
+			}
+			if previousMarker != nil && marker.Index <= previousMarker.Index {
+				return validated, record.Hash, fmt.Errorf("%w: rotation marker does not advance past index %d", ErrRotation, previousMarker.Index)
+			}
+			markerRecord, ok := records[marker]
+			if !ok {
+				return validated, "", fmt.Errorf("%w: rotation marker record is unavailable", ErrRotation)
+			}
+			if markerRecord.Event.Kind != protocol.DeliveryLogEventRotation || markerRecord.Event.Rotation == nil || markerRecord.Event.Delivery != nil {
+				return validated, record.Hash, fmt.Errorf("%w: referenced marker is not a rotation record", ErrRotation)
+			}
+			wantRotation, err := protocol.ObjectDigest(*keyEvent.Rotation)
+			if err != nil {
+				return validated, record.Hash, fmt.Errorf("%w: digest rotation: %v", ErrRotation, err)
+			}
+			gotRotation, err := protocol.ObjectDigest(*markerRecord.Event.Rotation)
+			if err != nil || gotRotation != wantRotation {
+				return validated, record.Hash, fmt.Errorf("%w: marker does not contain the committed rotation package", ErrRotation)
+			}
+			boundary := validityBoundary{Marker: marker, RotationDigest: wantRotation}
+			validated.validBefore[currentDigest] = boundary
+			validated.validFrom[newDigest] = boundary
+			validated.states[newDigest] = newState
+			currentState, currentDigest = newState, newDigest
+			markerCopy := marker
+			previousMarker = &markerCopy
+
+		default:
+			return validated, record.Hash, fmt.Errorf("%w: unknown key event kind %q", ErrRotation, keyEvent.Kind)
+		}
+	}
+	if currentDigest != head.CurrentStateDigest {
+		return validated, "", fmt.Errorf("%w: reconstructed state does not match current key-history head", ErrSigningState)
+	}
+	return validated, "", nil
+}
+
+// reconstructAcceptedEnrollment uses the accepted root plus absence from the
+// exception set as the durable statement that the time-sensitive OIDC checks
+// succeeded during map advancement. It repeats deterministic key checks but
+// does not require the IdP, its old JWKS, or an unexpired token at delivery
+// time.
+func (a *Agent) reconstructAcceptedEnrollment(enrollment protocol.EnrollmentPackage) (protocol.ContinuityState, string, error) {
+	intent := enrollment.Intent
+	if intent.Protocol != protocol.EnrollmentProtocol || intent.TenantID != a.config.TenantID {
+		return protocol.ContinuityState{}, "", errors.New("enrollment protocol or tenant mismatch")
+	}
+	if intent.ExpectedIssuer != a.config.OIDCIssuer || intent.EnrollmentClientID != a.config.OIDCClientID {
+		return protocol.ContinuityState{}, "", errors.New("enrollment issuer or client does not match provisioned tenant configuration")
+	}
+	if enrollment.IdentityID == "" || protocol.DigestBytes(enrollment.ContinuityPublicKey) != intent.ContinuityKeyDigest {
+		return protocol.ContinuityState{}, "", errors.New("accepted enrollment key binding is malformed")
+	}
+	if err := protocol.Verify(enrollment.ContinuityPublicKey, "enrollment-proof-of-possession/v1", intent, enrollment.ProofOfPossession); err != nil {
+		return protocol.ContinuityState{}, "", fmt.Errorf("continuity-key proof of possession: %w", err)
+	}
+	state := protocol.ContinuityState{
+		Protocol:            protocol.ContinuityStateProtocol,
+		TenantID:            a.config.TenantID,
+		IdentityID:          enrollment.IdentityID,
+		Generation:          0,
+		ContinuityPublicKey: append([]byte(nil), enrollment.ContinuityPublicKey...),
+	}
+	digest, err := state.Digest()
+	if err != nil {
+		return protocol.ContinuityState{}, "", err
+	}
+	return state, digest, nil
+}
+
+func (a *Agent) verifyRotation(rotation protocol.RotationPackage, currentState protocol.ContinuityState, currentDigest string) (protocol.ContinuityState, string, error) {
 	intent := rotation.Intent
 	if intent.Protocol != protocol.RotationProtocol || intent.TenantID != a.config.TenantID {
-		return "", protocol.ContinuityState{}, "", errors.New("rotation protocol or tenant mismatch")
+		return protocol.ContinuityState{}, "", errors.New("rotation protocol or tenant mismatch")
 	}
-	if intent.IdentityID != previousHead.IdentityID || intent.PreviousStateDigest != previousHead.CurrentStateDigest {
-		return "", protocol.ContinuityState{}, "", errors.New("rotation does not continue current key-history state")
-	}
-	currentState, ok := states[intent.PreviousStateDigest]
-	if !ok {
-		return "", protocol.ContinuityState{}, "", errors.New("current continuity state is unavailable")
+	if intent.IdentityID != currentState.IdentityID || intent.PreviousStateDigest != currentDigest {
+		return protocol.ContinuityState{}, "", errors.New("rotation does not continue current key-history state")
 	}
 	if intent.NewGeneration != currentState.Generation+1 {
-		return "", protocol.ContinuityState{}, "", errors.New("rotation generation is not the next generation")
+		return protocol.ContinuityState{}, "", errors.New("rotation generation is not the next generation")
 	}
 	if protocol.DigestBytes(rotation.NewContinuityPublicKey) != intent.NewContinuityKeyDigest {
-		return "", protocol.ContinuityState{}, "", errors.New("successor key does not match signed digest")
+		return protocol.ContinuityState{}, "", errors.New("successor key does not match signed digest")
 	}
 	if err := protocol.Verify(currentState.ContinuityPublicKey, "continuity-rotation-old-key/v1", intent, rotation.SignatureByOldKey); err != nil {
-		return "", protocol.ContinuityState{}, "", fmt.Errorf("old key did not authorize rotation: %w", err)
+		return protocol.ContinuityState{}, "", fmt.Errorf("old key did not authorize rotation: %w", err)
 	}
 	if err := protocol.Verify(rotation.NewContinuityPublicKey, "continuity-rotation-new-key/v1", intent, rotation.ProofByNewKey); err != nil {
-		return "", protocol.ContinuityState{}, "", fmt.Errorf("new key did not prove possession: %w", err)
+		return protocol.ContinuityState{}, "", fmt.Errorf("new key did not prove possession: %w", err)
 	}
 	newState := protocol.ContinuityState{
 		Protocol:            protocol.ContinuityStateProtocol,
@@ -363,58 +492,59 @@ func (a *Agent) verifyRotation(rotation protocol.RotationPackage, previousHead p
 	}
 	newDigest, err := newState.Digest()
 	if err != nil {
-		return "", protocol.ContinuityState{}, "", err
+		return protocol.ContinuityState{}, "", err
 	}
-	return intent.PreviousStateDigest, newState, newDigest, nil
+	return newState, newDigest, nil
 }
 
 // AdvanceDeliveryLog pins an RFC 6962 append-only continuation without
-// applying its delivery events. The update may selectively disclose records
-// (such as rotation markers) whose inclusion the agent needs to remember.
+// applying its delivery events. Disclosed records are deliberately not
+// retained; a later delivery must re-supply every leaf it relies on.
 func (a *Agent) AdvanceDeliveryLog(update protocol.DeliveryLogUpdate) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	return a.advanceDeliveryLogLocked(update)
+	_, err := a.advanceDeliveryLogLocked(update)
+	return err
 }
 
-func (a *Agent) advanceDeliveryLogLocked(update protocol.DeliveryLogUpdate) error {
+func (a *Agent) advanceDeliveryLogLocked(update protocol.DeliveryLogUpdate) (map[uint64]observedLogRecord, error) {
 	if err := protocol.VerifyDeliveryLogUpdate(a.deliveryCheckpoint, update); err != nil {
-		return fmt.Errorf("%w: %v", ErrLogFork, err)
+		return nil, fmt.Errorf("%w: %v", ErrLogFork, err)
 	}
 
-	observed := cloneObservedRecords(a.deliveryRecords)
+	observed := make(map[uint64]observedLogRecord, len(update.Entries))
 	for _, entry := range update.Entries {
 		next := observeRecord(entry.Record)
 		if previous, exists := observed[entry.Record.Index]; exists && previous != next {
-			return fmt.Errorf("%w: disclosed record at index %d conflicts with an earlier proof", ErrLogFork, entry.Record.Index)
+			return nil, fmt.Errorf("%w: disclosed record at index %d conflicts within proof", ErrLogFork, entry.Record.Index)
 		}
 		observed[entry.Record.Index] = next
 	}
 
 	a.deliveryCheckpoint = update.Checkpoint
-	a.deliveryRecords = observed
-	return nil
+	return observed, nil
 }
 
 // Deliver is the manager-facing push operation. When the manager constructs a
 // proof from an obsolete checkpoint, the agent returns its newer checkpoint so
 // the manager can validate that checkpoint and retry. A nil result is the ack.
-func (a *Agent) Deliver(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error {
+func (a *Agent) Deliver(record protocol.DeliveryRecord, deliveryProof protocol.DeliveryProof) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	attempt := summarizeDeliveryAttempt(record, update)
+	attempt := summarizeDeliveryAttempt(record, deliveryProof.Log)
 	a.lastDeliveryAttempt = &attempt
 	if a.failBeforeAccepting > 0 {
 		a.failBeforeAccepting--
 		return ErrDeliveryUnavailable
 	}
-	if err := a.advanceDeliveryLogLocked(update); err != nil {
+	observed, err := a.advanceDeliveryLogLocked(deliveryProof.Log)
+	if err != nil {
 		a.staleCheckpointResponses++
 		return &CheckpointStaleError{checkpoint: a.deliveryCheckpoint, cause: err}
 	}
-	if err := a.receiveIncludedDeliveryLocked(record); err != nil {
+	if err := a.receiveIncludedDeliveryLocked(record, deliveryProof.Identity, observed); err != nil {
 		return err
 	}
 	if a.loseNextAcknowledgement {
@@ -443,18 +573,19 @@ func summarizeDeliveryAttempt(record protocol.DeliveryRecord, update protocol.De
 // tests.
 // Unlike Deliver, it reports an invalid checkpoint transition as ErrLogFork
 // rather than participating in the manager/agent checkpoint-recovery exchange.
-func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error {
+func (a *Agent) ReceiveDelivery(record protocol.DeliveryRecord, deliveryProof protocol.DeliveryProof) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if err := a.advanceDeliveryLogLocked(update); err != nil {
+	observed, err := a.advanceDeliveryLogLocked(deliveryProof.Log)
+	if err != nil {
 		return err
 	}
-	return a.receiveIncludedDeliveryLocked(record)
+	return a.receiveIncludedDeliveryLocked(record, deliveryProof.Identity, observed)
 }
 
-func (a *Agent) receiveIncludedDeliveryLocked(record protocol.DeliveryRecord) error {
-	if err := a.verifyIncludedRecord(record); err != nil {
+func (a *Agent) receiveIncludedDeliveryLocked(record protocol.DeliveryRecord, identityProof protocol.IdentityTrustProof, observed map[uint64]observedLogRecord) error {
+	if err := a.verifyIncludedRecord(record, observed); err != nil {
 		return err
 	}
 
@@ -472,20 +603,33 @@ func (a *Agent) receiveIncludedDeliveryLocked(record protocol.DeliveryRecord) er
 	if protocol.DigestBytes(delivery.Content) != attestation.ContentDigest {
 		return fmt.Errorf("%w: delivered content does not match signed digest", ErrAttestation)
 	}
-	state, ok := a.states[attestation.SigningStateDigest]
+	if identityProof.Map.Head.IdentityID != attestation.IdentityID {
+		return fmt.Errorf("%w: identity proof is for a different signing identity", ErrSigningState)
+	}
+	if err := protocol.VerifyKeyHistoryMapProof(a.config.TenantID, a.mapRoot, identityProof.Map); err != nil {
+		return fmt.Errorf("%w: current map membership: %v", ErrSigningState, err)
+	}
+	history, _, err := a.validateHistory(context.Background(), identityProof.Map.Head, identityProof.History, identityProof.RotationRecords, true, true)
+	if err != nil {
+		if errors.Is(err, ErrEnrollment) || errors.Is(err, ErrRotation) {
+			return fmt.Errorf("%w: identity history: %v", ErrSigningState, err)
+		}
+		return err
+	}
+	state, ok := history.states[attestation.SigningStateDigest]
 	if !ok || state.IdentityID != attestation.IdentityID {
 		return fmt.Errorf("%w: unknown state for signing identity", ErrSigningState)
 	}
-	if boundary, rotated := a.validFrom[attestation.SigningStateDigest]; rotated {
-		if !a.boundaryVerified(boundary) {
+	if boundary, rotated := history.validFrom[attestation.SigningStateDigest]; rotated {
+		if !boundaryVerified(boundary, observed) {
 			return fmt.Errorf("%w: rotation marker establishing state is not proven", ErrSigningState)
 		}
 		if record.Index <= boundary.Marker.Index {
 			return fmt.Errorf("%w: state is not valid before rotation marker %d", ErrSigningState, boundary.Marker.Index)
 		}
 	}
-	if boundary, retired := a.validBefore[attestation.SigningStateDigest]; retired {
-		if !a.boundaryVerified(boundary) {
+	if boundary, retired := history.validBefore[attestation.SigningStateDigest]; retired {
+		if !boundaryVerified(boundary, observed) {
 			return fmt.Errorf("%w: rotation marker retiring state is not proven", ErrSigningState)
 		}
 		if record.Index >= boundary.Marker.Index {
@@ -521,22 +665,22 @@ func (a *Agent) receiveIncludedDeliveryLocked(record protocol.DeliveryRecord) er
 	return nil
 }
 
-func (a *Agent) verifyIncludedRecord(record protocol.DeliveryRecord) error {
+func (a *Agent) verifyIncludedRecord(record protocol.DeliveryRecord, observed map[uint64]observedLogRecord) error {
 	if record.Index >= a.deliveryCheckpoint.Size {
 		return fmt.Errorf("%w: delivery index %d is beyond accepted size %d", ErrLogFork, record.Index, a.deliveryCheckpoint.Size)
 	}
 	if _, err := protocol.VerifyDeliveryRecord(record); err != nil {
 		return fmt.Errorf("%w: %v", ErrLogFork, err)
 	}
-	accepted, ok := a.deliveryRecords[record.Index]
+	accepted, ok := observed[record.Index]
 	if !ok || accepted != observeRecord(record) {
 		return fmt.Errorf("%w: delivery record is absent from accepted log history", ErrLogFork)
 	}
 	return nil
 }
 
-func (a *Agent) boundaryVerified(boundary validityBoundary) bool {
-	observed, ok := a.deliveryRecords[boundary.Marker.Index]
+func boundaryVerified(boundary validityBoundary, records map[uint64]observedLogRecord) bool {
+	observed, ok := records[boundary.Marker.Index]
 	return ok &&
 		observed.Hash == boundary.Marker.Hash &&
 		observed.Kind == protocol.DeliveryLogEventRotation &&
@@ -569,41 +713,8 @@ func keyEventError(kind string) error {
 	return ErrRotation
 }
 
-func cloneStates(in map[string]protocol.ContinuityState) map[string]protocol.ContinuityState {
-	out := make(map[string]protocol.ContinuityState, len(in))
-	for key, value := range in {
-		value.ContinuityPublicKey = append([]byte(nil), value.ContinuityPublicKey...)
-		out[key] = value
-	}
-	return out
-}
-
-func cloneHeads(in map[string]protocol.KeyHistoryHead) map[string]protocol.KeyHistoryHead {
-	out := make(map[string]protocol.KeyHistoryHead, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneBoundaries(in map[string]validityBoundary) map[string]validityBoundary {
-	out := make(map[string]validityBoundary, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneMarkers(in map[string]protocol.DeliveryLogReference) map[string]protocol.DeliveryLogReference {
-	out := make(map[string]protocol.DeliveryLogReference, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneObservedRecords(in map[uint64]observedLogRecord) map[uint64]observedLogRecord {
-	out := make(map[uint64]observedLogRecord, len(in))
+func cloneExceptions(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
 	for key, value := range in {
 		out[key] = value
 	}

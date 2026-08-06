@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,6 +52,30 @@ func TestNewEnrollmentAndSignedDelivery(t *testing.T) {
 	}
 	if got := s.provider.SuccessfulCodeExchanges(); got != 1 {
 		t.Fatalf("OIDC authorization-code exchanges = %d, want 1", got)
+	}
+}
+
+func TestAcceptedRootSupportsRotationAndDeliveryWithoutLiveOIDC(t *testing.T) {
+	s := newEnrolledScenario(t)
+	s.provider.Close()
+
+	rotation, rotatedClient, err := s.controlledClient.PrepareRotation()
+	if err != nil {
+		t.Fatalf("prepare rotation: %v", err)
+	}
+	if _, err := s.manager.SubmitRotation(s.controlledClient.IdentityID(), rotation); err != nil {
+		t.Fatalf("submit rotation: %v", err)
+	}
+	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
+		t.Fatalf("sync rotation after OIDC provider became unavailable: %v", err)
+	}
+
+	signed := mustSignDelivery(t, rotatedClient, "accepted-root", 1, []byte(`{"source":"retained-root"}`))
+	if _, err := s.manager.SubmitDelivery(rotatedClient.IdentityID(), signed); err != nil {
+		t.Fatalf("deliver after OIDC provider became unavailable: %v", err)
+	}
+	if _, ok := s.agent.Applied("accepted-root"); !ok {
+		t.Fatal("agent did not apply delivery from previously accepted identity history")
 	}
 }
 
@@ -171,6 +196,162 @@ func TestEnrollmentRejectsResourceManagerKeySubstitution(t *testing.T) {
 	err = s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot()))
 	if !errors.Is(err, deliveryagent.ErrEnrollment) {
 		t.Fatalf("sync substituted enrollment error = %v, want ErrEnrollment", err)
+	}
+}
+
+func TestVerifierTrustCheckpointDoesNotScaleWithEnrolledIdentities(t *testing.T) {
+	s := newScenario(t)
+	before, err := json.Marshal(s.agent.VerifierCheckpoint())
+	if err != nil {
+		t.Fatalf("encode initial verifier checkpoint: %v", err)
+	}
+
+	for i := 0; i < 16; i++ {
+		controlledClient, err := client.New(client.Config{
+			TenantID:     testTenant,
+			Issuer:       s.provider.Issuer(),
+			OIDCClientID: testOIDCClient,
+			RedirectURI:  testRedirectURI,
+			HTTPClient:   s.provider.HTTPClient(),
+		})
+		if err != nil {
+			t.Fatalf("new controlled client %d: %v", i, err)
+		}
+		enrollment, err := controlledClient.Enroll(context.Background(), fmt.Sprintf("user-%d", i))
+		if err != nil {
+			t.Fatalf("enroll controlled client %d: %v", i, err)
+		}
+		if _, err := s.manager.SubmitEnrollment(enrollment); err != nil {
+			t.Fatalf("submit enrollment %d: %v", i, err)
+		}
+	}
+	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
+		t.Fatalf("sync enrollments: %v", err)
+	}
+
+	checkpoint := s.agent.VerifierCheckpoint()
+	if got := len(checkpoint.ExceptionalEventDigests); got != 0 {
+		t.Fatalf("exceptional event digests = %d, want 0", got)
+	}
+	after, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatalf("encode populated verifier checkpoint: %v", err)
+	}
+	if got, want := len(after), len(before); got != want {
+		t.Fatalf("verifier checkpoint size after 16 enrollments = %d, want constant size %d", got, want)
+	}
+}
+
+func TestExceptionCapacityBlocksFurtherMapAdvancement(t *testing.T) {
+	s := newScenario(t)
+	agent, err := deliveryagent.New(deliveryagent.Config{
+		TenantID:          testTenant,
+		TargetID:          testTarget,
+		OIDCIssuer:        s.provider.Issuer(),
+		OIDCClientID:      testOIDCClient,
+		HTTPClient:        s.provider.HTTPClient(),
+		ExceptionCapacity: 1,
+	})
+	if err != nil {
+		t.Fatalf("new capacity-limited delivery agent: %v", err)
+	}
+
+	appendInvalidEnrollment := func(subject string) protocol.AuthenticatedMapUpdate {
+		t.Helper()
+		controlledClient, err := client.New(client.Config{
+			TenantID:     testTenant,
+			Issuer:       s.provider.Issuer(),
+			OIDCClientID: testOIDCClient,
+			RedirectURI:  testRedirectURI,
+			HTTPClient:   s.provider.HTTPClient(),
+		})
+		if err != nil {
+			t.Fatalf("new %s client: %v", subject, err)
+		}
+		enrollment, err := controlledClient.Enroll(context.Background(), subject)
+		if err != nil {
+			t.Fatalf("enroll %s: %v", subject, err)
+		}
+		attacker, err := client.New(client.Config{TenantID: testTenant})
+		if err != nil {
+			t.Fatalf("new %s attacker: %v", subject, err)
+		}
+		enrollment.ContinuityPublicKey = attacker.ContinuityPublicKey()
+		return s.manager.Compromised().AppendEnrollment(enrollment)
+	}
+
+	first := appendInvalidEnrollment("invalid-1")
+	if err := agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(agent.MapRoot())); !errors.Is(err, deliveryagent.ErrEnrollment) {
+		t.Fatalf("first invalid enrollment error = %v, want ErrEnrollment", err)
+	}
+	if got, want := agent.MapRoot(), first.Root; got != want {
+		t.Fatalf("map root after retained exception = %q, want %q", got, want)
+	}
+	if got := len(agent.VerifierCheckpoint().ExceptionalEventDigests); got != 1 {
+		t.Fatalf("exceptional event digests = %d, want 1", got)
+	}
+	validClient, err := client.New(client.Config{
+		TenantID:     testTenant,
+		Issuer:       s.provider.Issuer(),
+		OIDCClientID: testOIDCClient,
+		RedirectURI:  testRedirectURI,
+		HTTPClient:   s.provider.HTTPClient(),
+	})
+	if err != nil {
+		t.Fatalf("new valid client: %v", err)
+	}
+	validEnrollment, err := validClient.Enroll(context.Background(), "valid-between-exceptions")
+	if err != nil {
+		t.Fatalf("enroll valid client: %v", err)
+	}
+	validUpdate, err := s.manager.SubmitEnrollment(validEnrollment)
+	if err != nil {
+		t.Fatalf("submit valid enrollment: %v", err)
+	}
+	if err := agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(agent.MapRoot())); err != nil {
+		t.Fatalf("full exception set blocked a valid map update: %v", err)
+	}
+	if got, want := agent.MapRoot(), validUpdate.Root; got != want {
+		t.Fatalf("map root after valid update = %q, want %q", got, want)
+	}
+
+	appendInvalidEnrollment("invalid-2")
+	if err := agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(agent.MapRoot())); !errors.Is(err, deliveryagent.ErrExceptionCapacity) {
+		t.Fatalf("second invalid enrollment error = %v, want ErrExceptionCapacity", err)
+	}
+	if got, want := agent.MapRoot(), validUpdate.Root; got != want {
+		t.Fatalf("map root advanced after exception capacity filled: got %q, want %q", got, want)
+	}
+}
+
+func TestExceptionalEnrollmentCannotAuthorizeDelivery(t *testing.T) {
+	s := newScenario(t)
+	enrollment := mustEnroll(t, s.controlledClient)
+	attacker, err := client.New(client.Config{TenantID: testTenant})
+	if err != nil {
+		t.Fatalf("new attacker client: %v", err)
+	}
+	enrollment.ContinuityPublicKey = attacker.ContinuityPublicKey()
+	s.manager.Compromised().AppendEnrollment(enrollment)
+	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); !errors.Is(err, deliveryagent.ErrEnrollment) {
+		t.Fatalf("sync exceptional enrollment error = %v, want ErrEnrollment", err)
+	}
+	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
+		t.Fatalf("register delivery agent: %v", err)
+	}
+	attackerState := protocol.ContinuityState{
+		Protocol:            protocol.ContinuityStateProtocol,
+		TenantID:            testTenant,
+		IdentityID:          enrollment.IdentityID,
+		ContinuityPublicKey: attacker.ContinuityPublicKey(),
+	}
+	attackerStateDigest, err := attackerState.Digest()
+	if err != nil {
+		t.Fatalf("digest attacker continuity state: %v", err)
+	}
+	forged := mustSignDeliveryAs(t, attacker, enrollment.IdentityID, attackerStateDigest, "exceptional-enrollment", 1, []byte(`{"attack":true}`))
+	if _, err := s.manager.SubmitDelivery(enrollment.IdentityID, forged); !errors.Is(err, deliveryagent.ErrSigningState) {
+		t.Fatalf("delivery rooted in exceptional enrollment error = %v, want ErrSigningState", err)
 	}
 }
 
@@ -362,7 +543,7 @@ func TestCompromisedResourceManagerCannotForgeOrAlterDelivery(t *testing.T) {
 		forged := mustSignDeliveryAs(t, attacker, s.controlledClient.IdentityID(), s.controlledClient.ContinuityStateDigest(), "forged", 1, []byte(`{"owner":"attacker"}`))
 		record := s.manager.Compromised().AppendDelivery(forged)
 
-		err = s.agent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, s.agent, record.Index))
+		err = s.agent.ReceiveDelivery(record, mustDeliveryProof(t, s.manager, s.agent, record, record.Index))
 		if !errors.Is(err, deliveryagent.ErrSignature) {
 			t.Fatalf("forged delivery error = %v, want ErrSignature", err)
 		}
@@ -374,7 +555,7 @@ func TestCompromisedResourceManagerCannotForgeOrAlterDelivery(t *testing.T) {
 		signed.Content = []byte(`{"approved":false}`)
 		record := s.manager.Compromised().AppendDelivery(signed)
 
-		err := s.agent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, s.agent, record.Index))
+		err := s.agent.ReceiveDelivery(record, mustDeliveryProof(t, s.manager, s.agent, record, record.Index))
 		if !errors.Is(err, deliveryagent.ErrAttestation) {
 			t.Fatalf("altered delivery error = %v, want ErrAttestation", err)
 		}
@@ -386,9 +567,35 @@ func TestCompromisedResourceManagerCannotForgeOrAlterDelivery(t *testing.T) {
 		signed.Attestation.Generation = 2
 		record := s.manager.Compromised().AppendDelivery(signed)
 
-		err := s.agent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, s.agent, record.Index))
+		err := s.agent.ReceiveDelivery(record, mustDeliveryProof(t, s.manager, s.agent, record, record.Index))
 		if !errors.Is(err, deliveryagent.ErrSignature) {
 			t.Fatalf("altered delivery metadata error = %v, want ErrSignature", err)
+		}
+	})
+}
+
+func TestCompromisedResourceManagerCannotTamperIdentityTrustProof(t *testing.T) {
+	t.Run("sparse-map membership", func(t *testing.T) {
+		s := newEnrolledScenario(t)
+		signed := mustSignDelivery(t, s.controlledClient, "tampered-map-proof", 1, []byte(`{"approved":true}`))
+		record := s.manager.Compromised().AppendDelivery(signed)
+		proof := mustDeliveryProof(t, s.manager, s.agent, record, record.Index)
+		proof.Identity.Map.SiblingHashes[0] = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+		if err := s.agent.ReceiveDelivery(record, proof); !errors.Is(err, deliveryagent.ErrSigningState) {
+			t.Fatalf("tampered map-membership proof error = %v, want ErrSigningState", err)
+		}
+	})
+
+	t.Run("key history", func(t *testing.T) {
+		s := newEnrolledScenario(t)
+		signed := mustSignDelivery(t, s.controlledClient, "tampered-history-proof", 1, []byte(`{"approved":true}`))
+		record := s.manager.Compromised().AppendDelivery(signed)
+		proof := mustDeliveryProof(t, s.manager, s.agent, record, record.Index)
+		proof.Identity.History[0].Event.Enrollment.ContinuityPublicKey[0] ^= 0xff
+
+		if err := s.agent.ReceiveDelivery(record, proof); !errors.Is(err, deliveryagent.ErrSigningState) {
+			t.Fatalf("tampered key-history proof error = %v, want ErrSigningState", err)
 		}
 	})
 }
@@ -407,7 +614,7 @@ func TestAuthenticProvenanceDoesNotReplaceResourceManagerAuthorization(t *testin
 	}
 
 	record := s.manager.Compromised().AppendDelivery(signed)
-	if err := s.agent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, s.agent, record.Index)); err != nil {
+	if err := s.agent.ReceiveDelivery(record, mustDeliveryProof(t, s.manager, s.agent, record, record.Index)); err != nil {
 		t.Fatalf("agent rejected authentic provenance after manager authorization bypass: %v", err)
 	}
 	if _, ok := s.agent.Applied("rbac-denied"); !ok {
@@ -448,7 +655,7 @@ func TestContinuityKeyRotation(t *testing.T) {
 	}
 
 	retiredRecord := s.manager.Compromised().AppendDelivery(queuedOld)
-	if err := s.agent.ReceiveDelivery(retiredRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, retiredRecord.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
+	if err := s.agent.ReceiveDelivery(retiredRecord, mustDeliveryProof(t, s.manager, s.agent, retiredRecord, retiredRecord.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
 		t.Fatalf("retired-key delivery error = %v, want ErrSigningState", err)
 	}
 }
@@ -468,7 +675,7 @@ func TestSuccessorKeyDeliveryBeforeRotationMarkerIsRejected(t *testing.T) {
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
 		t.Fatalf("sync rotation: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(earlyRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, earlyRecord.Index, commit.Marker.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
+	if err := s.agent.ReceiveDelivery(earlyRecord, mustDeliveryProof(t, s.manager, s.agent, earlyRecord, earlyRecord.Index, commit.Marker.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
 		t.Fatalf("early successor delivery error = %v, want ErrSigningState", err)
 	}
 }
@@ -493,15 +700,18 @@ func TestCurrentMapLeafCommitsPerIdentityKeyHistory(t *testing.T) {
 	current := mustSignDelivery(t, rotatedClient, "current", 1, []byte(`{"version":2}`))
 	currentRecord := mustSubmitUndelivered(t, s.manager, rotatedClient.IdentityID(), current)
 
-	// This agent learns the latest map leaf and Merkle-proven history in one
-	// catch-up. It can then validate deliveries on either side of the marker.
+	// This agent accepts the latest root without retaining the identity leaf.
+	// The manager can later prove deliveries on either side of the marker from
+	// its retained history.
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
 		t.Fatalf("sync key history: %v", err)
 	}
-	head, ok := s.agent.HistoryHead(s.controlledClient.IdentityID())
-	if !ok {
-		t.Fatal("authenticated map has no key-history head for identity")
+	s.provider.Close()
+	identityProof, err := s.manager.IdentityTrustProof(s.controlledClient.IdentityID())
+	if err != nil {
+		t.Fatalf("build current identity proof: %v", err)
 	}
+	head := identityProof.Map.Head
 	if got, want := head.Size, uint64(2); got != want {
 		t.Fatalf("key-history size = %d, want %d", got, want)
 	}
@@ -562,7 +772,7 @@ func TestHistoricalMiddleKeyIsBoundedByAdjacentMarkers(t *testing.T) {
 		t.Fatalf("manager deliver middle state using both adjacent-marker proofs: %v", err)
 	}
 	assertLastDeliveryAttemptIndexes(t, s.agent, firstCommit.Marker.Index, secondCommit.Marker.Index, middleRecord.Index)
-	if err := s.agent.ReceiveDelivery(lateMiddleRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, lateMiddleRecord.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
+	if err := s.agent.ReceiveDelivery(lateMiddleRecord, mustDeliveryProof(t, s.manager, s.agent, lateMiddleRecord, lateMiddleRecord.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
 		t.Fatalf("middle-state delivery after retiring marker error = %v, want ErrSigningState", err)
 	}
 	if err := s.manager.RetryDelivery(currentRecord.Index); err != nil {
@@ -593,14 +803,14 @@ func TestDeferredRotationMarkerMustBeProvenBeforeHistoricalDelivery(t *testing.T
 	if err := s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot())); err != nil {
 		t.Fatalf("sync key history before marker: %v", err)
 	}
-	err = s.agent.ReceiveDelivery(historicalRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, historicalRecord.Index))
+	err = s.agent.ReceiveDelivery(historicalRecord, mustDeliveryProof(t, s.manager, s.agent, historicalRecord, historicalRecord.Index))
 	if !errors.Is(err, deliveryagent.ErrSigningState) || !strings.Contains(err.Error(), "marker") {
 		t.Fatalf("historical delivery before marker proof error = %v, want marker ErrSigningState", err)
 	}
 	if err := s.agent.AdvanceDeliveryLog(mustDeliveryLogUpdate(t, s.manager, s.agent, commit.Marker.Index)); err != nil {
 		t.Fatalf("prove deferred marker: %v", err)
 	}
-	if err := s.agent.ReceiveDelivery(historicalRecord, mustDeliveryLogUpdate(t, s.manager, s.agent, historicalRecord.Index)); err != nil {
+	if err := s.agent.ReceiveDelivery(historicalRecord, mustDeliveryProof(t, s.manager, s.agent, historicalRecord, commit.Marker.Index, historicalRecord.Index)); err != nil {
 		t.Fatalf("retry historical delivery after marker proof: %v", err)
 	}
 }
@@ -760,7 +970,7 @@ func TestRotationCutoffIsLocalToAgentsThatObservedIt(t *testing.T) {
 	// The second verifier is deliberately not the manager's active target route;
 	// seed the common pre-rotation view before testing selective compromised
 	// routing to the two locally witnessed histories.
-	if err := staleAgent.ReceiveDelivery(initialRecord, mustDeliveryLogUpdate(t, s.manager, staleAgent, initialRecord.Index)); err != nil {
+	if err := staleAgent.ReceiveDelivery(initialRecord, mustDeliveryProof(t, s.manager, staleAgent, initialRecord, initialRecord.Index)); err != nil {
 		t.Fatalf("stale agent receive initial delivery: %v", err)
 	}
 
@@ -778,10 +988,10 @@ func TestRotationCutoffIsLocalToAgentsThatObservedIt(t *testing.T) {
 
 	compromisedOldKeyDelivery := mustSignDelivery(t, s.controlledClient, "old-key-after-cutoff", 1, []byte(`{"attack":true}`))
 	record := s.manager.Compromised().AppendDelivery(compromisedOldKeyDelivery)
-	if err := s.agent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, s.agent, commit.Marker.Index, record.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
+	if err := s.agent.ReceiveDelivery(record, mustDeliveryProof(t, s.manager, s.agent, record, commit.Marker.Index, record.Index)); !errors.Is(err, deliveryagent.ErrSigningState) {
 		t.Fatalf("rotated agent error = %v, want ErrSigningState", err)
 	}
-	if err := staleAgent.ReceiveDelivery(record, mustDeliveryLogUpdate(t, s.manager, staleAgent, record.Index)); err != nil {
+	if err := staleAgent.ReceiveDelivery(record, mustDeliveryProof(t, s.manager, staleAgent, record, record.Index)); err != nil {
 		t.Fatalf("stale agent should accept on its pre-rotation view: %v", err)
 	}
 }
@@ -797,7 +1007,7 @@ func TestEstablishedAgentRejectsDeliveryLogFork(t *testing.T) {
 
 	forked := mustSignDelivery(t, s.controlledClient, "fork", 1, []byte(`{"branch":"fork"}`))
 	forkRecord, forkUpdate := s.manager.Compromised().ForgeDeliveryAt(oldCheckpoint, forked)
-	if err := s.agent.ReceiveDelivery(forkRecord, forkUpdate); !errors.Is(err, deliveryagent.ErrLogFork) {
+	if err := s.agent.ReceiveDelivery(forkRecord, protocol.DeliveryProof{Log: forkUpdate}); !errors.Is(err, deliveryagent.ErrLogFork) {
 		t.Fatalf("forked delivery error = %v, want ErrLogFork", err)
 	}
 }
@@ -982,4 +1192,19 @@ func mustDeliveryLogUpdate(t *testing.T, manager *resourcemanager.Manager, agent
 		t.Fatalf("build delivery-log update: %v", err)
 	}
 	return update
+}
+
+func mustDeliveryProof(t *testing.T, manager *resourcemanager.Manager, agent *deliveryagent.Agent, record protocol.DeliveryRecord, indexes ...uint64) protocol.DeliveryProof {
+	t.Helper()
+	if record.Event.Delivery == nil {
+		t.Fatal("delivery proof requested for a non-delivery record")
+	}
+	identityProof, err := manager.IdentityTrustProofAt(record.Event.Delivery.Attestation.IdentityID, agent.MapRoot())
+	if err != nil {
+		t.Fatalf("build identity trust proof: %v", err)
+	}
+	return protocol.DeliveryProof{
+		Log:      mustDeliveryLogUpdate(t, manager, agent, indexes...),
+		Identity: identityProof,
+	}
 }

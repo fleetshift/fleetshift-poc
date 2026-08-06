@@ -37,7 +37,8 @@ type Authorizer func(AuthorizationRequest) error
 // error is the acknowledgement that the agent durably accepted the supplied
 // log checkpoint and delivery.
 type DeliveryAgent interface {
-	Deliver(record protocol.DeliveryRecord, update protocol.DeliveryLogUpdate) error
+	Deliver(record protocol.DeliveryRecord, proof protocol.DeliveryProof) error
+	MapRoot() string
 }
 
 // staleCheckpointError is returned by an agent when a request was constructed
@@ -74,7 +75,6 @@ type Manager struct {
 	mapUpdates     []protocol.AuthenticatedMapUpdate
 	histories      map[string]protocol.KeyHistoryHead
 	historyRecords map[string][]protocol.KeyEventRecord
-	states         map[string]protocol.ContinuityState
 	deliveries     []protocol.DeliveryRecord
 	deliveryTree   *merklelog.Tree
 	agents         map[string]*agentRoute
@@ -94,7 +94,6 @@ func New(tenantID string, authorizer Authorizer) *Manager {
 		mapRoot:        emptyMapRoot,
 		histories:      make(map[string]protocol.KeyHistoryHead),
 		historyRecords: make(map[string][]protocol.KeyEventRecord),
-		states:         make(map[string]protocol.ContinuityState),
 		deliveryTree:   merklelog.New(),
 		agents:         make(map[string]*agentRoute),
 	}
@@ -231,15 +230,20 @@ func (m *Manager) pushDelivery(record protocol.DeliveryRecord) error {
 	route.mu.Lock()
 	defer route.mu.Unlock()
 	for {
+		mapRoot := route.agent.MapRoot()
 		m.mu.RLock()
-		indexes := m.deliveryProofIndexesLocked(record)
+		identityProof, identityErr := m.identityTrustProofAtLocked(record.Event.Delivery.Attestation.IdentityID, mapRoot)
+		indexes := deliveryProofIndexes(record, identityProof.History)
 		update, err := deliveryLogUpdate(m.deliveryTree, m.deliveries, route.checkpoint, indexes...)
 		m.mu.RUnlock()
 		if err != nil {
 			return fmt.Errorf("construct proof from acknowledged agent checkpoint: %w", err)
 		}
+		if identityErr != nil {
+			return fmt.Errorf("construct identity trust proof: %w", identityErr)
+		}
 
-		if err := route.agent.Deliver(record, update); err != nil {
+		if err := route.agent.Deliver(record, protocol.DeliveryProof{Log: update, Identity: identityProof}); err != nil {
 			var stale staleCheckpointError
 			if !errors.As(err, &stale) {
 				return err
@@ -275,15 +279,14 @@ func (m *Manager) validateAgentCheckpoint(checkpoint protocol.Checkpoint) error 
 	return nil
 }
 
-// deliveryProofIndexesLocked selects the delivery plus the rotation markers
-// that bound its signing state. The consistency proof commits all undisclosed
-// intervening leaves, so no other delivery records need to be sent.
-func (m *Manager) deliveryProofIndexesLocked(record protocol.DeliveryRecord) []uint64 {
+// deliveryProofIndexes selects the delivery plus the rotation markers that
+// bound its signing state under the verifier's accepted identity history. The
+// consistency proof commits all undisclosed intervening leaves.
+func deliveryProofIndexes(record protocol.DeliveryRecord, history []protocol.KeyEventRecord) []uint64 {
 	delivery := record.Event.Delivery
 	if delivery == nil {
 		return []uint64{record.Index}
 	}
-	history := m.historyRecords[delivery.Attestation.IdentityID]
 	indexes := make([]uint64, 0, 3)
 	for i := range history {
 		if history[i].ResultingStateDigest != delivery.Attestation.SigningStateDigest {
@@ -356,6 +359,58 @@ func (m *Manager) DeliveryLogUpdate(checkpoint protocol.Checkpoint, indexes ...u
 	return deliveryLogUpdate(m.deliveryTree, m.deliveries, checkpoint, indexes...)
 }
 
+// IdentityTrustProof returns the manager-assembled proof that identityID's
+// complete continuity history is the current leaf under the authenticated map.
+// The agent can validate it without retaining any per-identity state.
+func (m *Manager) IdentityTrustProof(identityID string) (protocol.IdentityTrustProof, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.identityTrustProofAtLocked(identityID, m.mapRoot)
+}
+
+// IdentityTrustProofAt assembles a proof for a verifier that intentionally
+// retains an older accepted map root.
+func (m *Manager) IdentityTrustProofAt(identityID, root string) (protocol.IdentityTrustProof, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.identityTrustProofAtLocked(identityID, root)
+}
+
+func (m *Manager) identityTrustProofAtLocked(identityID, root string) (protocol.IdentityTrustProof, error) {
+	heads := make(map[string]protocol.KeyHistoryHead)
+	var history []protocol.KeyEventRecord
+	emptyRoot, err := protocol.KeyHistoryMapRoot(m.tenantID, nil)
+	if err != nil {
+		return protocol.IdentityTrustProof{}, err
+	}
+	if root != emptyRoot {
+		found := false
+		for _, update := range m.mapUpdates {
+			head := update.KeyHistory.Head
+			heads[head.IdentityID] = head
+			if head.IdentityID == identityID {
+				history = cloneKeyEventRecords(update.SemanticHistory)
+			}
+			if update.Root == root {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return protocol.IdentityTrustProof{}, fmt.Errorf("map root %q is not retained", root)
+		}
+	}
+	mapProof, err := protocol.NewKeyHistoryMapProof(m.tenantID, heads, identityID)
+	if err != nil {
+		return protocol.IdentityTrustProof{}, err
+	}
+	return protocol.IdentityTrustProof{
+		Map:             mapProof,
+		History:         history,
+		RotationRecords: m.rotationRecordsLocked(history),
+	}, nil
+}
+
 func deliveryLogUpdate(tree *merklelog.Tree, records []protocol.DeliveryRecord, previous protocol.Checkpoint, indexes ...uint64) (protocol.DeliveryLogUpdate, error) {
 	if previous.Size > tree.Size() {
 		return protocol.DeliveryLogUpdate{}, fmt.Errorf("checkpoint size %d is beyond log size %d", previous.Size, tree.Size())
@@ -424,7 +479,7 @@ func (m *Manager) appendEnrollmentLocked(enrollment protocol.EnrollmentPackage) 
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	m.commitKeyHistoryLocked(enrollment.IdentityID, head, state, mapUpdate)
+	m.commitKeyHistoryLocked(enrollment.IdentityID, head, mapUpdate)
 	return cloneAuthenticatedMapUpdate(mapUpdate), nil
 }
 
@@ -433,7 +488,7 @@ func (m *Manager) appendEnrollmentLocked(enrollment protocol.EnrollmentPackage) 
 // production store would use an equivalent transaction or ordered durable
 // protocol.
 func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (RotationCommit, error) {
-	state, stateDigest, err := successorState(rotation)
+	_, stateDigest, err := successorState(rotation)
 	if err != nil {
 		return RotationCommit{}, err
 	}
@@ -449,11 +504,14 @@ func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (Rotat
 	if err != nil {
 		return RotationCommit{}, err
 	}
+	// The marker is appended atomically below, so it is not yet discoverable in
+	// m.deliveries when the otherwise self-contained semantic proof is built.
+	mapUpdate.RotationRecords = append(mapUpdate.RotationRecords, cloneDeliveryRecord(marker))
 
 	if err := m.appendDeliveryRecordLocked(marker); err != nil {
 		return RotationCommit{}, fmt.Errorf("append rotation marker: %w", err)
 	}
-	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, state, mapUpdate)
+	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, mapUpdate)
 	return RotationCommit{Marker: cloneDeliveryRecord(marker), MapUpdate: cloneAuthenticatedMapUpdate(mapUpdate)}, nil
 }
 
@@ -465,7 +523,7 @@ func (m *Manager) newRotationMarkerLocked(rotation protocol.RotationPackage) (pr
 }
 
 func (m *Manager) appendRotationMapUpdateLocked(rotation protocol.RotationPackage, marker protocol.DeliveryLogReference) (protocol.AuthenticatedMapUpdate, error) {
-	state, stateDigest, err := successorState(rotation)
+	_, stateDigest, err := successorState(rotation)
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
@@ -477,7 +535,7 @@ func (m *Manager) appendRotationMapUpdateLocked(rotation protocol.RotationPackag
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, state, mapUpdate)
+	m.commitKeyHistoryLocked(rotation.Intent.IdentityID, head, mapUpdate)
 	return cloneAuthenticatedMapUpdate(mapUpdate), nil
 }
 
@@ -497,15 +555,40 @@ func (m *Manager) prepareKeyHistoryUpdateLocked(identityID, stateDigest string, 
 	if mapUpdate.PreviousRoot != m.mapRoot {
 		return protocol.AuthenticatedMapUpdate{}, protocol.KeyHistoryHead{}, fmt.Errorf("authenticated-map state mismatch: proof starts at %q, manager has %q", mapUpdate.PreviousRoot, m.mapRoot)
 	}
+	mapUpdate.SemanticHistory = append(cloneKeyEventRecords(m.historyRecords[identityID]), cloneKeyEventRecord(historyUpdate.Event))
+	mapUpdate.RotationRecords = m.rotationRecordsLocked(mapUpdate.SemanticHistory)
 	return mapUpdate, historyUpdate.Head, nil
 }
 
-func (m *Manager) commitKeyHistoryLocked(identityID string, head protocol.KeyHistoryHead, state protocol.ContinuityState, update protocol.AuthenticatedMapUpdate) {
+func (m *Manager) commitKeyHistoryLocked(identityID string, head protocol.KeyHistoryHead, update protocol.AuthenticatedMapUpdate) {
 	m.mapUpdates = append(m.mapUpdates, cloneAuthenticatedMapUpdate(update))
 	m.mapRoot = update.Root
 	m.histories[identityID] = head
 	m.historyRecords[identityID] = append(m.historyRecords[identityID], cloneKeyEventRecord(update.KeyHistory.Event))
-	m.states[identityID] = cloneState(state)
+}
+
+func (m *Manager) rotationRecordsLocked(history []protocol.KeyEventRecord) []protocol.DeliveryRecord {
+	records := make([]protocol.DeliveryRecord, 0)
+	seen := make(map[protocol.DeliveryLogReference]struct{})
+	for _, event := range history {
+		marker := event.Event.RotationMarker
+		if marker == nil {
+			continue
+		}
+		if _, exists := seen[*marker]; exists {
+			continue
+		}
+		if marker.Index >= uint64(len(m.deliveries)) {
+			continue
+		}
+		record := m.deliveries[marker.Index]
+		if record.Hash != marker.Hash {
+			continue
+		}
+		records = append(records, cloneDeliveryRecord(record))
+		seen[*marker] = struct{}{}
+	}
+	return records
 }
 
 func (m *Manager) appendDelivery(delivery protocol.SignedDelivery) (protocol.DeliveryRecord, error) {
@@ -726,12 +809,6 @@ func cloneDelivery(in protocol.SignedDelivery) protocol.SignedDelivery {
 	return out
 }
 
-func cloneState(in protocol.ContinuityState) protocol.ContinuityState {
-	out := in
-	out.ContinuityPublicKey = append([]byte(nil), in.ContinuityPublicKey...)
-	return out
-}
-
 func cloneKeyEvent(in protocol.KeyEvent) protocol.KeyEvent {
 	out := in
 	out.Enrollment = cloneEnrollment(in.Enrollment)
@@ -760,6 +837,14 @@ func cloneKeyEventRecord(in protocol.KeyEventRecord) protocol.KeyEventRecord {
 	return out
 }
 
+func cloneKeyEventRecords(in []protocol.KeyEventRecord) []protocol.KeyEventRecord {
+	out := make([]protocol.KeyEventRecord, len(in))
+	for i := range in {
+		out[i] = cloneKeyEventRecord(in[i])
+	}
+	return out
+}
+
 func cloneAuthenticatedMapUpdate(in protocol.AuthenticatedMapUpdate) protocol.AuthenticatedMapUpdate {
 	out := in
 	if in.PreviousHead != nil {
@@ -768,6 +853,11 @@ func cloneAuthenticatedMapUpdate(in protocol.AuthenticatedMapUpdate) protocol.Au
 	}
 	out.KeyHistory = *cloneKeyHistoryUpdate(&in.KeyHistory)
 	out.SiblingHashes = append([]string(nil), in.SiblingHashes...)
+	out.SemanticHistory = cloneKeyEventRecords(in.SemanticHistory)
+	out.RotationRecords = make([]protocol.DeliveryRecord, len(in.RotationRecords))
+	for i := range in.RotationRecords {
+		out.RotationRecords[i] = cloneDeliveryRecord(in.RotationRecords[i])
+	}
 	return out
 }
 

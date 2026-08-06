@@ -30,7 +30,7 @@ resource manager
   - serializes deliveries and rotation markers in one RFC 6962 tenant log
   - maintains RFC 6962 per-identity key histories
   - derives direct CONIKS sparse-map leaf-update proofs for history heads
-  - routes selected records and compact proofs to the target
+  - assembles identity history/map proofs and selected log proofs for the target
   - has an explicit CompromisedManager attack harness in the tests
                |
                | untrusted records and evidence
@@ -38,9 +38,10 @@ resource manager
 delivery agent
   - is provisioned with tenant, target, OIDC issuer, and enrollment client ID
   - independently fetches OIDC discovery and JWKS
-  - verifies nonce binding, key proof of possession, signatures, key-history
-    extension, map roots, marker ordering, target binding, and generation
-  - retains its accepted map root and delivery-log checkpoint
+  - reconstructs identity state ephemerally while verifying nonce binding, key
+    possession, signatures, history, map roots, markers, target, and generation
+  - durably retains only its accepted map root, delivery-log checkpoint, and a
+    bounded set of exceptional event digests as cryptographic trust state
 ```
 
 The local OIDC provider is supporting infrastructure, not a FleetShift role.
@@ -102,6 +103,23 @@ Delivery-log updates, by contrast, disclose only requested leaves: unrelated
 intervening deliveries are represented solely by the logarithmic consistency
 and inclusion paths.
 
+This POC deliberately chooses the minimum-state verifier profile. Every map
+update carries the changed identity's complete authenticated semantic history,
+and every delivery carries a membership proof for the identity's current head
+plus that history. The agent reconstructs continuity states and validity
+boundaries only for the duration of verification; it does not retain a
+per-identity head, state, boundary, or observed-record database. This makes
+manager proofs larger than an anchored/cached profile, but directly exercises
+the intended storage asymmetry. Durable semantic anchors and optional caches
+can reduce proof size later without becoming authority accidentally.
+
+Acceptance of a root means every newly introduced non-exception event was
+semantically checked at advancement time. Later proofs reconstruct those
+accepted states without contacting the OIDC provider or requiring the original
+ID token to remain unexpired; an event digest in the exception set makes its
+entire descendant chain unusable. The manager can assemble membership proofs
+for either its latest root or an older root deliberately retained by an agent.
+
 The map-update sequence is not an authenticated log. Its records are merely a
 way to find the chain of individually verified root transitions needed by a
 stale agent. Persistent tiles, compressed sparse-map proofs, batched history
@@ -127,9 +145,10 @@ This stands in for the authoritative input/derivation/output/removal model in
 `poc/attestation/hybrid` and `poc/attestation/sigstore_tuf_bundle`. Device and
 session delegation are collapsed into the continuity key. There is no trust
 manifest rotation, TUF, DSSE/in-toto envelope, TSA, tombstone, recovery,
-semantic exception set, external apply loop, durable persistence, or external
-fork witness yet. The in-process push and acknowledgement model exercises
-retry semantics, but both manager and agent state still live only in memory.
+exception-resolution protocol, durable semantic anchor, external apply loop,
+durable persistence, or external fork witness yet. The in-process push and
+acknowledgement model exercises retry semantics, but both manager and agent
+state still live only in memory.
 
 The resource manager's `Authorizer` is intentionally an interface boundary,
 not another identity system in this POC. It makes the distinction between
@@ -149,7 +168,9 @@ ordinary platform permission and delivery-agent provenance explicit.
    the authenticated map to its history head.
 6. The delivery agent repeats ID-token validation, checks the nonce and proof
    of possession, derives `identity_id = H(tenant, iss, sub)`, verifies the map
-   update, and records the initial continuity state and history head.
+   update and supplied semantic history, then retains only the successor map
+   root (or that root plus the event digest if the authenticated event is an
+   exception).
 
 ### Delivery
 
@@ -159,12 +180,15 @@ ordinary platform permission and delivery-agent provenance explicit.
 3. The resource manager constructs an RFC 6962 consistency proof from its last
    checkpoint acknowledged by that target's agent. It includes only the
    delivery and the rotation-marker leaves bounding its signing state.
-4. The resource manager pushes the record and proofs through an in-process
+4. It also constructs a current sparse-map membership proof and supplies the
+   identity's authenticated key history and referenced marker records.
+5. The resource manager pushes the record and proofs through an in-process
    delivery-agent interface.
-5. The delivery agent verifies the proofs, content digest and signature,
-   marker-bounded validity interval, and stale-generation fencing, then applies
-   the POC's in-memory content state and acknowledges.
-6. Only after that acknowledgement does the resource manager advance its
+6. The delivery agent reconstructs the identity's states ephemerally, verifies
+   both proof axes, the content signature, marker-bounded validity interval,
+   and stale-generation fencing, then applies the POC's in-memory content state
+   and acknowledges.
+7. Only after that acknowledgement does the resource manager advance its
    per-agent checkpoint.
 
 The agent can inject a lost acknowledgement after it has updated its local
@@ -226,6 +250,9 @@ only that record with the logarithmic consistency and inclusion proofs.
 | Resource manager withholds rotation from one agent, then uses a compromised old key | The rotated agent rejects; the stale agent accepts on its local pre-rotation view |
 | Resource manager tampers with a log root, leaf, inclusion path, consistency path, map sibling, or history proof | Rejected by the corresponding retained-root proof verification |
 | A busy delivery log contains unrelated intervening leaves | The agent advances with logarithmic proofs and receives only selected delivery and marker records |
+| Many users enroll successfully | Agent trust-state size remains constant; no per-user head or state is retained |
+| One authenticated key event is semantically invalid | Its digest enters the bounded exception set and unrelated valid map updates can continue |
+| A new invalid event arrives when the exception set is full | The agent refuses that successor map root |
 
 The RBAC-bypass and stale-agent rows are tests, not disclaimers hidden outside
 the executable model. They establish the precise boundary of the additional
@@ -248,8 +275,8 @@ required.
 | --- | --- |
 | `client/` | Controlled-client OIDC flow, continuity key, delivery signing, and rotation |
 | `resourcemanager/` | Ordinary authorization, ordered storage, in-process push routing, per-agent acknowledged checkpoints, and explicit compromise harness |
-| `deliveryagent/` | Stateful target-side OIDC, key-history, signature, marker, log, generation verification, and delivery fault injection |
-| `protocol/` | Purpose-separated messages, signatures, digests, RFC 6962 log proofs, and sparse-map leaf updates |
+| `deliveryagent/` | Minimal trust checkpoints, ephemeral OIDC/history/signature verification, application-state modeling, and delivery fault injection |
+| `protocol/` | Purpose-separated messages, signatures, digests, self-contained identity evidence, RFC 6962 proofs, and sparse-map updates/membership proofs |
 | `internal/merklelog/` | In-memory storage adapter around `transparency-dev/merkle` |
 | `internal/sparsemap/` | In-memory storage and proof adapter around Trillian SMT and CONIKS primitives |
 | `internal/testoidc/` | Minimal TLS OIDC authorization-code provider |
@@ -265,8 +292,8 @@ required.
    Sigstore Bundle and in-toto/DSSE types while retaining these exact tests.
 4. Add device and session delegation, identity tombstones, recovery, and the
    optional OIDC reanchor paths.
-5. Add semantic exceptions for invalid key events so one bad principal does
-   not halt an agent's map-update batch.
+5. Add explicit exception resolution/reanchor and durable semantic-anchor
+   profiles, comparing their proof-size savings with the minimum-state profile.
 6. Move RFC 6962 node storage to persistent tiles, evaluate Tessera for the
    delivery-log runtime, compress default sparse-map siblings, and batch
    per-principal history extensions.

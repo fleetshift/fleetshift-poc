@@ -18,6 +18,8 @@ type oidcIdentity struct {
 	Subject string
 }
 
+var errOIDCEvidenceUnavailable = errors.New("OIDC verification evidence is unavailable")
+
 type discoveryDocument struct {
 	Issuer  string `json:"issuer"`
 	JWKSURI string `json:"jwks_uri"`
@@ -34,15 +36,15 @@ func verifyEnrollmentIDToken(ctx context.Context, config Config, nonce, rawToken
 	}
 	discoveryResponse, err := httpClient.Do(discoveryRequest)
 	if err != nil {
-		return oidcIdentity{}, fmt.Errorf("OIDC discovery: %w", err)
+		return oidcIdentity{}, fmt.Errorf("%w: discovery: %v", errOIDCEvidenceUnavailable, err)
 	}
 	defer discoveryResponse.Body.Close()
 	if discoveryResponse.StatusCode != http.StatusOK {
-		return oidcIdentity{}, fmt.Errorf("OIDC discovery response: %s", discoveryResponse.Status)
+		return oidcIdentity{}, fmt.Errorf("%w: discovery response: %s", errOIDCEvidenceUnavailable, discoveryResponse.Status)
 	}
 	var discovery discoveryDocument
 	if err := json.NewDecoder(io.LimitReader(discoveryResponse.Body, 1<<20)).Decode(&discovery); err != nil {
-		return oidcIdentity{}, fmt.Errorf("decode OIDC discovery: %w", err)
+		return oidcIdentity{}, fmt.Errorf("%w: decode discovery: %v", errOIDCEvidenceUnavailable, err)
 	}
 	if discovery.Issuer != config.OIDCIssuer || discovery.JWKSURI == "" {
 		return oidcIdentity{}, errors.New("OIDC discovery does not match provisioned issuer")
@@ -54,15 +56,15 @@ func verifyEnrollmentIDToken(ctx context.Context, config Config, nonce, rawToken
 	}
 	jwksResponse, err := httpClient.Do(jwksRequest)
 	if err != nil {
-		return oidcIdentity{}, fmt.Errorf("fetch JWKS: %w", err)
+		return oidcIdentity{}, fmt.Errorf("%w: fetch JWKS: %v", errOIDCEvidenceUnavailable, err)
 	}
 	defer jwksResponse.Body.Close()
 	if jwksResponse.StatusCode != http.StatusOK {
-		return oidcIdentity{}, fmt.Errorf("JWKS response: %s", jwksResponse.Status)
+		return oidcIdentity{}, fmt.Errorf("%w: JWKS response: %s", errOIDCEvidenceUnavailable, jwksResponse.Status)
 	}
 	keySet, err := jwk.ParseReader(io.LimitReader(jwksResponse.Body, 1<<20))
 	if err != nil {
-		return oidcIdentity{}, fmt.Errorf("parse JWKS: %w", err)
+		return oidcIdentity{}, fmt.Errorf("%w: parse JWKS: %v", errOIDCEvidenceUnavailable, err)
 	}
 	token, err := jwt.ParseString(rawToken,
 		jwt.WithKeySet(keySet),
