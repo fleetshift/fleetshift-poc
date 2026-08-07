@@ -600,7 +600,7 @@ In various scenarios, we could benefit from specific IdP configuration:
 ### Open challenges
 
 - Audience scoping – if we want to scope tokens to particular clusters, we need separate audiences for those. More IdP configuration to do. Hard to make dynamic. Token Exchange (RFC 8693) can address this: exchange a platform-audience token for a target-audience token at the IdP. The IdP controls policy (which exchanges are allowed, for which audiences). This avoids per-cluster client IDs but requires IdP support (Keycloak, Dex have it; Auth0/Okta partial).
-- Root user – there should be some non-IdP issued credential or out of band channel for configuring IdP trust. If your IdP is down or compromised or you messed up the configuration and you need to reconfigure, you need some escape hatch.
+- Root user – there should be some non-IdP issued credential or out of band channel for configuring IdP trust. If your IdP is down or compromised or you messed up the configuration and you need to reconfigure, you need some escape hatch. The first IdP on a fresh platform is a related problem: see [idp_bootstrap.md](idp_bootstrap.md).
 - Trust anchor distribution – this might be solved but it is tricky to think through end to end. If you are trying to avoid privileged service accounts, then you also need to be very careful about how trust is established to tenant-level roots itself. If a compromise can reconfigure all of those, then all of the end to end verification is not helping there.
 - BMC credentials are unavoidable – maybe they can only be retrieved with a user token
 - Key rotation (as discussed) is difficult to balance security, availability, and UX (toil). The right choice may be an external public key store.
