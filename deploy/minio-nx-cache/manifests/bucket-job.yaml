@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+  labels:
+    app: minio
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app: minio-bucket-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until mc alias set myminio http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "Waiting for MinIO..."
+                sleep 2
+              done
+              mc mb --ignore-existing myminio/nx-cache
+              mc ilm rule add --expire-days 3 myminio/nx-cache
+              echo "Bucket 'nx-cache' ready (lifecycle: expire after 3 days)."
+          envFrom:
+            - secretRef:
+                name: minio-credentials

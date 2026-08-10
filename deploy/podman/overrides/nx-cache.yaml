@@ -1,0 +1,66 @@
+# Adds MinIO + nx-cache-proxy for local Nx remote cache development.
+#
+# Usage:
+#   task podman:up -- -f overrides/nx-cache.yaml
+#
+# Nx configuration (set in .env or shell):
+#   NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://localhost:8420
+#   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=local-read-token
+
+services:
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minio-admin
+      MINIO_ROOT_PASSWORD: minio-local-password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-bucket-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set myminio http://minio:9000 minio-admin minio-local-password; do
+          echo "Waiting for MinIO..."
+          sleep 2
+        done
+        mc mb --ignore-existing myminio/nx-cache
+        echo "Bucket 'nx-cache' ready."
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  nx-cache-proxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.nx-cache
+    ports:
+      - "8420:8080"
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio-admin
+      MINIO_SECRET_KEY: minio-local-password
+      MINIO_BUCKET: nx-cache
+      MINIO_SECURE: "false"
+      NX_CACHE_READ_TOKEN: local-read-token
+      NX_CACHE_WRITE_TOKEN: local-write-token
+      CACHE_TTL: "48h"
+      LOG_LEVEL: debug
+    depends_on:
+      minio-bucket-init:
+        condition: service_completed_successfully
+
+
+volumes:
+  minio-data:

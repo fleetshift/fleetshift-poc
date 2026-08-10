@@ -1,0 +1,12 @@
+FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS build
+WORKDIR /src
+COPY sdk/nx-cache-proxy/go.mod sdk/nx-cache-proxy/go.sum ./
+RUN go mod download
+COPY sdk/nx-cache-proxy/ .
+RUN CGO_ENABLED=0 go build -o /tmp/nx-cache-proxy ./cmd/nx-cache-proxy
+
+FROM registry.access.redhat.com/ubi9-micro:latest
+COPY --from=build /tmp/nx-cache-proxy /usr/local/bin/nx-cache-proxy
+USER 1001
+EXPOSE 8080
+ENTRYPOINT ["nx-cache-proxy"]

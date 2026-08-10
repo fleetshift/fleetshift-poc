@@ -20,6 +20,10 @@ includes:
     taskfile: ./deploy/keycloak/Taskfile.yml
     dir: ./deploy/keycloak
     aliases: [kc]
+  minio-nx-cache:
+    taskfile: ./deploy/minio-nx-cache/Taskfile.yml
+    dir: ./deploy/minio-nx-cache
+    aliases: [minio]
 
 vars:
   IMAGE_TAG: '{{.IMAGE_TAG | default "latest"}}'

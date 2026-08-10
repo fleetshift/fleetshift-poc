@@ -70,7 +70,7 @@
       "options": {
         "command": "node tools/generate-plugin-registry.mjs"
       },
-      "dependsOn": ["plugins:build", "@fleetshift/gcphcp-plugin:build:client", "@fleetshift/kind-plugin:build:client"],
+      "dependsOn": ["plugins:build", "@fleetshift/gcphcp-plugin:build", "@fleetshift/kind-plugin:build"],
       "cache": true,
       "inputs": [
         "{workspaceRoot}/tools/generate-plugin-registry.mjs",
@@ -93,8 +93,8 @@
         "ui:generate-icons",
         "common:build",
         "plugins:build",
-        "@fleetshift/gcphcp-plugin:build:client",
-        "@fleetshift/kind-plugin:build:client",
+        "@fleetshift/gcphcp-plugin:build",
+        "@fleetshift/kind-plugin:build",
         "web:build",
         "ui:generate-registry",
         "ui:merge-web"

@@ -142,6 +142,11 @@ const pluginConfigs = [{ plugin: GcpHcpPlugin, key: "gcphcp" }] as const;
 
 const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   name: key,
+  cache: {
+    type: "persistent" as const,
+    name: key,
+    buildDependencies: [fileURLToPath(import.meta.url)],
+  },
   entry: {
     mock: path.resolve(configDir, "./src/index.ts"),
   },
