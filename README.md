@@ -89,11 +89,11 @@ task image:push             # push server, server-local, and web to DEV_REGISTRY
 
 ## Local Development (Podman)
 
-All podman deploy commands are available through Nx. Env vars (AUTH, LOCAL_WEB, UI_SETUP, DB, etc.) pass through to Taskfile.
+All podman deploy commands are available through Nx. Env vars (AUTH, LOCAL_WEB, DB, etc.) pass through to Taskfile.
 
 ```bash
 npx nx run pd:dev                                    # start local dev stack
-AUTH=external LOCAL_WEB=true UI_SETUP=true npx nx run pd:dev  # with external auth + local web
+AUTH=external LOCAL_WEB=true npx nx run pd:dev       # with external auth + local web
 npx nx run pd:up                                     # start stack (non-dev)
 npx nx run pd:down                                   # stop stack
 npx nx run pd:clean                                  # stop + remove volumes
@@ -107,7 +107,7 @@ npx nx run pd:clock-drift                            # fix podman clock drift
 npx nx run pd:test-attestation                       # test attestation flow
 
 # Or via Taskfile directly:
-task pd:dev AUTH=external LOCAL_WEB=true UI_SETUP=true
+task pd:dev AUTH=external LOCAL_WEB=true
 ```
 
 Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain Taskfile-only — they target remote clusters, not local dev.

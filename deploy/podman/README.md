@@ -144,7 +144,7 @@ All tasks use the `podman:` namespace (alias `pd:`).
 
 ## Full Stack Dev Mode
 
-`task podman:dev` builds frontend assets in a container (using `Dockerfile.web`) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required. Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo.
+`task podman:dev` builds frontend assets in a container (using `Dockerfile.web`) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required.
 
 After changing Go code, run `task podman:rebuild` to rebuild and restart. After changing frontend code, run `task podman:clean` then `task podman:dev` to rebuild the web assets.
 
@@ -156,14 +156,11 @@ For faster frontend iteration, serve assets directly from your host filesystem i
 # Terminal 1 — start the stack with local web assets
 task podman:dev LOCAL_WEB=true
 
-# Terminal 2 — watch & rebuild in the UI repo
-cd /path/to/fleetshift-user-interface
-npm run dev
+# Terminal 2 — watch & rebuild merged UI assets into monorepo-root web/
+npx nx run web:dev
 ```
 
-This skips the Docker web-builder and bind-mounts the UI repo's `web/` directory into the container. Webpack watches for source changes, rebuilds, and the Go backend picks up the new assets — just refresh the browser.
-
-Set `UI_DIR` in `.env` if the UI repo is not at the default `../../../fleetshift-user-interface` relative path.
+This skips the Docker web-builder and bind-mounts the monorepo-root `web/` directory (from `tools/merge-web.mjs`) into the container. The watch build rebuilds on source changes, and the Go backend picks up the new assets — just refresh the browser.
 
 ## Configuration
 

@@ -13,7 +13,6 @@ vars:
   DEV: '{{if not (empty .DEV_INPUT)}}{{.DEV_INPUT}}{{else if not (empty .ACTIVE_DEV)}}{{.ACTIVE_DEV}}{{else}}false{{end}}'
   LOCAL_WEB: '{{.LOCAL_WEB | default "false"}}'
   NX_CACHE: '{{.NX_CACHE | default "false"}}'
-  UI_SETUP: '{{.UI_SETUP | default "false"}}'
   BUILD: '{{.BUILD | default "false"}}'
   RESOLVED_GCPHCP_ENABLED:
     sh: |
@@ -77,7 +76,7 @@ tasks:
       DB: '{{.RESOLVED_DB}}'
       AUTH: '{{.RESOLVED_AUTH}}'
       DB_FLAG: '{{.RESOLVED_DB_FLAG}}'
-      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}{{if eq .NX_CACHE "true"}} -f overrides/nx-cache.yaml{{end}}{{if eq .UI_SETUP "true"}} -f overrides/ui-setup.yaml{{end}} -f overrides/gcphcp.yaml'
+      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}{{if eq .NX_CACHE "true"}} -f overrides/nx-cache.yaml{{end}} -f overrides/gcphcp.yaml'
       DEV: '{{.DEV}}'
       BUILD: '{{.BUILD}}'
       OIDC_URL: '{{.RESOLVED_OIDC_URL}}'
