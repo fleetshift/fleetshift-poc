@@ -76,7 +76,16 @@ fi
 # --- Configure CLI auth -----------------------------------------------
 
 log "Configuring CLI auth"
-"$SCRIPT_DIR/cli-setup.sh"
+SETUP_ARGS=(
+  auth setup
+  --issuer-url "$OIDC_URL"
+  --client-id "${OIDC_CLI_CLIENT_ID:-fleetshift-cli}"
+  --key-enrollment-client-id fleetshift-signing
+)
+if [ -f "${COMPOSE_DIR}/.certs/ca.crt" ]; then
+  SETUP_ARGS+=(--oidc-ca-file "${COMPOSE_DIR}/.certs/ca.crt")
+fi
+"$FLEETCTL" "${SETUP_ARGS[@]}"
 
 # --- Login -------------------------------------------------------------
 

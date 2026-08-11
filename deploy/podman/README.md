@@ -11,10 +11,18 @@ Local container-based deployment using podman and docker-compose. Runs the full 
 - **[mkcert](https://github.com/filosottile/mkcert)** - trusted dev cert for local keycloak
 - `.env` file — copy from `.env.template`
 
-**macOS:** Podman only forwards IPv6 loopback. Add this one-time `/etc/hosts` entry or Keycloak will be unreachable:
+**Host mapping:** `fleetctl` (and `task podman:up` Keycloak checks) run on the
+host and must resolve `keycloak`. That name is compose DNS only — add a
+one-time `/etc/hosts` entry on Linux and macOS:
+
+```bash
+echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
+```
+
+**macOS:** Podman may only forward IPv6 loopback; also add:
+
 ```bash
 echo "::1 keycloak" | sudo tee -a /etc/hosts
-echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
 ```
 
 ## Quick Start
@@ -23,7 +31,11 @@ echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
 cp .env.template .env         # configure (edit as needed)
 task build:cli                # build fleetctl Go binaries
 task podman:up                # start the stack (demo mode)
-task podman:cli-setup         # configure fleetctl CLI
+bin/fleetctl auth setup \
+  --issuer-url https://keycloak:8443/auth/realms/fleetshift \
+  --client-id fleetshift-cli \
+  --key-enrollment-client-id fleetshift-signing \
+  --oidc-ca-file deploy/podman/.certs/ca.crt
 bin/fleetctl auth login       # log in (opens browser)
 ```
 
@@ -127,13 +139,12 @@ All tasks use the `podman:` namespace (alias `pd:`).
 | `podman:status` | Show running containers |
 | `podman:restart:<service>` | Restart a specific container |
 | `podman:rebuild-web` | Rebuild frontend without restarting server |
-| `podman:cli-setup` | Configure fleetctl for local auth |
 | `podman:test-attestation` | Run end-to-end attestation flow |
 | `podman:reset-keycloak` | Wipe Keycloak state (AUTH=local only) |
 
 ## Full Stack Dev Mode
 
-`task podman:dev` builds frontend assets in a container (using `Dockerfile.web`) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required. Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo.
+`task podman:dev` builds frontend assets in a container (using `Dockerfile.web`) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required.
 
 After changing Go code, run `task podman:rebuild` to rebuild and restart. After changing frontend code, run `task podman:clean` then `task podman:dev` to rebuild the web assets.
 
@@ -145,14 +156,11 @@ For faster frontend iteration, serve assets directly from your host filesystem i
 # Terminal 1 — start the stack with local web assets
 task podman:dev LOCAL_WEB=true
 
-# Terminal 2 — watch & rebuild in the UI repo
-cd /path/to/fleetshift-user-interface
-npm run dev
+# Terminal 2 — watch & rebuild merged UI assets into monorepo-root web/
+npx nx run web:dev
 ```
 
-This skips the Docker web-builder and bind-mounts the UI repo's `web/` directory into the container. Webpack watches for source changes, rebuilds, and the Go backend picks up the new assets — just refresh the browser.
-
-Set `UI_DIR` in `.env` if the UI repo is not at the default `../../../fleetshift-user-interface` relative path.
+This skips the Docker web-builder and bind-mounts the monorepo-root `web/` directory (from `tools/merge-web.mjs`) into the container. The watch build rebuilds on source changes, and the Go backend picks up the new assets — just refresh the browser.
 
 ## Configuration
 

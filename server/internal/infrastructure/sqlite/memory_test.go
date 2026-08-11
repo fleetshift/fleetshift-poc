@@ -1,7 +1,6 @@
 package sqlite_test
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
@@ -53,63 +52,4 @@ func TestOpenMemory_RoundTripAndIsolation(t *testing.T) {
 	if err := db2.QueryRow(`SELECT note FROM mem_probe WHERE id = 1`).Scan(&note); err == nil {
 		t.Fatalf("isolated DB unexpectedly has mem_probe row: %q", note)
 	}
-}
-
-func TestDumpToFile_RoundTrip(t *testing.T) {
-	db := sqlite.OpenTestDB(t)
-
-	if _, err := db.Exec(`CREATE TABLE dump_probe (id INTEGER PRIMARY KEY, note TEXT)`); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO dump_probe (note) VALUES ('hello')`); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-
-	path := filepath.Join(t.TempDir(), "snapshot.db")
-	if err := sqlite.DumpToFile(db, path); err != nil {
-		t.Fatalf("DumpToFile: %v", err)
-	}
-
-	restored, err := sqlite.Open(path)
-	if err != nil {
-		t.Fatalf("open dump: %v", err)
-	}
-	t.Cleanup(func() { _ = restored.Close() })
-
-	var note string
-	if err := restored.QueryRow(`SELECT note FROM dump_probe WHERE id = 1`).Scan(&note); err != nil {
-		t.Fatalf("query dump: %v", err)
-	}
-	if note != "hello" {
-		t.Fatalf("note = %q, want hello", note)
-	}
-}
-
-func TestDumpToFile_Validation(t *testing.T) {
-	db := sqlite.OpenTestDB(t)
-	path := filepath.Join(t.TempDir(), "exists.db")
-
-	t.Run("nil database", func(t *testing.T) {
-		if err := sqlite.DumpToFile(nil, path); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-	t.Run("empty path", func(t *testing.T) {
-		if err := sqlite.DumpToFile(db, ""); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-	t.Run("whitespace path", func(t *testing.T) {
-		if err := sqlite.DumpToFile(db, "   "); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-	t.Run("existing path", func(t *testing.T) {
-		if err := sqlite.DumpToFile(db, path); err != nil {
-			t.Fatalf("first DumpToFile: %v", err)
-		}
-		if err := sqlite.DumpToFile(db, path); err == nil {
-			t.Fatal("expected error dumping onto existing path")
-		}
-	})
 }

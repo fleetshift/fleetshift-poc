@@ -25,6 +25,7 @@ bin
 **/bin/
 poc
 docs
+e2e
 # Exclude deploy harnesses from the image build context, but keep
 # deploy/scripts/ (renderer + all-in-one entrypoint for Dockerfile.fleetshift).
 deploy/podman

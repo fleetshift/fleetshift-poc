@@ -72,9 +72,11 @@ func TestLifecycle_GoWorkflowRegistryCloseThroughServer(t *testing.T) {
 	}
 
 	cfg, err := NewConfig(ConfigInput{
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DBPath:   dbPath,
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               dbPath,
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)

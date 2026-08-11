@@ -54,6 +54,9 @@ func TestConfig_HTTPClient_ValidCA(t *testing.T) {
 	if client == nil {
 		t.Fatal("HTTPClient() returned nil for valid CA file")
 	}
+	if client.Timeout != auth.DefaultOIDCHTTPTimeout {
+		t.Errorf("Timeout = %v, want %v", client.Timeout, auth.DefaultOIDCHTTPTimeout)
+	}
 
 	// The client should be able to reach the self-signed TLS server.
 	resp, err := client.Get(srv.URL)

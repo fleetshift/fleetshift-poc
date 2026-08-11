@@ -14,10 +14,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultSQLitePath is the serve --db default when PostgreSQL is not selected.
 const DefaultSQLitePath = "fleetshift.db"
+
+// DefaultInitialAuthMethodTimeout bounds implicit initial-AuthMethod discovery/install
+// when the AuthMethod store is empty and OIDC initial-AuthMethod config is present.
+const DefaultInitialAuthMethodTimeout = 20 * time.Second
 
 // AddonName is an addon identifier in production configuration. Allow-listed
 // values are the Addon* constants; unknown names are rejected by NewConfig.
@@ -42,9 +47,7 @@ type Database interface {
 	database()
 }
 
-// SQLite selects SQLite persistence. Path is the filesystem path or DSN
-// passed to database/sql when Start opens the database. When
-// [WithSQLiteDBAndRegistry] is set, Path is not opened.
+// SQLite is file-backed SQLite persistence.
 type SQLite struct {
 	Path string
 }
@@ -97,19 +100,25 @@ func databaseKind(db Database) string {
 // or other I/O. The CLI/runner edge resolves environment and file indirection
 // before constructing this value.
 type ConfigInput struct {
-	GRPCAddr               string
-	HTTPAddr               string
-	DBPath                 string
-	DatabaseURL            string // flag/env value only (not file content)
-	DatabaseURLFileContent string // content read at the edge; empty when unused
-	DatabaseURLFileSet     bool   // file path was non-empty (flag/env)
-	DBExplicit             bool
-	OIDCCABundle           []byte
-	WebDir                 string
-	OIDCUIAuthority        string
-	OIDCUIClientID         string
-	Addons                 string
-	GCPHCPConfigPath       string
+	GRPCAddr                      string
+	HTTPAddr                      string
+	DBPath                        string
+	DatabaseURL                   string // flag/env value only (not file content)
+	DatabaseURLFileContent        string // content read at the edge; empty when unused
+	DatabaseURLFileSet            bool   // file path was non-empty (flag/env)
+	DBExplicit                    bool
+	OIDCCABundle                  []byte
+	WebDir                        string
+	OIDCIssuer                    string
+	OIDCUIClientID                string
+	OIDCUIScope                   string
+	OIDCResourceAudience          string
+	OIDCKeyEnrollmentAudience     string
+	OIDCRegistryID                string
+	OIDCRegistrySubjectExpression string
+	OIDCPublicKeyClaimExpression  string
+	Addons                        string
+	GCPHCPConfigPath              string
 }
 
 // Config is the normalized typed production configuration accepted by
@@ -129,9 +138,20 @@ type Config struct {
 	// Empty means the system trust store.
 	OIDCCABundle []byte
 
-	WebDir          string
-	OIDCUIAuthority string
-	OIDCUIClientID  string
+	WebDir         string
+	OIDCIssuer     string
+	OIDCUIClientID string
+	// OIDCUIScope is the browser OIDC scope string advertised on /api/ui/config.
+	// Packaging/deploy supplies it; NewConfig does not invent a value.
+	OIDCUIScope string
+
+	// OIDC AuthMethod policy for empty-store install. Supplied by the serve
+	// caller; NewConfig does not invent values when these are empty.
+	OIDCResourceAudience          string
+	OIDCKeyEnrollmentAudience     string
+	OIDCRegistryID                string
+	OIDCRegistrySubjectExpression string
+	OIDCPublicKeyClaimExpression  string
 
 	// Addons is the enabled addon name list (order preserved, duplicates removed).
 	Addons []AddonName
@@ -179,15 +199,21 @@ func NewConfig(in ConfigInput) (Config, error) {
 	}
 
 	cfg := Config{
-		GRPCAddr:         in.GRPCAddr,
-		HTTPAddr:         in.HTTPAddr,
-		Database:         database,
-		OIDCCABundle:     append([]byte(nil), in.OIDCCABundle...),
-		WebDir:           in.WebDir,
-		OIDCUIAuthority:  in.OIDCUIAuthority,
-		OIDCUIClientID:   in.OIDCUIClientID,
-		Addons:           normalizeAddonList(in.Addons),
-		GCPHCPConfigPath: in.GCPHCPConfigPath,
+		GRPCAddr:                      in.GRPCAddr,
+		HTTPAddr:                      in.HTTPAddr,
+		Database:                      database,
+		OIDCCABundle:                  append([]byte(nil), in.OIDCCABundle...),
+		WebDir:                        in.WebDir,
+		OIDCIssuer:                    strings.TrimSpace(in.OIDCIssuer),
+		OIDCUIClientID:                strings.TrimSpace(in.OIDCUIClientID),
+		OIDCUIScope:                   strings.TrimSpace(in.OIDCUIScope),
+		OIDCResourceAudience:          strings.TrimSpace(in.OIDCResourceAudience),
+		OIDCKeyEnrollmentAudience:     strings.TrimSpace(in.OIDCKeyEnrollmentAudience),
+		OIDCRegistryID:                strings.TrimSpace(in.OIDCRegistryID),
+		OIDCRegistrySubjectExpression: strings.TrimSpace(in.OIDCRegistrySubjectExpression),
+		OIDCPublicKeyClaimExpression:  strings.TrimSpace(in.OIDCPublicKeyClaimExpression),
+		Addons:                        normalizeAddonList(in.Addons),
+		GCPHCPConfigPath:              in.GCPHCPConfigPath,
 	}
 	if err := cfg.checkInvariants(); err != nil {
 		return Config{}, err
@@ -202,6 +228,12 @@ func (c Config) AddonSet() map[AddonName]bool {
 		out[name] = true
 	}
 	return out
+}
+
+// OIDCInitialAuthMethodConfigured reports whether empty-store AuthMethod install has
+// the required inputs (issuer + resource audience).
+func (c Config) OIDCInitialAuthMethodConfigured() bool {
+	return c.OIDCIssuer != "" && c.OIDCResourceAudience != ""
 }
 
 // checkInvariants verifies Config invariants after mapping. It performs no I/O
@@ -235,10 +267,19 @@ func (c Config) checkInvariants() error {
 		}
 	}
 
-	if c.OIDCUIAuthority != "" {
-		if err := parseHTTPURL(c.OIDCUIAuthority, "oidc UI authority"); err != nil {
+	if c.OIDCIssuer != "" {
+		if err := parseOIDCIssuerURL(c.OIDCIssuer); err != nil {
 			return err
 		}
+	}
+
+	regIDSet := c.OIDCRegistryID != ""
+	regExprSet := c.OIDCRegistrySubjectExpression != ""
+	if regIDSet != regExprSet {
+		return fmt.Errorf("oidc registry id and registry subject expression must both be set or both be empty")
+	}
+	if c.OIDCPublicKeyClaimExpression != "" && (regIDSet || regExprSet) {
+		return fmt.Errorf("oidc public-key claim expression and registry subject mapping are mutually exclusive")
 	}
 
 	gcphcpEnabled := false
@@ -341,22 +382,37 @@ func (p Postgres) driverDSN(scheme string) string {
 	return u.String()
 }
 
-// parseHTTPURL validates that raw is an http or https URL with a host.
-// field is used only in error messages.
-func parseHTTPURL(raw, field string) error {
+// parseOIDCIssuerURL validates that raw is an http or https URL with a host.
+// HTTPS is allowed for any host. HTTP is allowed only for loopback hosts
+// (localhost / 127.0.0.0/8 / ::1) so remote cleartext discovery and JWKS
+// fetches cannot be MITMed on the network.
+func parseOIDCIssuerURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid %s: %w", field, err)
+		return fmt.Errorf("invalid oidc issuer: %w", err)
 	}
-	switch strings.ToLower(u.Scheme) {
+	scheme := strings.ToLower(u.Scheme)
+	switch scheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("invalid %s: scheme must be http or https", field)
+		return fmt.Errorf("invalid oidc issuer: scheme must be http or https")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("invalid %s: host is required", field)
+		return fmt.Errorf("invalid oidc issuer: host is required")
+	}
+	if scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("invalid oidc issuer: http is only allowed for loopback hosts")
 	}
 	return nil
+}
+
+// isLoopbackHost reports whether host (no port) is a loopback name or address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // parseCAPEM requires data to contain at least one parseable PEM CERTIFICATE

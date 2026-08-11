@@ -7,7 +7,7 @@ vars:
 
 tasks:
   deploy:
-    desc: Deploy FleetShift to OpenShift (kustomize manifests, images, auth-setup)
+    desc: Deploy FleetShift to OpenShift (kustomize manifests and images)
     preconditions:
       - sh: '{{.OME_CLUSTER_CHECK}}'
         msg: '{{.OME_CLUSTER_MSG}}'
@@ -95,17 +95,6 @@ tasks:
         msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - ./scripts/register-redirect.sh {{.USER}} {{.PASSWORD}}
-
-  auth-setup:
-    desc: Re-run the auth-setup job (deletes previous job first)
-    preconditions:
-      - sh: '{{.OME_CLUSTER_CHECK}}'
-        msg: '{{.OME_CLUSTER_MSG}}'
-    cmds:
-      - oc delete job auth-setup -n {{.NAMESPACE}} --ignore-not-found=true
-      - oc apply -f auth-setup/job.yaml -n {{.NAMESPACE}}
-      - echo "Waiting for auth-setup to complete..."
-      - oc wait -n {{.NAMESPACE}} job/auth-setup --for=condition=Complete --timeout=120s
 
   'grpc-route-cert:deploy':
     desc: "Deploy a cert-manager-backed trusted certificate for the grpc Route"

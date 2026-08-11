@@ -175,6 +175,21 @@ func TestLoadServeConfig(t *testing.T) {
 			},
 			wantErr: "--database-url-file is set but contains no database URL",
 		},
+		{
+			name: "oidc authority accepted",
+			flags: serveFlags{
+				grpcAddr:   ":50051",
+				httpAddr:   ":8085",
+				dbPath:     bootstrap.DefaultSQLitePath,
+				oidcIssuer: "https://issuer.example/oidc",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				Database:   bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer: "https://issuer.example/oidc",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -268,8 +283,14 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 	if got.GRPCAddr != want.GRPCAddr ||
 		got.HTTPAddr != want.HTTPAddr ||
 		got.WebDir != want.WebDir ||
-		got.OIDCUIAuthority != want.OIDCUIAuthority ||
+		got.OIDCIssuer != want.OIDCIssuer ||
 		got.OIDCUIClientID != want.OIDCUIClientID ||
+		got.OIDCUIScope != want.OIDCUIScope ||
+		got.OIDCResourceAudience != want.OIDCResourceAudience ||
+		got.OIDCKeyEnrollmentAudience != want.OIDCKeyEnrollmentAudience ||
+		got.OIDCRegistryID != want.OIDCRegistryID ||
+		got.OIDCRegistrySubjectExpression != want.OIDCRegistrySubjectExpression ||
+		got.OIDCPublicKeyClaimExpression != want.OIDCPublicKeyClaimExpression ||
 		got.GCPHCPConfigPath != want.GCPHCPConfigPath ||
 		string(got.OIDCCABundle) != string(want.OIDCCABundle) {
 		t.Fatalf("config mismatch:\n got: %#v\nwant: %#v", got, want)

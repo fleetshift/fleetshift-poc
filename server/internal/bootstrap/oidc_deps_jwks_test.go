@@ -23,21 +23,21 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
-// gatedKeySetVerifier forces RegisterKeySet to fail instantly so startup's
-// registerPersistedKeySets path is exercised without waiting on httprc.
-type gatedKeySetVerifier struct {
+// gatedJWKSVerifier forces RegisterJWKS to fail instantly so startup's
+// registerAuthMethodJWKS path is exercised without waiting on httprc.
+type gatedJWKSVerifier struct {
 	inner         *oidc.Verifier
 	allowRegister atomic.Bool
 }
 
-func (v *gatedKeySetVerifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error {
+func (v *gatedJWKSVerifier) RegisterJWKS(ctx context.Context, jwksURI domain.EndpointURL) error {
 	if !v.allowRegister.Load() {
 		return context.DeadlineExceeded
 	}
-	return v.inner.RegisterKeySet(ctx, jwksURI)
+	return v.inner.RegisterJWKS(ctx, jwksURI)
 }
 
-func (v *gatedKeySetVerifier) Verify(ctx context.Context, config domain.OIDCConfig, rawToken string) (domain.SubjectClaims, error) {
+func (v *gatedJWKSVerifier) Verify(ctx context.Context, config domain.OIDCConfig, rawToken string) (domain.SubjectClaims, error) {
 	return v.inner.Verify(ctx, config, rawToken)
 }
 
@@ -57,7 +57,7 @@ func seedOIDCAuthMethod(t *testing.T, dbPath string, cfg domain.OIDCConfig) {
 }
 
 func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
-	// Fast cement for bootstrap: registerPersistedKeySets failures must not
+	// Fast cement for bootstrap: registerAuthMethodJWKS failures must not
 	// fail Start (warn-and-continue).
 	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
@@ -67,7 +67,7 @@ func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
-	gated := &gatedKeySetVerifier{inner: inner}
+	gated := &gatedJWKSVerifier{inner: inner}
 	gated.allowRegister.Store(false)
 
 	cfg, err := NewConfig(ConfigInput{
@@ -139,7 +139,7 @@ func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
 	seedOIDCAuthMethod(t, dbPath, cfgForSeed)
 
-	// Short client timeout keeps boot-time RegisterKeySet from hanging when
+	// Short client timeout keeps boot-time RegisterJWKS from hanging when
 	// the proxy returns 503 / when httprc waits on first successful fetch.
 	verifier, err := oidc.NewVerifier(context.Background(), oidc.WithHTTPClient(&http.Client{
 		Timeout: 500 * time.Millisecond,

@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"testing"
 )
 
@@ -11,50 +10,56 @@ import (
 // applied via goose migrations. The database is closed when the test
 // finishes.
 //
-// Shared-cache mode is used so that all connections from the pool share
-// the same in-memory database, which is necessary when the database is
-// accessed from multiple goroutines.
-//
-// A sentinel connection is held open for the lifetime of the test to prevent
-// the shared-cache database from being destroyed if the pool momentarily
-// drops to zero active connections (e.g. due to context cancellation in a
-// background goroutine).
-//
-// MaxOpenConns is set to 2: one for the sentinel and one for actual work.
-// This funnels all transactions through a single active connection,
-// serializing writes at the pool level. Without this, concurrent
-// BEGIN IMMEDIATE from different goroutines would hit SQLITE_LOCKED
-// in shared-cache mode (the busy_timeout pragma does not help with
-// SQLITE_LOCKED, only SQLITE_BUSY on file-backed databases).
+// It delegates to [OpenMemory] for DSN, pool, and sentinel setup.
 func OpenTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	return openTestDSN(t, dsn)
+	return openTestMemory(t, t.Name())
 }
 
-// OpenTestDSN is like [OpenTestDB] but accepts an explicit DSN. Use
-// this when a test needs multiple independent in-memory databases
-// (e.g. by appending a sequence suffix to the DSN).
+// OpenTestDSN is like [OpenTestDB] but accepts an explicit DSN. Use this
+// when a test needs multiple independent in-memory databases (e.g. by
+// appending a sequence suffix to the DSN). Shared-cache memory DSNs keep
+// their full query string (via [openSharedMemoryDSN]); other DSNs use
+// the prior open path with the same pool/sentinel setup.
 func OpenTestDSN(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
-	return openTestDSN(t, dsn)
+	var (
+		db       *sql.DB
+		sentinel *sql.Conn
+		err      error
+	)
+	if isSharedMemoryDSN(dsn) {
+		db, sentinel, err = openSharedMemoryDSN(dsn)
+	} else {
+		db, err = Open(dsn)
+		if err != nil {
+			t.Fatalf("open test db: %v", err)
+		}
+		db.SetMaxOpenConns(2)
+		sentinel, err = db.Conn(context.Background())
+	}
+	if err != nil {
+		if db != nil {
+			_ = db.Close()
+		}
+		t.Fatalf("open test db: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sentinel.Close()
+		_ = db.Close()
+	})
+	return db
 }
 
-func openTestDSN(t *testing.T, dsn string) *sql.DB {
+func openTestMemory(t *testing.T, name string) *sql.DB {
 	t.Helper()
-	db, err := Open(dsn)
+	db, sentinel, err := OpenMemory(name)
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	db.SetMaxOpenConns(2)
-	sentinel, err := db.Conn(context.Background())
-	if err != nil {
-		db.Close()
-		t.Fatalf("open sentinel connection: %v", err)
-	}
 	t.Cleanup(func() {
-		sentinel.Close()
-		db.Close()
+		_ = sentinel.Close()
+		_ = db.Close()
 	})
 	return db
 }

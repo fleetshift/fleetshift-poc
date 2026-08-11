@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"time"
 
@@ -19,7 +18,6 @@ type options struct {
 	workflowRegistry domain.Registry
 	oidcDeps         *OIDCDeps
 	addonAssembly    AddonAssemblyFunc
-	sqliteDB         *sql.DB
 
 	shutdownGrace time.Duration
 }
@@ -39,27 +37,6 @@ func WithWorkflowRegistry(reg domain.Registry) Option {
 		panic("bootstrap.WithWorkflowRegistry: registry is nil")
 	}
 	return func(o *options) { o.workflowRegistry = reg }
-}
-
-// WithSQLiteDBAndRegistry substitutes the SQLite *sql.DB used for persistence
-// and the workflow registry that must accompany it. Config.Database must be
-// [SQLite]; Path is not opened. The caller retains ownership and must Close
-// the database after Server.Close (or after a failed Start).
-//
-// reg is required in the same option because the default go-workflows SQLite
-// backend opens Config.Database.Path on its own and would diverge from db.
-// Both db and reg must be non-nil.
-func WithSQLiteDBAndRegistry(db *sql.DB, reg domain.Registry) Option {
-	if db == nil {
-		panic("bootstrap.WithSQLiteDBAndRegistry: db is nil")
-	}
-	if reg == nil {
-		panic("bootstrap.WithSQLiteDBAndRegistry: workflow registry is nil")
-	}
-	return func(o *options) {
-		o.sqliteDB = db
-		o.workflowRegistry = reg
-	}
 }
 
 // WithOIDCDeps substitutes discovery and token verification dependencies.

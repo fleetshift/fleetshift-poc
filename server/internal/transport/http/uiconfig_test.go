@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -253,125 +255,245 @@ func TestGenerateNavLayout_NoGroups(t *testing.T) {
 	}
 }
 
-func TestHandleConfig_AuthConfiguredTrue(t *testing.T) {
+func TestHandleConfig_Unconfigured(t *testing.T) {
 	opts := UIConfigOptions{
-		OIDCAuthority:  "https://keycloak.example.com/realms/test",
-		OIDCUIClientID: "ui-client",
+		UIOrigin:       "http://127.0.0.1:8085",
+		OIDCUIClientID: "fleetshift-ui",
+		OIDCUIScope:    "openid profile email groups audience:server:client_id:fleetshift",
 		Logger:         slog.Default(),
-		AuthConfigured: func(_ context.Context) (bool, error) {
-			return true, nil
+		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
+			return "", "", false, nil
 		},
 	}
 
 	handler := handleConfig(opts)
 	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
 	rec := httptest.NewRecorder()
-
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	val, ok := resp["authConfigured"]
-	if !ok {
-		t.Fatal("authConfigured field missing from response")
+	if resp["uiOrigin"] != "http://127.0.0.1:8085" {
+		t.Fatalf("uiOrigin = %v", resp["uiOrigin"])
 	}
-	if val != true {
-		t.Errorf("authConfigured = %v, want true", val)
+	if resp["authConfigured"] != false {
+		t.Fatalf("authConfigured = %v, want false", resp["authConfigured"])
+	}
+	oidc, ok := resp["oidc"].(map[string]any)
+	if !ok {
+		t.Fatalf("oidc type = %T", resp["oidc"])
+	}
+	if oidc["authority"] != "" ||
+		oidc["clientId"] != "fleetshift-ui" ||
+		oidc["scope"] != "openid profile email groups audience:server:client_id:fleetshift" {
+		t.Fatalf("oidc = %#v", oidc)
+	}
+	if _, present := oidc["authorizationEndpoint"]; present {
+		t.Fatal("unconfigured must omit authorizationEndpoint")
+	}
+	if _, ok := resp["authentication"]; ok {
+		t.Fatal("authentication union must not appear in transitional response")
+	}
+	if _, ok := resp["schemaVersion"]; ok {
+		t.Fatal("schemaVersion must not appear in transitional response")
 	}
 }
 
-func TestHandleConfig_AuthConfiguredFalse(t *testing.T) {
+func TestHandleConfig_ConfiguredOIDC(t *testing.T) {
+	const uiScope = "openid profile email groups audience:server:client_id:fleetshift"
 	opts := UIConfigOptions{
-		OIDCAuthority:  "https://keycloak.example.com/realms/test",
-		OIDCUIClientID: "ui-client",
+		UIOrigin:       "http://127.0.0.1:8085",
+		OIDCUIClientID: "fleetshift-ui",
+		OIDCUIScope:    uiScope,
 		Logger:         slog.Default(),
-		AuthConfigured: func(_ context.Context) (bool, error) {
-			return false, nil
+		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
+			return "https://127.0.0.1:5556/dex", "https://127.0.0.1:5556/dex/auth", true, nil
 		},
 	}
 
 	handler := handleConfig(opts)
 	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
 	rec := httptest.NewRecorder()
-
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	val, ok := resp["authConfigured"]
-	if !ok {
-		t.Fatal("authConfigured field missing from response")
+	if resp["authConfigured"] != true {
+		t.Fatalf("authConfigured = %v, want true", resp["authConfigured"])
 	}
-	if val != false {
-		t.Errorf("authConfigured = %v, want false", val)
+	oidc := resp["oidc"].(map[string]any)
+	if oidc["authority"] != "https://127.0.0.1:5556/dex" ||
+		oidc["authorizationEndpoint"] != "https://127.0.0.1:5556/dex/auth" ||
+		oidc["clientId"] != "fleetshift-ui" ||
+		oidc["scope"] != uiScope {
+		t.Fatalf("oidc = %#v", oidc)
 	}
 }
 
-func TestHandleConfig_AuthConfiguredNil_OmitsField(t *testing.T) {
+func TestHandleConfig_AuthNil_OmitsAuthConfigured(t *testing.T) {
 	opts := UIConfigOptions{
-		OIDCAuthority:  "https://keycloak.example.com/realms/test",
-		OIDCUIClientID: "ui-client",
+		OIDCUIClientID: "fleetshift-ui",
 		Logger:         slog.Default(),
-		// AuthConfigured intentionally nil.
+		// AuthSnapshot intentionally nil.
 	}
 
 	handler := handleConfig(opts)
 	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
 	rec := httptest.NewRecorder()
-
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if _, ok := resp["authConfigured"]; ok {
-		t.Error("authConfigured should be omitted when AuthConfigured callback is nil")
+		t.Error("authConfigured should be omitted when AuthSnapshot callback is nil")
 	}
 }
 
-func TestHandleConfig_AuthConfiguredError_OmitsField(t *testing.T) {
+func TestHandleConfig_EmptyClientIDAndScopePassThrough(t *testing.T) {
 	opts := UIConfigOptions{
-		OIDCAuthority:  "https://keycloak.example.com/realms/test",
-		OIDCUIClientID: "ui-client",
-		Logger:         slog.Default(),
-		AuthConfigured: func(_ context.Context) (bool, error) {
-			return false, errors.New("db down")
+		Logger: slog.Default(),
+		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
+			return "", "", false, nil
 		},
 	}
 
 	handler := handleConfig(opts)
 	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
 	rec := httptest.NewRecorder()
-
 	handler.ServeHTTP(rec, req)
 
-	// Should still return 200 — authConfigured error is non-fatal.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if _, ok := resp["authConfigured"]; ok {
-		t.Error("authConfigured should be omitted on error (non-fatal)")
+	oidc := resp["oidc"].(map[string]any)
+	if oidc["clientId"] != "" || oidc["scope"] != "" {
+		t.Fatalf("server must not invent clientId/scope defaults; oidc=%#v", oidc)
+	}
+}
+
+func TestHandleConfig_AuthError(t *testing.T) {
+	opts := UIConfigOptions{
+		UIOrigin: "http://127.0.0.1:8085",
+		Logger:   slog.Default(),
+		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
+			return "", "", false, errors.New("db down")
+		},
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestHandleConfig_ConfiguredIncomplete(t *testing.T) {
+	opts := UIConfigOptions{
+		UIOrigin: "http://127.0.0.1:8085",
+		Logger:   slog.Default(),
+		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
+			return "https://issuer.example/dex", "", true, nil
+		},
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestHandleConfig_IncludesPluginFields(t *testing.T) {
+	dir := t.TempDir()
+	registry := `{
+		"assetsHost": "",
+		"plugins": {
+			"core-plugin": {
+				"name": "core-plugin",
+				"key": "core",
+				"label": "Core",
+				"persona": "ops",
+				"manifestPath": "/plugins/core/plugin-manifest.json",
+				"pluginManifest": {
+					"name": "core-plugin",
+					"version": "1.0.0",
+					"extensions": [
+						{
+							"type": "fleetshift.module",
+							"properties": {
+								"id": "home",
+								"label": "Home",
+								"component": {"$codeRef": "HomePage.default"}
+							}
+						}
+					],
+					"registrationMethod": "callback",
+					"baseURL": "/",
+					"loadScripts": ["plugin.js"]
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin-registry.json"), []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := UIConfigOptions{
+		WebDir:         dir,
+		UIOrigin:       "http://127.0.0.1:8085",
+		OIDCUIClientID: "fleetshift-ui",
+		Logger:         slog.Default(),
+		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
+			return "", "", false, nil
+		},
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, key := range []string{"scalprumConfig", "pluginPages", "pluginEntries", "assetsHost"} {
+		if _, ok := resp[key]; !ok {
+			t.Fatalf("missing plugin bootstrap field %q", key)
+		}
 	}
 }

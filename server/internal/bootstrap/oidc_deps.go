@@ -11,13 +11,13 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
 )
 
-// KeySetRegistrar registers JWKS URIs required for token verification.
+// JWKSRegistrar registers JWKS URIs required for token verification.
 // Optional capability on a Verifier; not all verifiers implement it.
-type KeySetRegistrar interface {
-	// RegisterKeySet registers jwksURI for subsequent token verification.
+type JWKSRegistrar interface {
+	// RegisterJWKS registers jwksURI for subsequent token verification.
 	// ctx bounds network I/O. A non-nil error means keys were not published;
 	// callers may retry later. Success is idempotent when already registered.
-	RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error
+	RegisterJWKS(ctx context.Context, jwksURI domain.EndpointURL) error
 }
 
 // OIDCDeps holds OIDC discovery and token verification dependencies for Start.
@@ -45,13 +45,13 @@ func NewProductionOIDCDeps(ctx context.Context, oidcHTTPClient *http.Client) (OI
 	}, nil
 }
 
-// registerPersistedKeySets attempts JWKS registration for every persisted OIDC
-// auth method. Failures are logged and ignored so an unavailable IdP does not
-// block process start. Each attempt is bounded so a slow/unreachable IdP cannot
-// stall Start. The production verifier's Verify path retries registration on
-// demand, so IdP recovery restores auth without a restart.
-func registerPersistedKeySets(ctx context.Context, logger *slog.Logger, verifier domain.OIDCTokenVerifier, methods []domain.AuthMethod) {
-	registrar, ok := verifier.(KeySetRegistrar)
+// registerAuthMethodJWKS best-effort registers each OIDC AuthMethod's JWKS URI
+// with the verifier. Failures are logged and ignored so an unavailable IdP does
+// not block process start. Each attempt is bounded so a slow/unreachable IdP
+// cannot stall Start. The production verifier's Verify path retries registration
+// on demand, so IdP recovery restores auth without a restart.
+func registerAuthMethodJWKS(ctx context.Context, logger *slog.Logger, verifier domain.OIDCTokenVerifier, methods []domain.AuthMethod) {
+	registrar, ok := verifier.(JWKSRegistrar)
 	if !ok {
 		return
 	}
@@ -60,7 +60,7 @@ func registerPersistedKeySets(ctx context.Context, logger *slog.Logger, verifier
 			continue
 		}
 		regCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		err := registrar.RegisterKeySet(regCtx, m.OIDC().JWKSURI)
+		err := registrar.RegisterJWKS(regCtx, m.OIDC().JWKSURI)
 		cancel()
 		if err != nil {
 			logger.Warn("failed to register JWKS for auth method", "id", m.ID(), "err", err)

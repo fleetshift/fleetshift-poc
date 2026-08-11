@@ -12,7 +12,6 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func isPodmanAvailable() bool {
@@ -61,7 +60,10 @@ func startContainer(extraOpts ...testcontainers.ContainerCustomizer) (*tcpostgre
 		tcpostgres.WithDatabase("fleetshift_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("5432/tcp")),
+		// Wait for the ready log twice (Postgres restarts once after
+		// initdb) then for the listening port. Port-only wait races the
+		// restart and causes intermittent connection-reset flakes.
+		tcpostgres.BasicWaitStrategies(),
 		detectProvider(),
 	}, extraOpts...)
 	ctr, err := tcpostgres.Run(ctx, "postgres:18", opts...)

@@ -19,20 +19,26 @@ import (
 // serveFlags holds raw serve CLI flag values before edge resolution into
 // bootstrap.Config.
 type serveFlags struct {
-	grpcAddr         string
-	httpAddr         string
-	dbPath           string
-	databaseURL      string
-	databaseURLFile  string
-	logLevel         string
-	logFormat        string
-	logLevelOverride string
-	oidcCAFile       string
-	webDir           string
-	oidcUIAuthority  string
-	oidcUIClientID   string
-	addons           string
-	gcphcpConfig     string
+	grpcAddr                      string
+	httpAddr                      string
+	dbPath                        string
+	databaseURL                   string
+	databaseURLFile               string
+	logLevel                      string
+	logFormat                     string
+	logLevelOverride              string
+	oidcCAFile                    string
+	webDir                        string
+	oidcIssuer                    string
+	oidcUIClientID                string
+	oidcUIScope                   string
+	oidcResourceAudience          string
+	oidcKeyEnrollmentAudience     string
+	oidcRegistryID                string
+	oidcRegistrySubjectExpression string
+	oidcPublicKeyClaimExpression  string
+	addons                        string
+	gcphcpConfig                  string
 }
 
 // newServeCmd builds the serve Cobra command and passes explicit --db selection
@@ -57,8 +63,14 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuers (for kind clusters trusting self-signed or local CAs)")
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
-	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
-	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
+	cmd.Flags().StringVar(&f.oidcIssuer, "oidc-issuer", os.Getenv("OIDC_ISSUER_URL"), "OIDC issuer URL for empty-store initial AuthMethod install (also seeds UI issuer via AuthMethod)")
+	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", os.Getenv("OIDC_UI_CLIENT_ID"), "OIDC client ID for the frontend UI (packaging/deploy supplies; no server default)")
+	cmd.Flags().StringVar(&f.oidcUIScope, "oidc-ui-scope", os.Getenv("OIDC_UI_SCOPE"), "OIDC scope string for the frontend UI (packaging/deploy supplies; no server default)")
+	cmd.Flags().StringVar(&f.oidcResourceAudience, "oidc-resource-audience", os.Getenv("OIDC_RESOURCE_AUDIENCE"), "AuthMethod resource/API audience (required when AuthMethod store is empty)")
+	cmd.Flags().StringVar(&f.oidcKeyEnrollmentAudience, "oidc-key-enrollment-audience", os.Getenv("OIDC_KEY_ENROLLMENT_AUDIENCE"), "AuthMethod key-enrollment audience (optional when enrollment is unused)")
+	cmd.Flags().StringVar(&f.oidcRegistryID, "oidc-registry-id", os.Getenv("OIDC_REGISTRY_ID"), "external key registry ID (requires --oidc-registry-subject-expression)")
+	cmd.Flags().StringVar(&f.oidcRegistrySubjectExpression, "oidc-registry-subject-expression", os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION"), "CEL expression mapping ID token claims to a registry subject")
+	cmd.Flags().StringVar(&f.oidcPublicKeyClaimExpression, "oidc-public-key-claim-expression", os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION"), "CEL expression extracting signer SPKI from ID token claims (mutually exclusive with registry mapping)")
 	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
 	return cmd

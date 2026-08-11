@@ -188,7 +188,9 @@ type fakeAuthMethodRepo struct {
 
 func (f *fakeAuthMethodRepo) Save(ctx context.Context, m domain.AuthMethod) error {
 	if f.saveFn != nil {
-		return f.saveFn(ctx, m)
+		if err := f.saveFn(ctx, m); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -5,10 +5,9 @@ Deploy FleetShift to an OpenShift cluster using Kustomize manifests. Everything 
 ## What gets deployed
 
 - **PostgreSQL** — StatefulSet with PVC (5Gi), headless Service, file-based secret mounting (`_FILE` convention)
-- **FleetShift server** — Deployment with web UI init container, `--database-url-file` for credentials, env-driven addon selection, and optional mounted `gcphcp.yaml`
+- **FleetShift server** — Deployment with web UI init container, `--database-url-file` for credentials, env-driven addon selection, optional mounted `gcphcp.yaml`, and serve OIDC bootstrap flags that install the first AuthMethod when the store is empty
 - **Networking** — OpenShift Routes (edge TLS) for HTTP/UI and gRPC, Service with ports 8085 (http) and 50051 (grpc)
 - **ImageStreams** — Pull from quay.io with scheduled import and deployment triggers
-- **Auth setup** — Job that registers the OIDC auth method via `fleetctl auth setup`
 - **ConfigMap + Secret** — Generated from `.env` at deploy time via Kustomize generators
 
 ## Prerequisites
@@ -28,8 +27,11 @@ task kubernetes:teardown        # remove everything
 
 The deploy script generates `config.env`, `secrets.env`, and `gcphcp.yaml`
 from the root `.env`, applies Kustomize manifests, waits for PostgreSQL and the
-server, imports images, and runs the auth-setup job. On completion it prints
-the frontend and gRPC URLs.
+server, and imports images. On completion it prints the frontend and gRPC URLs.
+First-trust AuthMethod install is performed by `fleetshift serve` from the
+Deployment's OIDC bootstrap flags (there is no auth-setup Job; public
+`CreateAuthMethod` is not a Day One path). `fleetctl auth setup` only writes
+local Fleetctl OIDC client config via issuer discovery.
 
 ## Tasks
 
@@ -37,7 +39,7 @@ All tasks use the `kubernetes:` namespace (alias `k8:`).
 
 | Task | Description |
 |------|-------------|
-| `kubernetes:deploy` | Deploy FleetShift (manifests, images, auth-setup) |
+| `kubernetes:deploy` | Deploy FleetShift (manifests and images) |
 | `kubernetes:teardown` | Remove all resources and namespace |
 | `kubernetes:status` | Show pods, services, routes; warn if image override is active |
 | `kubernetes:logs` | Tail logs from fleetshift-server (all containers) |
@@ -46,7 +48,6 @@ All tasks use the `kubernetes:` namespace (alias `k8:`).
 | `kubernetes:reset-image` | Restore default `:latest` tag with scheduled import |
 | `kubernetes:import-images` | Force reimport of images from quay.io |
 | `kubernetes:register-redirect USER=<u> PASSWORD=<p>` | Register UI redirect URI in Keycloak |
-| `kubernetes:auth-setup` | Re-run the auth-setup job (deletes previous first) |
 
 ## Configuration
 
@@ -100,22 +101,14 @@ See [grpc-route-cert/README.md](grpc-route-cert/README.md) for details.
 
 ## CLI Access
 
-After deployment and auth setup:
+After deployment, the server has already installed `authMethods/default` from
+its OIDC bootstrap flags when the AuthMethod store was empty. Configure local
+Fleetctl client settings separately (fleetctl auth setup), then login:
 
 ```bash
 GRPC_ROUTE=$(oc get route grpc -n fleetshift -o jsonpath='{.spec.host}')
 
-# Setup local auth config
-bin/fleetctl auth setup \
-  --server "$GRPC_ROUTE:443" --server-tls \
-  --issuer-url <OIDC_ISSUER_URL> \
-  --client-id fleetshift-cli \
-  --audience fleetshift-cli \
-  --key-enrollment-client-id fleetshift-signing \
-  --registry-id github.com \
-  --registry-subject-expression "claims.github_username"
-
-# Login and use
+# Login and use (after local Fleetctl OIDC client config exists)
 bin/fleetctl auth login
 bin/fleetctl deployment list --server "$GRPC_ROUTE:443" --server-tls
 ```

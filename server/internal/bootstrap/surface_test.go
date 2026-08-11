@@ -31,6 +31,9 @@ var expectedGRPCServiceFamilies = []string{
 // expectedHTTPRouteFamilies lists required HTTP route prefixes/patterns that
 // must be reachable (or explicitly exempt) on a ready server without WebDir.
 var expectedHTTPRouteFamilies = []string{
+	"/livez",
+	"/readyz",
+	"/api/ui/config",
 	"/v1/",
 	"/apis/fleetshift.io/",
 	"/api/ui/setup/ws",
@@ -58,6 +61,9 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodGet, "/livez"},
+		{http.MethodGet, "/readyz"},
+		{http.MethodGet, "/api/ui/config"},
 		{http.MethodGet, "/v1/deployments"},
 		{http.MethodGet, "/apis/fleetshift.io/v1/-:queryResources"},
 		{http.MethodGet, "/api/ui/setup/ws"},
@@ -78,10 +84,36 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s %s: %v", p.method, p.path, err)
 		}
-		io.Copy(io.Discard, resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
 			t.Errorf("%s %s returned 404; route family missing", p.method, p.path)
+		}
+		switch p.path {
+		case "/livez", "/readyz":
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("%s status = %d, want 200", p.path, resp.StatusCode)
+			}
+			if string(body) != "ok" {
+				t.Errorf("%s body = %q, want ok", p.path, body)
+			}
+		case "/api/ui/config":
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("/api/ui/config status = %d, want 200", resp.StatusCode)
+			}
+			bodyStr := string(body)
+			if !strings.Contains(bodyStr, `"oidc"`) {
+				t.Errorf("/api/ui/config body missing oidc: %s", bodyStr)
+			}
+			if !strings.Contains(bodyStr, `"authConfigured"`) {
+				t.Errorf("/api/ui/config body missing authConfigured: %s", bodyStr)
+			}
+			if !strings.Contains(bodyStr, `"uiOrigin"`) {
+				t.Errorf("/api/ui/config body missing uiOrigin: %s", bodyStr)
+			}
+			if !strings.Contains(bodyStr, `"authorizationEndpoint"`) {
+				t.Errorf("/api/ui/config body missing authorizationEndpoint: %s", bodyStr)
+			}
 		}
 	}
 

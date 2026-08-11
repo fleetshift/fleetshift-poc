@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -62,7 +63,7 @@ func TestStaticHandler_KnownRoute_Returns200(t *testing.T) {
 	dir := setupTestWebDir(t)
 	handler := NewStaticHandler(dir)
 
-	for _, path := range []string{"/", "/clusters", "/clusters/some-id", "/setup", "/debug"} {
+	for _, path := range []string{"/", "/clusters", "/clusters/some-id", "/setup", "/debug", "/auth/callback"} {
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("Accept", "text/html")
 		rec := httptest.NewRecorder()
@@ -70,6 +71,9 @@ func TestStaticHandler_KnownRoute_Returns200(t *testing.T) {
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("expected 200 for known route %s, got %d", path, rec.Code)
+		}
+		if path == "/auth/callback" && !strings.Contains(rec.Body.String(), "app") {
+			t.Errorf("expected SPA body for %s", path)
 		}
 	}
 }

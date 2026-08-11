@@ -6,7 +6,7 @@ Dependencies flow downward only.
 
 ### Layer 1: Main (`cmd/fleetshift`, `internal/cli`, and `internal/bootstrap`)
 
-CLI commands, config serialization, and the application object graph / lifecycle. No business logic. `internal/bootstrap` is the sole composition edge: it eagerly constructs the complete production graph, owns listeners, readiness, supervision, and shutdown, and is shared by `fleetshift serve`, `internal/testenv`, and the frozen `testserver` facade. `internal/testenv` is the runner-neutral environment harness (profiles/capabilities, typed controllers, artifacts); `e2e/` holds Go scenario tests that consume it. `internal/cli` stays a thin front for flags, environment/file resolution, logger construction, and OS signals. Packages below `bootstrap` must not import it.
+CLI commands, config serialization, and the application object graph / lifecycle. No business logic. `internal/bootstrap` is the sole composition edge: it eagerly constructs the complete production graph, owns listeners, readiness, supervision, and shutdown, and is shared by `fleetshift serve` and the frozen `testserver` facade used by existing fleetshift-cli tests. `internal/cli` stays a thin front for flags, environment/file resolution, logger construction, and OS signals. Packages below `bootstrap` must not import it.
 
 Depends on: Transport and Infrastructure, sometimes Application and Domain (when the CLI is acting as "the transport")
 

@@ -2,9 +2,7 @@
 #
 # Layered on top of the base compose + db + auth overrides.
 # Activated by DEV=true (e.g. `task podman:dev`).
-#
-# Requires UI_DIR in .env (default: ../../../fleetshift-user-interface,
-# relative to deploy/podman/).
+# Frontend assets are built in-container via Dockerfile.web (monorepo root).
 
 services:
 

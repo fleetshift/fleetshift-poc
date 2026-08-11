@@ -1,8 +1,6 @@
-// Package testserver provides a focused shared-builder facade over
-// bootstrap for sibling-module integration tests. New uses are frozen;
-// prefer internal/testenv for new scenarios. The independent object graph
-// has been deleted — Start delegates to bootstrap with workflow, OIDC,
-// and add-on substitutions that preserve Kind/GCP HCP create/read semantics.
+// Package testserver is a frozen fixture for existing fleetshift-cli
+// unit/contract tests that call Start. Do not add new callers, prefer
+// adding new e2e tests.
 package testserver
 
 import (
@@ -34,8 +32,8 @@ func (stubVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ string) (do
 	}, nil
 }
 
-// RegisterKeySet implements bootstrap.KeySetRegistrar as a no-op.
-func (stubVerifier) RegisterKeySet(context.Context, domain.EndpointURL) error { return nil }
+// RegisterJWKS implements bootstrap.JWKSRegistrar as a no-op.
+func (stubVerifier) RegisterJWKS(context.Context, domain.EndpointURL) error { return nil }
 
 // stubDiscovery returns fixed test metadata.
 type stubDiscovery struct{}
@@ -60,9 +58,11 @@ func Start(t *testing.T) string {
 	dbPath := filepath.Join(dir, "fleetshift.db")
 
 	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DBPath:   dbPath,
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               dbPath,
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 		// kind alone drives trust-bundle placement for provision-IdP;
 		// gcphcp is assembled via WithAddonAssembly without requiring a
 		// production gcphcp config file.

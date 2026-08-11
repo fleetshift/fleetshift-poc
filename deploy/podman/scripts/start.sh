@@ -9,8 +9,8 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 # profile attribute and optionally creates a dev user.
 #
 # In prod mode (AUTH=external): validates OIDC_ISSUER_URL is set, then
-# starts the stack. No local Keycloak — auth-setup points at the
-# external OIDC provider.
+# starts the stack. No local Keycloak — serve OIDC bootstrap flags point at
+# the external issuer (including AuthMethod policy fields).
 
 # Env vars (DEPLOY_MODE, DB, AUTH, DB_FLAG, COMPOSE_FILES) are set by Taskfile.
 # AUTH_MODE is derived from AUTH for backwards compatibility within this script.
@@ -60,7 +60,20 @@ fi
 compose up "${UP_ARGS[@]}"
 
 if [ "$AUTH_MODE" = "local" ]; then
-  KC_URL="https://${KC_HOSTNAME:-keycloak}:${KC_HTTPS_PORT:-8443}/auth"
+  kc_host="${KC_HOSTNAME:-keycloak}"
+  KC_URL="https://${kc_host}:${KC_HTTPS_PORT:-8443}/auth"
+
+  if ! { command -v getent >/dev/null 2>&1 && getent hosts "$kc_host" >/dev/null 2>&1; } \
+    && ! grep -Eq "^[^#]*[[:space:]]${kc_host}([[:space:]]|$)" /etc/hosts 2>/dev/null; then
+    echo "ERROR: hostname '${kc_host}' does not resolve on this host." >&2
+    echo "Map it to loopback before continuing (needed for Keycloak checks and fleetctl):" >&2
+    echo "  echo \"127.0.0.1 ${kc_host}\" | sudo tee -a /etc/hosts" >&2
+    if [ "$(uname -s)" = "Darwin" ]; then
+      echo "On macOS, also add IPv6 (Podman may only forward IPv6 loopback):" >&2
+      echo "  echo \"::1 ${kc_host}\" | sudo tee -a /etc/hosts" >&2
+    fi
+    exit 1
+  fi
 
   echo "==> Waiting for Keycloak API..."
   api_deadline=$((SECONDS + 90))
@@ -122,7 +135,7 @@ echo ""
 echo "==> FleetShift stack is running!"
 echo "    FleetShift:      http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Keycloak Admin:  https://keycloak:${KC_HTTPS_PORT:-8443}"
+  echo "    Keycloak Admin:  https://${kc_host}:${KC_HTTPS_PORT:-8443}"
   echo ""
   echo "  Keycloak Admin Console:"
   echo "    admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}"
@@ -133,7 +146,13 @@ if [ "$AUTH_MODE" = "local" ]; then
 fi
 echo ""
 if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Run 'task podman:cli-setup' to configure fleetctl."
+  echo "    Configure fleetctl:"
+  echo "      bin/fleetctl auth setup \\"
+  echo "        --issuer-url ${OIDC_URL} \\"
+  echo "        --client-id fleetshift-cli \\"
+  echo "        --key-enrollment-client-id fleetshift-signing \\"
+  echo "        --oidc-ca-file deploy/podman/.certs/ca.crt"
+  echo "      bin/fleetctl auth login"
 fi
 echo "    Run 'task podman:logs' to tail container output."
 echo "    Run 'task podman:status' to check container health."

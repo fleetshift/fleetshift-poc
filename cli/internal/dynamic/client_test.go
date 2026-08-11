@@ -6,22 +6,41 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/dynamic"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testserver"
 )
 
-func TestClient_ListResourceTypes(t *testing.T) {
-	addr := testserver.Start(t)
+// staticToken attaches a bearer token accepted by the testserver stub verifier.
+type staticToken string
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func (t staticToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + string(t)}, nil
+}
+
+func (t staticToken) RequireTransportSecurity() bool { return false }
+
+var _ credentials.PerRPCCredentials = staticToken("")
+
+func dialTestserver(t *testing.T, addr string) *grpc.ClientConn {
+	t.Helper()
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(staticToken("test-access-token")),
+	)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
 
-	client := dynamic.NewClient(conn)
+func TestClient_ListResourceTypes(t *testing.T) {
+	addr := testserver.Start(t)
+
+	client := dynamic.NewClient(dialTestserver(t, addr))
 	types, err := client.ListResourceTypes(context.Background())
 	if err != nil {
 		t.Fatalf("ListResourceTypes: %v", err)
@@ -79,17 +98,11 @@ func TestClient_ListResourceTypes(t *testing.T) {
 func TestClient_ResolveType_AmbiguousCollection(t *testing.T) {
 	addr := testserver.Start(t)
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-
-	client := dynamic.NewClient(conn)
+	client := dynamic.NewClient(dialTestserver(t, addr))
 
 	// Resolving "clusters" without a service should fail because both
 	// Kind and GCP HCP expose the same collection.
-	_, err = client.ResolveType(context.Background(), "clusters", "")
+	_, err := client.ResolveType(context.Background(), "clusters", "")
 	if err == nil {
 		t.Fatal("expected ambiguity error, got nil")
 	}
@@ -117,13 +130,7 @@ func TestClient_ResolveType_AmbiguousCollection(t *testing.T) {
 func TestClient_ResolveType_QualifiedName(t *testing.T) {
 	addr := testserver.Start(t)
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-
-	client := dynamic.NewClient(conn)
+	client := dynamic.NewClient(dialTestserver(t, addr))
 
 	// Qualified name should resolve without ambiguity, even though
 	// "clusters" alone is ambiguous.
@@ -160,13 +167,7 @@ func TestClient_ResolveType_QualifiedName(t *testing.T) {
 func TestClient_CreateAndGet(t *testing.T) {
 	addr := testserver.Start(t)
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-
-	client := dynamic.NewClient(conn)
+	client := dynamic.NewClient(dialTestserver(t, addr))
 	rt, err := client.ResolveType(context.Background(), "clusters", "kind.fleetshift.v1.ClusterService")
 	if err != nil {
 		t.Fatalf("ResolveType: %v", err)

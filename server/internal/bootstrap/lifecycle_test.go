@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
@@ -40,8 +42,13 @@ func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err = pb.NewDeploymentServiceClient(conn).ListDeployments(ctx, &pb.ListDeploymentsRequest{})
-	if err != nil {
-		t.Fatalf("ListDeployments via resolved dial: %v", err)
+	// AuthMethod exists after initial AuthMethod install; unauthenticated calls must still
+	// reach the service (Unauthenticated), proving the dial target works.
+	if err == nil {
+		t.Fatal("expected Unauthenticated without token after initial AuthMethod install")
+	}
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("ListDeployments via resolved dial: %v (want Unauthenticated)", err)
 	}
 
 	resp, err := http.Get("http://" + ep.HTTP.Dial + "/v1/deployments")
@@ -52,6 +59,9 @@ func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
 	if resp.StatusCode == http.StatusNotFound {
 		t.Fatal("gateway /v1/deployments not found; dial target mismatch?")
 	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("gateway status = %d, want 401 after initial AuthMethod install", resp.StatusCode)
+	}
 }
 
 func TestLifecycle_GatewaySurvivesStartContextCancel(t *testing.T) {
@@ -59,9 +69,11 @@ func TestLifecycle_GatewaySurvivesStartContextCancel(t *testing.T) {
 	// (testserver.Start's defer cancel). Shared Close-owned conn must remain.
 	startCtx, startCancel := context.WithCancel(context.Background())
 	cfg, err := NewConfig(ConfigInput{
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -105,9 +117,11 @@ func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 
 	grpcAddr := freeLocalAddr(t)
 	cfg, err := NewConfig(ConfigInput{
-		GRPCAddr: grpcAddr,
-		HTTPAddr: heldHTTP.Addr().String(),
-		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+		GRPCAddr:             grpcAddr,
+		HTTPAddr:             heldHTTP.Addr().String(),
+		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -136,9 +150,11 @@ func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
 
 	cfg, err := NewConfig(ConfigInput{
-		GRPCAddr: grpcAddr,
-		HTTPAddr: httpAddr,
-		DBPath:   dbPath,
+		GRPCAddr:             grpcAddr,
+		HTTPAddr:             httpAddr,
+		DBPath:               dbPath,
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -175,9 +191,11 @@ func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 
 func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
 	cfg, err := NewConfig(ConfigInput{
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -199,6 +217,86 @@ func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "Connect.Agent is nil") {
 		t.Fatalf("Start error = %v, want Connect.Agent is nil", err)
+	}
+}
+
+func TestStart_FailClosedEmptyStoreWithoutOIDC(t *testing.T) {
+	cfg, err := NewConfig(ConfigInput{
+		GRPCAddr: "127.0.0.1:0",
+		HTTPAddr: "127.0.0.1:0",
+		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	_, err = Start(context.Background(), cfg, testLogger(),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
+	)
+	if err == nil {
+		t.Fatal("expected Start to fail closed with empty AuthMethod store and no OIDC")
+	}
+	if !strings.Contains(err.Error(), "refusing to open the public API") {
+		t.Fatalf("Start error = %v, want refuse public API", err)
+	}
+}
+
+func TestStart_InstallsDefaultAuthMethodWhenStoreEmpty(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	cfg, err := NewConfig(ConfigInput{
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               dbPath,
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	srv, err := Start(ctx, cfg, testLogger(),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
+	)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer closeCancel()
+	if err := srv.Close(closeCtx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	repo := &sqlite.AuthMethodRepo{DB: db}
+	methods, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(methods) != 1 || methods[0].ID() != domain.DefaultAuthMethodID {
+		t.Fatalf("methods = %+v, want default AuthMethod", methods)
+	}
+	oidc := methods[0].OIDC()
+	if oidc == nil || string(oidc.IssuerURL) != "https://test-issuer.example" {
+		t.Fatalf("issuer = %#v, want https://test-issuer.example", oidc)
+	}
+	if string(oidc.AuthorizationEndpoint) != "https://test-issuer.example/authorize" {
+		t.Fatalf("AuthorizationEndpoint = %q, want .../authorize", oidc.AuthorizationEndpoint)
+	}
+	if string(oidc.TokenEndpoint) != "https://test-issuer.example/token" {
+		t.Fatalf("TokenEndpoint = %q, want .../token", oidc.TokenEndpoint)
+	}
+	if string(oidc.JWKSURI) != "https://test-issuer.example/jwks" {
+		t.Fatalf("JWKSURI = %q, want .../jwks", oidc.JWKSURI)
 	}
 }
 
@@ -554,84 +652,6 @@ func TestLifecycle_WorkflowsRegisteredBeforeWorkerStart(t *testing.T) {
 	}
 	if reg.registersBeforeStart < 8 {
 		t.Fatalf("registers before Start = %d, want at least 8 workflow registrations", reg.registersBeforeStart)
-	}
-}
-
-func TestLifecycle_WithSQLiteDBAndRegistryCallerRetainsOwnership(t *testing.T) {
-	db, sentinel, err := sqlite.OpenMemory(t.Name())
-	if err != nil {
-		t.Fatalf("OpenMemory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sentinel.Close()
-		_ = db.Close()
-	})
-
-	if _, err := db.Exec(`CREATE TABLE ownership_probe (id INTEGER PRIMARY KEY)`); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-
-	srv := startTestServerWithConfig(t, ConfigInput{
-		DBPath: "memory", // not opened; handle comes from WithSQLiteDBAndRegistry
-	}, WithSQLiteDBAndRegistry(db, NewMemWorkflowRegistry()))
-
-	closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := srv.Close(closeCtx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	// Injected DB must remain usable after Server.Close.
-	if err := db.Ping(); err != nil {
-		t.Fatalf("Ping after Server.Close: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "fleetshift.db")
-	if err := sqlite.DumpToFile(db, path); err != nil {
-		t.Fatalf("DumpToFile after Server.Close: %v", err)
-	}
-}
-
-func TestWithSQLiteDBAndRegistry_RequiresWorkflowRegistry(t *testing.T) {
-	db, sentinel, err := sqlite.OpenMemory(t.Name())
-	if err != nil {
-		t.Fatalf("OpenMemory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sentinel.Close()
-		_ = db.Close()
-	})
-
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic for nil workflow registry")
-		}
-		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, "workflow registry is nil") {
-			t.Fatalf("panic = %#v, want workflow registry is nil", r)
-		}
-	}()
-	_ = WithSQLiteDBAndRegistry(db, nil)
-}
-
-func TestOpenPersistence_WithSQLiteDBAndRegistryRequiresSQLite(t *testing.T) {
-	db, sentinel, err := sqlite.OpenMemory(t.Name())
-	if err != nil {
-		t.Fatalf("OpenMemory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sentinel.Close()
-		_ = db.Close()
-	})
-
-	_, err = openPersistence(Postgres{
-		Host:      "localhost",
-		Port:      5432,
-		Name:      "fleetshift",
-		DriverDSN: "postgres://localhost:5432/fleetshift",
-	}, db)
-	if err == nil {
-		t.Fatal("expected error injecting SQLite DB into Postgres config")
 	}
 }
 

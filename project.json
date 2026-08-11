@@ -169,11 +169,6 @@
       "options": { "command": "task pd:pull" },
       "cache": false
     },
-    "pd:cli-setup": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:cli-setup" },
-      "cache": false
-    },
     "pd:cert-init": {
       "executor": "nx:run-commands",
       "options": { "command": "task pd:cert-init" },
