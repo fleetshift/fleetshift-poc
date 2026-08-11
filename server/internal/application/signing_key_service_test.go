@@ -23,7 +23,7 @@ func setupSignerEnrollmentService(t *testing.T) (*application.SignerEnrollmentSe
 	if err != nil {
 		t.Fatalf("create verifier: %v", err)
 	}
-	if err := verifier.RegisterKeySet(context.Background(), domain.EndpointURL(string(provider.IssuerURL())+"/jwks")); err != nil {
+	if err := verifier.RegisterJWKS(context.Background(), domain.EndpointURL(string(provider.IssuerURL())+"/jwks")); err != nil {
 		t.Fatalf("register key set: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestSignerEnrollmentService_Create_NoRegistryConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create verifier: %v", err)
 	}
-	if err := verifier.RegisterKeySet(context.Background(), domain.EndpointURL(string(provider.IssuerURL())+"/jwks")); err != nil {
+	if err := verifier.RegisterJWKS(context.Background(), domain.EndpointURL(string(provider.IssuerURL())+"/jwks")); err != nil {
 		t.Fatalf("register key set: %v", err)
 	}
 

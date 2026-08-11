@@ -85,8 +85,7 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 		registryID = mapping.RegistryID
 	default:
 		return domain.SignerEnrollment{}, fmt.Errorf(
-			"%w: no key registry configured — run fleetctl auth setup with "+
-				"--public-key-claim-expression (OIDC) or --registry-id + --registry-subject-expression (GitHub)",
+			"%w: no key registry configured — AuthMethod needs a public-key claim expression or registry subject mapping",
 			domain.ErrInvalidArgument)
 	}
 

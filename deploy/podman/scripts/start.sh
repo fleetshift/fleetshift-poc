@@ -9,8 +9,8 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 # profile attribute and optionally creates a dev user.
 #
 # In prod mode (AUTH=external): validates OIDC_ISSUER_URL is set, then
-# starts the stack. No local Keycloak — auth-setup points at the
-# external OIDC provider.
+# starts the stack. No local Keycloak — serve OIDC bootstrap flags point at
+# the external issuer (including AuthMethod policy fields).
 
 # Env vars (DEPLOY_MODE, DB, AUTH, DB_FLAG, COMPOSE_FILES) are set by Taskfile.
 # AUTH_MODE is derived from AUTH for backwards compatibility within this script.
@@ -133,7 +133,13 @@ if [ "$AUTH_MODE" = "local" ]; then
 fi
 echo ""
 if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Run 'task podman:cli-setup' to configure fleetctl."
+  echo "    Configure fleetctl:"
+  echo "      bin/fleetctl auth setup \\"
+  echo "        --issuer-url ${OIDC_URL} \\"
+  echo "        --client-id fleetshift-cli \\"
+  echo "        --key-enrollment-client-id fleetshift-signing \\"
+  echo "        --oidc-ca-file deploy/podman/.certs/ca.crt"
+  echo "      bin/fleetctl auth login"
 fi
 echo "    Run 'task podman:logs' to tail container output."
 echo "    Run 'task podman:status' to check container health."

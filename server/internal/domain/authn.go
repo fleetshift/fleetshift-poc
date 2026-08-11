@@ -15,6 +15,10 @@ type AuthMethodType string
 const (
 	// AuthMethodTypeOIDC represents OpenID Connect token-based authentication.
 	AuthMethodTypeOIDC AuthMethodType = "oidc"
+
+	// DefaultAuthMethodID is the AuthMethod ID used by implicit config
+	// bootstrap for the first IdP.
+	DefaultAuthMethodID AuthMethodID = "default"
 )
 
 // AuthMethod is a configured authentication method. Exactly one of the

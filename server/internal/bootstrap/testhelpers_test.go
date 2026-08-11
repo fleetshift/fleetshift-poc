@@ -19,7 +19,7 @@ func (testVerifier) Verify(context.Context, domain.OIDCConfig, string) (domain.S
 	}, nil
 }
 
-func (testVerifier) RegisterKeySet(context.Context, domain.EndpointURL) error { return nil }
+func (testVerifier) RegisterJWKS(context.Context, domain.EndpointURL) error { return nil }
 
 type testDiscovery struct{}
 
@@ -39,9 +39,11 @@ func testLogger() *slog.Logger {
 func startTestServer(t *testing.T, opts ...Option) *Server {
 	t.Helper()
 	return startTestServerWithConfig(t, ConfigInput{
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		OIDCIssuer:           "https://test-issuer.example",
+		OIDCResourceAudience: "fleetshift",
 	}, opts...)
 }
 
@@ -55,6 +57,15 @@ func startTestServerWithConfig(t *testing.T, in ConfigInput, opts ...Option) *Se
 	}
 	if in.DBPath == "" {
 		in.DBPath = filepath.Join(t.TempDir(), "fleetshift.db")
+	}
+	// Fail-closed Start requires complete OIDC initial-AuthMethod config when the
+	// AuthMethod store is empty. Tests that intentionally omit it must call
+	// Start directly.
+	if in.OIDCIssuer == "" {
+		in.OIDCIssuer = "https://test-issuer.example"
+	}
+	if in.OIDCResourceAudience == "" {
+		in.OIDCResourceAudience = "fleetshift"
 	}
 	cfg, err := NewConfig(in)
 	if err != nil {

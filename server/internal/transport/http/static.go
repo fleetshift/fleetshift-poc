@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+// knownRoutes caches first-path segments that should receive SPA index.html
+// with HTTP 200 (including plugin pages and staticKnownPrefixes).
 type knownRoutes struct {
 	mu       sync.RWMutex
 	prefixes []string
@@ -18,6 +20,7 @@ type knownRoutes struct {
 	cacheTTL time.Duration
 }
 
+// newKnownRoutes builds a route cache rooted at webDir.
 func newKnownRoutes(webDir string) *knownRoutes {
 	return &knownRoutes{
 		webDir:   webDir,
@@ -25,6 +28,7 @@ func newKnownRoutes(webDir string) *knownRoutes {
 	}
 }
 
+// isKnown reports whether urlPath's first segment is a known SPA route.
 func (kr *knownRoutes) isKnown(urlPath string) bool {
 	kr.mu.RLock()
 	stale := time.Since(kr.loadedAt) > kr.cacheTTL
@@ -46,8 +50,14 @@ func (kr *knownRoutes) isKnown(urlPath string) bool {
 	return false
 }
 
-var staticKnownPrefixes = []string{"setup", "debug"}
+// staticKnownPrefixes are first-path segments that receive SPA index.html with
+// HTTP 200 (product shell routes; "auth" covers /auth/callback and other /auth/*).
+var staticKnownPrefixes = []string{"setup", "debug", "auth"}
 
+// reload refreshes known prefixes: always includes staticKnownPrefixes, then
+// adds first-path segments from plugin-registry.json page paths (via
+// generatePluginPages, including builtin pages). Falls back to
+// staticKnownPrefixes alone when the registry is missing or invalid.
 func (kr *knownRoutes) reload() []string {
 	data, err := os.ReadFile(filepath.Join(kr.webDir, "plugin-registry.json"))
 	if err != nil {
@@ -89,6 +99,8 @@ func (kr *knownRoutes) reload() []string {
 	return prefixes
 }
 
+// NewStaticHandler serves frontend assets from webDir with SPA fallback for
+// HTML document requests. Unknown client routes return index.html with 404.
 func NewStaticHandler(webDir string) http.Handler {
 	absWebDir, err := filepath.Abs(webDir)
 	if err != nil {
@@ -132,6 +144,8 @@ func NewStaticHandler(webDir string) http.Handler {
 	})
 }
 
+// setCacheHeaders applies Cache-Control: no-cache for index.html and manifests,
+// and a long immutable cache for all other served files.
 func setCacheHeaders(w http.ResponseWriter, path string) {
 	base := filepath.Base(path)
 
@@ -147,6 +161,8 @@ func setCacheHeaders(w http.ResponseWriter, path string) {
 	}
 }
 
+// acceptsHTML reports whether the Accept header includes text/html or */*
+// (q-values and preference order are not considered).
 func acceptsHTML(r *http.Request) bool {
 	accept := r.Header.Get("Accept")
 	for _, part := range strings.Split(accept, ",") {

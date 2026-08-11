@@ -7,13 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testserver"
 )
 
 func TestResource_TypesCommand(t *testing.T) {
+	seedTestAuth(t)
 	addr := testserver.Start(t)
 
 	out := runCLI(t, "--server", addr, "resource", "types")
@@ -34,6 +32,7 @@ func TestResource_TypesCommand(t *testing.T) {
 }
 
 func TestResource_DescribeCommand(t *testing.T) {
+	seedTestAuth(t)
 	addr := testserver.Start(t)
 
 	out := runCLI(t, "--server", addr, "resource", "--service", "kind.fleetshift.v1.ClusterService", "describe", "clusters")
@@ -47,6 +46,7 @@ func TestResource_DescribeCommand(t *testing.T) {
 }
 
 func TestResource_CreateGetListDelete(t *testing.T) {
+	seedTestAuth(t)
 	addr := testserver.Start(t)
 
 	specJSON := `{"name": "test-cluster"}`
@@ -82,14 +82,14 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 	}
 
 	// Verify it's gone.
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
+	_, err := runCLIErr(t, "--server", addr, "resource", svcFlag, svcName, "get", "clusters", "test-cluster")
+	if err == nil {
+		t.Fatal("get after delete should fail")
 	}
-	defer conn.Close()
 }
 
 func TestResource_QualifiedTypeCRUD(t *testing.T) {
+	seedTestAuth(t)
 	addr := testserver.Start(t)
 
 	specJSON := `{"name": "qualified-cluster"}`
@@ -122,9 +122,16 @@ func TestResource_QualifiedTypeCRUD(t *testing.T) {
 	if !strings.Contains(out, "clusters/qualified-cluster") {
 		t.Fatalf("expected deleted resource in output, got:\n%s", out)
 	}
+
+	// Verify it's gone.
+	_, err := runCLIErr(t, "--server", addr, "resource", "get", qualifiedType, "qualified-cluster")
+	if err == nil {
+		t.Fatal("get after delete should fail")
+	}
 }
 
 func TestResource_GetTableOutput(t *testing.T) {
+	seedTestAuth(t)
 	addr := testserver.Start(t)
 
 	specJSON := `{"name": "tbl-cluster"}`
@@ -155,6 +162,7 @@ func TestResource_GetTableOutput(t *testing.T) {
 }
 
 func TestResource_ListTableOutput(t *testing.T) {
+	seedTestAuth(t)
 	addr := testserver.Start(t)
 
 	specJSON := `{"name": "tbl-list-cluster"}`

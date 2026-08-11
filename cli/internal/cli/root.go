@@ -6,6 +6,10 @@ import (
 	"google.golang.org/grpc"
 )
 
+// annotationSkipServer marks commands that do not dial the FleetShift gRPC
+// server (for example local auth configuration).
+const annotationSkipServer = "fleetctl.io/skip-server"
+
 type globalFlags struct {
 	server         string
 	outputFormat   string
@@ -34,6 +38,10 @@ func New() *cobra.Command {
 				return err
 			}
 			ctx.printer = output.NewPrinter(cmd.OutOrStdout(), format)
+
+			if cmd.Annotations[annotationSkipServer] == "true" {
+				return nil
+			}
 
 			conn, err := dial(ctx.flags)
 			if err != nil {

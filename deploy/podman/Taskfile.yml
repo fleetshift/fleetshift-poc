@@ -31,7 +31,7 @@ vars:
       else
         echo "--db=/data/fleetshift.db"
       fi
-  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml'
+  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml{{if eq .RESOLVED_AUTH "local"}} -f overrides/local-keycloak.yaml{{end}}'
   RESOLVED_PODMAN_SOCKET:
     sh: './scripts/detect-podman-socket.sh'
 
@@ -183,15 +183,6 @@ tasks:
     cmds:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env rm -f -s web-builder
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env up --build web-builder
-
-  cli-setup:
-    desc: Configure fleetctl CLI for the current deployment
-    env: *deploy_env
-    preconditions:
-      - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
-        msg: "OIDC_ISSUER_URL is required when AUTH=external"
-    cmds:
-      - ./scripts/cli-setup.sh
 
   test-attestation:
     desc: Run the end-to-end attestation flow

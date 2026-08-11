@@ -49,8 +49,13 @@ services:
       - --log-level=${FLEETSHIFT_LOG_LEVEL}
       - --addons=${FLEETSHIFT_SERVER_ADDONS:-kind,kubernetes}
       - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
-      - --oidc-ui-authority=${OIDC_UI_AUTHORITY:-${OIDC_ISSUER_URL}}
+      - --oidc-issuer=${OIDC_ISSUER_URL}
       - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
+      - --oidc-ui-scope=${OIDC_UI_SCOPE:-openid profile email groups audience:server:client_id:fleetshift}
+      - --oidc-resource-audience=${OIDC_RESOURCE_AUDIENCE:-fleetshift}
+      - --oidc-key-enrollment-audience=${OIDC_KEY_ENROLLMENT_AUDIENCE:-fleetshift-signing}
+      - --oidc-registry-id=${OIDC_REGISTRY_ID:-github.com}
+      - --oidc-registry-subject-expression=${OIDC_REGISTRY_SUBJECT_EXPRESSION:-claims.preferred_username}
     depends_on:
       web-builder:
         condition: service_completed_successfully

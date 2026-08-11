@@ -23,7 +23,11 @@ echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
 cp .env.template .env         # configure (edit as needed)
 task build:cli                # build fleetctl Go binaries
 task podman:up                # start the stack (demo mode)
-task podman:cli-setup         # configure fleetctl CLI
+bin/fleetctl auth setup \
+  --issuer-url https://keycloak:8443/auth/realms/fleetshift \
+  --client-id fleetshift-cli \
+  --key-enrollment-client-id fleetshift-signing \
+  --oidc-ca-file deploy/podman/.certs/ca.crt
 bin/fleetctl auth login       # log in (opens browser)
 ```
 
@@ -127,7 +131,6 @@ All tasks use the `podman:` namespace (alias `pd:`).
 | `podman:status` | Show running containers |
 | `podman:restart:<service>` | Restart a specific container |
 | `podman:rebuild-web` | Rebuild frontend without restarting server |
-| `podman:cli-setup` | Configure fleetctl for local auth |
 | `podman:test-attestation` | Run end-to-end attestation flow |
 | `podman:reset-keycloak` | Wipe Keycloak state (AUTH=local only) |
 

@@ -16,20 +16,13 @@ CONTAINER_HOST=host.docker.internal ./bin/fleetshift serve --http-addr :8085 --l
 
 `CONTAINER_HOST` rewrites `localhost` in OIDC issuer URLs to `host.docker.internal` so kind containers can reach host services. Without this, OIDC-authenticated deployments fail because `localhost` inside a Docker container doesn't reach the host.
 
-### 2. Register auth method
+Day One server AuthMethod install is performed by `fleetshift serve` bootstrap (empty store + OIDC bootstrap config).
 
-```bash
-./bin/fleetctl auth setup \
-  --issuer-url http://localhost:8180/realms/fleetshift \
-  --client-id fleetshift-ui \
-  --audience fleetshift-ui
-```
-
-### 3. Create a deployment from the UI
+### 2. Create a deployment from the UI
 
 Navigate to **Orchestration** in the Control Plane section. Click "Create deployment", enter a cluster name, and submit. Leave the Kind Config field empty — the backend handles config generation.
 
-### 4. Monitor progress
+### 3. Monitor progress
 
 ```bash
 # Watch Go backend logs (best source of truth)

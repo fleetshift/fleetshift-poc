@@ -39,8 +39,13 @@ spec:
             - --addons=$(FLEETSHIFT_SERVER_ADDONS)
             - --gcphcp-config=$(GCPHCP_CONFIG_PATH)
             - --web-dir=/srv/web
-            - --oidc-ui-authority=$(OIDC_ISSUER_URL)
+            - --oidc-issuer=$(OIDC_ISSUER_URL)
             - --oidc-ui-client-id=$(OIDC_UI_CLIENT_ID)
+            - --oidc-ui-scope=$(OIDC_UI_SCOPE)
+            - --oidc-resource-audience=$(OIDC_RESOURCE_AUDIENCE)
+            - --oidc-key-enrollment-audience=$(OIDC_KEY_ENROLLMENT_AUDIENCE)
+            - --oidc-registry-id=$(KEY_REGISTRY_ID)
+            - --oidc-registry-subject-expression=$(KEY_REGISTRY_SUBJECT_EXPR)
           envFrom:
             - configMapRef:
                 name: fleetshift-server-config

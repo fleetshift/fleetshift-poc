@@ -31,7 +31,7 @@ type Verifier struct {
 	// the number of OIDC auth methods.
 	//
 	// TODO: During a prolonged IdP/JWKS outage, every Verify → getKeySet →
-	// RegisterKeySet for an unpublished URI re-drives jwk.Fetch under the
+	// RegisterJWKS for an unpublished URI re-drives jwk.Fetch under the
 	// per-URI mutex, so waiters queue and then each attempt another upstream
 	// fetch. Consider a short negative-result cache (few seconds) so outage
 	// load is bounded, while still allowing on-demand recovery when the IdP
@@ -79,9 +79,9 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 	}, nil
 }
 
-// RegisterKeySet registers a JWKS URI with the background cache so keys
-// are refreshed automatically. Called at process start for persisted auth
-// methods and on demand from Verify when keys were not cached at boot.
+// RegisterJWKS registers a JWKS URI with the background cache so keys
+// are refreshed automatically. Called at process start for auth methods
+// and on demand from Verify when keys were not cached at boot.
 //
 // Registration is fail-fast and recoverable:
 //  1. Preflight fetch under ctx (surfaces 503/timeout immediately).
@@ -96,7 +96,7 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 //
 // Network I/O runs outside v.mu. Same-URI callers serialize on a per-URI
 // mutex and each attempt uses that caller's ctx; other URIs are not blocked.
-func (v *Verifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error {
+func (v *Verifier) RegisterJWKS(ctx context.Context, jwksURI domain.EndpointURL) error {
 	uri := string(jwksURI)
 	if v.hasKeySet(uri) {
 		return nil
@@ -109,7 +109,7 @@ func (v *Verifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointUR
 	if v.hasKeySet(uri) {
 		return nil
 	}
-	return v.doRegisterKeySet(ctx, uri)
+	return v.doRegisterJWKS(ctx, uri)
 }
 
 // lockForURI returns the per-URI mutex used to serialize registration.
@@ -124,9 +124,9 @@ func (v *Verifier) lockForURI(uri string) *sync.Mutex {
 	return m
 }
 
-// doRegisterKeySet performs preflight fetch, cache registration, and publish.
+// doRegisterJWKS performs preflight fetch, cache registration, and publish.
 // It must not hold v.mu across network or cache I/O.
-func (v *Verifier) doRegisterKeySet(ctx context.Context, uri string) error {
+func (v *Verifier) doRegisterJWKS(ctx context.Context, uri string) error {
 	if v.cache.IsRegistered(ctx, uri) {
 		// Prior success that wasn't published yet (shouldn't happen), or a
 		// stale registration left after a failed WaitReady — reuse if ready,
@@ -176,7 +176,7 @@ func (v *Verifier) hasKeySet(uri string) bool {
 }
 
 // publishCachedSet stores a ready CachedSet in keySets. On CachedSet failure
-// it unregisters the URI so a later RegisterKeySet can recover.
+// it unregisters the URI so a later RegisterJWKS can recover.
 func (v *Verifier) publishCachedSet(ctx context.Context, uri string) error {
 	cached, err := v.cache.CachedSet(uri)
 	if err != nil {
@@ -288,7 +288,7 @@ func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (j
 		return ks, nil
 	}
 
-	if err := v.RegisterKeySet(ctx, jwksURI); err != nil {
+	if err := v.RegisterJWKS(ctx, jwksURI); err != nil {
 		return nil, err
 	}
 

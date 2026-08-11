@@ -126,7 +126,7 @@ func fetchJWKSBody(t *testing.T, client *http.Client, jwksURI string) []byte {
 	return body
 }
 
-func TestVerifier_RegisterKeySetFailsFastWhenJWKSUnavailable(t *testing.T) {
+func TestVerifier_RegisterJWKSFailsFastWhenJWKSUnavailable(t *testing.T) {
 	// Cement fail-fast: a 503 must not burn the caller's full deadline waiting
 	// on httprc Ready() (which only unblocks on first success or ctx cancel).
 	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
@@ -144,17 +144,17 @@ func TestVerifier_RegisterKeySetFailsFastWhenJWKSUnavailable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	err = verifier.RegisterKeySet(ctx, domain.EndpointURL(proxy.URL+"/jwks"))
+	err = verifier.RegisterJWKS(ctx, domain.EndpointURL(proxy.URL+"/jwks"))
 	elapsed := time.Since(start)
 	if err == nil {
-		t.Fatal("expected RegisterKeySet error while JWKS down")
+		t.Fatal("expected RegisterJWKS error while JWKS down")
 	}
 	if elapsed > time.Second {
-		t.Fatalf("RegisterKeySet took %v while JWKS returned 503; want fail-fast (<1s), not Ready()-until-deadline", elapsed)
+		t.Fatalf("RegisterJWKS took %v while JWKS returned 503; want fail-fast (<1s), not Ready()-until-deadline", elapsed)
 	}
 }
 
-func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
+func TestVerifier_RegisterJWKSDoesNotBlockOtherURIs(t *testing.T) {
 	// A slow/hung registration for URI A must not delay registration for URI B.
 	// Before the fix, v.mu was held across Fetch, serializing all URIs.
 	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
@@ -198,7 +198,7 @@ func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		errA <- verifier.RegisterKeySet(ctx, domain.EndpointURL(proxyA.URL+"/jwks"))
+		errA <- verifier.RegisterJWKS(ctx, domain.EndpointURL(proxyA.URL+"/jwks"))
 	}()
 
 	select {
@@ -210,11 +210,11 @@ func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
 	startB := time.Now()
 	ctxB, cancelB := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelB()
-	if err := verifier.RegisterKeySet(ctxB, domain.EndpointURL(proxyB.URL+"/jwks")); err != nil {
-		t.Fatalf("RegisterKeySet B while A blocked: %v", err)
+	if err := verifier.RegisterJWKS(ctxB, domain.EndpointURL(proxyB.URL+"/jwks")); err != nil {
+		t.Fatalf("RegisterJWKS B while A blocked: %v", err)
 	}
 	if elapsed := time.Since(startB); elapsed > time.Second {
-		t.Fatalf("RegisterKeySet B took %v while A was blocked; want independent progress", elapsed)
+		t.Fatalf("RegisterJWKS B took %v while A was blocked; want independent progress", elapsed)
 	}
 
 	close(releaseA)
@@ -223,7 +223,7 @@ func TestVerifier_RegisterKeySetDoesNotBlockOtherURIs(t *testing.T) {
 	<-errA
 }
 
-func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
+func TestVerifier_RegisterJWKSShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 	// Same-URI registration must use each caller's ctx. A short-lived first
 	// attempt must not cause a concurrent waiter with a healthy budget to fail.
 	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
@@ -265,7 +265,7 @@ func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		errLeader <- verifier.RegisterKeySet(leaderCtx, uri)
+		errLeader <- verifier.RegisterJWKS(leaderCtx, uri)
 	}()
 
 	select {
@@ -278,7 +278,7 @@ func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		errFollower <- verifier.RegisterKeySet(ctx, uri)
+		errFollower <- verifier.RegisterJWKS(ctx, uri)
 	}()
 
 	// Expire the leader while still held, then release so the waiter's own
@@ -288,17 +288,17 @@ func TestVerifier_RegisterKeySetShortLeaderDoesNotPoisonWaiter(t *testing.T) {
 	wg.Wait()
 
 	if err := <-errLeader; err == nil {
-		t.Fatal("expected leader RegisterKeySet to fail after short deadline")
+		t.Fatal("expected leader RegisterJWKS to fail after short deadline")
 	}
 	if err := <-errFollower; err != nil {
-		t.Fatalf("follower RegisterKeySet: %v (must not inherit leader ctx failure)", err)
+		t.Fatalf("follower RegisterJWKS: %v (must not inherit leader ctx failure)", err)
 	}
 }
 
-func TestVerifier_RegisterKeySetRecoversAfterInitialFetchFailure(t *testing.T) {
-	// Cement on-demand recovery: repeated failed RegisterKeySet (IdP/JWKS
+func TestVerifier_RegisterJWKSRecoversAfterInitialFetchFailure(t *testing.T) {
+	// Cement on-demand recovery: repeated failed RegisterJWKS (IdP/JWKS
 	// down) must not poison the URI or the httprc worker pool; a later
-	// Verify (getKeySet → RegisterKeySet) succeeds. Uses >DefaultWorkers(5)
+	// Verify (getKeySet → RegisterJWKS) succeeds. Uses >DefaultWorkers(5)
 	// failures so a Refresh-based approach that kills workers on sync
 	// failure would permanently break recovery.
 	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
@@ -318,10 +318,10 @@ func TestVerifier_RegisterKeySetRecoversAfterInitialFetchFailure(t *testing.T) {
 	up.Store(false)
 	for i := 0; i < 10; i++ {
 		downCtx, downCancel := context.WithTimeout(context.Background(), time.Second)
-		err = verifier.RegisterKeySet(downCtx, jwksURI)
+		err = verifier.RegisterJWKS(downCtx, jwksURI)
 		downCancel()
 		if err == nil {
-			t.Fatalf("iteration %d: expected RegisterKeySet error while JWKS down", i)
+			t.Fatalf("iteration %d: expected RegisterJWKS error while JWKS down", i)
 		}
 	}
 
@@ -330,7 +330,7 @@ func TestVerifier_RegisterKeySetRecoversAfterInitialFetchFailure(t *testing.T) {
 	defer upCancel()
 	raw := idp.IssueToken(t, oidctest.TokenClaims{Subject: "user-1"})
 	// Recover through Verify only — production auth path, not an explicit
-	// second RegisterKeySet call from the test.
+	// second RegisterJWKS call from the test.
 	if _, err := verifier.Verify(upCtx, cfg, raw); err != nil {
 		t.Fatalf("Verify after recovery: %v", err)
 	}

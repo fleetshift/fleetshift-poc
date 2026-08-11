@@ -12,22 +12,32 @@ import (
 	"strings"
 )
 
+// UIConfigOptions configures UI bootstrap HTTP routes.
 type UIConfigOptions struct {
-	WebDir         string
-	OIDCAuthority  string
+	WebDir string
+	// UIOrigin is the trusted advertised browser origin (never from request
+	// headers). Emitted as uiOrigin when nonempty.
+	// TODO(fe): decide — consume (require uiOrigin == window.location.origin
+	// and derive redirect URI as uiOrigin+"/auth/callback") or remove from
+	// this contract.
+	UIOrigin string
+	// OIDCUIClientID and OIDCUIScope are packaging/deploy-supplied browser
+	// OIDC inputs advertised on /api/ui/config. The server does not invent
+	// defaults for either field.
 	OIDCUIClientID string
+	OIDCUIScope    string
 	Logger         *slog.Logger
 	// AuthMiddleware, when non-nil, wraps routes that serve
 	// user-specific data (e.g. /api/ui/user-config → navLayout).
 	// Global bootstrap routes (/api/ui/config, /api/ui/plugin-registry)
 	// are never wrapped.
 	AuthMiddleware func(http.Handler) http.Handler
-	// AuthConfigured, when non-nil, is called to check whether at
-	// least one OIDC auth method has been configured. The result is
-	// surfaced as "authConfigured" in the /api/ui/config response so
-	// the frontend can enable auth gating on setup routes even when
-	// the user has no token yet.
-	AuthConfigured func(ctx context.Context) (bool, error)
+	// AuthSnapshot returns the live browser OIDC snapshot from AuthMethod
+	// state. configured=false is unconfigured (empty authority/endpoint).
+	// err or configured=true with a partial tuple yields 503. When nil,
+	// authConfigured is omitted (frontend treats that as false).
+	// authorizationEndpoint is the IdP authorize URL from validated discovery.
+	AuthSnapshot func(ctx context.Context) (authority, authorizationEndpoint string, configured bool, err error)
 }
 
 type pluginManifest struct {
@@ -82,6 +92,8 @@ type moduleGroupMeta struct {
 	pluginKey string
 }
 
+// NewUIConfigMux mounts unauthenticated /api/ui/config and
+// /api/ui/plugin-registry, plus /api/ui/user-config (optionally auth-wrapped).
 func NewUIConfigMux(opts UIConfigOptions) *http.ServeMux {
 	mux := http.NewServeMux()
 	// /api/ui/config must remain unauthenticated — the frontend needs
@@ -96,46 +108,61 @@ func NewUIConfigMux(opts UIConfigOptions) *http.ServeMux {
 	return mux
 }
 
+// oidcConfig is the oidc object on /api/ui/config.
+// AuthorizationEndpoint is omitted when unconfigured.
+// TODO(fe): decide — consume AuthorizationEndpoint (seed Sign-in without a
+// prior discovery fetch) or remove it from this contract.
+type oidcConfig struct {
+	Authority             string `json:"authority"`
+	ClientID              string `json:"clientId"`
+	Scope                 string `json:"scope"`
+	AuthorizationEndpoint string `json:"authorizationEndpoint,omitempty"`
+}
+
+// handleConfig serves GET /api/ui/config in the FE-compatible shape: oidc,
+// authConfigured, and plugin bootstrap fields, plus additive uiOrigin and
+// oidc.authorizationEndpoint.
 func handleConfig(opts UIConfigOptions) http.HandlerFunc {
-	type oidcConfig struct {
-		Authority string `json:"authority"`
-		ClientID  string `json:"clientId"`
-		Scope     string `json:"scope"`
-	}
-
-	oidc := oidcConfig{
-		Authority: opts.OIDCAuthority,
-		ClientID:  opts.OIDCUIClientID,
-		Scope:     "openid profile email roles",
-	}
-
 	return func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
+		oidc := oidcConfig{
+			ClientID: opts.OIDCUIClientID,
+			Scope:    opts.OIDCUIScope,
+		}
+
+		resp := map[string]any{
 			"oidc": oidc,
 		}
-
-		// Surface whether auth has been configured so the frontend
-		// can gate setup routes appropriately (e.g. require login
-		// when revisiting /setup/auth after auth was configured).
-		if opts.AuthConfigured != nil {
-			configured, err := opts.AuthConfigured(r.Context())
-			if err != nil {
-				opts.Logger.ErrorContext(r.Context(), "failed to check auth configuration", "error", err)
-				// Non-fatal — omit the field rather than failing
-				// the entire config response.
-			} else {
-				resp["authConfigured"] = configured
-			}
+		if opts.UIOrigin != "" {
+			resp["uiOrigin"] = opts.UIOrigin
 		}
 
-		// Augment with plugin-derived global config when webDir is
-		// available. These fields are NOT user-specific — scalprum
-		// bootstrap, plugin pages, and plugin entries must load
-		// regardless of authentication state.
-		//
-		// Failures are surfaced as errors rather than silently
-		// omitted, because the frontend relies on these bootstrap
-		// fields (scalprumConfig, pluginPages, pluginEntries).
+		if opts.AuthSnapshot != nil {
+			authority, authorizationEndpoint, configured, err := opts.AuthSnapshot(r.Context())
+			if err != nil {
+				if opts.Logger != nil {
+					opts.Logger.ErrorContext(r.Context(), "ui config auth snapshot failed", "error", err)
+				}
+				http.Error(w, "ui config unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if configured {
+				if authority == "" || authorizationEndpoint == "" {
+					if opts.Logger != nil {
+						opts.Logger.ErrorContext(r.Context(), "ui config auth snapshot incomplete")
+					}
+					http.Error(w, "ui config unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				oidc.Authority = authority
+				oidc.AuthorizationEndpoint = authorizationEndpoint
+			}
+			resp["oidc"] = oidc
+			resp["authConfigured"] = configured
+		}
+
+		// Plugin-derived global config remains on this route because the
+		// current frontend loads it here; moving it requires a coordinated
+		// frontend change.
 		if opts.WebDir != "" {
 			path := filepath.Join(opts.WebDir, "plugin-registry.json")
 			data, err := os.ReadFile(path)
@@ -162,10 +189,16 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		w.Header().Set("Cache-Control", "no-store")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			if opts.Logger != nil {
+				opts.Logger.ErrorContext(r.Context(), "ui config encode failed", "error", err)
+			}
+		}
 	}
 }
 
+// handlePluginRegistry serves the static plugin-registry.json from WebDir.
 func handlePluginRegistry(opts UIConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := filepath.Join(opts.WebDir, "plugin-registry.json")

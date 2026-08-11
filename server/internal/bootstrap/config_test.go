@@ -278,22 +278,22 @@ func TestNewConfig(t *testing.T) {
 			wantErr: "GCPHCP_CONFIG",
 		},
 		{
-			name: "invalid OIDC UI authority",
+			name: "invalid OIDC issuer",
 			in: bootstrap.ConfigInput{
-				GRPCAddr:        ":50051",
-				HTTPAddr:        ":8080",
-				DBPath:          bootstrap.DefaultSQLitePath,
-				OIDCUIAuthority: "://bad",
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8080",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "://bad",
 			},
-			wantErr: "oidc UI authority",
+			wantErr: "oidc issuer",
 		},
 		{
-			name: "OIDC UI authority missing host",
+			name: "OIDC issuer missing host",
 			in: bootstrap.ConfigInput{
-				GRPCAddr:        ":50051",
-				HTTPAddr:        ":8080",
-				DBPath:          bootstrap.DefaultSQLitePath,
-				OIDCUIAuthority: "http:///path",
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8080",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "http:///path",
 			},
 			wantErr: "host is required",
 		},
@@ -306,6 +306,94 @@ func TestNewConfig(t *testing.T) {
 				OIDCCABundle: []byte("not-pem"),
 			},
 			wantErr: "invalid OIDC CA data",
+		},
+		{
+			name: "oidc authority accepted",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "https://issuer.example/oidc",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				Database:   bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer: "https://issuer.example/oidc",
+			},
+		},
+		{
+			name: "oidc initial-AuthMethod policy fields accepted",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:                      ":50051",
+				HTTPAddr:                      ":8085",
+				DBPath:                        bootstrap.DefaultSQLitePath,
+				OIDCIssuer:                    "https://issuer.example/oidc",
+				OIDCResourceAudience:          "fleetshift",
+				OIDCKeyEnrollmentAudience:     "fleetshift-signing",
+				OIDCRegistryID:                "github.com",
+				OIDCRegistrySubjectExpression: "claims.preferred_username",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:                      ":50051",
+				HTTPAddr:                      ":8085",
+				Database:                      bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer:                    "https://issuer.example/oidc",
+				OIDCResourceAudience:          "fleetshift",
+				OIDCKeyEnrollmentAudience:     "fleetshift-signing",
+				OIDCRegistryID:                "github.com",
+				OIDCRegistrySubjectExpression: "claims.preferred_username",
+			},
+		},
+		{
+			name: "oidc registry id without expression rejected",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:       ":50051",
+				HTTPAddr:       ":8080",
+				DBPath:         bootstrap.DefaultSQLitePath,
+				OIDCRegistryID: "github.com",
+			},
+			wantErr: "registry id and registry subject expression",
+		},
+		{
+			name: "oidc public-key and registry mapping mutually exclusive",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:                      ":50051",
+				HTTPAddr:                      ":8080",
+				DBPath:                        bootstrap.DefaultSQLitePath,
+				OIDCRegistryID:                "github.com",
+				OIDCRegistrySubjectExpression: "claims.preferred_username",
+				OIDCPublicKeyClaimExpression:  "claims.signing_public_key",
+			},
+			wantErr: "mutually exclusive",
+		},
+		{
+			name: "oidc authority accepts non-loopback issuer",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "https://external.example/oidc",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				Database:   bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer: "https://external.example/oidc",
+			},
+		},
+		{
+			name: "empty oidc authority allowed at config parse",
+			in: bootstrap.ConfigInput{
+				GRPCAddr: ":50051",
+				HTTPAddr: ":8080",
+				DBPath:   bootstrap.DefaultSQLitePath,
+			},
+			want: bootstrap.Config{
+				GRPCAddr: ":50051",
+				HTTPAddr: ":8080",
+				Database: bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+			},
 		},
 	}
 
@@ -354,8 +442,14 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 	if got.GRPCAddr != want.GRPCAddr ||
 		got.HTTPAddr != want.HTTPAddr ||
 		got.WebDir != want.WebDir ||
-		got.OIDCUIAuthority != want.OIDCUIAuthority ||
+		got.OIDCIssuer != want.OIDCIssuer ||
 		got.OIDCUIClientID != want.OIDCUIClientID ||
+		got.OIDCUIScope != want.OIDCUIScope ||
+		got.OIDCResourceAudience != want.OIDCResourceAudience ||
+		got.OIDCKeyEnrollmentAudience != want.OIDCKeyEnrollmentAudience ||
+		got.OIDCRegistryID != want.OIDCRegistryID ||
+		got.OIDCRegistrySubjectExpression != want.OIDCRegistrySubjectExpression ||
+		got.OIDCPublicKeyClaimExpression != want.OIDCPublicKeyClaimExpression ||
 		got.GCPHCPConfigPath != want.GCPHCPConfigPath ||
 		string(got.OIDCCABundle) != string(want.OIDCCABundle) {
 		t.Fatalf("config mismatch:\n got: %#v\nwant: %#v", got, want)

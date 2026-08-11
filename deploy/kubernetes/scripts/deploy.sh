@@ -13,7 +13,6 @@ set -euo pipefail
 #   3. Imports container images from quay.io via ImageStreams
 #   4. Configures image change triggers on the server deployment
 #   5. Waits for the fleetshift-server deployment to be available
-#   6. Runs the auth-setup job (creates OIDC client config)
 #
 # Prerequisites:
 #   - 'oc' CLI installed
@@ -68,9 +67,10 @@ fi
 cat > "${K8S_DIR}/config.env" <<EOF
 OIDC_ISSUER_URL=${OIDC_ISSUER_URL}
 OIDC_UI_CLIENT_ID=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
+OIDC_UI_SCOPE=${OIDC_UI_SCOPE:-openid profile email groups audience:server:client_id:fleetshift}
 OIDC_CLI_CLIENT_ID=${OIDC_CLI_CLIENT_ID}
-OIDC_AUDIENCE=${OIDC_AUDIENCE}
-KEY_ENROLLMENT_CLIENT_ID=${KEY_ENROLLMENT_CLIENT_ID}
+OIDC_RESOURCE_AUDIENCE=${OIDC_RESOURCE_AUDIENCE:-${OIDC_AUDIENCE:-fleetshift}}
+OIDC_KEY_ENROLLMENT_AUDIENCE=${OIDC_KEY_ENROLLMENT_AUDIENCE:-fleetshift-signing}
 KEY_REGISTRY_ID=${KEY_REGISTRY_ID}
 KEY_REGISTRY_SUBJECT_EXPR=${KEY_REGISTRY_SUBJECT_EXPR}
 FLEETSHIFT_LOG_LEVEL=${FLEETSHIFT_LOG_LEVEL:-info}
@@ -119,21 +119,6 @@ oc wait -n "${NAMESPACE}" \
   deployment/fleetshift-server \
   --for=condition=Available \
   --timeout=300s
-
-# --- Auth setup ---
-echo "Checking auth-setup job..."
-JOB_STATUS=$(oc get job auth-setup -n "${NAMESPACE}" -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "")
-if [ "${JOB_STATUS}" = "1" ]; then
-  echo "Auth setup already completed."
-else
-  echo "Deleting previous auth-setup job (if any) and re-running..."
-  oc delete job auth-setup -n "${NAMESPACE}" --ignore-not-found=true
-  oc apply -k "${K8S_DIR}" -l "batch.kubernetes.io/job-name=auth-setup" 2>/dev/null || \
-    oc apply -f "${K8S_DIR}/auth-setup/job.yaml" -n "${NAMESPACE}"
-  echo "Waiting for auth-setup to complete..."
-  oc wait -n "${NAMESPACE}" job/auth-setup --for=condition=Complete --timeout=120s || \
-    echo "WARNING: Auth setup did not complete. Check logs: oc logs -n ${NAMESPACE} job/auth-setup"
-fi
 
 # --- Summary ---
 echo ""

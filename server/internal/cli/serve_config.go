@@ -8,8 +8,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 )
 
-// serveSelections records which database-related flags were explicitly set
-// via the CLI (pflag.Changed). Environment-provided defaults are not explicit.
+// serveSelections records which flags were explicitly set via the CLI
+// (pflag.Changed). Environment-provided defaults are not explicit.
 type serveSelections struct {
 	DBExplicit bool
 }
@@ -36,19 +36,25 @@ func loadServeConfig(f *serveFlags, sel serveSelections) (bootstrap.Config, erro
 	}
 
 	return bootstrap.NewConfig(bootstrap.ConfigInput{
-		GRPCAddr:               f.grpcAddr,
-		HTTPAddr:               f.httpAddr,
-		DBPath:                 f.dbPath,
-		DatabaseURL:            f.databaseURL,
-		DatabaseURLFileContent: dbURLFromFile,
-		DatabaseURLFileSet:     f.databaseURLFile != "",
-		DBExplicit:             sel.DBExplicit,
-		OIDCCABundle:           caBundle,
-		WebDir:                 f.webDir,
-		OIDCUIAuthority:        f.oidcUIAuthority,
-		OIDCUIClientID:         f.oidcUIClientID,
-		Addons:                 f.addons,
-		GCPHCPConfigPath:       resolveGCPHCPConfigPath(f.gcphcpConfig),
+		GRPCAddr:                      f.grpcAddr,
+		HTTPAddr:                      f.httpAddr,
+		DBPath:                        f.dbPath,
+		DatabaseURL:                   f.databaseURL,
+		DatabaseURLFileContent:        dbURLFromFile,
+		DatabaseURLFileSet:            f.databaseURLFile != "",
+		DBExplicit:                    sel.DBExplicit,
+		OIDCCABundle:                  caBundle,
+		WebDir:                        f.webDir,
+		OIDCIssuer:                    f.oidcIssuer,
+		OIDCUIClientID:                f.oidcUIClientID,
+		OIDCUIScope:                   f.oidcUIScope,
+		OIDCResourceAudience:          f.oidcResourceAudience,
+		OIDCKeyEnrollmentAudience:     f.oidcKeyEnrollmentAudience,
+		OIDCRegistryID:                f.oidcRegistryID,
+		OIDCRegistrySubjectExpression: f.oidcRegistrySubjectExpression,
+		OIDCPublicKeyClaimExpression:  f.oidcPublicKeyClaimExpression,
+		Addons:                        f.addons,
+		GCPHCPConfigPath:              resolveGCPHCPConfigPath(f.gcphcpConfig),
 	})
 }
 

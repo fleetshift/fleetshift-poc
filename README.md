@@ -101,7 +101,6 @@ npx nx run pd:status                                 # show container status
 npx nx run pd:logs                                   # tail all logs
 npx nx run pd:rebuild                                # rebuild and restart
 npx nx run pd:rebuild-web                            # rebuild web container only
-npx nx run pd:cli-setup                              # configure CLI against local stack
 npx nx run pd:cert-init                              # generate local mkcert certs
 npx nx run pd:reset-keycloak                         # reset keycloak realm
 npx nx run pd:clock-drift                            # fix podman clock drift
@@ -119,7 +118,7 @@ Copy `.env.template` to `.env` and edit. All available settings are documented i
 
 ## Run
 
-The simplest way to run FleetShift is a single container (API + UI). That image is a sandbox for playing around, bootstrapping a real cluster, or testing — not a production deployment. Pass `OIDC_ISSUER_URL` so the UI can log users in (`OIDC_UI_CLIENT_ID` defaults to `fleetshift-ui`). Day One `/setup` can create a server-side auth method, but the UI’s OIDC client still reads the issuer from this startup config — it does not discover it from configured auth methods yet.
+The simplest way to run FleetShift is a single container (API + UI). That image is a sandbox for playing around, bootstrapping a real cluster, or testing — not a production deployment. Pass `OIDC_ISSUER_URL` so the UI can log users in. Sandbox/AIO and deploy packaging supply UI client defaults such as `OIDC_UI_CLIENT_ID=fleetshift-ui` and the browser scope string; `fleetshift serve` itself does not invent those values. Day One `/setup` can create a server-side auth method, but the UI’s OIDC client still reads the issuer from this startup config — it does not discover it from configured auth methods yet.
 
 ```bash
 podman run --rm -it \
@@ -172,21 +171,20 @@ Combine with the kind flags above when you also need local cluster provisioning.
 
 ## Day One Setup
 
-The Day One setup flow is an unauthenticated UI page at `/setup` that guides initial OIDC configuration before any identity provider has been registered. A WebSocket endpoint at `/api/ui/setup/ws` broadcasts auth method lifecycle events to the UI in real time so the setup page can react as provisioning progresses.
+Day One IdP install is performed by `fleetshift serve` when the AuthMethod store
+is empty and complete OIDC bootstrap config is present (issuer,
+audience, and optional enrollment/registry or public-key claim fields). Packaging
+and deploy paths pass those flags.
 
-The equivalent CLI command:
-
-```bash
-fleetctl auth setup \
-  --issuer-url=<URL> \
-  --client-id=<CLIENT_ID> \
-  --audience=<AUDIENCE> \
-  --key-enrollment-client-id=<AUDIENCE>
-```
-
-Optional flags for key registry configuration:
+Example serve inputs (values are packaging/deploy-owned):
 
 ```bash
---registry-id=github.com \
---registry-subject-expression=claims.github_username
+fleetshift serve \
+  --oidc-issuer=<ISSUER_URL> \
+  --oidc-ui-client-id=fleetshift-ui \
+  --oidc-ui-scope='openid profile email groups audience:server:client_id:fleetshift' \
+  --oidc-resource-audience=fleetshift \
+  --oidc-key-enrollment-audience=fleetshift-signing \
+  --oidc-registry-id=github.com \
+  --oidc-registry-subject-expression=claims.preferred_username
 ```

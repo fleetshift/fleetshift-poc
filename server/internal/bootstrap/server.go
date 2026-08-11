@@ -59,7 +59,7 @@ type Server struct {
 	shutdownGrace     time.Duration
 	serveErrCh        chan error
 	shutdownRequested bool
-	ready             bool
+	readiness         *transporthttp.Readiness
 
 	closeOnce sync.Once
 	closeDone chan struct{}
@@ -126,9 +126,6 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	if err := cfg.checkInvariants(); err != nil {
-		return nil, err
-	}
 
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -143,6 +140,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		shutdownGrace: o.shutdownGrace,
 		serveErrCh:    make(chan error, 2),
 		closeDone:     make(chan struct{}),
+		readiness:     &transporthttp.Readiness{},
 	}
 
 	var cleanups []func()
@@ -251,11 +249,10 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		return fail(err)
 	}
 
-	existingMethods, err := wfs.authMethodSvc.List(ctx)
+	initialAuthMethod, err := prepareAuthMethods(ctx, cfg, wfs.authMethodSvc, oidcDeps.Verifier, logger)
 	if err != nil {
-		return fail(fmt.Errorf("load auth methods: %w", err))
+		return fail(err)
 	}
-	registerPersistedKeySets(ctx, logger, oidcDeps.Verifier, existingMethods)
 
 	authnInterceptor := transportgrpc.NewAuthnInterceptor(wfs.authMethodSvc, oidcDeps.Verifier, observability.NewAuthnObserver(logger))
 	resourceQuerySvc := application.NewResourceQueryService(p.store)
@@ -314,59 +311,26 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	// the gateway's /v1/ catch-all and the platform-owned
 	// /apis/fleetshift.io/ prefix used by QueryResources.
 	topMux := http.NewServeMux()
+	// Minimal health probes are unauthenticated and registered before auth
+	// middleware / SPA fallback.
+	transporthttp.RegisterHealthRoutes(topMux, srv.readiness)
 	topMux.Handle("/v1/", gwMux)
 	topMux.Handle("/apis/fleetshift.io/", gwMux)
 
-	// HTTP auth middleware — mirrors the gRPC authn interceptor: if
-	// auth methods are configured require a valid OIDC Bearer token,
-	// otherwise allow anonymous (setup mode). Applied selectively to
-	// endpoints that need protection; /api/ui/config,
-	// /api/ui/setup/ws, and /api/ui/events/ws intentionally remain
-	// unauthenticated (events/ws because the browser WebSocket API
-	// cannot set Authorization headers — see TODO below).
-	httpAuthn := &transporthttp.AuthnMiddleware{
-		Methods:  wfs.authMethodSvc,
-		Verifier: oidcDeps.Verifier,
-		Logger:   logger.With("component", "authn-http"),
+	if err := registerUIHTTP(topMux, uiHTTPDeps{
+		cfg:           cfg,
+		logger:        logger,
+		authMethods:   wfs.authMethodSvc,
+		verifier:      oidcDeps.Verifier,
+		store:         p.store,
+		provenanceSvc: wfs.provenanceSvc,
+		setupHub:      setupHub,
+		eventHub:      eventHub,
+	}); err != nil {
+		return fail(err)
 	}
-	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
-	// TODO(auth): Browser WebSocket API cannot set custom HTTP headers, so
-	// wrapping this endpoint with httpAuthn.Wrap would always 401 once OIDC
-	// is configured. Proper WS auth requires a short-lived OTP/ticket
-	// handshake — passing the JWT as a query param leaks into logs,
-	// referrer, and browser history. Leave unauthenticated for now.
-	topMux.HandleFunc("GET /api/ui/events/ws", eventHub.HandleWS)
-	topMux.Handle("GET /api/ui/github-signing-keys/{username}", httpAuthn.Wrap(http.HandlerFunc(transporthttp.HandleGitHubSigningKeys)))
-	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
-		AuthMethods: wfs.authMethodSvc, Verifier: oidcDeps.Verifier, Store: p.store, ProvenanceSvc: wfs.provenanceSvc,
-	})
 
 	dynamicHTTPMux := dynamicapi.NewDynamicHTTPMux(topMux, dynamicHTTPConn)
-
-	if cfg.WebDir != "" {
-		uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
-			WebDir:         cfg.WebDir,
-			OIDCAuthority:  cfg.OIDCUIAuthority,
-			OIDCUIClientID: cfg.OIDCUIClientID,
-			Logger:         logger,
-			AuthMiddleware: httpAuthn.Wrap,
-			AuthConfigured: func(ctx context.Context) (bool, error) {
-				methods, err := wfs.authMethodSvc.List(ctx)
-				if err != nil {
-					return false, err
-				}
-				for _, m := range methods {
-					if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
-						return true, nil
-					}
-				}
-				return false, nil
-			},
-		})
-		topMux.Handle("/api/ui/", uiMux)
-		topMux.Handle("/", transporthttp.NewStaticHandler(cfg.WebDir))
-		logger.Info("serving frontend assets", "web-dir", cfg.WebDir)
-	}
 
 	httpLis, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
@@ -450,6 +414,15 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		_ = reg.Close(waitCtx)
 	})
 
+	// Install the initial AuthMethod after the workflow worker is running so
+	// ProvisionIdP can complete under both mem and go-workflows registries.
+	// Listeners are bound but Serve has not started, so the public API stays closed.
+	if initialAuthMethod != nil {
+		if err := initialAuthMethod.Install(ctx, logger); err != nil {
+			return fail(err)
+		}
+	}
+
 	go func() {
 		logger.Info("gRPC server listening", "addr", grpcEP.Bind, "dial", grpcEP.Dial)
 		err := grpcServer.Serve(grpcLis)
@@ -471,7 +444,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if err := proveReadiness(ctx, grpcEP.Dial); err != nil {
 		return fail(err)
 	}
-	srv.ready = true
+	srv.readiness.MarkReady()
 
 	// Successful start: transfer lifetime ownership; do not run fail cleanups.
 	cleanups = nil
@@ -538,7 +511,9 @@ func isExpectedServeStop(err error) bool {
 // workflow runtime, and closes connections/DB. Invoked once from Close.
 func (s *Server) shutdown() error {
 	s.logger.Info("shutting down")
-	s.ready = false
+	if s.readiness != nil {
+		s.readiness.ClearReady()
+	}
 
 	var primary error
 	join := func(err error) {

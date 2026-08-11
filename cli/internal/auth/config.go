@@ -10,7 +10,8 @@ import (
 	"path/filepath"
 )
 
-// Config holds local OIDC client configuration saved by `fleetctl auth setup`.
+// Config is Fleetctl's local OIDC client settings (issuer, client ID, scopes,
+// discovered endpoints, and optional CA path) stored in auth.json.
 type Config struct {
 	IssuerURL             string   `json:"issuer_url"`
 	ClientID              string   `json:"client_id"`
