@@ -168,6 +168,7 @@ Combine with the kind flags above when you also need local cluster provisioning.
 | Podman compose | Multi-service local stack (Keycloak, Postgres, hot-reload) | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
 | Keycloak (OpenShift) | External OIDC provider for those deployments | [deploy/keycloak/](deploy/keycloak/README.md) |
+| Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
 
 ## Day One Setup
 

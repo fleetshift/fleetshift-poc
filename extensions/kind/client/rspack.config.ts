@@ -109,6 +109,11 @@ const pluginConfigs = [{ plugin: KindPlugin, key: "kind" }] as const;
 
 const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   name: key,
+  cache: {
+    type: "persistent" as const,
+    version: key,
+    buildDependencies: [fileURLToPath(import.meta.url)],
+  },
   entry: {
     mock: path.resolve(configDir, "./src/index.ts"),
   },

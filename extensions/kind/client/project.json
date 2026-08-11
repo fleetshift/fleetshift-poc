@@ -6,29 +6,16 @@
   "tags": ["scope:ui", "type:lib", "federation:remote"],
   "implicitDependencies": ["@fleetshift/kind-server"],
   "targets": {
-    "build:client": {
+    "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "rm -rf dist node_modules/.cache && rspack build",
+        "command": "rm -rf dist && rspack build",
         "cwd": "extensions/kind/client"
       },
       "inputs": [
         "{projectRoot}/src/**/*",
         "{projectRoot}/rspack.config.*",
         "{projectRoot}/tsconfig*.json"
-      ],
-      "outputs": ["{projectRoot}/dist"],
-      "dependsOn": ["common:build"]
-    },
-    "build:ci": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "rspack build",
-        "cwd": "extensions/kind/client"
-      },
-      "inputs": [
-        "{projectRoot}/src/**/*",
-        "{projectRoot}/rspack.config.*"
       ],
       "outputs": ["{projectRoot}/dist"],
       "dependsOn": ["common:build"]

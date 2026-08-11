@@ -43,6 +43,15 @@ COPY tools/merge-web.mjs tools/merge-web.mjs
 COPY tools/generate-plugin-registry.mjs tools/generate-plugin-registry.mjs
 COPY tools/generate-icons.mjs tools/generate-icons.mjs
 
+# Remote cache (optional): speeds up builds by pulling cached Nx task outputs from MinIO.
+#   podman build --build-arg NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://nx-cache.example.com \
+#                --build-arg NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=<read-token> \
+#                -f Dockerfile.web .
+ARG NX_SELF_HOSTED_REMOTE_CACHE_SERVER=""
+ARG NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=""
+ENV NX_SELF_HOSTED_REMOTE_CACHE_SERVER=${NX_SELF_HOSTED_REMOTE_CACHE_SERVER} \
+    NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN}
+
 # Install + build in one RUN so node_modules cache mount is available throughout
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/build/node_modules \
@@ -54,10 +63,8 @@ RUN --mount=type=cache,target=/root/.npm \
     -w @fleetshift/gcphcp-plugin \
     -w @fleetshift/kind-plugin \
     && NX=./node_modules/.bin/nx \
-    && $NX run common:build \
-    && $NX run plugins:build:ci \
-    && $NX run @fleetshift/gcphcp-plugin:build:ci \
-    && $NX run @fleetshift/kind-plugin:build:ci \
+    && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
+    && $NX run-many --target=build --projects=plugins,@fleetshift/gcphcp-plugin,@fleetshift/kind-plugin \
     && node tools/generate-plugin-registry.mjs \
     && $NX run web:build \
     && node tools/merge-web.mjs

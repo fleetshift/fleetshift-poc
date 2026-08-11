@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nx-cache-proxy
+  labels:
+    app: nx-cache-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nx-cache-proxy
+  template:
+    metadata:
+      labels:
+        app: nx-cache-proxy
+    spec:
+      containers:
+        - name: nx-cache-proxy
+          image: quay.io/stolostron/nx-cache-proxy:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: MINIO_ENDPOINT
+              value: minio:9000
+            - name: MINIO_BUCKET
+              value: nx-cache
+            - name: MINIO_SECURE
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_PASSWORD
+            - name: NX_CACHE_READ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nx-cache-tokens
+                  key: read-token
+            - name: NX_CACHE_WRITE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nx-cache-tokens
+                  key: write-token
+            - name: CACHE_TTL
+              value: "48h"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nx-cache-proxy
+  labels:
+    app: nx-cache-proxy
+spec:
+  selector:
+    app: nx-cache-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: nx-cache-proxy
+  labels:
+    app: nx-cache-proxy
+spec:
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: nx-cache-proxy
+    weight: 100

@@ -35,8 +35,8 @@ function merge() {
 if (!watchOnly) {
   console.log("Running initial build...");
   nx("plugins:build");
-  nx("@fleetshift/gcphcp-plugin:build:client");
-  nx("@fleetshift/kind-plugin:build:client");
+  nx("@fleetshift/gcphcp-plugin:build");
+  nx("@fleetshift/kind-plugin:build");
   nx("ui:generate-registry");
   nx("web:build");
   nx("ui:merge-web");

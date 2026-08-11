@@ -26,6 +26,10 @@ const pfSharedModules = getDynamicModules(configDir, uiRoot);
 const pfTransformImport = createPfTransformImport();
 
 const config: Configuration = {
+  cache: {
+    type: "persistent",
+    buildDependencies: [fileURLToPath(import.meta.url)],
+  },
   entry: "./src/index.ts",
   output: {
     publicPath: "/",
