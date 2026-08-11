@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -136,7 +137,7 @@ func TestDiscoverEndpoints_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestDiscoverEndpoints_HonorsCallerDeadline(t *testing.T) {
+func TestDiscoverEndpoints_HonorsCallerCancellation(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
@@ -144,7 +145,7 @@ func TestDiscoverEndpoints_HonorsCallerDeadline(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	// Cancel only after the handler has been entered so a short timeout cannot
+	// Cancel only after the handler has been entered so cancellation cannot
 	// race with dial/scheduling and miss the server (false "handler was not
 	// reached"). Bounded waits also prevent a hang if context is not wired
 	// into the request.
@@ -167,8 +168,8 @@ func TestDiscoverEndpoints_HonorsCallerDeadline(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		if err == nil {
-			t.Fatal("expected cancel error")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("DiscoverEndpoints did not return after cancel")
