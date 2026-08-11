@@ -14,12 +14,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
@@ -298,6 +300,179 @@ func TestStart_InstallsDefaultAuthMethodWhenStoreEmpty(t *testing.T) {
 	if string(oidc.JWKSURI) != "https://test-issuer.example/jwks" {
 		t.Fatalf("JWKSURI = %q, want .../jwks", oidc.JWKSURI)
 	}
+}
+
+func TestStart_SkipsBootstrapWhenAuthMethodExists(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	startOpts := []Option{
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
+		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
+		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
+	}
+
+	firstCfg, err := NewConfig(ConfigInput{
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               dbPath,
+		OIDCIssuer:           "https://first-issuer.example",
+		OIDCResourceAudience: "fleetshift",
+	})
+	if err != nil {
+		t.Fatalf("NewConfig (first): %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	first, err := Start(ctx, firstCfg, testLogger(), startOpts...)
+	if err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer closeCancel()
+	if err := first.Close(closeCtx); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	before := listAuthMethods(t, dbPath)
+	if len(before) != 1 || before[0].ID() != domain.DefaultAuthMethodID {
+		t.Fatalf("after first Start: methods = %+v, want default", before)
+	}
+	if got := before[0].OIDC(); got == nil || string(got.IssuerURL) != "https://first-issuer.example" {
+		t.Fatalf("after first Start: issuer = %#v, want https://first-issuer.example", got)
+	}
+
+	// Different OIDC argv on restart must not reinstall or overwrite; persisted
+	// AuthMethod remains the authority.
+	secondCfg, err := NewConfig(ConfigInput{
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               dbPath,
+		OIDCIssuer:           "https://other-issuer.example",
+		OIDCResourceAudience: "fleetshift",
+	})
+	if err != nil {
+		t.Fatalf("NewConfig (second): %v", err)
+	}
+	second, err := Start(ctx, secondCfg, testLogger(), startOpts...)
+	if err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	t.Cleanup(func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer ccancel()
+		_ = second.Close(cctx)
+	})
+
+	after := listAuthMethods(t, dbPath)
+	if len(after) != 1 || after[0].ID() != domain.DefaultAuthMethodID {
+		t.Fatalf("after second Start: methods = %+v, want single default", after)
+	}
+	if got := after[0].OIDC(); got == nil || string(got.IssuerURL) != "https://first-issuer.example" {
+		t.Fatalf("after second Start: issuer = %#v, want persisted https://first-issuer.example", got)
+	}
+}
+
+func TestStart_MiddlewareAcceptsOIDCAccessToken(t *testing.T) {
+	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
+	other := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
+
+	oidcDeps, err := NewProductionOIDCDeps(context.Background(), idp.HTTPClient())
+	if err != nil {
+		t.Fatalf("NewProductionOIDCDeps: %v", err)
+	}
+
+	cfg, err := NewConfig(ConfigInput{
+		GRPCAddr:             "127.0.0.1:0",
+		HTTPAddr:             "127.0.0.1:0",
+		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		OIDCIssuer:           string(idp.IssuerURL()),
+		OIDCResourceAudience: "fleetshift",
+		OIDCCABundle:         idp.CACertPEM(),
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	srv, err := Start(ctx, cfg, testLogger(),
+		WithWorkflowRegistry(NewMemWorkflowRegistry()),
+		WithOIDCDeps(oidcDeps),
+		WithAddonAssembly(func(context.Context, AddonDeps) ([]AddonSpec, error) { return nil, nil }),
+	)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer closeCancel()
+		_ = srv.Close(closeCtx)
+	})
+
+	conn, err := grpc.NewClient(srv.Endpoints().GRPC.Dial, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	client := pb.NewDeploymentServiceClient(conn)
+
+	authed := func(token string) context.Context {
+		return metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
+	}
+	list := func(t *testing.T, token string) error {
+		t.Helper()
+		callCtx, callCancel := context.WithTimeout(authed(token), 5*time.Second)
+		defer callCancel()
+		_, err := client.ListDeployments(callCtx, &pb.ListDeploymentsRequest{})
+		return err
+	}
+
+	valid := idp.IssueToken(t, oidctest.TokenClaims{Subject: "user-1"})
+	if err := list(t, valid); err != nil {
+		t.Fatalf("valid token ListDeployments: %v", err)
+	}
+
+	t.Run("wrong_audience", func(t *testing.T) {
+		tok := idp.IssueToken(t, oidctest.TokenClaims{Subject: "user-1", Audience: "wrong-audience"})
+		err := list(t, tok)
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("got %v (%v), want Unauthenticated", err, status.Code(err))
+		}
+	})
+	t.Run("wrong_issuer", func(t *testing.T) {
+		tok := other.IssueToken(t, oidctest.TokenClaims{Subject: "user-1"})
+		err := list(t, tok)
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("got %v (%v), want Unauthenticated", err, status.Code(err))
+		}
+	})
+	t.Run("bad_signature", func(t *testing.T) {
+		tok := valid
+		parts := strings.Split(tok, ".")
+		if len(parts) != 3 {
+			t.Fatalf("token segments = %d, want 3", len(parts))
+		}
+		sig := []byte(parts[2])
+		sig[len(sig)-1] ^= 0x01
+		parts[2] = string(sig)
+		err := list(t, strings.Join(parts, "."))
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("got %v (%v), want Unauthenticated", err, status.Code(err))
+		}
+	})
+}
+
+func listAuthMethods(t *testing.T, dbPath string) []domain.AuthMethod {
+	t.Helper()
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	methods, err := (&sqlite.AuthMethodRepo{DB: db}).List(context.Background())
+	if err != nil {
+		t.Fatalf("list auth methods: %v", err)
+	}
+	return methods
 }
 
 func TestStopIngress_ReleasesListenersAfterServe(t *testing.T) {
