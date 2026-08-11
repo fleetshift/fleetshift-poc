@@ -33,10 +33,10 @@ Two bearer tokens control access:
 2. **Start MinIO + proxy:**
 
    ```sh
-   task podman:up -- -f overrides/nx-cache.yaml
+   NX_CACHE=true task podman:up
    ```
 
-   This starts MinIO on `:9000` (console `:9001`), creates the `nx-cache` bucket, and runs the proxy on `:8420`.
+   This starts MinIO on `:9000` (console `:9001`), creates the `nx-cache` bucket, and runs the proxy on `:8420`. The `NX_CACHE=true` flag adds the `nx-cache.yaml` compose override.
 
 3. **Verify:**
 
