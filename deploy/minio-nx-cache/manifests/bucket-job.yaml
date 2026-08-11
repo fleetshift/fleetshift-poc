@@ -6,6 +6,7 @@ metadata:
     app: minio
 spec:
   backoffLimit: 4
+  activeDeadlineSeconds: 120
   template:
     metadata:
       labels:
@@ -18,12 +19,22 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              set -eu
+              retries=0
               until mc --config-dir /tmp/mc alias set myminio http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
-                echo "Waiting for MinIO..."
+                retries=$((retries + 1))
+                if [ "$retries" -ge 15 ]; then
+                  echo "MinIO not ready after $retries attempts, giving up."
+                  exit 1
+                fi
+                echo "Waiting for MinIO... (attempt $retries)"
                 sleep 2
               done
               mc --config-dir /tmp/mc mb --ignore-existing myminio/nx-cache
-              mc --config-dir /tmp/mc ilm rule add --expire-days 3 myminio/nx-cache
+              # Idempotent lifecycle: import full config instead of appending rules.
+              mc --config-dir /tmp/mc ilm import myminio/nx-cache <<'ILM'
+              {"Rules":[{"Expiration":{"Days":3},"ID":"nx-cache-expire","Status":"Enabled"}]}
+              ILM
               echo "Bucket 'nx-cache' ready (lifecycle: expire after 3 days)."
           securityContext:
             allowPrivilegeEscalation: false

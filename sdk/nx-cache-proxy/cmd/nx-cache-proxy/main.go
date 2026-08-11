@@ -103,8 +103,8 @@ func (p *cacheProxy) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	obj, err := p.client.GetObject(r.Context(), p.bucket, hash, minio.GetObjectOptions{})
 	if err != nil {
-		p.logger.Error("GetObject failed", "hash", hash, "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		p.logger.Warn("MinIO unreachable, treating as cache miss", "hash", hash, "error", err)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	defer obj.Close()
@@ -116,8 +116,8 @@ func (p *cacheProxy) handleGet(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		p.logger.Error("Stat failed", "hash", hash, "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		p.logger.Warn("MinIO unreachable, treating as cache miss", "hash", hash, "error", err)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
@@ -166,8 +166,8 @@ func (p *cacheProxy) handlePut(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var minioErr minio.ErrorResponse
 		if !errors.As(err, &minioErr) || minioErr.Code != "NoSuchKey" {
-			p.logger.Error("StatObject failed", "hash", hash, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			p.logger.Warn("MinIO unreachable, accepting write silently", "hash", hash, "error", err)
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 	}
@@ -182,8 +182,8 @@ func (p *cacheProxy) handlePut(w http.ResponseWriter, r *http.Request) {
 		ContentType: "application/octet-stream",
 	})
 	if err != nil {
-		p.logger.Error("PutObject failed", "hash", hash, "error", err)
-		http.Error(w, "upload failed", http.StatusInternalServerError)
+		p.logger.Warn("MinIO unreachable, cache write dropped", "hash", hash, "error", err)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
