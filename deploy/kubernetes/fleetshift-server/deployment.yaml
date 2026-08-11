@@ -44,6 +44,7 @@ spec:
             - --oidc-ui-scope=$(OIDC_UI_SCOPE)
             - --oidc-resource-audience=$(OIDC_RESOURCE_AUDIENCE)
             - --oidc-key-enrollment-audience=$(OIDC_KEY_ENROLLMENT_AUDIENCE)
+            - --oidc-public-key-claim-expression=$(PUBLIC_KEY_CLAIM_EXPR)
             - --oidc-registry-id=$(KEY_REGISTRY_ID)
             - --oidc-registry-subject-expression=$(KEY_REGISTRY_SUBJECT_EXPR)
           envFrom:
