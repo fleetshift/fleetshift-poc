@@ -36,7 +36,8 @@ services:
           sleep 2
         done
         mc mb --ignore-existing myminio/nx-cache
-        echo "Bucket 'nx-cache' ready."
+        mc ilm rule add --expire-days 3 myminio/nx-cache
+        echo "Bucket 'nx-cache' ready (lifecycle: expire after 3 days)."
     depends_on:
       minio:
         condition: service_healthy

@@ -104,10 +104,6 @@ oc rollout status deployment/nx-cache-proxy -n "${NAMESPACE}" --timeout=120s
 # --- Step 9: Print summary ---
 PROXY_ROUTE=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
 CONSOLE_ROUTE=$(oc get route minio-console -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
-READ_TOKEN=$(oc get secret nx-cache-tokens -n "${NAMESPACE}" \
-    -o jsonpath='{.data.read-token}' | base64 -d)
-WRITE_TOKEN=$(oc get secret nx-cache-tokens -n "${NAMESPACE}" \
-    -o jsonpath='{.data.write-token}' | base64 -d)
 
 echo ""
 echo "=========================================="
@@ -118,24 +114,6 @@ echo "  Cache Proxy: https://${PROXY_ROUTE}"
 echo "  Console:     https://${CONSOLE_ROUTE}"
 echo "  Bucket:      nx-cache"
 echo ""
-echo "  Bearer Tokens:"
-echo "    Read-only:  ${READ_TOKEN}"
-echo "    Read-write: ${WRITE_TOKEN}"
-echo ""
-echo "  Nx configuration (nx.json):"
-echo "    {"
-echo "      \"remoteCache\": {"
-echo "        \"server\": \"https://${PROXY_ROUTE}\""
-echo "      }"
-echo "    }"
-echo ""
-echo "  Environment variables:"
-echo "    NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://${PROXY_ROUTE}"
-echo ""
-echo "  CI (read-only):"
-echo "    NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${READ_TOKEN}"
-echo ""
-echo "  Local dev (read-write):"
-echo "    NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${WRITE_TOKEN}"
+echo "  Run 'task minio:credentials' to retrieve bearer tokens."
 echo ""
 echo "=========================================="

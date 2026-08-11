@@ -4,7 +4,7 @@ Remote cache for Nx task outputs backed by MinIO and a lightweight Go proxy (`nx
 
 ## Architecture
 
-```
+```text
   Nx CLI ──(HTTP)──▶ nx-cache-proxy ──(S3)──▶ MinIO
                        :8080                   :9000
 ```

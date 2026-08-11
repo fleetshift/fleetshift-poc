@@ -784,7 +784,7 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   name: key,
   cache: {
     type: "persistent" as const,
-    name: key,
+    version: key,
     buildDependencies: [fileURLToPath(import.meta.url)],
   },
   entry: {

@@ -9,7 +9,7 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "rm -rf dist node_modules/.cache && rspack build",
+        "command": "rm -rf dist && rspack build",
         "cwd": "extensions/gcphcp/client"
       },
       "inputs": [

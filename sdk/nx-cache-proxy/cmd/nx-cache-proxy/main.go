@@ -143,7 +143,12 @@ func (p *cacheProxy) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !p.authorize(r, true) {
+	token := extractBearer(r)
+	if token == "" || (!constantTimeEqual(token, p.readToken) && !constantTimeEqual(token, p.writeToken)) {
+		http.Error(w, "missing or invalid authentication token", http.StatusUnauthorized)
+		return
+	}
+	if !constantTimeEqual(token, p.writeToken) {
 		http.Error(w, "access forbidden: read-only token cannot write", http.StatusForbidden)
 		return
 	}

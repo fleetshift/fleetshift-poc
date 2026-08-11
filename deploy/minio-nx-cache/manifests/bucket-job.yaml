@@ -18,13 +18,24 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              until mc alias set myminio http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+              until mc --config-dir /tmp/mc alias set myminio http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
                 echo "Waiting for MinIO..."
                 sleep 2
               done
-              mc mb --ignore-existing myminio/nx-cache
-              mc ilm rule add --expire-days 3 myminio/nx-cache
+              mc --config-dir /tmp/mc mb --ignore-existing myminio/nx-cache
+              mc --config-dir /tmp/mc ilm rule add --expire-days 3 myminio/nx-cache
               echo "Bucket 'nx-cache' ready (lifecycle: expire after 3 days)."
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
           envFrom:
             - secretRef:
                 name: minio-credentials
+          volumeMounts:
+            - name: mc-config
+              mountPath: /tmp/mc
+      volumes:
+        - name: mc-config
+          emptyDir: {}

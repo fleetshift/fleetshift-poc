@@ -22,6 +22,11 @@ spec:
         - name: fix-permissions
           image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
           command: ["sh", "-c", "chgrp -R 0 /data && chmod -R g+rwX /data"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
           volumeMounts:
             - name: data
               mountPath: /data
@@ -29,6 +34,11 @@ spec:
         - name: minio
           image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
           args: ["server", "/data", "--console-address", ":9001"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
           envFrom:
             - secretRef:
                 name: minio-credentials

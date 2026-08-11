@@ -2,7 +2,8 @@
   "name": "nx-cache-proxy",
   "targets": {
     "build": {
-      "command": "cd sdk/nx-cache-proxy && go build -o ../../bin/nx-cache-proxy ./cmd/nx-cache-proxy/"
+      "command": "cd sdk/nx-cache-proxy && go build -o ../../bin/nx-cache-proxy ./cmd/nx-cache-proxy/",
+      "outputs": ["{workspaceRoot}/bin/nx-cache-proxy"]
     },
     "test": {
       "command": "cd sdk/nx-cache-proxy && go test ./..."
