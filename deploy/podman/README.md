@@ -11,10 +11,18 @@ Local container-based deployment using podman and docker-compose. Runs the full 
 - **[mkcert](https://github.com/filosottile/mkcert)** - trusted dev cert for local keycloak
 - `.env` file — copy from `.env.template`
 
-**macOS:** Podman only forwards IPv6 loopback. Add this one-time `/etc/hosts` entry or Keycloak will be unreachable:
+**Host mapping:** `fleetctl` (and `task podman:up` Keycloak checks) run on the
+host and must resolve `keycloak`. That name is compose DNS only — add a
+one-time `/etc/hosts` entry on Linux and macOS:
+
+```bash
+echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
+```
+
+**macOS:** Podman may only forward IPv6 loopback; also add:
+
 ```bash
 echo "::1 keycloak" | sudo tee -a /etc/hosts
-echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
 ```
 
 ## Quick Start

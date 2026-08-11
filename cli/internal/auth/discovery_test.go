@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
 )
@@ -132,5 +133,44 @@ func TestDiscoverEndpoints_InvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "decode") {
 		t.Fatalf("error = %v, want decode failure", err)
+	}
+}
+
+func TestDiscoverEndpoints_HonorsCallerDeadline(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	// Cancel only after the handler has been entered so a short timeout cannot
+	// race with dial/scheduling and miss the server (false "handler was not
+	// reached"). Bounded waits also prevent a hang if context is not wired
+	// into the request.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := auth.DiscoverEndpoints(ctx, srv.URL+"/dex", srv.Client())
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler was not reached")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected cancel error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DiscoverEndpoints did not return after cancel")
 	}
 }

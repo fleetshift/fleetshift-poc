@@ -89,6 +89,36 @@ func TestAuthSetup_EmptyScopes(t *testing.T) {
 	}
 }
 
+func TestAuthSetup_WhitespaceOnlyClientID(t *testing.T) {
+	_, err := runCLIErr(t,
+		"--server", "127.0.0.1:1",
+		"auth", "setup",
+		"--issuer-url", "https://issuer.example/dex",
+		"--client-id", " ",
+	)
+	if err == nil {
+		t.Fatal("expected whitespace client-id error")
+	}
+	if !strings.Contains(err.Error(), "--client-id is required") {
+		t.Fatalf("error = %v, want client-id validation failure", err)
+	}
+}
+
+func TestAuthSetup_WhitespaceOnlyIssuerURL(t *testing.T) {
+	_, err := runCLIErr(t,
+		"--server", "127.0.0.1:1",
+		"auth", "setup",
+		"--issuer-url", " ",
+		"--client-id", "fleetshift-cli",
+	)
+	if err == nil {
+		t.Fatal("expected whitespace issuer-url error")
+	}
+	if !strings.Contains(err.Error(), "--issuer-url is required") {
+		t.Fatalf("error = %v, want issuer-url validation failure", err)
+	}
+}
+
 func TestAuthSetup_LocalConfigAndConfigureServerConflict(t *testing.T) {
 	_, err := runCLIErr(t,
 		"auth", "setup",
@@ -120,7 +150,7 @@ func TestAuthSetup_ServerOnlyFlagRequiresConfigureServer(t *testing.T) {
 	}
 }
 
-func TestAuthSetup_ConfigureServerDials(t *testing.T) {
+func TestAuthSetup_ConfigureServerNotSupported(t *testing.T) {
 	_, err := runCLIErr(t,
 		"--server", "127.0.0.1:1",
 		"auth", "setup",
@@ -130,13 +160,39 @@ func TestAuthSetup_ConfigureServerDials(t *testing.T) {
 		"--audience", "fleetshift",
 	)
 	if err == nil {
-		t.Fatal("expected dial error")
+		t.Fatal("expected configure-server rejection")
 	}
-	// Unreachable server proves configure-server does not take the local path.
-	if !strings.Contains(err.Error(), "connection refused") &&
-		!strings.Contains(err.Error(), "connect") &&
-		!strings.Contains(err.Error(), "dial") {
-		t.Fatalf("error = %v, want dial/connect failure", err)
+	if !strings.Contains(err.Error(), "--configure-server is not supported yet") {
+		t.Fatalf("error = %v, want configure-server not supported", err)
+	}
+	if strings.Contains(err.Error(), "connection refused") ||
+		strings.Contains(err.Error(), "connect") ||
+		strings.Contains(err.Error(), "dial") {
+		t.Fatalf("error = %v, must reject before dialing", err)
+	}
+}
+
+func TestAuthSetup_ConfigureServerEmptyScopesSkipsDial(t *testing.T) {
+	_, err := runCLIErr(t,
+		"--server", "127.0.0.1:1",
+		"auth", "setup",
+		"--configure-server",
+		"--issuer-url", "https://issuer.example/dex",
+		"--client-id", "fleetshift-cli",
+		"--audience", "fleetshift",
+		"--scopes", ", ,",
+	)
+	if err == nil {
+		t.Fatal("expected empty scopes error")
+	}
+	if !strings.Contains(err.Error(), "--scopes must include at least one scope") {
+		t.Fatalf("error = %v, want scopes validation failure (before dial)", err)
+	}
+	// Unreachable server: a dial/connect error would mean validation ran too late.
+	if strings.Contains(err.Error(), "connection refused") ||
+		strings.Contains(err.Error(), "connect") ||
+		strings.Contains(err.Error(), "dial") {
+		t.Fatalf("error = %v, scopes must be validated before dialing", err)
 	}
 }
 

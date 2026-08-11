@@ -383,6 +383,61 @@ func TestNewConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "oidc issuer rejects remote http",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8080",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "http://evil.example/oidc",
+			},
+			wantErr: "http is only allowed for loopback",
+		},
+		{
+			name: "oidc issuer accepts loopback http",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "http://127.0.0.1:5556/dex",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				Database:   bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer: "http://127.0.0.1:5556/dex",
+			},
+		},
+		{
+			name: "oidc issuer accepts localhost http",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "http://localhost:5556/dex",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				Database:   bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer: "http://localhost:5556/dex",
+			},
+		},
+		{
+			name: "oidc issuer accepts ipv6 loopback http",
+			in: bootstrap.ConfigInput{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				DBPath:     bootstrap.DefaultSQLitePath,
+				OIDCIssuer: "http://[::1]:5556/dex",
+			},
+			want: bootstrap.Config{
+				GRPCAddr:   ":50051",
+				HTTPAddr:   ":8085",
+				Database:   bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
+				OIDCIssuer: "http://[::1]:5556/dex",
+			},
+		},
+		{
 			name: "empty oidc authority allowed at config parse",
 			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",

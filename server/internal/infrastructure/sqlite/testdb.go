@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"testing"
 )
 
@@ -19,27 +18,31 @@ func OpenTestDB(t *testing.T) *sql.DB {
 
 // OpenTestDSN is like [OpenTestDB] but accepts an explicit DSN. Use this
 // when a test needs multiple independent in-memory databases (e.g. by
-// appending a sequence suffix to the DSN). Shared-cache memory DSNs are
-// opened through [OpenMemory]; other DSNs keep the prior open path.
+// appending a sequence suffix to the DSN). Shared-cache memory DSNs keep
+// their full query string (via [openSharedMemoryDSN]); other DSNs use
+// the prior open path with the same pool/sentinel setup.
 func OpenTestDSN(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
+	var (
+		db       *sql.DB
+		sentinel *sql.Conn
+		err      error
+	)
 	if isSharedMemoryDSN(dsn) {
-		rest := strings.TrimPrefix(dsn, "file:")
-		name := rest
-		if i := strings.IndexByte(rest, '?'); i >= 0 {
-			name = rest[:i]
+		db, sentinel, err = openSharedMemoryDSN(dsn)
+	} else {
+		db, err = Open(dsn)
+		if err != nil {
+			t.Fatalf("open test db: %v", err)
 		}
-		return openTestMemory(t, name)
+		db.SetMaxOpenConns(2)
+		sentinel, err = db.Conn(context.Background())
 	}
-	db, err := Open(dsn)
 	if err != nil {
+		if db != nil {
+			_ = db.Close()
+		}
 		t.Fatalf("open test db: %v", err)
-	}
-	db.SetMaxOpenConns(2)
-	sentinel, err := db.Conn(context.Background())
-	if err != nil {
-		_ = db.Close()
-		t.Fatalf("open sentinel connection: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = sentinel.Close()

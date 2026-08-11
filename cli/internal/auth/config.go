@@ -24,7 +24,8 @@ type Config struct {
 
 // HTTPClient returns an *http.Client that trusts the CA certificate at
 // cfg.OIDCCAFile (in addition to system CAs). Returns nil if OIDCCAFile
-// is not set.
+// is not set. The client uses [DefaultOIDCHTTPTimeout] so OIDC calls
+// (token exchange, etc.) cannot hang indefinitely.
 func (cfg Config) HTTPClient() (*http.Client, error) {
 	if cfg.OIDCCAFile == "" {
 		return nil, nil
@@ -39,6 +40,7 @@ func (cfg Config) HTTPClient() (*http.Client, error) {
 	}
 	pool.AppendCertsFromPEM(caPEM)
 	return &http.Client{
+		Timeout: DefaultOIDCHTTPTimeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: pool},
 		},

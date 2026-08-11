@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// DefaultOIDCHTTPTimeout bounds OIDC HTTP when the caller provides no
+// context deadline, and is set on [Config.HTTPClient].
+const DefaultOIDCHTTPTimeout = 30 * time.Second
 
 // DiscoveryEndpoints holds authorization and token endpoint URLs from OIDC
 // discovery.
@@ -27,6 +32,9 @@ type discoveryDocument struct {
 // returns the authorization and token endpoints. issuerURL must be nonempty.
 // When httpClient is nil, [http.DefaultClient] is used.
 //
+// If ctx has no deadline, a [DefaultOIDCHTTPTimeout] deadline is applied so a
+// stalled issuer cannot block forever.
+//
 // The discovery document's issuer must match issuerURL after trimming a single
 // trailing slash on each side. Authorization and token endpoints must be
 // nonempty.
@@ -37,6 +45,11 @@ func DiscoverEndpoints(ctx context.Context, issuerURL string, httpClient *http.C
 	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, DefaultOIDCHTTPTimeout)
+		defer cancel()
 	}
 
 	endpoint := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"

@@ -118,7 +118,7 @@ Copy `.env.template` to `.env` and edit. All available settings are documented i
 
 ## Run
 
-The simplest way to run FleetShift is a single container (API + UI). That image is a sandbox for playing around, bootstrapping a real cluster, or testing — not a production deployment. Pass `OIDC_ISSUER_URL` so the UI can log users in. Sandbox/AIO and deploy packaging supply UI client defaults such as `OIDC_UI_CLIENT_ID=fleetshift-ui` and the browser scope string; `fleetshift serve` itself does not invent those values. Day One `/setup` can create a server-side auth method, but the UI’s OIDC client still reads the issuer from this startup config — it does not discover it from configured auth methods yet.
+The simplest way to run FleetShift is a single container (API + UI). That image is a sandbox for playing around, bootstrapping a real cluster, or testing — not a production deployment. Pass `OIDC_ISSUER_URL` (and related OIDC serve config) so the container can install the initial AuthMethod when the store is empty; the UI then reads issuer and authorization endpoint from that AuthMethod via `/api/ui/config`. Sandbox/AIO and deploy packaging supply UI client defaults such as `OIDC_UI_CLIENT_ID=fleetshift-ui` and the browser scope string; `fleetshift serve` itself does not invent those values.
 
 ```bash
 podman run --rm -it \
@@ -186,5 +186,5 @@ fleetshift serve \
   --oidc-resource-audience=fleetshift \
   --oidc-key-enrollment-audience=fleetshift-signing \
   --oidc-registry-id=github.com \
-  --oidc-registry-subject-expression=claims.preferred_username
+  --oidc-registry-subject-expression=claims.github_username
 ```

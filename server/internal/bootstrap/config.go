@@ -268,7 +268,7 @@ func (c Config) checkInvariants() error {
 	}
 
 	if c.OIDCIssuer != "" {
-		if err := parseHTTPURL(c.OIDCIssuer, "oidc issuer"); err != nil {
+		if err := parseOIDCIssuerURL(c.OIDCIssuer); err != nil {
 			return err
 		}
 	}
@@ -382,22 +382,37 @@ func (p Postgres) driverDSN(scheme string) string {
 	return u.String()
 }
 
-// parseHTTPURL validates that raw is an http or https URL with a host.
-// field is used only in error messages.
-func parseHTTPURL(raw, field string) error {
+// parseOIDCIssuerURL validates that raw is an http or https URL with a host.
+// HTTPS is allowed for any host. HTTP is allowed only for loopback hosts
+// (localhost / 127.0.0.0/8 / ::1) so remote cleartext discovery and JWKS
+// fetches cannot be MITMed on the network.
+func parseOIDCIssuerURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid %s: %w", field, err)
+		return fmt.Errorf("invalid oidc issuer: %w", err)
 	}
-	switch strings.ToLower(u.Scheme) {
+	scheme := strings.ToLower(u.Scheme)
+	switch scheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("invalid %s: scheme must be http or https", field)
+		return fmt.Errorf("invalid oidc issuer: scheme must be http or https")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("invalid %s: host is required", field)
+		return fmt.Errorf("invalid oidc issuer: host is required")
+	}
+	if scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("invalid oidc issuer: http is only allowed for loopback hosts")
 	}
 	return nil
+}
+
+// isLoopbackHost reports whether host (no port) is a loopback name or address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // parseCAPEM requires data to contain at least one parseable PEM CERTIFICATE
