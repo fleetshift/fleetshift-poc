@@ -1,0 +1,16 @@
+{
+  "name": "e2e-web",
+  "root": "e2e/web",
+  "sourceRoot": "e2e/web/src",
+  "projectType": "library",
+  "tags": ["scope:web", "type:e2e"],
+  "targets": {
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "playwright test",
+        "cwd": "e2e/web"
+      }
+    }
+  }
+}

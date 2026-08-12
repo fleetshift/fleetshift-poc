@@ -1,0 +1,43 @@
+{
+  "name": "e2e-dummy-app",
+  "root": "poc/e2e-dummy-app",
+  "sourceRoot": "poc/e2e-dummy-app/src",
+  "projectType": "application",
+  "tags": ["scope:ui", "type:app"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "rspack build",
+        "cwd": "poc/e2e-dummy-app"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/rspack.config.*",
+        "{projectRoot}/tsconfig*.json"
+      ],
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"]
+      }
+    },
+    "lint:fix": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": ["{projectRoot}/src/**/*.{ts,tsx}"],
+        "fix": true
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "NODE_ENV=development rspack serve",
+        "cwd": "poc/e2e-dummy-app"
+      },
+      "cache": false
+    }
+  }
+}
