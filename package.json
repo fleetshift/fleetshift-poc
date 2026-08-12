@@ -7,19 +7,23 @@
     "sdk/build-utils",
     "extensions/core/client",
     "extensions/gcphcp/client",
-    "extensions/kind/client"
+    "extensions/kind/client",
+    "poc/e2e-dummy-app"
   ],
   "devDependencies": {
     "@module-federation/enhanced": "2.8.1",
+    "@nx/devkit": "23.1.0",
     "@nx/docker": "^23.1.0",
     "@nx/eslint": "^23.1.1",
     "@nx/playwright": "^23.1.0",
+    "@nx/react": "^23.1.0",
     "@playwright/experimental-ct-react": "^1.61.1",
     "@playwright/test": "^1.61.1",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.65.0",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-playwright": "^1.6.2",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-simple-import-sort": "^13.0.0",
@@ -35,5 +39,9 @@
   },
   "scripts": {
     "nx": "nx"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }
