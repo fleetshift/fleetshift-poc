@@ -56,9 +56,10 @@ tasks:
     deps: [test:server, test:cli, test:server-integration, test:deploy]
 
   test:deploy:
-    desc: Run deploy script contract tests (renderer, entrypoint, dotenv precedence)
+    desc: Run AIO packaging unit tests
+    dir: deploy/aio
     cmds:
-      - bash deploy/scripts/test-gcphcp-defaults.sh
+      - go test -count=1 ./...
 
   test:server:
     desc: Run server tests
@@ -100,23 +101,27 @@ tasks:
         .
       - >-
         podman build -f Dockerfile.local
+        -t fleetshift-server-local:{{.IMAGE_TAG}}
         -t quay.io/stolostron/fleetshift-server-local:{{.IMAGE_TAG}}
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}}{{end}}
         .
       - >-
         podman build -f Dockerfile.web
+        -t fleetshift-web:{{.IMAGE_TAG}}
         -t quay.io/stolostron/fleetshift-web:{{.IMAGE_TAG}}
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-web:{{.IMAGE_TAG}}{{end}}
         .
 
+  # Assemble from local short names + --pull=missing so present local
+  # server-local/web tags are kept, but missing bases (e.g. Dex) can be fetched.
   image:aio:
     desc: Build all-in-one image from locally built server-local + web
     deps: [image:build]
     cmds:
       - >-
-        podman build {{.CLI_ARGS}} -f Dockerfile.fleetshift
-        --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:{{.IMAGE_TAG}}
-        --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:{{.IMAGE_TAG}}
+        podman build {{.CLI_ARGS}} --pull=missing -f Dockerfile.fleetshift
+        --build-arg SERVER_IMAGE=fleetshift-server-local:{{.IMAGE_TAG}}
+        --build-arg WEB_IMAGE=fleetshift-web:{{.IMAGE_TAG}}
         -t quay.io/stolostron/fleetshift:{{.IMAGE_TAG}}
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift:{{.IMAGE_TAG}}{{end}}
         .

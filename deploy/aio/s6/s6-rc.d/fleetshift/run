@@ -1,0 +1,43 @@
+#!/command/with-contenv sh
+# FleetShift longrun. When peer Dex is enabled, wait briefly for HTTPS discovery
+# so the serve bootstrap budget is not consumed by Dex boot.
+set -eu
+if [ -f /run/fleetshift/dex.enabled ]; then
+	i=0
+	while [ "$i" -lt 30 ]; do
+		if curl -skf --max-time 2 \
+			"https://127.0.0.1:5556/dex/.well-known/openid-configuration" \
+			>/dev/null 2>&1; then
+			break
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+fi
+# s6-setuidgid changes uid/gid only; keep HOME on the fleetshift home so
+# tools like podman do not probe /root.
+export HOME=/data
+
+# Optional kind packaging defaults (written by aio-init when a container
+# engine socket is mounted): KIND_EXPERIMENTAL_DOCKER_NETWORK and, on Dex-on,
+# KIND_NODE_ROUTE_BACKEND for control-plane loopback DNAT.
+if [ -f /run/fleetshift/kind.env ]; then
+	set -a
+	# shellcheck disable=SC1091
+	. /run/fleetshift/kind.env
+	set +a
+fi
+
+# Kind-capable launches mount an engine socket (CONTAINER_HOST). That socket is
+# often mode 0660; s6-setuidgid strips supplemental groups, so preserve the
+# socket's group via s6-applyuidgid without running FleetShift as root.
+sock="${CONTAINER_HOST-}"
+case "$sock" in
+	unix://*) sock=${sock#unix://} ;;
+	*) sock= ;;
+esac
+if [ -n "$sock" ] && [ -S "$sock" ]; then
+	sgid=$(stat -c %g "$sock")
+	exec s6-applyuidgid -u 1000 -g 1000 -G "$sgid" /run/fleetshift/exec-serve
+fi
+exec s6-setuidgid 1000:1000 /run/fleetshift/exec-serve

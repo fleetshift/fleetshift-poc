@@ -8,9 +8,9 @@ This repository represents both a **prototype** for a next generation k8s/OpenSh
 - **Node.js 20+** — for Nx and UI packages
 - **[Task](https://taskfile.dev/)** — `go install github.com/go-task/task/v3/cmd/task@latest`
 - **buf** — for protobuf generation (`brew install bufbuild/buf/buf`)
-- `.env` file — copy from `.env.template`
+- `.env` file — copy from `.env.template` (compose stack and Kubernetes only; not required for the all-in-one image)
 
-Deployment-specific prerequisites (podman, oc, kind, etc.) are listed in each deployment guide below.
+Deployment-specific prerequisites (podman, oc, kind, etc.) are listed in each deployment guide.
 
 ## Setup
 
@@ -87,9 +87,11 @@ task image:aio              # build all-in-one image from local server-local + w
 task image:push             # push server, server-local, and web to DEV_REGISTRY (not the AIO image)
 ```
 
-## Local Development (Podman)
+## Local compose stack
 
-All podman deploy commands are available through Nx. Env vars (AUTH, LOCAL_WEB, DB, etc.) pass through to Taskfile.
+The multi-service local harness (`task pd:*` / `task podman:*`) is documented in
+[deploy/podman/README.md](deploy/podman/README.md). Commands are also available
+through Nx; env vars (`AUTH`, `LOCAL_WEB`, `DB`, etc.) pass through to Taskfile.
 
 ```bash
 npx nx run pd:dev                                    # start local dev stack
@@ -110,81 +112,61 @@ npx nx run pd:test-attestation                       # test attestation flow
 task pd:dev AUTH=external LOCAL_WEB=true
 ```
 
-Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain Taskfile-only — they target remote clusters, not local dev.
+Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain
+Taskfile-only — they target remote clusters, not local compose.
 
 ## Configuration
 
-Copy `.env.template` to `.env` and edit. All available settings are documented in the template.
+For the **compose stack** and **Kubernetes** deployments, copy `.env.template`
+to `.env` and edit. Settings are documented in the template.
+
+The **all-in-one image** does not use `.env`; configure it with container env
+vars (`-e`). See [deploy/aio/README.md](deploy/aio/README.md).
 
 ## Run
 
-The simplest way to run FleetShift is a single container (API + UI). That image is a sandbox for playing around, bootstrapping a real cluster, or testing — not a production deployment. Pass `OIDC_ISSUER_URL` (and related OIDC serve config) so the container can install the initial AuthMethod when the store is empty; the UI then reads issuer and authorization endpoint from that AuthMethod via `/api/ui/config`. Sandbox/AIO and deploy packaging supply UI client defaults such as `OIDC_UI_CLIENT_ID=fleetshift-ui` and the browser scope string; `fleetshift serve` itself does not invent those values.
+Both local options below typically use podman as the container engine. Pick by
+**what you launch**, not by the engine:
 
-```bash
-podman run --rm -it \
-  -p 8085:8085 -p 50051:50051 \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
-  quay.io/stolostron/fleetshift:latest
-```
-
-Open http://localhost:8085. Build a local image with `task image:aio` instead of pulling from Quay when iterating on this repo.
-
-### With kind
-
-Privileged + host container socket (full control of the host engine — local/dev only). Create the `kind` network once if needed: `podman network create kind`.
-
-```bash
-podman run --rm -it \
-  --privileged --user 0:0 \
-  -p 8085:8085 -p 50051:50051 \
-  -v /tmp:/tmp \
-  -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
-  -e CONTAINER_HOST=unix:///var/run/docker.sock \
-  -e KIND_EXPERIMENTAL_DOCKER_NETWORK=kind \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
-  --network kind \
-  quay.io/stolostron/fleetshift:latest
-```
-
-### With GCP HCP
-
-Until the service is GA, enable the addon by passing the CLS gateway URL (optional overrides use shared renderer defaults):
-
-```bash
-podman run --rm -it \
-  -p 8085:8085 -p 50051:50051 \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
-  -e GCPHCP_GATEWAY_URL=https://your-cls-gateway \
-  quay.io/stolostron/fleetshift:latest
-```
-
-Combine with the kind flags above when you also need local cluster provisioning.
-
-### Other ways to run
-
-| Method | Use case | Guide |
-|--------|----------|-------|
-| Podman compose | Multi-service local stack (Keycloak, Postgres, hot-reload) | [deploy/podman/](deploy/podman/README.md) |
+| Path | What you launch | Guide |
+|------|-----------------|-------|
+| All-in-one image | One container (`quay.io/stolostron/fleetshift`) with API + UI + peer Dex | This section + [deploy/aio/](deploy/aio/README.md) |
+| Local compose stack | Multi-service harness (server, web builder, Keycloak, optional Postgres) | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
-| Keycloak (OpenShift) | External OIDC provider for those deployments | [deploy/keycloak/](deploy/keycloak/README.md) |
+| Keycloak (OpenShift) | External OIDC for cluster/compose `AUTH=external` | [deploy/keycloak/](deploy/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
+
+### All-in-one image (simplest)
+
+Sandbox for trying FleetShift — not a production deployment. Bare run needs
+**no** OIDC flags: packaging starts peer Dex and wires AuthMethod/UI defaults
+into `fleetshift serve`. Demo users: `ops@fleetshift.local` /
+`fleetshift-ops` and `dev@fleetshift.local` / `fleetshift-dev`.
+
+```bash
+podman run -d --rm -it \
+  -p 127.0.0.1:8085:8085 \
+  -p 127.0.0.1:50051:50051 \
+  -p 127.0.0.1:5556:5556 \
+  quay.io/stolostron/fleetshift:latest
+```
+
+Open http://127.0.0.1:8085. Build locally with `task image:aio` when iterating
+on this repo.
+
+Browsers will see Dex's sandbox CA as an unknown authority; continue only the
+interstitial for `https://127.0.0.1:5556` (do not import the CA). External
+issuer, kind, GCP HCP, env defaults, and fleetctl:
+[deploy/aio/README.md](deploy/aio/README.md).
 
 ## Day One Setup
 
-Day One IdP install is performed by `fleetshift serve` when the AuthMethod store
-is empty and complete OIDC bootstrap config is present (issuer,
-audience, and optional enrollment/registry or public-key claim fields). Packaging
-and deploy paths pass those flags.
+`fleetshift serve` installs the initial AuthMethod when the store is empty and
+complete OIDC bootstrap config is present. Who supplies those flags depends on
+the path:
 
-Example serve inputs (values are packaging/deploy-owned):
-
-```bash
-fleetshift serve \
-  --oidc-issuer=<ISSUER_URL> \
-  --oidc-ui-client-id=fleetshift-ui \
-  --oidc-ui-scope='openid profile email groups audience:server:client_id:fleetshift' \
-  --oidc-resource-audience=fleetshift \
-  --oidc-key-enrollment-audience=fleetshift-signing \
-  --oidc-registry-id=github.com \
-  --oidc-registry-subject-expression=claims.github_username
-```
+- **AIO Dex-on:** packaging fills them automatically (including registry mapping
+  to `claims.preferred_username` for peer Dex users).
+- **AIO Dex-off / compose / Kubernetes:** packaging or deploy manifests pass
+  explicit serve flags or `.env` values. Compose/Keycloak typically uses
+  `claims.github_username` via `KEY_REGISTRY_*` in `.env.template`.

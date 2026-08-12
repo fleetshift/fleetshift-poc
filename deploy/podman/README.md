@@ -1,6 +1,13 @@
-# Podman (Local Development)
+# Local compose stack
 
-Local container-based deployment using podman and docker-compose. Runs the full FleetShift stack on your workstation with optional local Keycloak.
+Multi-service local deployment under `deploy/podman`: podman + docker-compose
+via Taskfile (`task podman:*` / `task pd:*`). Runs server, web-builder, and
+optional Keycloak/Postgres on your workstation.
+
+This is **not** the all-in-one image. For the single-container AIO
+(`quay.io/stolostron/fleetshift`, peer Dex, packaging defaults), see
+[deploy/aio/README.md](../aio/README.md). Both paths often use podman as the
+container engine; they are different products.
 
 ## Prerequisites
 
@@ -39,8 +46,8 @@ bin/fleetctl auth setup \
 bin/fleetctl auth login       # log in (opens browser)
 ```
 
-`gcphcp` is opt-in in the Podman harness. A plain `task podman:up` starts the
-default local addon set without `gcphcp`. To enable `gcphcp`, set
+`gcphcp` is opt-in in this harness. A plain `task podman:up` starts the default
+local addon set without `gcphcp`. To enable `gcphcp`, set
 `GCPHCP_ENABLED=true` and `GCPHCP_GATEWAY_URL` (the only required value). The
 seven optional `GCPHCP_*` overrides default in
 `deploy/scripts/render-gcphcp-config.sh` when left empty:
@@ -58,54 +65,13 @@ task podman:up AUTH=external
 
 `GCPHCP_ENABLED=true` requires `AUTH=external`. The task fails early if local
 Keycloak auth is selected. For `AUTH=external`, also set `OIDC_ISSUER_URL` in
-`.env`.
+`.env`. For `AUTH=local`, the stack always uses bundled Keycloak
+(`https://$KC_HOSTNAME:$KC_HTTPS_PORT/auth/realms/fleetshift`) and ignores
+`.env`'s `OIDC_ISSUER_URL`.
 
 At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`
 (before Compose starts), mounts that file into `fleetshift-server`, and adds
 `gcphcp` to the explicit addon list for the deployment.
-
-## All-in-one image
-
-Published image `quay.io/stolostron/fleetshift:latest` bundles the server (from `fleetshift-server-local`, including a container runtime CLI for kind), baked-in UI assets, and defaults to serving the UI. Build it from this monorepo with `task image:aio`: that builds `Dockerfile` / `Dockerfile.local` / `Dockerfile.web`, then assembles via `Dockerfile.fleetshift` without duplicating those Dockerfiles. A thin reassemble from already-published component tags is still possible by passing `--build-arg SERVER_IMAGE=...` and `--build-arg WEB_IMAGE=...`.
-
-API + UI (runs as non-root by default):
-
-Assumes an OIDC issuer is already running (not bundled). Use
-`host.docker.internal` rather than `localhost` so the same issuer URL works
-from the browser, the server process inside the container, and kind nodes
-(`localhost` inside a container is that container, not the host). Map
-`host.docker.internal` to loopback in the host’s `/etc/hosts` so the browser
-can resolve it; add `--add-host=host.docker.internal:host-gateway` if the
-runtime does not inject it. Compose Keycloak path:
-
-`https://host.docker.internal:8443/auth/realms/fleetshift`
-
-```bash
-podman run --rm -p 8085:8085 -p 50051:50051 \
-  --add-host=host.docker.internal:host-gateway \
-  -e OIDC_ISSUER_URL=https://host.docker.internal:8443/auth/realms/fleetshift \
-  quay.io/stolostron/fleetshift:latest
-```
-
-With kind provisioning (same privileges/socket pattern as compose). This path is a trusted local/dev tool: privileged + host container socket means full control of the host engine. With no GCP HCP variables, the image starts with `kind,kubernetes`. Supply only `-e GCPHCP_GATEWAY_URL=...` to activate `gcphcp` with the shared renderer defaults.
-
-```bash
-podman run --rm \
-  --privileged --user 0:0 \
-  -p 8085:8085 -p 50051:50051 \
-  -v /tmp:/tmp \
-  -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
-  --add-host=host.docker.internal:host-gateway \
-  -e CONTAINER_HOST=unix:///var/run/docker.sock \
-  -e OIDC_ISSUER_URL=https://host.docker.internal:8443/auth/realms/fleetshift \
-  -e KIND_EXPERIMENTAL_DOCKER_NETWORK=kind \
-  --network kind \
-  quay.io/stolostron/fleetshift:latest
-```
-
-In the future, we can hopefully extend this with separate process addons by leveraging a minimal supervisor like s6.
-
-This Podman compose stack remains the local multi-service setup (server + web-builder init, optional Keycloak/Postgres). Use the all-in-one image when you want a single container with API + UI (and optionally kind).
 
 ## Deploy Modes
 
@@ -166,13 +132,17 @@ This skips the Docker web-builder and bind-mounts the monorepo-root `web/` direc
 
 Copy `.env.template` to `.env` and edit. All available settings are documented in the template. Command-line variables always override `.env`.
 
+This stack configures `fleetshift-server` with compose/`KEY_REGISTRY_*` /
+`PUBLIC_KEY_CLAIM_EXPR`. The AIO image uses different env names — see
+[deploy/aio/README.md](../aio/README.md).
+
 ### `gcphcp` Addon Toggle
 
 - Default: `kind,kubernetes`
 - Add `gcphcp`: set `GCPHCP_ENABLED=true` and `GCPHCP_GATEWAY_URL` in `.env`
   (`AUTH=external` required). Optional `GCPHCP_*` overrides use renderer
-  defaults when empty.
-- Runtime artifact: Podman renders `deploy/podman/.gcphcp.yaml` from `.env` and
-  mounts it as `/config/gcphcp.yaml`
+  defaults when empty. (AIO enables gcphcp from `GCPHCP_GATEWAY_URL` alone.)
+- Runtime artifact: this harness renders `deploy/podman/.gcphcp.yaml` from `.env`
+  and mounts it as `/config/gcphcp.yaml`
 - Follow-on tasks such as `task podman:logs`, `task podman:status`, and
   `task podman:rebuild` recalculate the rendered config from the current `.env`

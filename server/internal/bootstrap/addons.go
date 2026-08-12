@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
@@ -64,6 +66,13 @@ func assembleProductionAddons(
 		}
 		if deps.Indexing != nil {
 			kindOpts = append(kindOpts, kindaddon.WithIndexingRuntime(deps.Indexing.Runtime))
+		}
+		if destination := strings.TrimSpace(os.Getenv(kindaddon.NodeRouteBackendEnv)); destination != "" {
+			route, err := kindaddon.NewNodeRoute(destination)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", kindaddon.NodeRouteBackendEnv, err)
+			}
+			kindOpts = append(kindOpts, kindaddon.WithNodeRoute(route))
 		}
 		kindAgent := kindaddon.NewAgent(
 			deps.DeliveryReporter,

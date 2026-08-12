@@ -1,0 +1,4 @@
+#!/command/with-contenv sh
+# Packaging initialization (Dex/PKI/serve argv). Failure fails the oneshot and the container.
+set -eu
+exec /usr/local/bin/aio-init
