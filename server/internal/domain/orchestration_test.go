@@ -362,9 +362,11 @@ func (r *recordingRecord) Run(activity domain.Activity[any, any], in any) (any, 
 func (r *recordingRecord) Await(signalName string) (any, error) {
 	return r.delegate.Await(signalName)
 }
+
 func (r *recordingRecord) AwaitWithTimeout(signalName string, timeout time.Duration) (any, error) {
 	return r.delegate.AwaitWithTimeout(signalName, timeout)
 }
+
 func (r *recordingRecord) Sleep(d time.Duration) error {
 	return r.delegate.Sleep(d)
 }
@@ -389,6 +391,7 @@ func (r *simpleRecord) Context() context.Context { return r.ctx }
 func (r *simpleRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
 	return activity.Run(r.ctx, in)
 }
+
 func (r *simpleRecord) Await(_ string) (any, error) {
 	select {
 	case e := <-r.events:
@@ -397,6 +400,7 @@ func (r *simpleRecord) Await(_ string) (any, error) {
 		return nil, r.ctx.Err()
 	}
 }
+
 func (r *simpleRecord) AwaitWithTimeout(_ string, timeout time.Duration) (any, error) {
 	if timeout == 0 {
 		select {
@@ -417,6 +421,7 @@ func (r *simpleRecord) AwaitWithTimeout(_ string, timeout time.Duration) (any, e
 		return nil, r.ctx.Err()
 	}
 }
+
 func (r *simpleRecord) Sleep(_ time.Duration) error {
 	return nil
 }
@@ -800,7 +805,8 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 		},
 		State: domain.FulfillmentStateCreating,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "old1", Name: "old1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "new1", Name: "new1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "new2", Name: "new2", Type: "test"}),
@@ -1051,7 +1057,8 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
 		State:             domain.FulfillmentStateDeleting,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
@@ -1267,7 +1274,8 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 		State:             domain.FulfillmentStateDeleting,
 	})
 
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
@@ -1556,7 +1564,8 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
 		State:             domain.FulfillmentStateDeleting,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
@@ -1598,7 +1607,8 @@ func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 		State:             domain.FulfillmentStateDeleting,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}),
 	)
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
@@ -1731,7 +1741,8 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 		},
 		State: domain.FulfillmentStateCreating,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k8s", Name: "k8s", Type: "kubernetes", AcceptedManifestTypes: []domain.ManifestType{"kubernetes.manifest"}}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "plain", Name: "plain", Type: "test"}),
 	)
@@ -1762,6 +1773,126 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 	}
 }
 
+// TestOrchestration_AllManifestsRejected_FailsFulfillment verifies that when
+// every manifest is filtered out for every target (no target accepts the
+// deployment's manifest type), the fulfillment transitions to failed rather
+// than silently becoming active with zero deliveries.
+func TestOrchestration_AllManifestsRejected_FailsFulfillment(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
+		Generation: 1,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{
+				{Raw: json.RawMessage(`{"kind":"ConfigMap"}`), ManifestType: "incompatible.type"},
+			},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-local"},
+		},
+		State: domain.FulfillmentStateCreating,
+	})
+	seedTargets(
+		t, store,
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:                    "kind-local",
+			Name:                  "kind-local",
+			Type:                  "kind",
+			AcceptedManifestTypes: []domain.ManifestType{"api.kind.cluster", "managed.api.kind.cluster"},
+		}),
+	)
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	obs := &recordingObserver{}
+	rd := &recordingDelivery{events: events}
+	wf := newTestWorkflow(store, rd, events, func(wf *domain.OrchestrationWorkflowSpec) {
+		wf.Observer = obs
+	})
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	f := getFulfillment(t, store, "deployments/d1")
+	if f.State() != domain.FulfillmentStateFailed {
+		t.Errorf("State = %q, want %q: fulfillment should fail when all manifests are rejected by every target", f.State(), domain.FulfillmentStateFailed)
+	}
+	if f.StatusReason() == "" {
+		t.Error("StatusReason should describe why the fulfillment failed")
+	}
+
+	// No deliveries should have been dispatched.
+	rd.mu.Lock()
+	deliveredTo := rd.delivered
+	rd.mu.Unlock()
+	if len(deliveredTo) != 0 {
+		t.Errorf("expected 0 deliveries, got %d: %v", len(deliveredTo), deliveredTo)
+	}
+}
+
+// TestOrchestration_PartialManifestsRejected_StillDelivers verifies that when
+// only some targets reject the manifest type (but at least one target accepts
+// it), the fulfillment still reaches active and delivers to the accepting
+// targets.
+func TestOrchestration_PartialManifestsRejected_StillDelivers(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
+		Generation: 1,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{
+				{Raw: json.RawMessage(`{"name":"c1"}`), ManifestType: "api.kind.cluster"},
+			},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-target", "k8s-target"},
+		},
+		State: domain.FulfillmentStateCreating,
+	})
+	seedTargets(
+		t, store,
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:                    "kind-target",
+			Name:                  "kind-target",
+			Type:                  "kind",
+			AcceptedManifestTypes: []domain.ManifestType{"api.kind.cluster"},
+		}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:                    "k8s-target",
+			Name:                  "k8s-target",
+			Type:                  "kubernetes",
+			AcceptedManifestTypes: []domain.ManifestType{"kubernetes.manifest"},
+		}),
+	)
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	rd := &recordingDelivery{events: events}
+	wf := newTestWorkflow(store, rd, events)
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	f := getFulfillment(t, store, "deployments/d1")
+	if f.State() != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want %q: at least one target accepted manifests", f.State(), domain.FulfillmentStateActive)
+	}
+
+	// Only kind-target should have received a delivery.
+	rd.mu.Lock()
+	deliveredTo := rd.delivered
+	rd.mu.Unlock()
+	if len(deliveredTo) != 1 {
+		t.Fatalf("expected 1 delivery, got %d: %v", len(deliveredTo), deliveredTo)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Attestation assembly
 // ---------------------------------------------------------------------------
@@ -1780,9 +1911,11 @@ func (r *attestationCapturingRecord) Context() context.Context { return r.delega
 func (r *attestationCapturingRecord) Await(sig string) (any, error) {
 	return r.delegate.Await(sig)
 }
+
 func (r *attestationCapturingRecord) AwaitWithTimeout(sig string, timeout time.Duration) (any, error) {
 	return r.delegate.AwaitWithTimeout(sig, timeout)
 }
+
 func (r *attestationCapturingRecord) Sleep(d time.Duration) error {
 	return r.delegate.Sleep(d)
 }
@@ -2052,7 +2185,8 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 		Provenance: prov,
 		State:      domain.FulfillmentStateCreating,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "old1", Name: "old1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "new1", Name: "new1", Type: "test"}),
 	)
@@ -2120,7 +2254,8 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 		Provenance: prov,
 		State:      domain.FulfillmentStateDeleting,
 	})
-	seedTargets(t, store,
+	seedTargets(
+		t, store,
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)

@@ -1056,6 +1056,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 		if step.Deliver != nil {
 			// Phase 1: build inputs — generate manifests and assemble DeliverInput per target.
 			inputs := make(map[DeliveryID]DeliverInput)
+			var rejectedTargets []TargetID
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(record, s.GenerateManifests(), GenerateManifestsInput{
 					Spec:   f.ManifestStrategy(),
@@ -1071,6 +1072,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				manifests = FilterAcceptedManifests(target, manifests)
 				probe.ManifestsFiltered(target, total, len(manifests))
 				if len(manifests) == 0 {
+					rejectedTargets = append(rejectedTargets, target.ID())
 					continue
 				}
 				did := deliveryIDFor(fulfillmentID, target.ID())
@@ -1086,6 +1088,19 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					in.Attestation = AssembleDeliverAttestation(f, manifests, evidence)
 				}
 				inputs[did] = in
+			}
+
+			// If every target in this step rejected all manifests, no
+			// delivery can proceed. This is a terminal configuration
+			// error — the manifest type does not match any target's
+			// accepted types — and must not silently become active.
+			if len(rejectedTargets) > 0 && len(inputs) == 0 {
+				manifestTypes := manifestTypeSet(f.ManifestStrategy().Manifests)
+				return TerminalError(fmt.Errorf(
+					"no target accepted any manifest: manifest types %v were rejected by all %d target(s) %v; "+
+						"verify that --resource-type matches a type the target accepts",
+					manifestTypes, len(rejectedTargets), rejectedTargets,
+				))
 			}
 
 			// Phase 2: dispatch + ack + complete loop.
@@ -1422,6 +1437,22 @@ func assembleRemoveAttestation(f Fulfillment, ev *ResolvedEvidence) *Attestation
 			Name: ResourceName(f.Provenance().Content.ContentID()),
 		},
 	}
+}
+
+// manifestTypeSet returns the deduplicated set of [ManifestType]s
+// present in manifests. Used in error messages to show the caller which
+// types were offered.
+func manifestTypeSet(manifests []Manifest) []ManifestType {
+	seen := make(map[ManifestType]struct{}, len(manifests))
+	out := make([]ManifestType, 0, len(manifests))
+	for _, m := range manifests {
+		if _, ok := seen[m.ManifestType]; ok {
+			continue
+		}
+		seen[m.ManifestType] = struct{}{}
+		out = append(out, m.ManifestType)
+	}
+	return out
 }
 
 // unused import guard
