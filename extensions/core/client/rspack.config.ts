@@ -725,7 +725,9 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       KindOnboarding: p(
         "./src/plugins/addon-demo-plugin/providers/KindOnboarding.tsx",
       ),
-      KindOnboardingIcon: p("./src/plugins/addon-demo-plugin/icons/KindIcon.tsx"),
+      KindOnboardingIcon: p(
+        "./src/plugins/addon-demo-plugin/icons/KindIcon.tsx",
+      ),
       // Module pages
       SecurityPage: p(
         "./src/plugins/addon-demo-plugin/security/SecurityPage.tsx",
@@ -796,7 +798,9 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
     assetModuleFilename: `plugins/${key}/assets/[hash][ext]`,
     uniqueName: key,
   },
-  mode: (process.env.NODE_ENV === "development" ? "development" : "production") as Configuration["mode"],
+  mode: (process.env.NODE_ENV === "development"
+    ? "development"
+    : "production") as Configuration["mode"],
   ignoreWarnings: [/Plugin base URL/, /Plugin has no extensions/],
   stats: {
     preset: "normal",

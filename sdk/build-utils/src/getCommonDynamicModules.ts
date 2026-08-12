@@ -27,12 +27,14 @@ export default function getCommonDynamicModules(): Record<
     return {};
   }
 
-  const moduleMap: Record<string, string> = JSON.parse(
+  const moduleMap: Record<string, { path: string }> = JSON.parse(
     fs.readFileSync(mapPath, "utf-8"),
   );
 
   // Deduplicate: multiple exports can map to the same dynamic path
-  const uniquePaths = new Set(Object.values(moduleMap));
+  const uniquePaths = new Set(
+    Object.values(moduleMap).map((entry) => entry.path),
+  );
 
   const modules: Record<string, { requiredVersion: string; version: string }> =
     {};

@@ -11,7 +11,13 @@ interface TransformImportEntry {
   transformToDefaultImport?: boolean;
 }
 
-function loadCommonModulesMap(): Record<string, string> {
+interface CommonModuleEntry {
+  path: string;
+  sourceExport: string;
+  type: boolean;
+}
+
+function loadCommonModulesMap(): Record<string, CommonModuleEntry> {
   const req = createRequire(import.meta.url);
   const commonPkgDir = path.dirname(
     req.resolve("@fleetshift/common/package.json"),
@@ -50,9 +56,9 @@ export function createCommonModuleReplacementPlugin(): RspackPluginInstance {
   const moduleMap = loadCommonModulesMap();
 
   const corrections = new Map<string, string>();
-  for (const [exportName, dynamicPath] of Object.entries(moduleMap)) {
+  for (const [exportName, entry] of Object.entries(moduleMap)) {
     const naivePath = `@fleetshift/common/dist/dynamic/${exportName}`;
-    const actualPath = `@fleetshift/common/${dynamicPath}`;
+    const actualPath = `@fleetshift/common/${entry.path}`;
     if (naivePath !== actualPath) {
       corrections.set(naivePath, actualPath);
     }
