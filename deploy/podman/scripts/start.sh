@@ -20,6 +20,73 @@ ensure_podman_ready
 
 podman network exists kind 2>/dev/null || podman network create kind
 
+# ---------------------------------------------------------------------------
+# Warn when host /etc/hosts will leak into kind-node containers.
+#
+# Podman seeds each container's /etc/hosts from the host's /etc/hosts by
+# default (base_hosts_file = "").  When the host maps the local Keycloak
+# hostname (typically "keycloak") to 127.0.0.1 — which is needed for
+# browser and CLI access — that entry is copied into every container,
+# including kind cluster nodes.  Inside a kind node the kube-apiserver
+# resolves the OIDC issuer to loopback instead of the container-network
+# address, so OIDC token validation fails and deployments pause with an
+# authentication error.
+# ---------------------------------------------------------------------------
+warn_base_hosts_file() {
+  local kc_host="${KC_HOSTNAME:-keycloak}"
+
+  # Only relevant when the host has a loopback entry for the issuer hostname.
+  # Use awk for exact whitespace-delimited field matching — portable and
+  # avoids false positives on partial matches (e.g. "keycloak-old").
+  if ! awk -v host="${kc_host}" \
+    '$1 == "127.0.0.1" { for(i=2;i<=NF;i++) if($i == host) {f=1; exit} } END { exit !f }' \
+    /etc/hosts 2>/dev/null; then
+    return 0
+  fi
+
+  local conf="$HOME/.config/containers/containers.conf"
+
+  # Already configured to a non-default value — nothing to do.
+  # The default ("" or "/etc/hosts") still copies host entries, so only
+  # values like "/dev/null" actually fix the problem.
+  if [ -f "$conf" ]; then
+    local val
+    val=$(sed -n 's/^[[:space:]]*base_hosts_file[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}/\1/p' "$conf" | tail -1)
+    case "$val" in
+      ""|/etc/hosts) ;;   # default or explicit host file — still vulnerable
+      *) return 0 ;;      # set to /dev/null or similar — safe
+    esac
+  fi
+
+  echo ""
+  echo "⚠️ WARNING ⚠️ : host /etc/hosts maps '${kc_host}' to 127.0.0.1."
+  echo "  For Podman running on Linux systems, Podman copies this into every"
+  echo "  container it creates, including kind cluster nodes. The kube-apiserver"
+  echo "  inside those nodes will resolve the OIDC issuer to loopback instead of "
+  echo "  the Keycloak container, causing deployments to provisioned clusters "
+  echo "  to pause with an auth error."
+  echo ""
+  echo "  To fix, add this to ${conf}:"
+  echo ""
+  echo "    [containers]"
+  echo "    base_hosts_file = \"/dev/null\""
+  echo ""
+  echo "  This tells podman to start containers with a minimal /etc/hosts"
+  echo "  (localhost + container hostname). Container-to-container DNS via"
+  echo "  the podman network is unaffected — service names still resolve."
+  echo ""
+  echo "  ⚠️  This may affect the behavior of other containers running in podman"
+  echo "     that could be relying on the /etc/hosts to be copied from the host"
+  echo "     to the container"
+  echo ""  
+  echo "  After changing the file, restart the podman API service:"
+  echo ""
+  echo "    systemctl --user restart podman.service"
+  echo ""
+  echo "  Then recreate any existing kind clusters for the fix to take effect."
+  echo ""
+}
+
 REALM_TEMPLATE="${DEPLOY_DIR}/keycloak/fleetshift-realm.json"
 REALM_JSON="${COMPOSE_DIR}/.realm.json"
 
@@ -153,6 +220,9 @@ if [ "$AUTH_MODE" = "local" ]; then
   echo "        --key-enrollment-client-id fleetshift-signing \\"
   echo "        --oidc-ca-file deploy/podman/.certs/ca.crt"
   echo "      bin/fleetctl auth login"
+fi
+if [ "$AUTH_MODE" = "local" ] && [ "$(uname -s)" = "Linux" ]; then
+  warn_base_hosts_file
 fi
 echo "    Run 'task podman:logs' to tail container output."
 echo "    Run 'task podman:status' to check container health."

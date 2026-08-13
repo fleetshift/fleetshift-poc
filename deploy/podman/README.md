@@ -25,6 +25,29 @@ echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
 echo "::1 keycloak" | sudo tee -a /etc/hosts
 ```
 
+**Podman `base_hosts_file` (Linux only, kind clusters + local Keycloak):**
+On Linux, podman copies the host's `/etc/hosts` into every container by
+default. The `127.0.0.1 keycloak` entry above leaks into kind cluster nodes,
+causing the kube-apiserver to resolve the OIDC issuer to loopback instead of
+the Keycloak container. Deployments to provisioned clusters will pause with an
+auth error. `task podman:up` warns when this conflict is detected. To fix, add
+the following to `~/.config/containers/containers.conf`:
+
+```ini
+[containers]
+base_hosts_file = "/dev/null"
+```
+
+This tells podman to start containers with a minimal `/etc/hosts` (localhost +
+container hostname). Container-to-container DNS via the podman network is
+unaffected -- service names still resolve normally. **Note:** this is a
+user-wide podman setting -- it applies to all containers you run, not only
+FleetShift. Other containers that depend on host `/etc/hosts` entries may be
+affected. To undo, remove or comment out the `base_hosts_file` line.
+
+After editing the file, run `systemctl --user restart podman.service` and
+recreate any existing kind clusters.
+
 ## Quick Start
 
 ```bash
