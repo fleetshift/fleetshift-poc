@@ -6,12 +6,10 @@
 # works with no local CA trust or TLS-skip flags, from both dev machines and CI.
 #
 # deploy.sh substitutes __PROXY_HOST__ (the Route host, cluster-specific) and
-# __CERT_ISSUER__ (ClusterIssuer name, default `zerossl-prod`) before applying,
-# then copies the resulting secret into the Route's edge TLS config.
-#
-# NOTE: without the cert-manager openshift-routes controller the Route is not
-# auto-updated on renewal — re-run deploy.sh to re-patch, or install that
-# controller for hands-off renewal.
+# __CERT_ISSUER__ (ClusterIssuer name, default `zerossl-prod`) before applying.
+# The Route references this secret via spec.tls.externalCertificate, so
+# cert-manager renewals propagate automatically (the router reads the Secret
+# directly — see router-secret-reader-{role,binding}.yaml).
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

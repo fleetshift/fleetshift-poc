@@ -36,7 +36,6 @@ error() { echo "ERROR: $*" >&2; exit 1; }
 info "Checking prerequisites..."
 command -v oc &>/dev/null || error "'oc' CLI not found in PATH."
 command -v openssl &>/dev/null || error "'openssl' not found in PATH."
-command -v python3 &>/dev/null || error "'python3' not found in PATH (used to build the Route TLS patch)."
 require_oc_login
 
 # --- Step 2: Create namespace ---
@@ -106,9 +105,12 @@ oc rollout status deployment/nx-cache-proxy -n "${NAMESPACE}" --timeout=120s
 
 # --- Step 8b: Issue a trusted TLS cert for the proxy Route ---
 # The Nx CLI's HTTP client rejects the cluster's default self-signed ingress
-# cert. Mint a publicly-trusted cert via cert-manager and copy it into the
-# Route's edge TLS config so the https route works without any client-side
-# CA trust. Idempotent: re-running re-applies the Certificate and re-patches.
+# cert. Mint a publicly-trusted cert via cert-manager and reference it from the
+# Route with spec.tls.externalCertificate. Unlike copying the cert into the
+# Route's tls fields, externalCertificate makes the router read the Secret
+# directly, so cert-manager renewals propagate automatically — no re-patching.
+# This requires granting the openshift-ingress router serviceaccount read access
+# to just that Secret. Idempotent: re-running re-applies everything.
 PROXY_HOST=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
 info "Issuing TLS cert for ${PROXY_HOST} via ClusterIssuer ${CERT_ISSUER}..."
 sed -e "s|__PROXY_HOST__|${PROXY_HOST}|" -e "s|__CERT_ISSUER__|${CERT_ISSUER}|" \
@@ -118,22 +120,13 @@ info "Waiting for certificate to be issued..."
 oc wait -n "${NAMESPACE}" certificate/nx-cache-proxy-tls \
     --for=condition=Ready --timeout=180s
 
-info "Patching Route with issued certificate..."
-PATCH=$(oc get secret nx-cache-proxy-tls -n "${NAMESPACE}" -o json | python3 -c '
-import sys, json, base64
-d = json.load(sys.stdin)["data"]
-tls = {
-    "termination": "edge",
-    "insecureEdgeTerminationPolicy": "Redirect",
-    "certificate": base64.b64decode(d["tls.crt"]).decode(),
-    "key": base64.b64decode(d["tls.key"]).decode(),
-}
-ca = d.get("ca.crt")
-if ca:
-    tls["caCertificate"] = base64.b64decode(ca).decode()
-print(json.dumps({"spec": {"tls": tls}}))
-')
-oc patch route nx-cache-proxy -n "${NAMESPACE}" --type=merge -p "${PATCH}"
+info "Granting the router serviceaccount read access to the cert Secret..."
+oc apply -n "${NAMESPACE}" -f "${MINIO_DIR}/manifests/router-secret-reader-role.yaml"
+oc apply -n "${NAMESPACE}" -f "${MINIO_DIR}/manifests/router-secret-reader-binding.yaml"
+
+info "Patching Route to reference the cert via externalCertificate (auto-renews)..."
+oc patch route nx-cache-proxy -n "${NAMESPACE}" --type=merge -p \
+    '{"spec":{"tls":{"certificate":null,"key":null,"caCertificate":null,"externalCertificate":{"name":"nx-cache-proxy-tls"}}}}'
 
 # --- Step 9: Print summary ---
 PROXY_ROUTE=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
