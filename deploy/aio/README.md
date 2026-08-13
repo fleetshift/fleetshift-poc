@@ -81,7 +81,8 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Container socket | `CONTAINER_HOST` | `unix:///var/run/docker.sock` |
 
 Registry id and subject expression must be set together when overriding either.
-Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive.
+Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive
+(`fleetshift serve` enforces this).
 
 ## External issuer (Dex-off)
 
@@ -89,8 +90,8 @@ Presence of `OIDC_ISSUER_URL` skips peer Dex and forwards that issuer into the
 same serve bootstrap path. Packaging still fills omitted fields above. Pass
 `OIDC_CA_FILE` only when discovery/TLS needs non-system trust. Issuer URL
 shape, CA readability/PEM, and registry/claim pairing are validated by
-`fleetshift serve`. Packaging still fails closed on registry half-pairs /
-claim+registry mutual exclusion when applying serve defaults.
+`fleetshift serve`. Packaging fills omitted AuthMethod/UI defaults and
+forwards the resolved serve argv.
 
 Minimal:
 

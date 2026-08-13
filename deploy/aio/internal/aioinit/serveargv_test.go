@@ -10,14 +10,11 @@ import (
 )
 
 func TestApplyServeDefaultsAndArgs(t *testing.T) {
-	in, err := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
+	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
 		Endpoints: aioinit.FixedEndpoints,
 		Issuer:    aioinit.PeerDexIssuer,
 		CAFile:    "/data/sandbox/pki/ca.crt",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	args := aioinit.ServeArgs(in)
 	joined := strings.Join(args, "\x00")
 	for _, want := range []string{
@@ -42,70 +39,31 @@ func TestApplyServeDefaultsAndArgs(t *testing.T) {
 	}
 }
 
-func TestApplyServeDefaults_MutualExclusion(t *testing.T) {
-	_, err := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
+func TestApplyServeDefaults_PublicKeySkipsRegistryDefaults(t *testing.T) {
+	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
 		Endpoints:     aioinit.FixedEndpoints,
 		Issuer:        aioinit.PeerDexIssuer,
 		PublicKeyExpr: "claims.spk",
-		RegistryID:    "github.com",
-		RegistryExpr:  "claims.preferred_username",
 	})
-	if err == nil {
-		t.Fatal("expected mutual exclusion error")
+	if in.RegistryID != "" || in.RegistryExpr != "" {
+		t.Fatalf("registry defaults = %q/%q, want empty when public-key claim set", in.RegistryID, in.RegistryExpr)
 	}
-}
-
-func TestApplyServeDefaults_Validation(t *testing.T) {
-	tests := []struct {
-		name    string
-		in      aioinit.ServeConfig
-		wantErr string
-	}{
-		{
-			name:    "empty issuer",
-			in:      aioinit.ServeConfig{Endpoints: aioinit.FixedEndpoints},
-			wantErr: "issuer is required",
-		},
-		{
-			name: "registry id without expression",
-			in: aioinit.ServeConfig{
-				Endpoints:     aioinit.FixedEndpoints,
-				Issuer:        aioinit.PeerDexIssuer,
-				PublicKeyExpr: "claims.spk",
-				RegistryID:    "github.com",
-			},
-			wantErr: "OIDC_REGISTRY_ID set without OIDC_REGISTRY_SUBJECT_EXPRESSION",
-		},
-		{
-			name: "registry expression without id",
-			in: aioinit.ServeConfig{
-				Endpoints:     aioinit.FixedEndpoints,
-				Issuer:        aioinit.PeerDexIssuer,
-				PublicKeyExpr: "claims.spk",
-				RegistryExpr:  "claims.preferred_username",
-			},
-			wantErr: "OIDC_REGISTRY_SUBJECT_EXPRESSION set without OIDC_REGISTRY_ID",
-		},
+	args := aioinit.ServeArgs(in)
+	joined := strings.Join(args, "\x00")
+	if !strings.Contains(joined, "--oidc-public-key-claim-expression\x00claims.spk") {
+		t.Fatalf("args missing public-key claim: %v", args)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := aioinit.ApplyServeDefaults(tt.in)
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("ApplyServeDefaults() = %v, want err containing %q", err, tt.wantErr)
-			}
-		})
+	if strings.Contains(joined, "--oidc-registry-id") {
+		t.Fatalf("args unexpectedly include registry: %v", args)
 	}
 }
 
 func TestApplyServeDefaults_LogLevelOverride(t *testing.T) {
-	in, err := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
+	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
 		Endpoints: aioinit.FixedEndpoints,
 		Issuer:    aioinit.PeerDexIssuer,
 		LogLevel:  "info",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if in.LogLevel != "info" {
 		t.Fatalf("LogLevel = %q, want info", in.LogLevel)
 	}

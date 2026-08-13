@@ -1,7 +1,6 @@
 package aioinit
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,10 +49,9 @@ type ServeConfig struct {
 }
 
 // ApplyServeDefaults fills packaging defaults for omitted AuthMethod/UI fields.
-func ApplyServeDefaults(in ServeConfig) (ServeConfig, error) {
-	if strings.TrimSpace(in.Issuer) == "" {
-		return ServeConfig{}, fmt.Errorf("issuer is required")
-	}
+// OIDC wire invariants (issuer URL, CA, registry pairing) are enforced by
+// fleetshift serve when the generated argv runs.
+func ApplyServeDefaults(in ServeConfig) ServeConfig {
 	if in.UIClientID == "" {
 		in.UIClientID = DefaultUIClientID
 	}
@@ -74,15 +72,6 @@ func ApplyServeDefaults(in ServeConfig) (ServeConfig, error) {
 			in.RegistryExpr = DefaultRegistrySubjectExpression
 		}
 	}
-	if in.RegistryID != "" && in.RegistryExpr == "" {
-		return ServeConfig{}, fmt.Errorf("OIDC_REGISTRY_ID set without OIDC_REGISTRY_SUBJECT_EXPRESSION")
-	}
-	if in.RegistryExpr != "" && in.RegistryID == "" {
-		return ServeConfig{}, fmt.Errorf("OIDC_REGISTRY_SUBJECT_EXPRESSION set without OIDC_REGISTRY_ID")
-	}
-	if in.PublicKeyExpr != "" && (in.RegistryID != "" || in.RegistryExpr != "") {
-		return ServeConfig{}, fmt.Errorf("public-key claim expression and registry mapping are mutually exclusive")
-	}
 	if in.DBPath == "" {
 		in.DBPath = defaultServeDB
 	}
@@ -92,7 +81,7 @@ func ApplyServeDefaults(in ServeConfig) (ServeConfig, error) {
 	if in.LogLevel == "" {
 		in.LogLevel = defaultServeLogLevel
 	}
-	return in, nil
+	return in
 }
 
 // ServeArgs returns the argv for `fleetshift` including the serve subcommand.

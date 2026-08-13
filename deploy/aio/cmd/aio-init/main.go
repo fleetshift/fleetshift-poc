@@ -90,10 +90,7 @@ func run() error {
 		}
 	}
 
-	in, err = aioinit.ApplyServeDefaults(in)
-	if err != nil {
-		return err
-	}
+	in = aioinit.ApplyServeDefaults(in)
 	args := aioinit.ServeArgs(in)
 	if err := aioinit.WriteServeExecScript(aioinit.ServeExecPath, args); err != nil {
 		return fmt.Errorf("write serve script: %w", err)
