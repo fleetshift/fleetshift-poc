@@ -84,6 +84,25 @@ podman build \
 
 ## OpenShift deployment
 
+### Prerequisites (one-time, per cluster)
+
+- **cert-manager ClusterIssuer** — `deploy.sh` mints a publicly-trusted cert for
+  the proxy Route (the Nx CLI rejects the cluster's self-signed ingress cert).
+  Defaults to `zerossl-prod`; override with `CERT_ISSUER=<name> task minio:deploy`.
+- **Image pull secret** — the proxy image lives in a private quay.io repo, so the
+  namespace needs a `quay-pull` secret linked to the `default` service account:
+
+  ```sh
+  oc create secret generic quay-pull \
+    --from-file=.dockerconfigjson="$HOME/.config/containers/auth.json" \
+    --type=kubernetes.io/dockerconfigjson -n minio-nx-cache
+  oc secrets link default quay-pull --for=pull -n minio-nx-cache
+  ```
+
+  (Use whichever local registry-auth file holds a real `quay.io` token — Docker
+  Desktop on macOS stores creds in the keychain, so its `config.json` won't work;
+  the podman `auth.json` above does.)
+
 MinIO and the cache proxy run on the Keycloak OCP cluster. All `task minio:*` commands require an active `oc` session on that cluster:
 
 ```sh

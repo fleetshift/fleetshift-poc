@@ -25,6 +25,8 @@ MINIO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$(cd "$SCRIPT_DIR/../../scripts" && pwd)/common.sh"
 
 NAMESPACE="minio-nx-cache"
+# ClusterIssuer used to mint a publicly-trusted cert for the proxy Route.
+CERT_ISSUER="${CERT_ISSUER:-zerossl-prod}"
 
 info()  { echo "==> $*"; }
 warn()  { echo "WARNING: $*"; }
@@ -100,6 +102,31 @@ oc apply -f "${MINIO_DIR}/manifests/proxy-deployment.yaml" -n "${NAMESPACE}"
 
 info "Waiting for nx-cache-proxy to be ready..."
 oc rollout status deployment/nx-cache-proxy -n "${NAMESPACE}" --timeout=120s
+
+# --- Step 8b: Issue a trusted TLS cert for the proxy Route ---
+# The Nx CLI's HTTP client rejects the cluster's default self-signed ingress
+# cert. Mint a publicly-trusted cert via cert-manager and reference it from the
+# Route with spec.tls.externalCertificate. Unlike copying the cert into the
+# Route's tls fields, externalCertificate makes the router read the Secret
+# directly, so cert-manager renewals propagate automatically — no re-patching.
+# This requires granting the openshift-ingress router serviceaccount read access
+# to just that Secret. Idempotent: re-running re-applies everything.
+PROXY_HOST=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
+info "Issuing TLS cert for ${PROXY_HOST} via ClusterIssuer ${CERT_ISSUER}..."
+sed -e "s|__PROXY_HOST__|${PROXY_HOST}|" -e "s|__CERT_ISSUER__|${CERT_ISSUER}|" \
+    "${MINIO_DIR}/manifests/certificate.yaml" | oc apply -n "${NAMESPACE}" -f -
+
+info "Waiting for certificate to be issued..."
+oc wait -n "${NAMESPACE}" certificate/nx-cache-proxy-tls \
+    --for=condition=Ready --timeout=180s
+
+info "Granting the router serviceaccount read access to the cert Secret..."
+oc apply -n "${NAMESPACE}" -f "${MINIO_DIR}/manifests/router-secret-reader-role.yaml"
+oc apply -n "${NAMESPACE}" -f "${MINIO_DIR}/manifests/router-secret-reader-binding.yaml"
+
+info "Patching Route to reference the cert via externalCertificate (auto-renews)..."
+oc patch route nx-cache-proxy -n "${NAMESPACE}" --type=merge -p \
+    '{"spec":{"tls":{"certificate":null,"key":null,"caCertificate":null,"externalCertificate":{"name":"nx-cache-proxy-tls"}}}}'
 
 # --- Step 9: Print summary ---
 PROXY_ROUTE=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
