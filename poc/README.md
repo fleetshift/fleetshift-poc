@@ -5,6 +5,10 @@ This folder represents standalone proofs of concepts for concepts explored as pa
 Current POCs include:
 
 - `attestation/`: attestation chain and hybrid verification experiments
+- `attestation/sigstore_tuf/`: Sigstore (Fulcio+TSA+DSSE/in-toto) + TUF trust
+  distribution POC with offline, preassembled delivery bundles (Mode A)
+- `trust-model-v3/`: three-role OIDC enrollment, client-held continuity keys,
+  signed delivery, rotation cutoff, and compromised-resource-manager POC
 - `inventory-identity-reconciliation/`: inventory write-path experiment where
   reported identity assertions are accepted asynchronously into a platform
     identity read model

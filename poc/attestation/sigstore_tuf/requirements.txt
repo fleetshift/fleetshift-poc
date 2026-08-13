@@ -1,0 +1,4 @@
+cryptography>=44.0.0
+pytest>=8.0.0
+cel-python==0.5.0
+securesystemslib[crypto]>=1.0.0
