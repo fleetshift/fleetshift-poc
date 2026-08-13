@@ -25,6 +25,8 @@ MINIO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$(cd "$SCRIPT_DIR/../../scripts" && pwd)/common.sh"
 
 NAMESPACE="minio-nx-cache"
+# ClusterIssuer used to mint a publicly-trusted cert for the proxy Route.
+CERT_ISSUER="${CERT_ISSUER:-zerossl-prod}"
 
 info()  { echo "==> $*"; }
 warn()  { echo "WARNING: $*"; }
@@ -34,6 +36,7 @@ error() { echo "ERROR: $*" >&2; exit 1; }
 info "Checking prerequisites..."
 command -v oc &>/dev/null || error "'oc' CLI not found in PATH."
 command -v openssl &>/dev/null || error "'openssl' not found in PATH."
+command -v python3 &>/dev/null || error "'python3' not found in PATH (used to build the Route TLS patch)."
 require_oc_login
 
 # --- Step 2: Create namespace ---
@@ -100,6 +103,37 @@ oc apply -f "${MINIO_DIR}/manifests/proxy-deployment.yaml" -n "${NAMESPACE}"
 
 info "Waiting for nx-cache-proxy to be ready..."
 oc rollout status deployment/nx-cache-proxy -n "${NAMESPACE}" --timeout=120s
+
+# --- Step 8b: Issue a trusted TLS cert for the proxy Route ---
+# The Nx CLI's HTTP client rejects the cluster's default self-signed ingress
+# cert. Mint a publicly-trusted cert via cert-manager and copy it into the
+# Route's edge TLS config so the https route works without any client-side
+# CA trust. Idempotent: re-running re-applies the Certificate and re-patches.
+PROXY_HOST=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
+info "Issuing TLS cert for ${PROXY_HOST} via ClusterIssuer ${CERT_ISSUER}..."
+sed -e "s|__PROXY_HOST__|${PROXY_HOST}|" -e "s|__CERT_ISSUER__|${CERT_ISSUER}|" \
+    "${MINIO_DIR}/manifests/certificate.yaml" | oc apply -n "${NAMESPACE}" -f -
+
+info "Waiting for certificate to be issued..."
+oc wait -n "${NAMESPACE}" certificate/nx-cache-proxy-tls \
+    --for=condition=Ready --timeout=180s
+
+info "Patching Route with issued certificate..."
+PATCH=$(oc get secret nx-cache-proxy-tls -n "${NAMESPACE}" -o json | python3 -c '
+import sys, json, base64
+d = json.load(sys.stdin)["data"]
+tls = {
+    "termination": "edge",
+    "insecureEdgeTerminationPolicy": "Redirect",
+    "certificate": base64.b64decode(d["tls.crt"]).decode(),
+    "key": base64.b64decode(d["tls.key"]).decode(),
+}
+ca = d.get("ca.crt")
+if ca:
+    tls["caCertificate"] = base64.b64decode(ca).decode()
+print(json.dumps({"spec": {"tls": tls}}))
+')
+oc patch route nx-cache-proxy -n "${NAMESPACE}" --type=merge -p "${PATCH}"
 
 # --- Step 9: Print summary ---
 PROXY_ROUTE=$(oc get route nx-cache-proxy -n "${NAMESPACE}" -o jsonpath='{.spec.host}')
