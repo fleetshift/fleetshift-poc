@@ -16,24 +16,19 @@ spec:
       labels:
         app: minio
     spec:
-      initContainers:
-        # OpenShift restricted SCC assigns a random UID in GID 0.
-        # MinIO needs /data to be group-writable.
-        - name: fix-permissions
-          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-          command: ["sh", "-c", "chgrp -R 0 /data && chmod -R g+rwX /data"]
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            runAsNonRoot: true
-          volumeMounts:
-            - name: data
-              mountPath: /data
+      # OpenShift's restricted-v2 SCC auto-injects a random UID and an fsGroup
+      # from the namespace's allocated range. The kubelet recursively chowns the
+      # mounted volume to fsGroup and makes it group-writable, so MinIO (running
+      # as the injected UID within that group) can write to /data. No permission-
+      # fixing initContainer is needed — a chgrp/chmod initContainer would fail
+      # anyway, since the non-root UID lacks CAP_CHOWN on files it doesn't own.
       containers:
         - name: minio
           image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-          args: ["server", "/data", "--console-address", ":9001"]
+          # Use a subdirectory, not the volume root: an ext4 PV has a
+          # `lost+found` at its root that MinIO would otherwise surface as a
+          # stray bucket. MinIO creates the subdir on first start.
+          args: ["server", "/data/minio", "--console-address", ":9001"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
