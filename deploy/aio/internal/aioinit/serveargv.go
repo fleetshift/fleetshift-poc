@@ -142,13 +142,7 @@ func WriteServeExecScript(path string, args []string) error {
 	return os.Rename(tmp, path)
 }
 
-// shellQuote returns s suitable for inclusion in a single-quoted shell word.
+// shellQuote returns s as a single-quoted shell word safe for /bin/sh.
 func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if !strings.ContainsAny(s, " \t\n'\"\\$`") {
-		return s
-	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

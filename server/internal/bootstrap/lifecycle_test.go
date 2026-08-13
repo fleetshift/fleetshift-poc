@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/http"
@@ -451,10 +452,16 @@ func TestStart_MiddlewareAcceptsOIDCAccessToken(t *testing.T) {
 		if len(parts) != 3 {
 			t.Fatalf("token segments = %d, want 3", len(parts))
 		}
-		sig := []byte(parts[2])
+		sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+		if err != nil {
+			t.Fatalf("decode signature: %v", err)
+		}
+		if len(sig) == 0 {
+			t.Fatal("empty signature")
+		}
 		sig[len(sig)-1] ^= 0x01
-		parts[2] = string(sig)
-		err := list(t, strings.Join(parts, "."))
+		parts[2] = base64.RawURLEncoding.EncodeToString(sig)
+		err = list(t, strings.Join(parts, "."))
 		if status.Code(err) != codes.Unauthenticated {
 			t.Fatalf("got %v (%v), want Unauthenticated", err, status.Code(err))
 		}

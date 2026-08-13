@@ -76,7 +76,12 @@ func TestApplyServeDefaults_LogLevelOverride(t *testing.T) {
 
 func TestWriteServeExecScript(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "exec-serve")
-	if err := aioinit.WriteServeExecScript(path, []string{"serve", "--oidc-ui-scope", "a b"}); err != nil {
+	if err := aioinit.WriteServeExecScript(path, []string{
+		"serve",
+		"--oidc-ui-scope", "a b",
+		"--oidc-issuer", "https://issuer.example/x&id",
+		"--oidc-ui-client-id", "it's-me",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
@@ -84,10 +89,16 @@ func TestWriteServeExecScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "exec /usr/local/bin/fleetshift serve") {
+	if !strings.Contains(body, "exec /usr/local/bin/fleetshift 'serve'") {
 		t.Fatalf("unexpected script: %s", raw)
 	}
-	if !strings.Contains(body, " --oidc-ui-scope 'a b'\n") {
+	if !strings.Contains(body, " '--oidc-ui-scope' 'a b'") {
 		t.Fatalf("scope not single-quoted in script: %s", raw)
+	}
+	if !strings.Contains(body, " '--oidc-issuer' 'https://issuer.example/x&id'") {
+		t.Fatalf("issuer with & not single-quoted in script: %s", raw)
+	}
+	if !strings.Contains(body, ` '--oidc-ui-client-id' 'it'\''s-me'`) {
+		t.Fatalf("embedded quote not escaped in script: %s", raw)
 	}
 }
