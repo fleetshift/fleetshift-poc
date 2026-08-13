@@ -145,6 +145,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 ## Related design documents
 
 - [docs/design/authentication.md](authentication.md): full delivery-authorization model, including credential presentation, provenance, trust anchors, and `PausedAuth`
+- [docs/design/idp_bootstrap.md](idp_bootstrap.md): how the platform installs its first provider-tenant IdP before the public API can authenticate anyone
 - [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to fulfillments
 - [docs/design/addon-ui-architecture.md](addon-ui-architecture.md): addon bundle model, OCI artifact distribution, shell integration, and UI plugin capability
 - [docs/design/provider_consumer_model.md](provider_consumer_model.md): provider/consumer/factory topology built on top of the core architecture
