@@ -165,6 +165,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
+		clearEnv(t, kindNodeRouteEnvKey)
 		if _, err := primaryIPv4(); err != nil {
 			err := ConfigureKindEnv(path, true, ":5556")
 			if err == nil {
@@ -188,6 +189,48 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 		if !strings.Contains(body, kindNodeRouteEnvKey+"=") || !strings.Contains(body, ":5556") {
 			t.Fatalf("kind.env missing node route backend: %q", body)
+		}
+	})
+
+	t.Run("preserves explicit node route override", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "kind.env")
+		withUnixSocket(t)
+		clearEnv(t, kindExperimentalNetKey)
+		t.Setenv(kindNodeRouteEnvKey, "10.89.0.2:5556")
+		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(raw)
+		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
+			t.Fatalf("kind.env missing network default: %q", body)
+		}
+		if strings.Contains(body, kindNodeRouteEnvKey+"=") {
+			t.Fatalf("explicit node route should not be rewritten: %q", body)
+		}
+	})
+
+	t.Run("preserves empty node route override", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "kind.env")
+		withUnixSocket(t)
+		clearEnv(t, kindExperimentalNetKey)
+		t.Setenv(kindNodeRouteEnvKey, "")
+		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(raw)
+		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
+			t.Fatalf("kind.env missing network default: %q", body)
+		}
+		if strings.Contains(body, kindNodeRouteEnvKey+"=") {
+			t.Fatalf("empty node route override should not be rewritten: %q", body)
 		}
 	})
 }

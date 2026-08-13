@@ -20,8 +20,9 @@ const (
 // Always defaults KIND_EXPERIMENTAL_DOCKER_NETWORK=kind unless that variable
 // is already present in the environment (including empty). On Dex-on, also
 // sets KIND_NODE_ROUTE_BACKEND so kind control-planes can DNAT
-// 127.0.0.1:<dex> to this AIO's address on the shared network; failure to
-// resolve a backend address is fatal (kind + peer Dex requires the route).
+// 127.0.0.1:<dex> to this AIO's address on the shared network, unless that
+// variable is already set (operator pin). Failure to resolve a backend
+// address when one must be written is fatal (kind + peer Dex requires the route).
 func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
 	_ = os.Remove(path)
 	if !containerEngineSocketPresent() {
@@ -35,16 +36,18 @@ func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
 	}
 
 	if dexOn {
-		ip, err := primaryIPv4()
-		if err != nil {
-			return fmt.Errorf("kind node route backend: %w", err)
+		if _, set := os.LookupEnv(kindNodeRouteEnvKey); !set {
+			ip, err := primaryIPv4()
+			if err != nil {
+				return fmt.Errorf("kind node route backend: %w", err)
+			}
+			port := strings.TrimPrefix(dexListen, ":")
+			backend := net.JoinHostPort(ip, port)
+			b.WriteString(kindNodeRouteEnvKey + "=")
+			b.WriteString(backend)
+			b.WriteString("\n")
+			fmt.Fprintf(os.Stdout, "aio-init: %s=%s\n", kindNodeRouteEnvKey, backend)
 		}
-		port := strings.TrimPrefix(dexListen, ":")
-		backend := net.JoinHostPort(ip, port)
-		b.WriteString(kindNodeRouteEnvKey + "=")
-		b.WriteString(backend)
-		b.WriteString("\n")
-		fmt.Fprintf(os.Stdout, "aio-init: %s=%s\n", kindNodeRouteEnvKey, backend)
 	}
 
 	body := b.String()

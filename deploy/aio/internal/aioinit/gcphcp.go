@@ -1,17 +1,22 @@
 package aioinit
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	defaultGCPHCPRenderer  = "/usr/local/bin/render-gcphcp-config.sh"
 	defaultGCPHCPConfigOut = "/data/gcphcp.yaml"
 )
+
+// renderTimeout bounds the GCP HCP config renderer subprocess.
+var renderTimeout = 10 * time.Second
 
 // GCPHCPResult is the addon list and optional gcphcp config path after ResolveGCPHCP.
 type GCPHCPResult struct {
@@ -34,7 +39,9 @@ func ResolveGCPHCP() (GCPHCPResult, error) {
 	if gw := strings.TrimSpace(os.Getenv("GCPHCP_GATEWAY_URL")); gw != "" {
 		out := getenvDefault("GCPHCP_CONFIG_OUT", defaultGCPHCPConfigOut)
 		renderer := getenvDefault("RENDER_GCPHCP_CONFIG", defaultGCPHCPRenderer)
-		cmd := exec.Command(renderer, "--output", out)
+		ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, renderer, "--output", out)
 		cmd.Env = append(os.Environ(), "GCPHCP_ENABLED=true")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

@@ -164,13 +164,14 @@ func ensureLeaf(paths SandboxPKIPaths, caCert *x509.Certificate, caKey *ecdsa.Pr
 }
 
 // leafOK reports whether the on-disk leaf is present, unexpired, SAN-correct,
-// and verifiable against caCert.
+// keyed to LeafKey, and verifiable against caCert.
 func leafOK(paths SandboxPKIPaths, caCert *x509.Certificate) bool {
 	certPEM, err := os.ReadFile(paths.LeafCert)
 	if err != nil {
 		return false
 	}
-	if _, err := os.Stat(paths.LeafKey); err != nil {
+	keyPEM, err := os.ReadFile(paths.LeafKey)
+	if err != nil {
 		return false
 	}
 	block, _ := pem.Decode(certPEM)
@@ -179,6 +180,9 @@ func leafOK(paths SandboxPKIPaths, caCert *x509.Certificate) bool {
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
+		return false
+	}
+	if err := ecdsaKeyMatchesCert(keyPEM, cert); err != nil {
 		return false
 	}
 	if time.Now().After(cert.NotAfter) || time.Now().Before(cert.NotBefore) {
@@ -217,7 +221,8 @@ func applySandboxPKIOwnership(paths SandboxPKIPaths, dexUID, dexGID int) error {
 	return nil
 }
 
-// parseCA decodes PEM CA cert and EC private key bytes and validates the cert.
+// parseCA decodes PEM CA cert and EC private key bytes and validates the cert
+// matches the key.
 func parseCA(certPEM, keyPEM []byte) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	cb, _ := pem.Decode(certPEM)
 	if cb == nil {
@@ -241,7 +246,35 @@ func parseCA(certPEM, keyPEM []byte) (*x509.Certificate, *ecdsa.PrivateKey, erro
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := ecdsaPublicKeysEqual(&key.PublicKey, cert.PublicKey); err != nil {
+		return nil, nil, err
+	}
 	return cert, key, nil
+}
+
+// ecdsaKeyMatchesCert reports whether keyPEM is an EC private key for cert.
+func ecdsaKeyMatchesCert(keyPEM []byte, cert *x509.Certificate) error {
+	kb, _ := pem.Decode(keyPEM)
+	if kb == nil {
+		return fmt.Errorf("EC private key PEM missing")
+	}
+	key, err := x509.ParseECPrivateKey(kb.Bytes)
+	if err != nil {
+		return err
+	}
+	return ecdsaPublicKeysEqual(&key.PublicKey, cert.PublicKey)
+}
+
+// ecdsaPublicKeysEqual reports whether pub matches want (cert public key).
+func ecdsaPublicKeysEqual(pub *ecdsa.PublicKey, want any) error {
+	certPub, ok := want.(*ecdsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("certificate public key is not ECDSA")
+	}
+	if !pub.Equal(certPub) {
+		return fmt.Errorf("private key does not match certificate")
+	}
+	return nil
 }
 
 // writePEMFile atomically writes a PEM block to path with mode.

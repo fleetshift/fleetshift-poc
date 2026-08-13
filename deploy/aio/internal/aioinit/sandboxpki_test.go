@@ -1,6 +1,9 @@
 package aioinit_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"net"
@@ -78,6 +81,94 @@ func TestEnsureSandboxPKI_PartialCAState(t *testing.T) {
 			t.Fatalf("EnsureSandboxPKI() = %v, want partial CA state", err)
 		}
 	})
+}
+
+func TestEnsureSandboxPKI_MismatchedLeafKeyRegenerates(t *testing.T) {
+	paths := testSandboxPKIPaths(t.TempDir())
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	leafBefore, err := os.ReadFile(paths.LeafCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(paths.LeafKey, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeUnrelatedECKey(paths.LeafKey, 0400); err != nil {
+		t.Fatal(err)
+	}
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	leafAfter, err := os.ReadFile(paths.LeafCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(leafBefore) == string(leafAfter) {
+		t.Fatal("leaf cert was not regenerated after key mismatch")
+	}
+	assertLeafSAN(t, leafAfter)
+	assertKeyMatchesCert(t, paths.LeafKey, leafAfter)
+}
+
+func TestEnsureSandboxPKI_MismatchedCAKeyFails(t *testing.T) {
+	paths := testSandboxPKIPaths(t.TempDir())
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeUnrelatedECKey(paths.CAKey, 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := aioinit.EnsureSandboxPKI(paths, uid, gid)
+	if err == nil || !strings.Contains(err.Error(), "existing CA invalid") {
+		t.Fatalf("EnsureSandboxPKI() = %v, want existing CA invalid", err)
+	}
+	if !strings.Contains(err.Error(), "private key does not match certificate") {
+		t.Fatalf("EnsureSandboxPKI() = %v, want key mismatch detail", err)
+	}
+}
+
+func writeUnrelatedECKey(path string, mode os.FileMode) error {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), mode)
+}
+
+func assertKeyMatchesCert(t *testing.T, keyPath string, certPEM []byte) {
+	t.Helper()
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, _ := pem.Decode(keyPEM)
+	if kb == nil {
+		t.Fatal("leaf key PEM missing")
+	}
+	key, err := x509.ParseECPrivateKey(kb.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, _ := pem.Decode(certPEM)
+	if cb == nil {
+		t.Fatal("leaf cert PEM missing")
+	}
+	cert, err := x509.ParseCertificate(cb.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	if !ok || !key.PublicKey.Equal(pub) {
+		t.Fatal("regenerated leaf key does not match leaf cert")
+	}
 }
 
 func assertLeafSAN(t *testing.T, pemBytes []byte) {

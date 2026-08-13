@@ -137,8 +137,10 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
 - `KIND_EXPERIMENTAL_DOCKER_NETWORK=kind` unless already set (including
   intentionally empty to disable)
 - On Dex-on only: `KIND_NODE_ROUTE_BACKEND=<aio-ip>:5556` so kind control-plane
-  nodes DNAT `127.0.0.1:5556` to this AIO for the loopback issuer URL. If no
-  suitable IPv4 is available (e.g. not on `--network kind`), init fails.
+  nodes DNAT `127.0.0.1:5556` to this AIO for the loopback issuer URL, unless
+  already set (including intentionally empty to disable). If no suitable IPv4
+  is available when a value must be written (e.g. not on `--network kind`),
+  init fails.
 
 ```bash
 podman run -d --rm -it \

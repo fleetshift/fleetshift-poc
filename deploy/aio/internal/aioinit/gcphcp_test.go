@@ -1,12 +1,11 @@
-package aioinit_test
+package aioinit
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"time"
 )
 
 func clearGCPHCPEnv(t *testing.T) {
@@ -25,7 +24,7 @@ func clearGCPHCPEnv(t *testing.T) {
 func TestResolveGCPHCP(t *testing.T) {
 	t.Run("default addons", func(t *testing.T) {
 		clearGCPHCPEnv(t)
-		got, err := aioinit.ResolveGCPHCP()
+		got, err := ResolveGCPHCP()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -38,7 +37,7 @@ func TestResolveGCPHCP(t *testing.T) {
 		clearGCPHCPEnv(t)
 		t.Setenv("GCPHCP_ENABLED", "false")
 		t.Setenv("GCPHCP_GATEWAY_URL", "https://cls.example")
-		got, err := aioinit.ResolveGCPHCP()
+		got, err := ResolveGCPHCP()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +49,7 @@ func TestResolveGCPHCP(t *testing.T) {
 	t.Run("invalid enabled value", func(t *testing.T) {
 		clearGCPHCPEnv(t)
 		t.Setenv("GCPHCP_ENABLED", "yes")
-		_, err := aioinit.ResolveGCPHCP()
+		_, err := ResolveGCPHCP()
 		if err == nil || !strings.Contains(err.Error(), "GCPHCP_ENABLED") {
 			t.Fatalf("err = %v", err)
 		}
@@ -59,7 +58,7 @@ func TestResolveGCPHCP(t *testing.T) {
 	t.Run("explicit config", func(t *testing.T) {
 		clearGCPHCPEnv(t)
 		t.Setenv("GCPHCP_CONFIG", "/tmp/custom-gcphcp.yaml")
-		got, err := aioinit.ResolveGCPHCP()
+		got, err := ResolveGCPHCP()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -71,7 +70,7 @@ func TestResolveGCPHCP(t *testing.T) {
 	t.Run("addons env override", func(t *testing.T) {
 		clearGCPHCPEnv(t)
 		t.Setenv("FLEETSHIFT_SERVER_ADDONS", "kind")
-		got, err := aioinit.ResolveGCPHCP()
+		got, err := ResolveGCPHCP()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +82,7 @@ func TestResolveGCPHCP(t *testing.T) {
 	t.Run("enabled without gateway", func(t *testing.T) {
 		clearGCPHCPEnv(t)
 		t.Setenv("GCPHCP_ENABLED", "true")
-		_, err := aioinit.ResolveGCPHCP()
+		_, err := ResolveGCPHCP()
 		if err == nil || !strings.Contains(err.Error(), "GCPHCP_GATEWAY_URL") {
 			t.Fatalf("err = %v", err)
 		}
@@ -92,7 +91,7 @@ func TestResolveGCPHCP(t *testing.T) {
 	t.Run("orphan overrides", func(t *testing.T) {
 		clearGCPHCPEnv(t)
 		t.Setenv("GCPHCP_GCP_PROJECT", "proj")
-		_, err := aioinit.ResolveGCPHCP()
+		_, err := ResolveGCPHCP()
 		if err == nil || !strings.Contains(err.Error(), "optional overrides") {
 			t.Fatalf("err = %v", err)
 		}
@@ -117,7 +116,7 @@ echo rendered > "$out"
 		t.Setenv("GCPHCP_GATEWAY_URL", "https://cls.example")
 		t.Setenv("GCPHCP_CONFIG_OUT", out)
 		t.Setenv("RENDER_GCPHCP_CONFIG", renderer)
-		got, err := aioinit.ResolveGCPHCP()
+		got, err := ResolveGCPHCP()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,6 +133,31 @@ echo rendered > "$out"
 		// Process env must not be mutated by ResolveGCPHCP.
 		if os.Getenv("GCPHCP_ENABLED") != "" {
 			t.Fatalf("GCPHCP_ENABLED leaked into process: %q", os.Getenv("GCPHCP_ENABLED"))
+		}
+	})
+
+	t.Run("renderer timeout", func(t *testing.T) {
+		clearGCPHCPEnv(t)
+		root := t.TempDir()
+		out := filepath.Join(root, "gcphcp.yaml")
+		renderer := filepath.Join(root, "hang.sh")
+		if err := os.WriteFile(renderer, []byte("#!/bin/sh\nexec sleep 60\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("GCPHCP_GATEWAY_URL", "https://cls.example")
+		t.Setenv("GCPHCP_CONFIG_OUT", out)
+		t.Setenv("RENDER_GCPHCP_CONFIG", renderer)
+
+		old := renderTimeout
+		renderTimeout = 100 * time.Millisecond
+		t.Cleanup(func() { renderTimeout = old })
+
+		_, err := ResolveGCPHCP()
+		if err == nil {
+			t.Fatal("expected renderer timeout error")
+		}
+		if !strings.Contains(err.Error(), "render gcphcp config") {
+			t.Fatalf("err = %v, want render gcphcp config", err)
 		}
 	})
 }
