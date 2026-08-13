@@ -17,9 +17,9 @@ services:
     ports:
       - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
     volumes:
-      - ./.certs/keycloak.crt:/opt/keycloak/certs/keycloak.crt:ro
-      - ./.certs/keycloak.key:/opt/keycloak/certs/keycloak.key:ro
-      - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
+      - ./.certs/keycloak.crt:/opt/keycloak/certs/keycloak.crt:ro,z
+      - ./.certs/keycloak.key:/opt/keycloak/certs/keycloak.key:ro,z
+      - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro,z
     networks:
       - default
       - kind
@@ -49,4 +49,4 @@ services:
       - --oidc-registry-id=${KEY_REGISTRY_ID:-}
       - --oidc-registry-subject-expression=${KEY_REGISTRY_SUBJECT_EXPR:-}
     volumes:
-      - ./.certs/ca.crt:/certs/ca.crt:ro
+      - ./.certs/ca.crt:/certs/ca.crt:ro,z
