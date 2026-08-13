@@ -1,6 +1,7 @@
 // Command aio-init is the AIO packaging initialization helper.
-// It selects Dex-on vs Dex-off by issuer presence, renders PKI/Dex when needed,
-// and writes the ordinary fleetshift serve argv for s6 to exec.
+// It selects Dex-on vs Dex-off by issuer presence, renders sandbox PKI and
+// peer Dex when needed (or forwards an external issuer/CA on Dex-off), and
+// writes the ordinary fleetshift serve argv for s6 to exec.
 package main
 
 import (
@@ -12,8 +13,10 @@ import (
 )
 
 const (
-	dexUID = 1001
-	dexGID = 1001
+	fleetshiftUID = 1000
+	fleetshiftGID = 1000
+	dexUID        = 1001
+	dexGID        = 1001
 
 	// dexEnabledFlag is written on Dex-on so the s6-rc dex longrun execs Dex
 	// instead of parking on s6-pause (Dex-off).
@@ -64,29 +67,26 @@ func run() error {
 		if err := enableDex(); err != nil {
 			return err
 		}
-		pkiPaths := aioinit.DefaultPKIPaths()
-		if err := aioinit.EnsurePKI(pkiPaths, dexUID, dexGID); err != nil {
-			return fmt.Errorf("pki: %w", err)
+		sandboxPKI := aioinit.DefaultSandboxPKIPaths()
+		if err := aioinit.EnsureSandboxPKI(sandboxPKI, dexUID, dexGID); err != nil {
+			return fmt.Errorf("sandbox pki: %w", err)
 		}
 		if err := aioinit.InstallDexConfig(aioinit.DexRenderInput{
 			Issuer:    aioinit.PeerDexIssuer,
 			Endpoints: endpoints,
-			TLSCert:   pkiPaths.LeafCert,
-			TLSKey:    pkiPaths.LeafKey,
+			TLSCert:   sandboxPKI.LeafCert,
+			TLSKey:    sandboxPKI.LeafKey,
 		}, aioinit.DefaultDexPaths(), dexUID, dexGID); err != nil {
 			return fmt.Errorf("dex config: %w", err)
 		}
 		in.Issuer = aioinit.PeerDexIssuer
-		in.CAFile = pkiPaths.CACert
+		in.CAFile = sandboxPKI.CACert
 	} else {
 		disableDex()
 		in.Issuer = issuerEnv
-		caFile := strings.TrimSpace(os.Getenv("OIDC_CA_FILE"))
-		if caFile != "" {
-			if st, err := os.Stat(caFile); err != nil || st.IsDir() {
-				return fmt.Errorf("OIDC CA file %q is required/unreadable: %v", caFile, err)
-			}
-			in.CAFile = caFile
+		externalCA := strings.TrimSpace(os.Getenv("OIDC_CA_FILE"))
+		if externalCA != "" {
+			in.CAFile = externalCA
 		}
 	}
 
@@ -116,7 +116,7 @@ func enableDex() error {
 // prepareDataLayout ensures /data is writable by FleetShift and /data/sandbox
 // remains root-owned after volume mounts replace image contents.
 func prepareDataLayout() error {
-	if err := ensureOwnedDir("/data", 1000, 1000); err != nil {
+	if err := ensureOwnedDir("/data", fleetshiftUID, fleetshiftGID); err != nil {
 		return fmt.Errorf("data dir: %w", err)
 	}
 	if err := ensureOwnedDir("/data/sandbox", 0, 0); err != nil {

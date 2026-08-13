@@ -40,13 +40,7 @@ func TestContainerEngineSocketPresent(t *testing.T) {
 		}
 	})
 	t.Run("present unix", func(t *testing.T) {
-		dir := t.TempDir()
-		sockPath := filepath.Join(dir, "engine.sock")
-		ln, err := net.Listen("unix", sockPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = ln.Close() })
+		sockPath := listenUnixSocket(t)
 		t.Setenv("CONTAINER_HOST", "unix://"+sockPath)
 		if !containerEngineSocketPresent() {
 			t.Fatal("existing unix socket should be true")
@@ -79,15 +73,28 @@ func clearEnv(t *testing.T, key string) {
 	})
 }
 
-func withUnixSocket(t *testing.T) string {
+// listenUnixSocket creates a listening unix socket under /tmp.
+// macOS sun_path is ~104 bytes; t.TempDir() under $TMPDIR (/var/folders/...)
+// is often too long and listen fails with "bind: invalid argument".
+func listenUnixSocket(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("/tmp", "fs-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sockPath := filepath.Join(dir, "engine.sock")
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
+	return sockPath
+}
+
+func withUnixSocket(t *testing.T) string {
+	t.Helper()
+	sockPath := listenUnixSocket(t)
 	t.Setenv("CONTAINER_HOST", "unix://"+sockPath)
 	return sockPath
 }

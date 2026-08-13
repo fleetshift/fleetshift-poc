@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	// pkiDir is the fixed sandbox PKI root.
-	pkiDir = "/data/sandbox/pki"
+	// sandboxPKIDir is the fixed sandbox PKI root.
+	sandboxPKIDir = "/data/sandbox/pki"
 
 	caCertName   = "ca.crt"
 	caKeyName    = "ca.key"
@@ -30,8 +30,8 @@ const (
 	serialMaxBits = 128
 )
 
-// PKIPaths holds absolute paths for the sandbox CA and Dex leaf material.
-type PKIPaths struct {
+// SandboxPKIPaths holds absolute paths for Dex-on sandbox CA and leaf material.
+type SandboxPKIPaths struct {
 	Dir      string
 	CACert   string
 	CAKey    string
@@ -39,22 +39,23 @@ type PKIPaths struct {
 	LeafKey  string
 }
 
-// DefaultPKIPaths returns the fixed sandbox PKI layout under /data/sandbox/pki.
-func DefaultPKIPaths() PKIPaths {
-	return PKIPaths{
-		Dir:      pkiDir,
-		CACert:   filepath.Join(pkiDir, caCertName),
-		CAKey:    filepath.Join(pkiDir, caKeyName),
-		LeafCert: filepath.Join(pkiDir, leafCertName),
-		LeafKey:  filepath.Join(pkiDir, leafKeyName),
+// DefaultSandboxPKIPaths returns the fixed layout under /data/sandbox/pki.
+func DefaultSandboxPKIPaths() SandboxPKIPaths {
+	return SandboxPKIPaths{
+		Dir:      sandboxPKIDir,
+		CACert:   filepath.Join(sandboxPKIDir, caCertName),
+		CAKey:    filepath.Join(sandboxPKIDir, caKeyName),
+		LeafCert: filepath.Join(sandboxPKIDir, leafCertName),
+		LeafKey:  filepath.Join(sandboxPKIDir, leafKeyName),
 	}
 }
 
-// EnsurePKI generates or reuses the CA and Dex leaf. Leaf SAN is IP 127.0.0.1 only.
-// dexUID/dexGID own the leaf private key (0400); the CA cert is world-readable.
-func EnsurePKI(paths PKIPaths, dexUID, dexGID int) error {
+// EnsureSandboxPKI generates or reuses the Dex-on sandbox CA and leaf.
+// Leaf SAN is IP 127.0.0.1 only. dexUID/dexGID own the leaf private key
+// (0400); the CA cert is world-readable.
+func EnsureSandboxPKI(paths SandboxPKIPaths, dexUID, dexGID int) error {
 	if err := os.MkdirAll(paths.Dir, 0755); err != nil {
-		return fmt.Errorf("pki dir: %w", err)
+		return fmt.Errorf("sandbox pki dir: %w", err)
 	}
 
 	caCert, caKey, err := loadOrCreateCA(paths)
@@ -64,12 +65,12 @@ func EnsurePKI(paths PKIPaths, dexUID, dexGID int) error {
 	if err := ensureLeaf(paths, caCert, caKey); err != nil {
 		return err
 	}
-	return applyPKIOwnership(paths, dexUID, dexGID)
+	return applySandboxPKIOwnership(paths, dexUID, dexGID)
 }
 
 // loadOrCreateCA reuses a valid on-disk CA or creates a new one when absent.
 // Partial CA state (cert without key or the reverse) is an error.
-func loadOrCreateCA(paths PKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func loadOrCreateCA(paths SandboxPKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	certPEM, certErr := os.ReadFile(paths.CACert)
 	keyPEM, keyErr := os.ReadFile(paths.CAKey)
 	switch {
@@ -94,7 +95,7 @@ func loadOrCreateCA(paths PKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, error
 }
 
 // createCA writes a new ECDSA P-256 CA cert and key to paths.
-func createCA(paths PKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func createCA(paths SandboxPKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate CA key: %w", err)
@@ -131,7 +132,7 @@ func createCA(paths PKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 }
 
 // ensureLeaf reuses a valid leaf under caCert or renews an invalid/missing leaf.
-func ensureLeaf(paths PKIPaths, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) error {
+func ensureLeaf(paths SandboxPKIPaths, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) error {
 	if leafOK(paths, caCert) {
 		return nil
 	}
@@ -164,7 +165,7 @@ func ensureLeaf(paths PKIPaths, caCert *x509.Certificate, caKey *ecdsa.PrivateKe
 
 // leafOK reports whether the on-disk leaf is present, unexpired, SAN-correct,
 // and verifiable against caCert.
-func leafOK(paths PKIPaths, caCert *x509.Certificate) bool {
+func leafOK(paths SandboxPKIPaths, caCert *x509.Certificate) bool {
 	certPEM, err := os.ReadFile(paths.LeafCert)
 	if err != nil {
 		return false
@@ -192,9 +193,9 @@ func leafOK(paths PKIPaths, caCert *x509.Certificate) bool {
 	return err == nil
 }
 
-// applyPKIOwnership sets root ownership on CA material and dexUID:dexGID on the
+// applySandboxPKIOwnership sets root ownership on CA material and dexUID:dexGID on the
 // leaf key when running as root. Non-root callers keep creator ownership.
-func applyPKIOwnership(paths PKIPaths, dexUID, dexGID int) error {
+func applySandboxPKIOwnership(paths SandboxPKIPaths, dexUID, dexGID int) error {
 	if err := os.Chmod(paths.LeafKey, 0400); err != nil {
 		return err
 	}

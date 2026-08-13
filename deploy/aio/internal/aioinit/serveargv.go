@@ -21,8 +21,8 @@ const (
 	// DefaultRegistrySubjectExpression maps preferred_username.
 	DefaultRegistrySubjectExpression = "claims.preferred_username"
 
-	defaultServeDB       = "/data/fleetshift.db"
-	defaultServeWebDir   = "/srv/web"
+	defaultServeDB     = "/data/fleetshift.db"
+	defaultServeWebDir = "/srv/web"
 	// defaultServeLogLevel is used when FLEETSHIFT_LOG_LEVEL is unset.
 	defaultServeLogLevel = "debug"
 
@@ -34,7 +34,7 @@ const (
 type ServeConfig struct {
 	Endpoints          Endpoints
 	Issuer             string // peer or external
-	CAFile             string // set on Dex-on; optional external
+	CAFile             string // sandbox CA on Dex-on; optional OIDC_CA_FILE on Dex-off
 	UIClientID         string
 	UIScope            string
 	ResourceAudience   string

@@ -12,8 +12,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
 )
 
-func testPKIPaths(root string) aioinit.PKIPaths {
-	return aioinit.PKIPaths{
+func testSandboxPKIPaths(root string) aioinit.SandboxPKIPaths {
+	return aioinit.SandboxPKIPaths{
 		Dir:      filepath.Join(root, "pki"),
 		CACert:   filepath.Join(root, "pki", "ca.crt"),
 		CAKey:    filepath.Join(root, "pki", "ca.key"),
@@ -22,10 +22,10 @@ func testPKIPaths(root string) aioinit.PKIPaths {
 	}
 }
 
-func TestEnsurePKI_GenerateAndReuse(t *testing.T) {
-	paths := testPKIPaths(t.TempDir())
+func TestEnsureSandboxPKI_GenerateAndReuse(t *testing.T) {
+	paths := testSandboxPKIPaths(t.TempDir())
 	uid, gid := os.Getuid(), os.Getgid()
-	if err := aioinit.EnsurePKI(paths, uid, gid); err != nil {
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
 		t.Fatal(err)
 	}
 	ca1, err := os.ReadFile(paths.CACert)
@@ -38,7 +38,7 @@ func TestEnsurePKI_GenerateAndReuse(t *testing.T) {
 	}
 	assertLeafSAN(t, leaf1)
 
-	if err := aioinit.EnsurePKI(paths, uid, gid); err != nil {
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
 		t.Fatal(err)
 	}
 	ca2, err := os.ReadFile(paths.CACert)
@@ -50,32 +50,32 @@ func TestEnsurePKI_GenerateAndReuse(t *testing.T) {
 	}
 }
 
-func TestEnsurePKI_PartialCAState(t *testing.T) {
+func TestEnsureSandboxPKI_PartialCAState(t *testing.T) {
 	uid, gid := os.Getuid(), os.Getgid()
 	t.Run("cert without key", func(t *testing.T) {
-		paths := testPKIPaths(t.TempDir())
+		paths := testSandboxPKIPaths(t.TempDir())
 		if err := os.MkdirAll(paths.Dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(paths.CACert, []byte("not-a-real-cert\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		err := aioinit.EnsurePKI(paths, uid, gid)
+		err := aioinit.EnsureSandboxPKI(paths, uid, gid)
 		if err == nil || !strings.Contains(err.Error(), "partial CA state") {
-			t.Fatalf("EnsurePKI() = %v, want partial CA state", err)
+			t.Fatalf("EnsureSandboxPKI() = %v, want partial CA state", err)
 		}
 	})
 	t.Run("key without cert", func(t *testing.T) {
-		paths := testPKIPaths(t.TempDir())
+		paths := testSandboxPKIPaths(t.TempDir())
 		if err := os.MkdirAll(paths.Dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(paths.CAKey, []byte("not-a-real-key\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		err := aioinit.EnsurePKI(paths, uid, gid)
+		err := aioinit.EnsureSandboxPKI(paths, uid, gid)
 		if err == nil || !strings.Contains(err.Error(), "partial CA state") {
-			t.Fatalf("EnsurePKI() = %v, want partial CA state", err)
+			t.Fatalf("EnsureSandboxPKI() = %v, want partial CA state", err)
 		}
 	})
 }
