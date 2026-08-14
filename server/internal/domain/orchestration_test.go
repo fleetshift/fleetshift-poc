@@ -878,7 +878,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	}
 }
 
-func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
+func TestOrchestration_ZeroTargets_PendingTarget(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
@@ -898,8 +898,8 @@ func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	}
 
 	dep := getFulfillment(t, store, "deployments/d1")
-	if dep.State() != domain.FulfillmentStateActive {
-		t.Errorf("State = %q, want active", dep.State())
+	if dep.State() != domain.FulfillmentStatePendingTarget {
+		t.Errorf("State = %q, want %q: selector matched no targets", dep.State(), domain.FulfillmentStatePendingTarget)
 	}
 	if len(dep.ResolvedTargets()) != 0 {
 		t.Errorf("ResolvedTargets = %v, want empty", dep.ResolvedTargets())

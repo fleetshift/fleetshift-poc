@@ -18,15 +18,6 @@ import (
 // state) and complete the workflow.
 var errAuthPaused = errors.New("delivery auth failed: pausing for fresh credentials")
 
-// errPendingTarget is a sentinel error returned by [executeRolloutPlan]
-// when every resolved target rejects all manifests in a deliver step.
-// Unlike a terminal error (which transitions to Failed), this signals
-// that the deployment's manifest type doesn't match any current
-// target's accepted types. The orchestration sets the fulfillment to
-// [FulfillmentStatePendingTarget] — a state that could auto-resolve
-// when placement is re-evaluated against different targets.
-var errPendingTarget = errors.New("no target accepted any manifest")
-
 // TargetDelta represents the difference between the previous and current
 // resolved target sets for a fulfillment.
 type TargetDelta struct {
@@ -856,7 +847,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 					ResolvedTargets: resolvedIDs,
 					Auth:            f.Auth(),
 				}
-			} else if errors.Is(err, errPendingTarget) {
+			} else if IsPendingTarget(err) {
 				// No target accepted the deployment's manifest type.
 				// This isn't a permanent failure — dynamic placement
 				// may resolve to compatible targets later.
@@ -952,7 +943,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	}
 
 	if len(resolved) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("%w: placement resolved zero targets", ErrPendingTarget)
 	}
 
 	ids := make([]TargetID, len(resolved))
@@ -1114,14 +1105,15 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 			// If every target in this step rejected all manifests, no
 			// delivery can proceed. This is not necessarily a permanent
 			// failure — with dynamic placement, different targets may
-			// resolve later. Signal via errPendingTarget so the
+			// resolve later. Signal via ErrPendingTarget so the
 			// orchestration sets FulfillmentStatePendingTarget rather
 			// than FulfillmentStateFailed.
 			if len(rejectedTargets) > 0 && len(inputs) == 0 {
 				manifestTypes := manifestTypeSet(f.ManifestStrategy().Manifests)
-				return fmt.Errorf("%w: manifest types %v were rejected by all %d target(s) %v; "+
-					"verify that --resource-type matches a type the target accepts",
-					errPendingTarget, manifestTypes, len(rejectedTargets), rejectedTargets,
+				return fmt.Errorf(
+					"%w: manifest types %v were rejected by all %d target(s) %v; "+
+						"verify that --resource-type matches a type the target accepts",
+					ErrPendingTarget, manifestTypes, len(rejectedTargets), rejectedTargets,
 				)
 			}
 

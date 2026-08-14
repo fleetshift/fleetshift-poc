@@ -448,7 +448,7 @@ func registerActivity[I, O any](
 
 	activityFn := func(ctx context.Context, in I) (O, error) {
 		out, err := activity.Run(ctx, in)
-		if err != nil && (domain.IsTerminal(err) || domain.IsAuthExpired(err)) {
+		if err != nil && (domain.IsTerminal(err) || domain.IsAuthExpired(err) || domain.IsPendingTarget(err)) {
 			return out, workflow.NewPermanentError(err)
 		}
 		return out, err
@@ -510,6 +510,9 @@ func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error
 	if err != nil && !workflow.CanRetry(err) {
 		if domain.IsAuthExpired(err) {
 			return out, fmt.Errorf("%w: %v", domain.ErrAuthExpired, err)
+		}
+		if domain.IsPendingTarget(err) {
+			return out, fmt.Errorf("%w: %v", domain.ErrPendingTarget, err)
 		}
 		return out, domain.TerminalError(err)
 	}

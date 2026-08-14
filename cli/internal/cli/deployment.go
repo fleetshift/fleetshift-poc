@@ -77,7 +77,7 @@ func formatState(s pb.Deployment_State) string {
 	case pb.Deployment_STATE_FAILED:
 		return "Failed"
 	case pb.Deployment_STATE_PENDING_TARGET:
-		return "Pending_Target"
+		return "PENDING_TARGET"
 	default:
 		return "Unknown"
 	}
