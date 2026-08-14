@@ -125,8 +125,10 @@ set -e
 BIN=/usr/local/bin/kind-loopback-forward
 UNIT=/etc/systemd/system/kind-loopback-forward.service
 if [ "$MODE" = ensure ]; then
-  cat > "$BIN"
-  chmod 0755 "$BIN"
+  TMP="${BIN}.new"
+  cat > "$TMP"
+  chmod 0755 "$TMP"
+  mv -f "$TMP" "$BIN"
   cat > "$UNIT" <<EOF
 [Unit]
 Description=kind loopback TCP forward

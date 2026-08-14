@@ -183,10 +183,14 @@ func TestLoopbackForward_Ensure_InstallsSystemdProxy(t *testing.T) {
 	if strings.Contains(script, "iptables") {
 		t.Fatal("install script still uses iptables")
 	}
+	if strings.Contains(script, `cat > "$BIN"`) {
+		t.Fatal("script writes the running binary in place")
+	}
 	for _, want := range []string{
 		"systemctl restart kind-loopback-forward.service",
 		"-listen 127.0.0.1:${LISTEN_PORT}",
 		"-to ${DESTINATION}",
+		`mv -f "$TMP" "$BIN"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("script missing %q:\n%s", want, script)

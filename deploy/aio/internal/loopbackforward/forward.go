@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
-// dial is net.Dial; tests replace it to observe per-connection lookups.
-var dial = net.Dial
+const dialTimeout = 5 * time.Second
+
+// dial is (*net.Dialer).DialContext; tests replace it to observe per-connection lookups.
+var dial = new(net.Dialer).DialContext
 
 // ListenAndServe accepts TCP connections on listen and proxies each to dest.
 // dest is resolved on every connection so DNS names (e.g. a container alias)
@@ -48,23 +51,25 @@ func Serve(ctx context.Context, ln net.Listener, dest string) error {
 			}
 			return err
 		}
-		go proxyConn(c, dest)
+		go proxyConn(ctx, c, dest)
 	}
 }
 
 // proxyConn dials dest and copies bytes until either side closes.
-func proxyConn(client net.Conn, dest string) {
+func proxyConn(ctx context.Context, client net.Conn, dest string) {
 	defer client.Close()
-	backend, err := dial("tcp", dest)
+	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+	destConn, err := dial(dialCtx, "tcp", dest)
 	if err != nil {
 		return
 	}
-	defer backend.Close()
+	defer destConn.Close()
 	go func() {
-		_, _ = io.Copy(backend, client)
-		closeWrite(backend)
+		_, _ = io.Copy(destConn, client)
+		closeWrite(destConn)
 	}()
-	_, _ = io.Copy(client, backend)
+	_, _ = io.Copy(client, destConn)
 	closeWrite(client)
 }
 
