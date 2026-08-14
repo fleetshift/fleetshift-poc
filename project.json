@@ -6,15 +6,7 @@
       "dependsOn": ["server:build", "cli:build"]
     },
     "test:all": {
-      "dependsOn": ["server:test", "cli:test"]
-    },
-    "test:deploy": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "bash deploy/scripts/test-gcphcp-defaults.sh"
-      },
-      "cache": true,
-      "inputs": ["{workspaceRoot}/deploy/scripts/**/*"]
+      "dependsOn": ["server:test", "cli:test", "deploy-aio:test"]
     },
     "protogen": {
       "dependsOn": ["proto:generate"]

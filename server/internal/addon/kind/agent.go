@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/log"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
@@ -110,6 +111,7 @@ type ClusterProvider interface {
 	Create(name string, options ...cluster.CreateOption) error
 	Delete(name, kubeconfig string) error
 	List() ([]string, error)
+	ListNodes(name string) ([]nodes.Node, error)
 	KubeConfig(name string, internal bool) (string, error)
 }
 
@@ -131,6 +133,7 @@ type Agent struct {
 	generations     GenerationStore
 	indexingRuntime kubernetes.IndexingRuntime
 	bootstrapSA     func(context.Context, []byte, domain.TargetID) (domain.SecretRef, []byte, error)
+	loopbackForward LoopbackForward
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -197,6 +200,12 @@ func WithPlatformSABootstrap(fn func(context.Context, []byte, domain.TargetID) (
 			a.bootstrapSA = fn
 		}
 	}
+}
+
+// WithLoopbackForward attaches an optional loopback TCP proxy on kind
+// control-plane nodes (see [LoopbackForward]). Nil is a no-op.
+func WithLoopbackForward(f LoopbackForward) AgentOption {
+	return func(a *Agent) { a.loopbackForward = f }
 }
 
 // NewAgent returns an Agent. The reporter is the addon's client
@@ -410,6 +419,7 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 			// Committed to teardown: stop the object indexer before delete.
 			// Inventory Unwatch stays after confirmed deletion (below).
 			a.stopIndexer(ctx, targetID)
+			a.removeLoopbackForward(ctx, provider, owned)
 			if err := provider.Delete(owned, ""); err != nil {
 				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: err.Error(),
@@ -596,6 +606,7 @@ func (a *Agent) recreateOwnedCluster(
 
 	targetID := domain.TargetID("k8s-" + string(spec.resourceID()))
 	a.stopIndexer(ctx, targetID)
+	a.removeLoopbackForward(ctx, provider, owned)
 
 	if err := provider.Delete(owned, ""); err != nil {
 		probe.Error(err)
@@ -709,7 +720,13 @@ func (a *Agent) advanceOrFail(ctx context.Context, kindName string, kc []byte, g
 	return true
 }
 
-func (a *Agent) ensureCluster(ctx context.Context, _ ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, kindName string, kc []byte, deliveryID domain.DeliveryID, generation domain.Generation, probe ClusterDeliverProbe) (*ClusterOutput, bool) {
+func (a *Agent) ensureCluster(ctx context.Context, provider ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, kindName string, kc []byte, deliveryID domain.DeliveryID, generation domain.Generation, probe ClusterDeliverProbe) (*ClusterOutput, bool) {
+	if err := a.ensureLoopbackForward(ctx, provider, kindName); err != nil {
+		probe.Error(err)
+		a.failDelivery(ctx, deliveryID, generation, "ensure loopback forward on %q: %v", kindName, err)
+		return nil, false
+	}
+
 	if auth.Caller != nil {
 		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
@@ -875,4 +892,21 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		return cfg, ConfigSourceCustom, nil
 	}
 	return nil, ConfigSourceDefault, nil
+}
+
+// ensureLoopbackForward installs the configured [LoopbackForward] on the kind
+// cluster control-planes. Nil is a no-op.
+func (a *Agent) ensureLoopbackForward(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
+	if a.loopbackForward == nil {
+		return nil
+	}
+	return a.loopbackForward.Ensure(ctx, provider, kindClusterName)
+}
+
+// removeLoopbackForward best-effort clears the loopback proxy before delete.
+func (a *Agent) removeLoopbackForward(ctx context.Context, provider ClusterProvider, kindClusterName string) {
+	if a.loopbackForward == nil {
+		return
+	}
+	_ = a.loopbackForward.Remove(ctx, provider, kindClusterName)
 }

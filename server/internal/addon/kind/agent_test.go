@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/log"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
@@ -100,6 +101,10 @@ func (p *fakeProvider) List() ([]string, error) {
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+func (p *fakeProvider) ListNodes(string) ([]nodes.Node, error) {
+	return nil, nil
 }
 
 func (p *fakeProvider) KubeConfig(name string, _ bool) (string, error) {

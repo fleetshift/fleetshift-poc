@@ -40,9 +40,6 @@ services:
       - --addons=${FLEETSHIFT_SERVER_ADDONS:-kind,kubernetes}
       - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
       - --oidc-ca-file=/certs/ca.crt
-      # Always use the local Keycloak issuer — this override is only loaded
-      # when AUTH=local, so OIDC_ISSUER_URL (which may point at an external
-      # IdP) must not leak in.
       - --oidc-issuer=https://${KC_HOSTNAME}:${KC_HTTPS_PORT}/auth/realms/fleetshift
       - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
       - --oidc-ui-scope=${OIDC_UI_SCOPE:-openid profile email groups audience:server:client_id:fleetshift}

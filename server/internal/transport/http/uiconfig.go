@@ -17,9 +17,6 @@ type UIConfigOptions struct {
 	WebDir string
 	// UIOrigin is the trusted advertised browser origin (never from request
 	// headers). Emitted as uiOrigin when nonempty.
-	// TODO(fe): decide — consume (require uiOrigin == window.location.origin
-	// and derive redirect URI as uiOrigin+"/auth/callback") or remove from
-	// this contract.
 	UIOrigin string
 	// OIDCUIClientID and OIDCUIScope are packaging/deploy-supplied browser
 	// OIDC inputs advertised on /api/ui/config. The server does not invent
@@ -110,8 +107,6 @@ func NewUIConfigMux(opts UIConfigOptions) *http.ServeMux {
 
 // oidcConfig is the oidc object on /api/ui/config.
 // AuthorizationEndpoint is omitted when unconfigured.
-// TODO(fe): decide — consume AuthorizationEndpoint (seed Sign-in without a
-// prior discovery fetch) or remove it from this contract.
 type oidcConfig struct {
 	Authority             string `json:"authority"`
 	ClientID              string `json:"clientId"`
@@ -119,9 +114,8 @@ type oidcConfig struct {
 	AuthorizationEndpoint string `json:"authorizationEndpoint,omitempty"`
 }
 
-// handleConfig serves GET /api/ui/config in the FE-compatible shape: oidc,
-// authConfigured, and plugin bootstrap fields, plus additive uiOrigin and
-// oidc.authorizationEndpoint.
+// handleConfig serves GET /api/ui/config: oidc, authConfigured, optional
+// uiOrigin, and plugin bootstrap fields when WebDir is set.
 func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		oidc := oidcConfig{
@@ -160,9 +154,6 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 			resp["authConfigured"] = configured
 		}
 
-		// Plugin-derived global config remains on this route because the
-		// current frontend loads it here; moving it requires a coordinated
-		// frontend change.
 		if opts.WebDir != "" {
 			path := filepath.Join(opts.WebDir, "plugin-registry.json")
 			data, err := os.ReadFile(path)

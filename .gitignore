@@ -58,6 +58,7 @@ data/
 
 # Local test certs
 *.pem
+*.crt
 
 .claude_state
 keycloak/certs/

@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [server, cli]
+        module: [server, cli, deploy/aio]
 
     steps:
       - name: Checkout
@@ -88,16 +88,3 @@ jobs:
 
       - name: Component tests (plugins)
         run: npx nx run plugins:test:ct
-
-  deploy-scripts:
-    name: Deploy script contracts
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Run deploy contract tests
-        run: bash deploy/scripts/test-gcphcp-defaults.sh

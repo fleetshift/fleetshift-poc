@@ -1,0 +1,7 @@
+#!/command/with-contenv sh
+# Peer Dex longrun. Dex-off parks on s6-pause when aio-init did not enable Dex.
+set -eu
+if [ ! -f /run/fleetshift/dex.enabled ]; then
+	exec s6-pause
+fi
+exec s6-setuidgid 1001:1001 /usr/local/bin/dex serve /data/sandbox/dex/config.yaml

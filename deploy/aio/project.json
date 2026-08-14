@@ -1,0 +1,21 @@
+{
+  "name": "deploy-aio",
+  "root": "deploy/aio",
+  "projectType": "library",
+  "tags": ["lang:go", "scope:deploy"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test -count=1 ./...",
+        "cwd": "deploy/aio"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/**/*",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    }
+  }
+}

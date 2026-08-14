@@ -1,6 +1,5 @@
 # Assembles the all-in-one FleetShift image from component images.
-# Does not duplicate Dockerfile / Dockerfile.local / fleetshift-ui/Dockerfile.web —
-# build those first, then assemble.
+# Packaging (deploy/aio) owns s6 PID 1, peer Dex (default), PKI, and serve argv.
 #
 # From-source (monorepo; preferred):
 #   task image:aio
@@ -14,30 +13,106 @@
 #     --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest \
 #     -t quay.io/stolostron/fleetshift:latest .
 #
-# Thin reassemble from published tags (openshift/release periodic, etc.):
-#   podman build -f Dockerfile.fleetshift \
-#     --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest \
-#     --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest \
-#     -t quay.io/stolostron/fleetshift:latest .
-#
 # Base is fleetshift-server-local so the kind library can shell out to a
 # container runtime CLI (podman) against a mounted host socket. For kind,
-# run privileged as root with the socket mounted (USER below is overridden
-# by --user 0:0).
+# run --privileged with the socket mounted and join
+# --network kind:alias=fleetshift. CONTAINER_HOST, KIND_EXPERIMENTAL_DOCKER_NETWORK,
+# and KIND_LOOPBACK_FORWARD_TO=fleetshift:5556 are packaging defaults
+# (see deploy/aio/README.md).
 #
-# The entrypoint optionally renders GCP HCP config when the caller expresses
-# intent (GCPHCP_GATEWAY_URL, GCPHCP_CONFIG, or GCPHCP_ENABLED=true). The
-# default addon list remains kind,kubernetes until that intent is present.
+# Default: peer Dex under s6; bare podman run needs no OIDC flags.
+# Presence of OIDC_ISSUER_URL selects Dex-off and forwards that issuer.
+
 ARG SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest
 ARG WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest
+# Immutable build inputs (edit here when bumping).
+# Dex v2.45.1 — multi-arch index digest for docker.io/dexidp/dex:v2.45.1
+# Platform digests (informational; index digest is the pin used at build):
+#   linux/amd64: sha256:f5f9fb373188b0f701b80edd68b3f4745ced69306c9d382999f11b7774335a98
+#   linux/arm64: sha256:b79cf220951b3851b322a85ac9eeacdc38cfcca49dbe3cdbc55d2b2020f35feb
+ARG DEX_IMAGE=docker.io/dexidp/dex:v2.45.1@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462
+# s6-overlay v3.2.3.2 — tarball SHA-256 verified at build after download
+ARG S6_OVERLAY_VERSION=3.2.3.2
+ARG S6_OVERLAY_NOARCH_SHA256=5379750ed30a84bbd2e2dd74847ba6b5bd29cd0b2e3ea2ec58049b57eb2eda12
+ARG S6_OVERLAY_X86_64_SHA256=e6befcc96a437a3831386ecfc51808c5d3e939dc5fe3c02ae9284599e8aa2408
+ARG S6_OVERLAY_AARCH64_SHA256=b17f17a82e7a515c682a91edaf2ffdabb73f891981b6c1fd712115693a2f8b4c
+ARG TARGETARCH
+
 FROM ${WEB_IMAGE} AS web-assets
+FROM ${DEX_IMAGE} AS dex-bin
+FROM golang:1.25 AS aio-builder
+WORKDIR /src
+COPY deploy/aio/go.mod deploy/aio/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY deploy/aio/ ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+	--mount=type=cache,target=/root/.cache/go-build \
+	CGO_ENABLED=0 go build -o /bin/aio-init ./cmd/aio-init && \
+	CGO_ENABLED=0 go build -o /bin/kind-loopback-forward ./cmd/kind-loopback-forward
+
 FROM ${SERVER_IMAGE}
+
+ARG S6_OVERLAY_VERSION
+ARG S6_OVERLAY_NOARCH_SHA256
+ARG S6_OVERLAY_X86_64_SHA256
+ARG S6_OVERLAY_AARCH64_SHA256
+ARG TARGETARCH
+
 COPY --from=web-assets /srv/web /srv/web
+COPY --from=dex-bin /usr/local/bin/dex /usr/local/bin/dex
+COPY --from=aio-builder /bin/aio-init /usr/local/bin/aio-init
+COPY --from=aio-builder /bin/kind-loopback-forward /usr/local/bin/kind-loopback-forward
 COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
-COPY deploy/scripts/fleetshift-aio-entrypoint.sh /usr/local/bin/fleetshift-aio-entrypoint.sh
-RUN chmod +x /usr/local/bin/render-gcphcp-config.sh /usr/local/bin/fleetshift-aio-entrypoint.sh \
-	&& useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift \
-	&& chown -R fleetshift:fleetshift /data /srv/web
-USER fleetshift
-ENTRYPOINT ["/usr/local/bin/fleetshift-aio-entrypoint.sh"]
-CMD ["serve", "--http-addr", ":8085", "--grpc-addr", ":50051", "--db", "/data/fleetshift.db", "--web-dir", "/srv/web", "--log-level", "debug"]
+COPY deploy/aio/s6/ /etc/s6-overlay/
+
+RUN set -eux; \
+	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/render-gcphcp-config.sh \
+		/etc/s6-overlay/scripts/aio-init \
+		/etc/s6-overlay/s6-rc.d/dex/run \
+		/etc/s6-overlay/s6-rc.d/dex/finish \
+		/etc/s6-overlay/s6-rc.d/fleetshift/run \
+		/etc/s6-overlay/s6-rc.d/fleetshift/finish; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends curl ca-certificates xz-utils; \
+	arch="$TARGETARCH"; \
+	if [ -z "$arch" ]; then arch="$(dpkg --print-architecture)"; fi; \
+	case "$arch" in \
+		amd64|x86_64) s6arch=x86_64; s6sha="$S6_OVERLAY_X86_64_SHA256" ;; \
+		arm64|aarch64) s6arch=aarch64; s6sha="$S6_OVERLAY_AARCH64_SHA256" ;; \
+		*) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+	esac; \
+	curl -fsSL -o /tmp/s6-overlay-noarch.tar.xz \
+		"https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz"; \
+	curl -fsSL -o /tmp/s6-overlay-${s6arch}.tar.xz \
+		"https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${s6arch}.tar.xz"; \
+	echo "${S6_OVERLAY_NOARCH_SHA256}  /tmp/s6-overlay-noarch.tar.xz" | sha256sum -c -; \
+	echo "${s6sha}  /tmp/s6-overlay-${s6arch}.tar.xz" | sha256sum -c -; \
+	tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz; \
+	tar -C / -Jxpf /tmp/s6-overlay-${s6arch}.tar.xz; \
+	rm -f /tmp/s6-overlay-*.tar.xz; \
+	rm -rf /var/lib/apt/lists/*; \
+	# FleetShift 1000:1000; Dex 1001:1001.
+	if ! id -u fleetshift >/dev/null 2>&1; then \
+		useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift; \
+	fi; \
+	if ! id -u dex >/dev/null 2>&1; then \
+		useradd --uid 1001 --system --home-dir /nonexistent --shell /usr/sbin/nologin dex; \
+	fi; \
+	mkdir -p /data /data/sandbox /run/fleetshift; \
+	chown -R fleetshift:fleetshift /data /srv/web; \
+	# Sandbox tree is root-owned; FleetShift may create ordinary /data state.
+	chown root:root /data/sandbox; \
+	chmod 0755 /data/sandbox
+
+# CONTAINER_HOST defaults to the documented in-container socket mount path.
+# Override when mounting the engine socket elsewhere. Missing sockets are ignored.
+ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
+	S6_KEEP_ENV=1 \
+	CONTAINER_HOST=unix:///var/run/docker.sock
+
+# s6 is PID 1 (starts as container root to init/drop privileges).
+ENTRYPOINT ["/init"]
+# CMD unused: s6-rc longruns own FleetShift and Dex.
+CMD []
+
+EXPOSE 8085 50051 5556
