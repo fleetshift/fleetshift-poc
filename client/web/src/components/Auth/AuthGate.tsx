@@ -22,7 +22,11 @@ const AuthGate = ({ children }: PropsWithChildren) => {
       })
     ) {
       loginTriggered.current = true;
-      startLogin();
+      window.sessionStorage.setItem(
+        "post_login_redirect_pathname",
+        window.location.pathname,
+      );
+      login();
     }
   }, [loading, user, authError, startLogin]);
 

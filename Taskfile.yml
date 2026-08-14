@@ -8,9 +8,6 @@ includes:
     dir: ./deploy/podman
     aliases: [pd]
     vars:
-      DEPLOY_MODE_INPUT: '{{.DEPLOY_MODE | default ""}}'
-      DB_INPUT: '{{.DB | default ""}}'
-      AUTH_INPUT: '{{.AUTH | default ""}}'
       DEV_INPUT: '{{.DEV | default ""}}'
   kubernetes:
     taskfile: ./deploy/kubernetes/Taskfile.yml

@@ -2,158 +2,76 @@
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
-# Start the FleetShift stack. Called by 'task podman:up'.
+# Start the FleetShift all-in-one stack. Called by 'task podman:up'.
 #
-# In demo mode (AUTH=local): generates Keycloak passwords, templates the
-# realm JSON, starts the stack, then registers the github_username user
-# profile attribute and optionally creates a dev user.
+# One container (deploy/aio) runs the API, UI, and peer Dex under s6. Auth is
+# selected inside the container from the root .env, which compose ingests:
+#   - OIDC_ISSUER_URL unset → built-in Dex sandbox IdP (https://127.0.0.1:5556/dex)
+#   - OIDC_ISSUER_URL set   → that external issuer; peer Dex parks and never serves
 #
-# In prod mode (AUTH=external): validates OIDC_ISSUER_URL is set, then
-# starts the stack. No local Keycloak — serve OIDC bootstrap flags point at
-# the external issuer (including AuthMethod policy fields).
+# Env vars (COMPOSE_FILES, DEV, BUILD, PODMAN_SOCKET) are set by the Taskfile.
 
-# Env vars (DEPLOY_MODE, DB, AUTH, DB_FLAG, COMPOSE_FILES) are set by Taskfile.
-# AUTH_MODE is derived from AUTH for backwards compatibility within this script.
-AUTH_MODE="$AUTH"
-DB_BACKEND="$DB"
 ensure_podman_ready
 
 podman network exists kind 2>/dev/null || podman network create kind
 
-REALM_TEMPLATE="${DEPLOY_DIR}/keycloak/fleetshift-realm.json"
-REALM_JSON="${COMPOSE_DIR}/.realm.json"
-
-if [ "$AUTH_MODE" = "external" ]; then
-  if [ -z "${OIDC_ISSUER_URL:-}" ]; then
-    echo "ERROR: OIDC_ISSUER_URL is required when AUTH=external (DEPLOY_MODE=prod)." >&2
-    echo "Set it in .env (at the project root) or pass it as an environment variable." >&2
-    exit 1
-  fi
+if [ "${DEV:-}" = "true" ] || [ "${BUILD:-}" = "true" ]; then
+  echo "==> Building all-in-one image from source (task image:aio)"
+  (cd "$ROOT_DIR" && task image:aio)
+  # Drop cached web assets so web-builder repopulates from the fresh image.
+  podman volume rm -f web-assets podman_web-assets 2>/dev/null || true
 fi
 
-if [ "$AUTH_MODE" = "local" ]; then
-  echo "==> Generating passwords"
-  KC_BOOTSTRAP_ADMIN_PASSWORD=$(generate_password)
-  export KC_BOOTSTRAP_ADMIN_PASSWORD
-  OPS_PASSWORD=$(generate_password)
-  DEV_PASSWORD=$(generate_password)
-
-  jq \
-    --arg ops "$OPS_PASSWORD" \
-    --arg dev "$DEV_PASSWORD" \
-    '.users |= map(
-        if .username == "ops-user" then .credentials[0].value = $ops
-        elif .username == "dev-user" then .credentials[0].value = $dev
-        else .
-        end
-    )' "$REALM_TEMPLATE" > "$REALM_JSON"
-fi
-
-echo "==> Starting FleetShift stack (db=$DB_BACKEND, auth=$AUTH_MODE)"
+echo "==> Starting FleetShift stack"
 UP_ARGS=(-d)
 if [ "${DEV:-}" = "true" ] || [ "${BUILD:-}" = "true" ]; then
-  echo "==> Building base fleetshift-server image"
-  podman build -t fleetshift-server "$ROOT_DIR"
   UP_ARGS+=(--build)
-  podman volume rm -f web-assets podman_web-assets 2>/dev/null || true
 fi
 compose up "${UP_ARGS[@]}"
 
-if [ "$AUTH_MODE" = "local" ]; then
-  kc_host="${KC_HOSTNAME:-keycloak}"
-  KC_URL="https://${kc_host}:${KC_HTTPS_PORT:-8443}/auth"
+http_port="${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 
-  if ! { command -v getent >/dev/null 2>&1 && getent hosts "$kc_host" >/dev/null 2>&1; } \
-    && ! grep -Eq "^[^#]*[[:space:]]${kc_host}([[:space:]]|$)" /etc/hosts 2>/dev/null; then
-    echo "ERROR: hostname '${kc_host}' does not resolve on this host." >&2
-    echo "Map it to loopback before continuing (needed for Keycloak checks and fleetctl):" >&2
-    echo "  echo \"127.0.0.1 ${kc_host}\" | sudo tee -a /etc/hosts" >&2
-    if [ "$(uname -s)" = "Darwin" ]; then
-      echo "On macOS, also add IPv6 (Podman may only forward IPv6 loopback):" >&2
-      echo "  echo \"::1 ${kc_host}\" | sudo tee -a /etc/hosts" >&2
-    fi
-    exit 1
-  fi
+echo ""
+echo "==> FleetShift stack is running!"
+echo "    FleetShift:      http://localhost:${http_port}"
 
-  echo "==> Waiting for Keycloak API..."
-  api_deadline=$((SECONDS + 90))
-  while true; do
-    if curl -sf --connect-timeout 2 --max-time 3 \
-      --cacert "${COMPOSE_DIR}/.certs/ca.crt" \
-      "$KC_URL/realms/master" >/dev/null 2>&1; then
+if [ -z "${OIDC_ISSUER_URL:-}" ]; then
+  # Dex-on: copy the sandbox CA so fleetctl can trust the loopback issuer.
+  mkdir -p "$COMPOSE_DIR/.certs"
+  echo "==> Copying Dex sandbox CA to .certs/ca.crt (for fleetctl)"
+  ca_deadline=$((SECONDS + 30))
+  until compose cp fleetshift-server:/data/sandbox/pki/ca.crt "$COMPOSE_DIR/.certs/ca.crt" 2>/dev/null; do
+    if (( SECONDS >= ca_deadline )); then
+      echo "    WARN: sandbox CA not ready yet. Copy it later with:" >&2
+      echo "      podman compose cp fleetshift-server:/data/sandbox/pki/ca.crt deploy/podman/.certs/ca.crt" >&2
       break
-    fi
-    if (( SECONDS >= api_deadline )); then
-      echo "ERROR: Keycloak API not reachable after 90 seconds." >&2
-      echo "  Check local mkcert trust or rerun ./deploy/podman/scripts/generate-certs.sh." >&2
-      exit 1
     fi
     sleep 1
   done
 
-  ADMIN_TOKEN=$(curl -sf --cacert "${COMPOSE_DIR}/.certs/ca.crt" \
-    "$KC_URL/realms/master/protocol/openid-connect/token" \
-    -d "grant_type=password&client_id=admin-cli&username=admin&password=${KC_BOOTSTRAP_ADMIN_PASSWORD}" \
-    | jq -r .access_token)
+  cat <<EOF
 
-  PROFILE_JSON=$(curl -sf --cacert "${COMPOSE_DIR}/.certs/ca.crt" \
-    "$KC_URL/admin/realms/fleetshift/users/profile" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
+  Built-in Dex sandbox IdP (no OIDC_ISSUER_URL set):
+    Issuer:  https://127.0.0.1:5556/dex
+    Users:   ops@fleetshift.local / fleetshift-ops
+             dev@fleetshift.local / fleetshift-dev
 
-  if echo "$PROFILE_JSON" | jq -e '.attributes[] | select(.name == "github_username")' >/dev/null 2>&1; then
-    echo "    github_username attribute already registered."
-  else
-    echo "==> Registering github_username in user profile schema"
-    UPDATED_PROFILE=$(echo "$PROFILE_JSON" | jq '.attributes += [{
-      "name": "github_username",
-      "displayName": "GitHub Username",
-      "validations": {},
-      "annotations": {},
-      "permissions": {"view": ["admin", "user"], "edit": ["admin"]},
-      "multivalued": false
-    }]')
-    curl -sf -o /dev/null --cacert "${COMPOSE_DIR}/.certs/ca.crt" -X PUT \
-      "$KC_URL/admin/realms/fleetshift/users/profile" \
-      -H "Authorization: Bearer $ADMIN_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$UPDATED_PROFILE"
-    echo "    github_username attribute registered."
-  fi
-fi
-
-if [ -n "${DEV_USER_USERNAME:-}" ] && [ "$AUTH_MODE" = "local" ]; then
-  echo "==> Creating dev user: ${DEV_USER_USERNAME}"
-  "$DEPLOY_DIR/keycloak/scripts/add-user.sh" \
-    --admin-password "$KC_BOOTSTRAP_ADMIN_PASSWORD" \
-    --username "$DEV_USER_USERNAME" \
-    --password "${DEV_USER_PASSWORD:-changeme}" \
-    --github "${DEV_USER_GITHUB:-}" \
-    ${DEV_USER_ROLES:+--roles "$DEV_USER_ROLES"}
+  Configure fleetctl:
+    bin/fleetctl auth setup \\
+      --issuer-url https://127.0.0.1:5556/dex \\
+      --client-id fleetshift-cli \\
+      --key-enrollment-client-id fleetshift-signing \\
+      --oidc-ca-file deploy/podman/.certs/ca.crt \\
+      --scopes 'openid,profile,email,audience:server:client_id:fleetshift'
+    bin/fleetctl auth login
+EOF
+else
+  echo ""
+  echo "    External OIDC issuer: ${OIDC_ISSUER_URL}"
+  echo "    (peer Dex is parked; the container uses your external issuer)"
 fi
 
 echo ""
-echo "==> FleetShift stack is running!"
-echo "    FleetShift:      http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
-if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Keycloak Admin:  https://${kc_host}:${KC_HTTPS_PORT:-8443}"
-  echo ""
-  echo "  Keycloak Admin Console:"
-  echo "    admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}"
-  echo ""
-  echo "  FleetShift Realm Credentials:"
-  echo "    ops-user / ${OPS_PASSWORD}"
-  echo "    dev-user / ${DEV_PASSWORD}"
-fi
-echo ""
-if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Configure fleetctl:"
-  echo "      bin/fleetctl auth setup \\"
-  echo "        --issuer-url ${OIDC_URL} \\"
-  echo "        --client-id fleetshift-cli \\"
-  echo "        --key-enrollment-client-id fleetshift-signing \\"
-  echo "        --oidc-ca-file deploy/podman/.certs/ca.crt"
-  echo "      bin/fleetctl auth login"
-fi
 echo "    Run 'task podman:logs' to tail container output."
 echo "    Run 'task podman:status' to check container health."
 echo "    Run 'task --list' to see all available commands."

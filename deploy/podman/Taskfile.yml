@@ -1,36 +1,18 @@
 version: '3'
 
+# FleetShift podman stack. Runs the all-in-one image (deploy/aio): API + UI +
+# peer Dex in one container. Auth is chosen inside the container from the root
+# .env — set OIDC_ISSUER_URL for an external issuer, leave it unset for the
+# built-in Dex sandbox IdP. sqlite only (the AIO image has no postgres backend).
+
 vars:
-  ACTIVE_AUTH:
-    sh: 'grep "^AUTH=" .active-deploy 2>/dev/null | cut -d= -f2 || true'
-  ACTIVE_DB:
-    sh: 'grep "^DB=" .active-deploy 2>/dev/null | cut -d= -f2 || true'
   ACTIVE_DEV:
     sh: 'grep "^DEV=" .active-deploy 2>/dev/null | cut -d= -f2 || true'
-  RESOLVED_DEPLOY_MODE: '{{if empty .DEPLOY_MODE_INPUT}}demo{{else}}{{.DEPLOY_MODE_INPUT}}{{end}}'
-  RESOLVED_DB: '{{if not (empty .DB_INPUT)}}{{.DB_INPUT}}{{else if not (empty .ACTIVE_DB)}}{{.ACTIVE_DB}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}postgres{{else}}sqlite{{end}}'
-  RESOLVED_AUTH: '{{if not (empty .AUTH_INPUT)}}{{.AUTH_INPUT}}{{else if not (empty .ACTIVE_AUTH)}}{{.ACTIVE_AUTH}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}external{{else}}local{{end}}'
   DEV: '{{if not (empty .DEV_INPUT)}}{{.DEV_INPUT}}{{else if not (empty .ACTIVE_DEV)}}{{.ACTIVE_DEV}}{{else}}false{{end}}'
   LOCAL_WEB: '{{.LOCAL_WEB | default "false"}}'
   NX_CACHE: '{{.NX_CACHE | default "false"}}'
   BUILD: '{{.BUILD | default "false"}}'
-  RESOLVED_GCPHCP_ENABLED:
-    sh: |
-      case "{{.GCPHCP_ENABLED | default "false"}}" in
-        1|true|TRUE|yes|YES|on|ON) echo "true" ;;
-        *) echo "false" ;;
-      esac
-  RESOLVED_GCPHCP_CONFIG: '{{.ROOT_DIR}}/deploy/podman/.gcphcp.yaml'
-  RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else}}https://{{.KC_HOSTNAME | default "keycloak"}}:{{.KC_HTTPS_PORT | default "8443"}}/auth/realms/fleetshift{{end}}'
-  RESOLVED_SERVER_ADDONS: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}kind,kubernetes,gcphcp{{else}}kind,kubernetes{{end}}'
-  RESOLVED_DB_FLAG:
-    sh: |
-      if [ "{{.RESOLVED_DB}}" = "postgres" ]; then
-        echo "--database-url=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
-      else
-        echo "--db=/data/fleetshift.db"
-      fi
-  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml{{if eq .RESOLVED_AUTH "local"}} -f overrides/local-keycloak.yaml{{end}}'
+  RESOLVED_COMPOSE_FILES: '-f compose.yaml{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}{{if eq .NX_CACHE "true"}} -f overrides/nx-cache.yaml{{end}}'
   RESOLVED_PODMAN_SOCKET:
     sh: './scripts/detect-podman-socket.sh'
 
@@ -45,80 +27,36 @@ tasks:
       - sh: command -v docker-compose
         msg: "docker-compose is not installed. Install: brew install docker-compose (podman-compose is not compatible)"
 
-  cert-init:
-    desc: Generate local TLS certs for Keycloak (one-time, requires mkcert)
-    cmds:
-      - ./scripts/generate-certs.sh
-    preconditions:
-      - sh: command -v mkcert
-        msg: "mkcert is not installed. Install: brew install mkcert (macOS) or go install filippo.io/mkcert@latest"
-
-  render-gcphcp-config:
-    internal: true
-    env:
-      GCPHCP_ENABLED: '{{.RESOLVED_GCPHCP_ENABLED}}'
-      GCPHCP_GATEWAY_URL: '{{.GCPHCP_GATEWAY_URL | default ""}}'
-      GCPHCP_GATEWAY_AUDIENCE: '{{.GCPHCP_GATEWAY_AUDIENCE | default ""}}'
-      GCPHCP_TARGET_ID: '{{.GCPHCP_TARGET_ID | default ""}}'
-      GCPHCP_GCP_PROJECT: '{{.GCPHCP_GCP_PROJECT | default ""}}'
-      GCPHCP_GCP_REGION: '{{.GCPHCP_GCP_REGION | default ""}}'
-      GCPHCP_WORKFORCE_POOL: '{{.GCPHCP_WORKFORCE_POOL | default ""}}'
-      GCPHCP_WORKFORCE_PROVIDER: '{{.GCPHCP_WORKFORCE_PROVIDER | default ""}}'
-      GCPHCP_BROKER_SA_EMAIL: '{{.GCPHCP_BROKER_SA_EMAIL | default ""}}'
-    cmds:
-      - '{{.ROOT_DIR}}/deploy/scripts/render-gcphcp-config.sh --output {{.RESOLVED_GCPHCP_CONFIG}}'
-
   up:
-    desc: Start the FleetShift stack (set DEPLOY_MODE, DB, AUTH to customize)
-    deps: [ensure-podman, render-gcphcp-config]
+    desc: Start the FleetShift stack (built-in Dex unless OIDC_ISSUER_URL is set)
+    deps: [ensure-podman]
     env: &deploy_env
-      DEPLOY_MODE: '{{.RESOLVED_DEPLOY_MODE}}'
-      DB: '{{.RESOLVED_DB}}'
-      AUTH: '{{.RESOLVED_AUTH}}'
-      DB_FLAG: '{{.RESOLVED_DB_FLAG}}'
-      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}{{if eq .NX_CACHE "true"}} -f overrides/nx-cache.yaml{{end}} -f overrides/gcphcp.yaml'
+      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}'
       DEV: '{{.DEV}}'
       BUILD: '{{.BUILD}}'
-      OIDC_URL: '{{.RESOLVED_OIDC_URL}}'
-      OIDC_ISSUER_URL: '{{.RESOLVED_OIDC_URL}}'
-      GCPHCP_CONFIG: '{{.RESOLVED_GCPHCP_CONFIG}}'
-      FLEETSHIFT_SERVER_ADDONS: '{{.RESOLVED_SERVER_ADDONS}}'
       PODMAN_SOCKET: '{{.RESOLVED_PODMAN_SOCKET}}'
     preconditions:
       - sh: test -f {{.ROOT_DIR}}/.env
         msg: "No .env found. Copy .env.template to .env first."
-      - sh: '{{if eq .RESOLVED_AUTH "local"}}command -v mkcert{{else}}true{{end}}'
-        msg: "mkcert is required for AUTH=local. Install: brew install mkcert (macOS) or go install filippo.io/mkcert@latest"
-      - sh: echo "{{.RESOLVED_DEPLOY_MODE}}" | grep -qE '^(demo|prod)$'
-        msg: "DEPLOY_MODE must be demo or prod, got: {{.RESOLVED_DEPLOY_MODE}}"
-      - sh: echo "{{.RESOLVED_DB}}" | grep -qE '^(sqlite|postgres)$'
-        msg: "DB must be sqlite or postgres, got: {{.RESOLVED_DB}}"
-      - sh: echo "{{.RESOLVED_AUTH}}" | grep -qE '^(local|external)$'
-        msg: "AUTH must be local or external, got: {{.RESOLVED_AUTH}}"
-      - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
-        msg: "OIDC_ISSUER_URL is required when AUTH=external"
-      - sh: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}[ "{{.RESOLVED_AUTH}}" = "external" ]{{else}}true{{end}}'
-        msg: "GCPHCP_ENABLED=true requires AUTH=external. gcphcp does not work with local Keycloak."
     cmds:
-      - '{{if eq .RESOLVED_AUTH "local"}}./scripts/generate-certs.sh{{else}}true{{end}}'
       - ./scripts/start.sh
-      - printf 'AUTH={{.RESOLVED_AUTH}}\nDB={{.RESOLVED_DB}}\nDEV={{.DEV}}\n' > .active-deploy
+      - printf 'DEV={{.DEV}}\n' > .active-deploy
 
   dev:
-    desc: Start in dev mode — builds frontend + backend from source in containers
+    desc: Start in dev mode — builds the all-in-one image from source, then up
     cmds:
       - task: up
         vars:
           DEV: "true"
 
   build:
-    desc: Build container images without restarting services
-    env: *deploy_env
+    desc: Build the all-in-one image from source (server + UI + peer Dex)
+    dir: '{{.ROOT_DIR}}'
     cmds:
-      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env build
+      - task image:aio
 
   rebuild:
-    desc: Stop, rebuild images, and restart
+    desc: Stop, rebuild the image from source, and restart
     cmds:
       - ./scripts/stop.sh
       - task: up
@@ -127,7 +65,7 @@ tasks:
           BUILD: "true"
 
   pull:
-    desc: Pull latest container images
+    desc: Pull the latest all-in-one + web images
     env: *deploy_env
     cmds:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env pull --ignore-buildable
@@ -170,7 +108,7 @@ tasks:
       - ./scripts/check-clock-drift.sh {{.CLI_ARGS}}
 
   'restart:*':
-    desc: "Restart a specific container (e.g. task podman:restart:keycloak)"
+    desc: "Restart a specific container (e.g. task podman:restart:fleetshift-server)"
     env: *deploy_env
     vars:
       CONTAINER: '{{index .MATCH 0}}'
@@ -187,21 +125,5 @@ tasks:
   test-attestation:
     desc: Run the end-to-end attestation flow
     env: *deploy_env
-    preconditions:
-      - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
-        msg: "OIDC_ISSUER_URL is required when AUTH=external"
     cmds:
       - ./scripts/test-attestation.sh {{.CLI_ARGS}}
-
-  reset-keycloak:
-    desc: Wipe Keycloak state and re-import realm (AUTH=local only)
-    env: *deploy_env
-    preconditions:
-      - sh: '[ "{{.RESOLVED_AUTH}}" = "local" ]'
-        msg: "reset-keycloak only works with AUTH=local (no local Keycloak with external auth)"
-    cmds:
-      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env stop keycloak
-      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env rm -f keycloak
-      - rm -rf .certs/
-      - rm -f .realm.json
-      - echo "Keycloak state wiped. Run 'task podman:up' to restart with fresh realm and passwords."
