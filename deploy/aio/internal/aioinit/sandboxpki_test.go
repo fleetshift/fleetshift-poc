@@ -51,6 +51,13 @@ func TestEnsureSandboxPKI_GenerateAndReuse(t *testing.T) {
 	if string(ca1) != string(ca2) {
 		t.Fatal("CA cert changed on reuse")
 	}
+	leaf2, err := os.ReadFile(paths.LeafCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(leaf1) != string(leaf2) {
+		t.Fatal("leaf cert changed on reuse")
+	}
 }
 
 func TestEnsureSandboxPKI_PartialCAState(t *testing.T) {
