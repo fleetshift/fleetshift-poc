@@ -1773,11 +1773,7 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 	}
 }
 
-// TestOrchestration_AllManifestsRejected_FailsFulfillment verifies that when
-// every manifest is filtered out for every target (no target accepts the
-// deployment's manifest type), the fulfillment transitions to failed rather
-// than silently becoming active with zero deliveries.
-func TestOrchestration_AllManifestsRejected_FailsFulfillment(t *testing.T) {
+func TestOrchestration_AllManifestsRejected_PendingTarget(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation: 1,
@@ -1817,11 +1813,11 @@ func TestOrchestration_AllManifestsRejected_FailsFulfillment(t *testing.T) {
 	}
 
 	f := getFulfillment(t, store, "deployments/d1")
-	if f.State() != domain.FulfillmentStateFailed {
-		t.Errorf("State = %q, want %q: fulfillment should fail when all manifests are rejected by every target", f.State(), domain.FulfillmentStateFailed)
+	if f.State() != domain.FulfillmentStatePendingTarget {
+		t.Errorf("State = %q, want %q: fulfillment should be pending_target when all manifests are rejected by every target", f.State(), domain.FulfillmentStatePendingTarget)
 	}
 	if f.StatusReason() == "" {
-		t.Error("StatusReason should describe why the fulfillment failed")
+		t.Error("StatusReason should describe why no target accepted the manifests")
 	}
 
 	// No deliveries should have been dispatched.
