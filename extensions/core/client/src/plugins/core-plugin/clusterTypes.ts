@@ -20,6 +20,7 @@ const STATE_LABELS: Record<
   PROVISIONING: { text: "Provisioning", color: "blue" },
   ERROR: { text: "Error", color: "red" },
   DEGRADED: { text: "Degraded", color: "orange" },
+  PENDING_TARGET: { text: "Pending Target", color: "orange" },
 };
 
 const DEFAULT_STATE_LABEL = { text: "Unknown", color: "grey" } as const;

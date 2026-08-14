@@ -17,10 +17,11 @@ type StrategyVersion int64
 type FulfillmentState string
 
 const (
-	FulfillmentStateCreating FulfillmentState = "creating"
-	FulfillmentStateActive   FulfillmentState = "active"
-	FulfillmentStateDeleting FulfillmentState = "deleting"
-	FulfillmentStateFailed   FulfillmentState = "failed"
+	FulfillmentStateCreating      FulfillmentState = "creating"
+	FulfillmentStateActive        FulfillmentState = "active"
+	FulfillmentStateDeleting      FulfillmentState = "deleting"
+	FulfillmentStateFailed        FulfillmentState = "failed"
+	FulfillmentStatePendingTarget FulfillmentState = "pending_target"
 )
 
 // Fulfillment is the kernel aggregate that owns strategies, state,
