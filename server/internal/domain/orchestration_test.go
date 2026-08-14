@@ -874,7 +874,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	}
 }
 
-func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
+func TestOrchestration_ZeroTargets_PendingTarget(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
@@ -894,8 +894,8 @@ func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	}
 
 	dep := getFulfillment(t, store, "deployments/d1")
-	if dep.State() != domain.FulfillmentStateActive {
-		t.Errorf("State = %q, want active", dep.State())
+	if dep.State() != domain.FulfillmentStatePendingTarget {
+		t.Errorf("State = %q, want %q: selector matched no targets", dep.State(), domain.FulfillmentStatePendingTarget)
 	}
 	if len(dep.ResolvedTargets()) != 0 {
 		t.Errorf("ResolvedTargets = %v, want empty", dep.ResolvedTargets())
@@ -1882,6 +1882,63 @@ func TestOrchestration_PartialManifestsRejected_StillDelivers(t *testing.T) {
 	rd.mu.Unlock()
 	if len(deliveredTo) != 1 {
 		t.Fatalf("expected 1 delivery, got %d: %v", len(deliveredTo), deliveredTo)
+	}
+}
+
+// TestOrchestration_MissingTarget_PendingTarget verifies that when a static
+// placement references a target ID that does not exist in the pool, the
+// fulfillment transitions to pending_target instead of retrying endlessly.
+func TestOrchestration_MissingTarget_PendingTarget(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
+		Generation: 1,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{
+				{Raw: json.RawMessage(`{"name":"c1"}`), ManifestType: "api.kind.cluster"},
+			},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"does-not-exist"},
+		},
+		State: domain.FulfillmentStateCreating,
+	})
+	// Register a real target, but NOT the one referenced by the deployment.
+	seedTargets(
+		t, store,
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:                    "kind-local",
+			Name:                  "kind-local",
+			Type:                  "kind",
+			AcceptedManifestTypes: []domain.ManifestType{"api.kind.cluster"},
+		}),
+	)
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	rd := &recordingDelivery{events: events}
+	wf := newTestWorkflow(store, rd, events)
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	f := getFulfillment(t, store, "deployments/d1")
+	if f.State() != domain.FulfillmentStatePendingTarget {
+		t.Errorf("State = %q, want %q: fulfillment should be pending_target when the target doesn't exist", f.State(), domain.FulfillmentStatePendingTarget)
+	}
+	if f.StatusReason() == "" {
+		t.Error("StatusReason should explain which target was not found")
+	}
+
+	// No deliveries should have been dispatched.
+	rd.mu.Lock()
+	deliveredTo := rd.delivered
+	rd.mu.Unlock()
+	if len(deliveredTo) != 0 {
+		t.Errorf("expected 0 deliveries, got %d: %v", len(deliveredTo), deliveredTo)
 	}
 }
 
