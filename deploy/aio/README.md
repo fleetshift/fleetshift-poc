@@ -79,6 +79,7 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Log level | `FLEETSHIFT_LOG_LEVEL` | `debug` |
 | Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (adds `gcphcp` when gateway/config set) |
 | Container socket | `CONTAINER_HOST` | `unix:///var/run/docker.sock` |
+| Kind node Dex route | `KIND_NODE_ROUTE_BACKEND` | `fleetshift:5556` on Dex-on (empty disables) |
 
 Registry id and subject expression must be set together when overriding either.
 Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive
@@ -136,11 +137,15 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
 
 - `KIND_EXPERIMENTAL_DOCKER_NETWORK=kind` unless already set (including
   intentionally empty to disable)
-- On Dex-on only: `KIND_NODE_ROUTE_BACKEND=<aio-ip>:5556` so kind control-plane
-  nodes DNAT `127.0.0.1:5556` to this AIO for the loopback issuer URL, unless
-  already set (including intentionally empty to disable). If no suitable IPv4
-  is available when a value must be written (e.g. not on `--network kind`),
-  init fails.
+- On Dex-on only: `KIND_NODE_ROUTE_BACKEND=fleetshift:5556` so kind
+  control-plane nodes run a loopback TCP proxy (`127.0.0.1:5556` →
+  `fleetshift:5556`). A TCP proxy binary is run as a systemd unit on the node
+  (not iptables DNAT) so Fedora and macOS behave the same. Podman DNS
+  resolves the `fleetshift` alias, so AIO restarts keep working. Override
+  with a different `host:port`, or set the variable empty to disable.
+
+Join `--network kind:alias=fleetshift`. Without that alias the default
+backend name does not resolve from kind nodes.
 
 On Linux, rootless Podman does not listen on `/var/run/docker.sock` (that
 path is Docker, or a macOS `podman machine` helper symlink). The API socket
@@ -161,7 +166,7 @@ podman run -d --rm -it \
   -p 127.0.0.1:5556:5556 \
   -v /tmp:/tmp \
   -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
-  --network kind \
+  --network kind:alias=fleetshift \
   quay.io/stolostron/fleetshift:latest
 ```
 
@@ -222,7 +227,9 @@ show `/init` as PID 1.
 | Path | Role |
 |---|---|
 | `cmd/aio-init` | Init helper: Dex-on/off branch, PKI, Dex config, serve argv |
+| `cmd/kind-loopback-forward` | TCP proxy copied onto kind control-planes for loopback Dex |
 | `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `gcphcp`, `kind`) |
+| `internal/loopbackforward` | Proxy implementation used by `kind-loopback-forward` |
 | `s6/` | s6-overlay v3 service defs (copied to `/etc/s6-overlay/`) |
 
 s6 services follow the [s6-overlay README](https://github.com/just-containers/s6-overlay/blob/v3.2.3.2/README.md)

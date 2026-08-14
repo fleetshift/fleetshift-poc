@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
@@ -16,6 +18,9 @@ import (
 // kind control-plane nodes to a TCP destination (host:port). Packaging sets this
 // for peer-Dex AIO launches; empty means no hook (no-op).
 const NodeRouteBackendEnv = "KIND_NODE_ROUTE_BACKEND"
+
+// loopbackForwardBin is the helper copied into kind nodes. Tests override it.
+var loopbackForwardBin = "/usr/local/bin/kind-loopback-forward"
 
 // NodeRoute installs or removes a node-local loopback forward on kind
 // control-plane containers so 127.0.0.1:<listenPort> reaches a destination.
@@ -29,14 +34,15 @@ type NodeRoute interface {
 	Remove(ctx context.Context, provider ClusterProvider, kindClusterName string) error
 }
 
-// loopbackNodeRoute DNATs 127.0.0.1:<listenPort> to destination inside each
-// control-plane node via the kind [ClusterProvider] (docker or podman).
+// loopbackNodeRoute runs a TCP proxy on 127.0.0.1:<listenPort> inside each
+// control-plane node, forwarding to destination via the kind [ClusterProvider]
+// (docker or podman). systemd owns the process so it survives podman exec.
 type loopbackNodeRoute struct {
 	destination string // host:port
 	listenPort  string
 }
 
-// NewNodeRoute builds a [NodeRoute] that DNATs kind control-plane
+// NewNodeRoute builds a [NodeRoute] that forwards kind control-plane
 // loopback traffic for destination's port to destination. destination must be host:port.
 func NewNodeRoute(destination string) (NodeRoute, error) {
 	host, portStr, err := net.SplitHostPort(strings.TrimSpace(destination))
@@ -56,7 +62,7 @@ func NewNodeRoute(destination string) (NodeRoute, error) {
 	}, nil
 }
 
-// Ensure idempotently installs OUTPUT DNAT rules on all control-plane nodes
+// Ensure idempotently installs the loopback TCP proxy on all control-plane nodes
 // for the kind cluster.
 func (h *loopbackNodeRoute) Ensure(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
 	cps, err := listControlPlaneNodes(provider, kindClusterName)
@@ -66,22 +72,29 @@ func (h *loopbackNodeRoute) Ensure(ctx context.Context, provider ClusterProvider
 	if len(cps) == 0 {
 		return fmt.Errorf("no control-plane nodes for kind cluster %q", kindClusterName)
 	}
+	bin, err := os.ReadFile(loopbackForwardBin)
+	if err != nil {
+		return fmt.Errorf("read loopback forwarder: %w", err)
+	}
+	if len(bin) == 0 {
+		return fmt.Errorf("loopback forwarder %s is empty", loopbackForwardBin)
+	}
 	for _, n := range cps {
-		if err := h.execIptables(ctx, n, true); err != nil {
+		if err := h.execForwarder(ctx, n, bin); err != nil {
 			return fmt.Errorf("ensure route on %s: %w", n.String(), err)
 		}
 	}
 	return nil
 }
 
-// Remove best-effort deletes the DNAT rules. Missing rules or nodes are ignored.
+// Remove best-effort deletes the loopback proxy unit. Missing state is ignored.
 func (h *loopbackNodeRoute) Remove(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
 	cps, err := listControlPlaneNodes(provider, kindClusterName)
 	if err != nil {
 		return err
 	}
 	for _, n := range cps {
-		_ = h.execIptables(ctx, n, false)
+		_ = h.execForwarder(ctx, n, nil)
 	}
 	return nil
 }
@@ -99,20 +112,41 @@ func listControlPlaneNodes(provider ClusterProvider, kindClusterName string) ([]
 	return cps, nil
 }
 
-// execIptables adds (ensure) or deletes (remove) the DNAT rule inside node.
-func (h *loopbackNodeRoute) execIptables(ctx context.Context, node nodes.Node, ensure bool) error {
+// execForwarder installs (bin != nil) or removes the systemd unit inside node.
+func (h *loopbackNodeRoute) execForwarder(ctx context.Context, node nodes.Node, bin []byte) error {
 	mode := "remove"
-	if ensure {
+	var stdin io.Reader
+	if bin != nil {
 		mode = "ensure"
+		stdin = bytes.NewReader(bin)
 	}
-	// Prefer iptables-legacy (kind nodes); fall back to iptables.
 	const script = `
-ipt() { iptables-legacy "$@" 2>/dev/null || iptables "$@"; }
+set -e
+BIN=/usr/local/bin/kind-loopback-forward
+UNIT=/etc/systemd/system/kind-loopback-forward.service
 if [ "$MODE" = ensure ]; then
-  ipt -t nat -C OUTPUT -p tcp -d 127.0.0.1 --dport "$LISTEN_PORT" -j DNAT --to-destination "$DESTINATION" 2>/dev/null \
-    || ipt -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport "$LISTEN_PORT" -j DNAT --to-destination "$DESTINATION"
+  cat > "$BIN"
+  chmod 0755 "$BIN"
+  cat > "$UNIT" <<EOF
+[Unit]
+Description=kind loopback TCP forward
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/kind-loopback-forward -listen 127.0.0.1:${LISTEN_PORT} -to ${DESTINATION}
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable kind-loopback-forward.service
+  systemctl restart kind-loopback-forward.service
 else
-  ipt -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport "$LISTEN_PORT" -j DNAT --to-destination "$DESTINATION" 2>/dev/null || true
+  systemctl disable --now kind-loopback-forward.service 2>/dev/null || true
+  rm -f "$UNIT" "$BIN"
+  systemctl daemon-reload 2>/dev/null || true
 fi
 `
 	var stderr bytes.Buffer
@@ -122,6 +156,9 @@ fi
 		"DESTINATION="+h.destination,
 		"MODE="+mode,
 	)
+	if stdin != nil {
+		cmd.SetStdin(stdin)
+	}
 	cmd.SetStderr(&stderr)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))

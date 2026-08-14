@@ -16,8 +16,9 @@
 # Base is fleetshift-server-local so the kind library can shell out to a
 # container runtime CLI (podman) against a mounted host socket. For kind,
 # run privileged as root with the socket mounted (--user 0:0) and join
-# --network kind. CONTAINER_HOST and KIND_EXPERIMENTAL_DOCKER_NETWORK are
-# packaging defaults (see deploy/aio/README.md).
+# --network kind:alias=fleetshift. CONTAINER_HOST, KIND_EXPERIMENTAL_DOCKER_NETWORK,
+# and KIND_NODE_ROUTE_BACKEND=fleetshift:5556 are packaging defaults
+# (see deploy/aio/README.md).
 #
 # Default: peer Dex under s6; bare podman run needs no OIDC flags.
 # Presence of OIDC_ISSUER_URL selects Dex-off and forwards that issuer.
@@ -46,7 +47,8 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY deploy/aio/ ./
 RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
-	CGO_ENABLED=0 go build -o /bin/aio-init ./cmd/aio-init
+	CGO_ENABLED=0 go build -o /bin/aio-init ./cmd/aio-init && \
+	CGO_ENABLED=0 go build -o /bin/kind-loopback-forward ./cmd/kind-loopback-forward
 
 FROM ${SERVER_IMAGE}
 
@@ -59,11 +61,12 @@ ARG TARGETARCH
 COPY --from=web-assets /srv/web /srv/web
 COPY --from=dex-bin /usr/local/bin/dex /usr/local/bin/dex
 COPY --from=aio-builder /bin/aio-init /usr/local/bin/aio-init
+COPY --from=aio-builder /bin/kind-loopback-forward /usr/local/bin/kind-loopback-forward
 COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
 COPY deploy/aio/s6/ /etc/s6-overlay/
 
 RUN set -eux; \
-	chmod +x /usr/local/bin/aio-init /usr/local/bin/render-gcphcp-config.sh \
+	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/render-gcphcp-config.sh \
 		/etc/s6-overlay/scripts/aio-init \
 		/etc/s6-overlay/s6-rc.d/dex/run \
 		/etc/s6-overlay/s6-rc.d/dex/finish \

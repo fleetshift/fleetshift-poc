@@ -14,15 +14,17 @@ const (
 	kindNodeRouteEnvKey        = "KIND_NODE_ROUTE_BACKEND"
 	kindExperimentalNetKey     = "KIND_EXPERIMENTAL_DOCKER_NETWORK"
 	kindExperimentalNetDefault = "kind"
+	// kindNodeRouteHost is the default KIND_NODE_ROUTE_BACKEND host. AIO kind
+	// runs should publish this as a network alias.
+	kindNodeRouteHost = "fleetshift"
 )
 
 // ConfigureKindEnv writes path when a container engine socket is mounted.
 // Always defaults KIND_EXPERIMENTAL_DOCKER_NETWORK=kind unless that variable
 // is already present in the environment (including empty). On Dex-on, also
-// sets KIND_NODE_ROUTE_BACKEND so kind control-planes can DNAT
-// 127.0.0.1:<dex> to this AIO's address on the shared network, unless that
-// variable is already set (operator pin). Failure to resolve a backend
-// address when one must be written is fatal (kind + peer Dex requires the route).
+// writes KIND_NODE_ROUTE_BACKEND=fleetshift:<dex-port> unless that variable
+// is already set (operator pin, including empty to disable). The kind addon
+// reads that env to install a loopback TCP proxy on control-plane nodes.
 func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
 	_ = os.Remove(path)
 	if !containerEngineSocketPresent() {
@@ -37,12 +39,8 @@ func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
 
 	if dexOn {
 		if _, set := os.LookupEnv(kindNodeRouteEnvKey); !set {
-			ip, err := primaryIPv4()
-			if err != nil {
-				return fmt.Errorf("kind node route backend: %w", err)
-			}
 			port := strings.TrimPrefix(dexListen, ":")
-			backend := net.JoinHostPort(ip, port)
+			backend := net.JoinHostPort(kindNodeRouteHost, port)
 			b.WriteString(kindNodeRouteEnvKey + "=")
 			b.WriteString(backend)
 			b.WriteString("\n")
@@ -73,39 +71,4 @@ func containerEngineSocketPresent() bool {
 		return false
 	}
 	return st.Mode()&os.ModeSocket != 0
-}
-
-// primaryIPv4 returns the first global unicast IPv4 on an up interface.
-func primaryIPv4() (string, error) {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return "", err
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			ip = ip.To4()
-			if ip == nil || !ip.IsGlobalUnicast() {
-				continue
-			}
-			return ip.String(), nil
-		}
-	}
-	return "", fmt.Errorf("no non-loopback IPv4 address (join --network kind for kind launches)")
 }

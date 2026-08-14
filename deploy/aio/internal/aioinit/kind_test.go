@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-func TestPrimaryIPv4_SkipsLoopback(t *testing.T) {
-	ip, err := primaryIPv4()
-	if err != nil {
-		// Some CI sandboxes have no non-loopback IPv4; skip rather than fail.
-		t.Skipf("no non-loopback IPv4: %v", err)
-	}
-	parsed := net.ParseIP(ip)
-	if parsed == nil || parsed.To4() == nil || parsed.IsLoopback() {
-		t.Fatalf("primaryIPv4 = %q", ip)
-	}
-}
-
 func TestContainerEngineSocketPresent(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		t.Setenv("CONTAINER_HOST", "")
@@ -161,21 +149,11 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("dex-on adds node route when possible", func(t *testing.T) {
+	t.Run("dex-on adds fleetshift alias node route", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		clearEnv(t, kindNodeRouteEnvKey)
-		if _, err := primaryIPv4(); err != nil {
-			err := ConfigureKindEnv(path, true, ":5556")
-			if err == nil {
-				t.Fatal("expected error when no non-loopback IPv4")
-			}
-			if !strings.Contains(err.Error(), "kind node route backend") {
-				t.Fatalf("error = %v, want kind node route backend", err)
-			}
-			return
-		}
 		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
 			t.Fatal(err)
 		}
@@ -187,8 +165,9 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		if !strings.Contains(body, kindNodeRouteEnvKey+"=") || !strings.Contains(body, ":5556") {
-			t.Fatalf("kind.env missing node route backend: %q", body)
+		want := kindNodeRouteEnvKey + "=fleetshift:5556\n"
+		if !strings.Contains(body, want) {
+			t.Fatalf("kind.env missing %q, got %q", want, body)
 		}
 	})
 
