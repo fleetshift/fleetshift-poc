@@ -142,6 +142,17 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
   is available when a value must be written (e.g. not on `--network kind`),
   init fails.
 
+On Linux, rootless Podman does not listen on `/var/run/docker.sock` (that
+path is Docker, or a macOS `podman machine` helper symlink). The API socket
+is `$XDG_RUNTIME_DIR/podman/podman.sock`, and only after the user systemd
+unit is running:
+
+```bash
+export PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock
+systemctl --user enable podman.socket
+systemctl --user restart podman.socket
+```
+
 ```bash
 podman run -d --rm -it \
   --privileged --user 0:0 \
