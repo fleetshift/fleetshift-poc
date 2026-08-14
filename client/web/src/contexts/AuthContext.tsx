@@ -12,6 +12,7 @@ import {
   AuthProvider as OidcAuthProvider,
   useAuth as useOidcAuth,
 } from "react-oidc-context";
+import { useNavigate } from "react-router-dom";
 
 import {
   installFetchInterceptor,
@@ -132,12 +133,13 @@ export function AuthProvider({
 }) {
   const [oidcProps, setOidcProps] = useState<AuthProviderProps | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchOidcConfig()
+    fetchOidcConfig(navigate)
       .then(setOidcProps)
       .catch((err) => setError(err.message));
-  }, []);
+  }, [navigate]);
 
   if (error) {
     if (requireAuth) {

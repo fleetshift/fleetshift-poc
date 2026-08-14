@@ -10,6 +10,10 @@ const AuthGate = ({ children }: PropsWithChildren) => {
   useEffect(() => {
     if (!loading && !user && !authError && !loginTriggered.current) {
       loginTriggered.current = true;
+      window.sessionStorage.setItem(
+        "post_login_redirect_pathname",
+        window.location.pathname,
+      );
       login();
     }
   }, [loading, user, authError, login]);
