@@ -112,16 +112,16 @@ tasks:
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-web:{{.IMAGE_TAG}}{{end}}
         .
 
-  # Assemble from local short names + --pull=missing so present local
-  # server-local/web tags are kept, but missing bases (e.g. Dex) can be fetched.
+  # Use localhost/ (not short names): Fedora/RHEL Podman prompts to pick a
+  # registry for unqualified FROM names. --pull=missing still fetches Dex.
   image:aio:
     desc: Build all-in-one image from locally built server-local + web
     deps: [image:build]
     cmds:
       - >-
         podman build {{.CLI_ARGS}} --pull=missing -f Dockerfile.fleetshift
-        --build-arg SERVER_IMAGE=fleetshift-server-local:{{.IMAGE_TAG}}
-        --build-arg WEB_IMAGE=fleetshift-web:{{.IMAGE_TAG}}
+        --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:{{.IMAGE_TAG}}
+        --build-arg WEB_IMAGE=localhost/fleetshift-web:{{.IMAGE_TAG}}
         -t quay.io/stolostron/fleetshift:{{.IMAGE_TAG}}
         {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift:{{.IMAGE_TAG}}{{end}}
         .
