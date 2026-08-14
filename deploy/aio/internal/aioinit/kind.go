@@ -11,18 +11,18 @@ const (
 	// KindEnvPath is sourced by the fleetshift s6 run script for kind networking.
 	KindEnvPath = "/run/fleetshift/kind.env"
 
-	kindNodeRouteEnvKey        = "KIND_NODE_ROUTE_BACKEND"
+	loopbackForwardToEnvKey    = "KIND_LOOPBACK_FORWARD_TO"
 	kindExperimentalNetKey     = "KIND_EXPERIMENTAL_DOCKER_NETWORK"
 	kindExperimentalNetDefault = "kind"
-	// kindNodeRouteHost is the default KIND_NODE_ROUTE_BACKEND host. AIO kind
-	// runs should publish this as a network alias.
-	kindNodeRouteHost = "fleetshift"
+	// loopbackForwardHost is the default KIND_LOOPBACK_FORWARD_TO host. AIO
+	// kind runs should publish this as a network alias.
+	loopbackForwardHost = "fleetshift"
 )
 
 // ConfigureKindEnv writes path when a container engine socket is mounted.
 // Always defaults KIND_EXPERIMENTAL_DOCKER_NETWORK=kind unless that variable
 // is already present in the environment (including empty). On Dex-on, also
-// writes KIND_NODE_ROUTE_BACKEND=fleetshift:<dex-port> unless that variable
+// writes KIND_LOOPBACK_FORWARD_TO=fleetshift:<dex-port> unless that variable
 // is already set (operator pin, including empty to disable). The kind addon
 // reads that env to install a loopback TCP proxy on control-plane nodes.
 func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
@@ -38,13 +38,13 @@ func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
 	}
 
 	if dexOn {
-		if _, set := os.LookupEnv(kindNodeRouteEnvKey); !set {
+		if _, set := os.LookupEnv(loopbackForwardToEnvKey); !set {
 			port := strings.TrimPrefix(dexListen, ":")
-			backend := net.JoinHostPort(kindNodeRouteHost, port)
-			b.WriteString(kindNodeRouteEnvKey + "=")
-			b.WriteString(backend)
+			destination := net.JoinHostPort(loopbackForwardHost, port)
+			b.WriteString(loopbackForwardToEnvKey + "=")
+			b.WriteString(destination)
 			b.WriteString("\n")
-			fmt.Fprintf(os.Stdout, "aio-init: %s=%s\n", kindNodeRouteEnvKey, backend)
+			fmt.Fprintf(os.Stdout, "aio-init: %s=%s\n", loopbackForwardToEnvKey, destination)
 		}
 	}
 

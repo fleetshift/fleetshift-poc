@@ -67,12 +67,12 @@ func assembleProductionAddons(
 		if deps.Indexing != nil {
 			kindOpts = append(kindOpts, kindaddon.WithIndexingRuntime(deps.Indexing.Runtime))
 		}
-		if destination := strings.TrimSpace(os.Getenv(kindaddon.NodeRouteBackendEnv)); destination != "" {
-			route, err := kindaddon.NewNodeRoute(destination)
+		if destination := strings.TrimSpace(os.Getenv(kindaddon.LoopbackForwardToEnv)); destination != "" {
+			fwd, err := kindaddon.NewLoopbackForward(destination)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", kindaddon.NodeRouteBackendEnv, err)
+				return nil, fmt.Errorf("%s: %w", kindaddon.LoopbackForwardToEnv, err)
 			}
-			kindOpts = append(kindOpts, kindaddon.WithNodeRoute(route))
+			kindOpts = append(kindOpts, kindaddon.WithLoopbackForward(fwd))
 		}
 		kindAgent := kindaddon.NewAgent(
 			deps.DeliveryReporter,

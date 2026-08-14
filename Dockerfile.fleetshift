@@ -15,9 +15,9 @@
 #
 # Base is fleetshift-server-local so the kind library can shell out to a
 # container runtime CLI (podman) against a mounted host socket. For kind,
-# run privileged as root with the socket mounted (--user 0:0) and join
+# run --privileged with the socket mounted and join
 # --network kind:alias=fleetshift. CONTAINER_HOST, KIND_EXPERIMENTAL_DOCKER_NETWORK,
-# and KIND_NODE_ROUTE_BACKEND=fleetshift:5556 are packaging defaults
+# and KIND_LOOPBACK_FORWARD_TO=fleetshift:5556 are packaging defaults
 # (see deploy/aio/README.md).
 #
 # Default: peer Dex under s6; bare podman run needs no OIDC flags.

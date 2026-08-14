@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/kind/pkg/exec"
 )
 
-func TestNewNodeRoute(t *testing.T) {
+func TestNewLoopbackForward(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
@@ -35,7 +35,7 @@ func TestNewNodeRoute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			h, err := kind.NewNodeRoute(tt.destination)
+			h, err := kind.NewLoopbackForward(tt.destination)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error")
@@ -43,41 +43,41 @@ func TestNewNodeRoute(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("NewNodeRoute: %v", err)
+				t.Fatalf("NewLoopbackForward: %v", err)
 			}
 			if h == nil {
-				t.Fatal("route is nil")
+				t.Fatal("forward is nil")
 			}
 		})
 	}
 }
 
-type recordingNodeRoute struct {
+type recordingLoopbackForward struct {
 	ensured   []string
 	removed   []string
 	ensureErr error
 }
 
-func (r *recordingNodeRoute) Ensure(_ context.Context, _ kind.ClusterProvider, name string) error {
+func (r *recordingLoopbackForward) Ensure(_ context.Context, _ kind.ClusterProvider, name string) error {
 	r.ensured = append(r.ensured, name)
 	return r.ensureErr
 }
 
-func (r *recordingNodeRoute) Remove(_ context.Context, _ kind.ClusterProvider, name string) error {
+func (r *recordingLoopbackForward) Remove(_ context.Context, _ kind.ClusterProvider, name string) error {
 	r.removed = append(r.removed, name)
 	return nil
 }
 
-func TestAgent_EnsureCluster_CallsNodeRoute(t *testing.T) {
+func TestAgent_EnsureCluster_CallsLoopbackForward(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	route := &recordingNodeRoute{}
-	agent, _ := newTestAgent(reporter, provider, kind.WithNodeRoute(route))
+	fwd := &recordingLoopbackForward{}
+	agent, _ := newTestAgent(reporter, provider, kind.WithLoopbackForward(fwd))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
-		Raw:          json.RawMessage(`{"name":"route-me"}`),
+		Raw:          json.RawMessage(`{"name":"forward-me"}`),
 	}}
 
 	if err := agent.Deliver(context.Background(), target, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {
@@ -87,11 +87,11 @@ func TestAgent_EnsureCluster_CallsNodeRoute(t *testing.T) {
 	if first.State != domain.DeliveryStateDelivered {
 		t.Fatalf("first State = %q (%s)", first.State, first.Message)
 	}
-	if len(route.ensured) != 1 || route.ensured[0] != "fs--route-me" {
-		t.Fatalf("after create ensured = %v, want [fs--route-me]", route.ensured)
+	if len(fwd.ensured) != 1 || fwd.ensured[0] != "fs--forward-me" {
+		t.Fatalf("after create ensured = %v, want [fs--forward-me]", fwd.ensured)
 	}
 
-	route.ensured = nil
+	fwd.ensured = nil
 	if err := agent.Deliver(context.Background(), target, "d2:t1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {
 		t.Fatalf("second Deliver: %v", err)
 	}
@@ -99,21 +99,21 @@ func TestAgent_EnsureCluster_CallsNodeRoute(t *testing.T) {
 	if second.State != domain.DeliveryStateDelivered {
 		t.Fatalf("second State = %q (%s)", second.State, second.Message)
 	}
-	if len(route.ensured) != 1 || route.ensured[0] != "fs--route-me" {
-		t.Fatalf("after ensure ensured = %v, want [fs--route-me]", route.ensured)
+	if len(fwd.ensured) != 1 || fwd.ensured[0] != "fs--forward-me" {
+		t.Fatalf("after ensure ensured = %v, want [fs--forward-me]", fwd.ensured)
 	}
 }
 
-func TestAgent_EnsureCluster_NodeRouteErrorFailsDelivery(t *testing.T) {
+func TestAgent_EnsureCluster_LoopbackForwardErrorFailsDelivery(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	route := &recordingNodeRoute{ensureErr: errors.New("proxy install failed")}
-	agent, _ := newTestAgent(reporter, provider, kind.WithNodeRoute(route))
+	fwd := &recordingLoopbackForward{ensureErr: errors.New("proxy install failed")}
+	agent, _ := newTestAgent(reporter, provider, kind.WithLoopbackForward(fwd))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
-		Raw:          json.RawMessage(`{"name":"route-fail"}`),
+		Raw:          json.RawMessage(`{"name":"forward-fail"}`),
 	}}
 	if err := agent.Deliver(context.Background(), target, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {
 		t.Fatalf("Deliver: %v", err)
@@ -122,16 +122,16 @@ func TestAgent_EnsureCluster_NodeRouteErrorFailsDelivery(t *testing.T) {
 	if res.State != domain.DeliveryStateFailed {
 		t.Fatalf("state = %q, want failed (message=%s)", res.State, res.Message)
 	}
-	if !strings.Contains(res.Message, "node route") {
-		t.Fatalf("message = %q, want node route error", res.Message)
+	if !strings.Contains(res.Message, "loopback forward") {
+		t.Fatalf("message = %q, want loopback forward error", res.Message)
 	}
 }
 
-func TestAgent_Remove_CallsNodeRoute(t *testing.T) {
+func TestAgent_Remove_CallsLoopbackForward(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	route := &recordingNodeRoute{}
-	agent, _ := newTestAgent(reporter, provider, kind.WithNodeRoute(route))
+	fwd := &recordingLoopbackForward{}
+	agent, _ := newTestAgent(reporter, provider, kind.WithLoopbackForward(fwd))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -151,12 +151,12 @@ func TestAgent_Remove_CallsNodeRoute(t *testing.T) {
 	if res := awaitDone(t, reporter.done); res.State != domain.DeliveryStateDelivered {
 		t.Fatalf("remove State = %q (%s)", res.State, res.Message)
 	}
-	if len(route.removed) != 1 || route.removed[0] != "fs--gone" {
-		t.Fatalf("removed = %v, want [fs--gone]", route.removed)
+	if len(fwd.removed) != 1 || fwd.removed[0] != "fs--gone" {
+		t.Fatalf("removed = %v, want [fs--gone]", fwd.removed)
 	}
 }
 
-func TestLoopbackNodeRoute_Ensure_InstallsSystemdProxy(t *testing.T) {
+func TestLoopbackForward_Ensure_InstallsSystemdProxy(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "kind-loopback-forward")
 	payload := []byte("fake-forwarder-binary")
 	if err := os.WriteFile(bin, payload, 0755); err != nil {
@@ -165,11 +165,11 @@ func TestLoopbackNodeRoute_Ensure_InstallsSystemdProxy(t *testing.T) {
 	t.Cleanup(kind.OverrideLoopbackForwardBin(bin))
 
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := route.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x"); err != nil {
+	if err := fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(node.cmds) != 1 {
@@ -200,14 +200,14 @@ func TestLoopbackNodeRoute_Ensure_InstallsSystemdProxy(t *testing.T) {
 	}
 }
 
-func TestLoopbackNodeRoute_Ensure_MissingBinary(t *testing.T) {
+func TestLoopbackForward_Ensure_MissingBinary(t *testing.T) {
 	t.Cleanup(kind.OverrideLoopbackForwardBin(filepath.Join(t.TempDir(), "missing")))
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = route.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -216,13 +216,13 @@ func TestLoopbackNodeRoute_Ensure_MissingBinary(t *testing.T) {
 	}
 }
 
-func TestLoopbackNodeRoute_Remove_StopsUnit(t *testing.T) {
+func TestLoopbackForward_Remove_StopsUnit(t *testing.T) {
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := route.Remove(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x"); err != nil {
+	if err := fwd.Remove(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(node.cmds) != 1 {
@@ -240,59 +240,59 @@ func TestLoopbackNodeRoute_Remove_StopsUnit(t *testing.T) {
 	}
 }
 
-func TestLoopbackNodeRoute_Ensure_NoControlPlane(t *testing.T) {
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+func TestLoopbackForward_Ensure_NoControlPlane(t *testing.T) {
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
 	worker := &recordingKindNode{name: "w-1", role: "worker"}
-	err = route.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{worker}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{worker}}, "fs--x")
 	if err == nil || !strings.Contains(err.Error(), "no control-plane nodes") {
 		t.Fatalf("error = %v, want no control-plane nodes", err)
 	}
 }
 
-func TestLoopbackNodeRoute_Ensure_EmptyBinary(t *testing.T) {
+func TestLoopbackForward_Ensure_EmptyBinary(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "kind-loopback-forward")
 	if err := os.WriteFile(bin, nil, 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(kind.OverrideLoopbackForwardBin(bin))
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = route.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
 	if err == nil || !strings.Contains(err.Error(), "is empty") {
 		t.Fatalf("error = %v, want empty helper", err)
 	}
 }
 
-func TestLoopbackNodeRoute_Ensure_CommandError(t *testing.T) {
+func TestLoopbackForward_Ensure_CommandError(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "kind-loopback-forward")
 	if err := os.WriteFile(bin, []byte("fake"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(kind.OverrideLoopbackForwardBin(bin))
 	node := &recordingKindNode{name: "cp-1", role: "control-plane", cmdErr: errors.New("systemctl failed")}
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = route.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
-	if err == nil || !strings.Contains(err.Error(), "ensure route on cp-1") || !strings.Contains(err.Error(), "systemctl failed") {
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	if err == nil || !strings.Contains(err.Error(), "ensure loopback forward on cp-1") || !strings.Contains(err.Error(), "systemctl failed") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestLoopbackNodeRoute_Ensure_DefaultBinaryPath(t *testing.T) {
+func TestLoopbackForward_Ensure_DefaultBinaryPath(t *testing.T) {
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	route, err := kind.NewNodeRoute("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = route.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
 	if err != nil {
 		if !strings.Contains(err.Error(), "/usr/local/bin/kind-loopback-forward") {
 			t.Fatalf("error = %v, want default helper path", err)

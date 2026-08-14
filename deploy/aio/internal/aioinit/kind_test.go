@@ -118,8 +118,8 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		if strings.Contains(body, kindNodeRouteEnvKey+"=") {
-			t.Fatalf("Dex-off should omit node route: %q", body)
+		if strings.Contains(body, loopbackForwardToEnvKey+"=") {
+			t.Fatalf("Dex-off should omit loopback forward: %q", body)
 		}
 	})
 
@@ -149,11 +149,11 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("dex-on adds fleetshift alias node route", func(t *testing.T) {
+	t.Run("dex-on adds fleetshift alias loopback forward", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
-		clearEnv(t, kindNodeRouteEnvKey)
+		clearEnv(t, loopbackForwardToEnvKey)
 		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
 			t.Fatal(err)
 		}
@@ -165,17 +165,17 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		want := kindNodeRouteEnvKey + "=fleetshift:5556\n"
+		want := loopbackForwardToEnvKey + "=fleetshift:5556\n"
 		if !strings.Contains(body, want) {
 			t.Fatalf("kind.env missing %q, got %q", want, body)
 		}
 	})
 
-	t.Run("preserves explicit node route override", func(t *testing.T) {
+	t.Run("preserves explicit loopback forward override", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
-		t.Setenv(kindNodeRouteEnvKey, "10.89.0.2:5556")
+		t.Setenv(loopbackForwardToEnvKey, "10.89.0.2:5556")
 		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
 			t.Fatal(err)
 		}
@@ -187,16 +187,16 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		if strings.Contains(body, kindNodeRouteEnvKey+"=") {
-			t.Fatalf("explicit node route should not be rewritten: %q", body)
+		if strings.Contains(body, loopbackForwardToEnvKey+"=") {
+			t.Fatalf("explicit loopback forward should not be rewritten: %q", body)
 		}
 	})
 
-	t.Run("preserves empty node route override", func(t *testing.T) {
+	t.Run("preserves empty loopback forward override", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
-		t.Setenv(kindNodeRouteEnvKey, "")
+		t.Setenv(loopbackForwardToEnvKey, "")
 		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
 			t.Fatal(err)
 		}
@@ -208,8 +208,8 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		if strings.Contains(body, kindNodeRouteEnvKey+"=") {
-			t.Fatalf("empty node route override should not be rewritten: %q", body)
+		if strings.Contains(body, loopbackForwardToEnvKey+"=") {
+			t.Fatalf("empty loopback forward override should not be rewritten: %q", body)
 		}
 	})
 }

@@ -13,7 +13,6 @@ x-fleetshift-server: &fleetshift-server
   image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server-local:latest}
   restart: unless-stopped
   privileged: true
-  user: "0:0"
   environment:
     KIND_EXPERIMENTAL_DOCKER_NETWORK: kind
     CONTAINER_HOST: "unix:///var/run/docker.sock"

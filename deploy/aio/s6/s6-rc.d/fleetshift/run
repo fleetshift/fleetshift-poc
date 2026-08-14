@@ -20,7 +20,7 @@ export HOME=/data
 
 # Optional kind packaging defaults (written by aio-init when a container
 # engine socket is mounted): KIND_EXPERIMENTAL_DOCKER_NETWORK and, on Dex-on,
-# KIND_NODE_ROUTE_BACKEND for control-plane loopback TCP proxy.
+# KIND_LOOPBACK_FORWARD_TO for the control-plane loopback TCP proxy.
 if [ -f /run/fleetshift/kind.env ]; then
 	set -a
 	# shellcheck disable=SC1091

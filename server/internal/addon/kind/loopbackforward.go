@@ -14,19 +14,19 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
 )
 
-// NodeRouteBackendEnv enables a create/delete-time loopback forward from
-// kind control-plane nodes to a TCP destination (host:port). Packaging sets this
+// LoopbackForwardToEnv enables a create/delete-time TCP forward from
+// kind control-plane loopback to a destination (host:port). Packaging sets this
 // for peer-Dex AIO launches; empty means no hook (no-op).
-const NodeRouteBackendEnv = "KIND_NODE_ROUTE_BACKEND"
+const LoopbackForwardToEnv = "KIND_LOOPBACK_FORWARD_TO"
 
 // loopbackForwardBin is the helper copied into kind nodes. Tests override it.
 var loopbackForwardBin = "/usr/local/bin/kind-loopback-forward"
 
-// NodeRoute installs or removes a node-local loopback forward on kind
+// LoopbackForward installs or removes a node-local TCP proxy on kind
 // control-plane containers so 127.0.0.1:<listenPort> reaches a destination.
 // The Kind addon stays IdP-agnostic: it only forwards bytes to the configured
 // destination. Nil means no-op.
-type NodeRoute interface {
+type LoopbackForward interface {
 	// Ensure idempotently installs the loopback forward on control-plane nodes
 	// for kindClusterName using provider.ListNodes.
 	Ensure(ctx context.Context, provider ClusterProvider, kindClusterName string) error
@@ -34,29 +34,29 @@ type NodeRoute interface {
 	Remove(ctx context.Context, provider ClusterProvider, kindClusterName string) error
 }
 
-// loopbackNodeRoute runs a TCP proxy on 127.0.0.1:<listenPort> inside each
+// loopbackForward runs a TCP proxy on 127.0.0.1:<listenPort> inside each
 // control-plane node, forwarding to destination via the kind [ClusterProvider]
 // (docker or podman). systemd owns the process so it survives podman exec.
-type loopbackNodeRoute struct {
+type loopbackForward struct {
 	destination string // host:port
 	listenPort  string
 }
 
-// NewNodeRoute builds a [NodeRoute] that forwards kind control-plane
+// NewLoopbackForward builds a [LoopbackForward] that proxies kind control-plane
 // loopback traffic for destination's port to destination. destination must be host:port.
-func NewNodeRoute(destination string) (NodeRoute, error) {
+func NewLoopbackForward(destination string) (LoopbackForward, error) {
 	host, portStr, err := net.SplitHostPort(strings.TrimSpace(destination))
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", NodeRouteBackendEnv, err)
+		return nil, fmt.Errorf("parse %s: %w", LoopbackForwardToEnv, err)
 	}
 	if host == "" {
-		return nil, fmt.Errorf("%s host is empty", NodeRouteBackendEnv)
+		return nil, fmt.Errorf("%s host is empty", LoopbackForwardToEnv)
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
-		return nil, fmt.Errorf("%s port %q invalid", NodeRouteBackendEnv, portStr)
+		return nil, fmt.Errorf("%s port %q invalid", LoopbackForwardToEnv, portStr)
 	}
-	return &loopbackNodeRoute{
+	return &loopbackForward{
 		destination: net.JoinHostPort(host, portStr),
 		listenPort:  portStr,
 	}, nil
@@ -64,7 +64,7 @@ func NewNodeRoute(destination string) (NodeRoute, error) {
 
 // Ensure idempotently installs the loopback TCP proxy on all control-plane nodes
 // for the kind cluster.
-func (h *loopbackNodeRoute) Ensure(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
+func (f *loopbackForward) Ensure(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
 	cps, err := listControlPlaneNodes(provider, kindClusterName)
 	if err != nil {
 		return err
@@ -80,21 +80,21 @@ func (h *loopbackNodeRoute) Ensure(ctx context.Context, provider ClusterProvider
 		return fmt.Errorf("loopback forwarder %s is empty", loopbackForwardBin)
 	}
 	for _, n := range cps {
-		if err := h.execForwarder(ctx, n, bin); err != nil {
-			return fmt.Errorf("ensure route on %s: %w", n.String(), err)
+		if err := f.execForwarder(ctx, n, bin); err != nil {
+			return fmt.Errorf("ensure loopback forward on %s: %w", n.String(), err)
 		}
 	}
 	return nil
 }
 
 // Remove best-effort deletes the loopback proxy unit. Missing state is ignored.
-func (h *loopbackNodeRoute) Remove(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
+func (f *loopbackForward) Remove(ctx context.Context, provider ClusterProvider, kindClusterName string) error {
 	cps, err := listControlPlaneNodes(provider, kindClusterName)
 	if err != nil {
 		return err
 	}
 	for _, n := range cps {
-		_ = h.execForwarder(ctx, n, nil)
+		_ = f.execForwarder(ctx, n, nil)
 	}
 	return nil
 }
@@ -113,7 +113,7 @@ func listControlPlaneNodes(provider ClusterProvider, kindClusterName string) ([]
 }
 
 // execForwarder installs (bin != nil) or removes the systemd unit inside node.
-func (h *loopbackNodeRoute) execForwarder(ctx context.Context, node nodes.Node, bin []byte) error {
+func (f *loopbackForward) execForwarder(ctx context.Context, node nodes.Node, bin []byte) error {
 	mode := "remove"
 	var stdin io.Reader
 	if bin != nil {
@@ -152,8 +152,8 @@ fi
 	var stderr bytes.Buffer
 	cmd := node.CommandContext(ctx, "sh", "-c", script)
 	cmd.SetEnv(
-		"LISTEN_PORT="+h.listenPort,
-		"DESTINATION="+h.destination,
+		"LISTEN_PORT="+f.listenPort,
+		"DESTINATION="+f.destination,
 		"MODE="+mode,
 	)
 	if stdin != nil {

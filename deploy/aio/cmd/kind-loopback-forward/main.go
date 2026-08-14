@@ -1,5 +1,5 @@
 // Command kind-loopback-forward is a TCP proxy installed on kind control-plane
-// nodes so 127.0.0.1:<port> reaches KIND_NODE_ROUTE_BACKEND (AIO Dex).
+// nodes so 127.0.0.1:<port> reaches KIND_LOOPBACK_FORWARD_TO (AIO Dex).
 package main
 
 import (

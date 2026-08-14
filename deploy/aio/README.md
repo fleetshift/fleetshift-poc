@@ -79,7 +79,7 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Log level | `FLEETSHIFT_LOG_LEVEL` | `debug` |
 | Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (adds `gcphcp` when gateway/config set) |
 | Container socket | `CONTAINER_HOST` | `unix:///var/run/docker.sock` |
-| Kind node Dex route | `KIND_NODE_ROUTE_BACKEND` | `fleetshift:5556` on Dex-on (empty disables) |
+| Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | `fleetshift:5556` on Dex-on (empty disables) |
 
 Registry id and subject expression must be set together when overriding either.
 Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive
@@ -137,7 +137,7 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
 
 - `KIND_EXPERIMENTAL_DOCKER_NETWORK=kind` unless already set (including
   intentionally empty to disable)
-- On Dex-on only: `KIND_NODE_ROUTE_BACKEND=fleetshift:5556` so kind
+- On Dex-on only: `KIND_LOOPBACK_FORWARD_TO=fleetshift:5556` so kind
   control-plane nodes run a loopback TCP proxy (`127.0.0.1:5556` →
   `fleetshift:5556`). A TCP proxy binary is run as a systemd unit on the node
   (not iptables DNAT) so Fedora and macOS behave the same. Podman DNS
@@ -145,7 +145,7 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
   with a different `host:port`, or set the variable empty to disable.
 
 Join `--network kind:alias=fleetshift`. Without that alias the default
-backend name does not resolve from kind nodes.
+destination host does not resolve from kind nodes.
 
 On Linux, rootless Podman does not listen on `/var/run/docker.sock` (that
 path is Docker, or a macOS `podman machine` helper symlink). The API socket
@@ -160,7 +160,7 @@ systemctl --user restart podman.socket
 
 ```bash
 podman run -d --rm -it \
-  --privileged --user 0:0 \
+  --privileged \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   -p 127.0.0.1:5556:5556 \
