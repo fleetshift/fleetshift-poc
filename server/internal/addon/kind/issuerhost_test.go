@@ -1,10 +1,14 @@
 package kind
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 func TestIssuerHostname(t *testing.T) {
@@ -46,26 +50,12 @@ func TestApplyLoopbackIssuerHost_AddsPatchForDNSHost(t *testing.T) {
 	if err := applyLoopbackIssuerHost(&cfg, "https://fleetshift-sandbox.localhost:8085/dex"); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Nodes[0].ExtraMounts) != 1 {
-		t.Fatalf("mounts = %+v", cfg.Nodes[0].ExtraMounts)
+	n := cfg.Nodes[0]
+	if len(n.ExtraMounts) != 1 {
+		t.Fatalf("mounts = %+v", n.ExtraMounts)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(cfg.Nodes[0].ExtraMounts[0].HostPath) })
-	raw, err := os.ReadFile(filepath.Join(cfg.Nodes[0].ExtraMounts[0].HostPath, kubeadmIssuerHostPatchFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "- fleetshift-sandbox.localhost") {
-		t.Fatalf("patch missing hostname:\n%s", raw)
-	}
-}
-
-func TestWriteIssuerHostPatch(t *testing.T) {
-	dir, err := writeIssuerHostPatch("fleetshift-sandbox.localhost")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	raw, err := os.ReadFile(filepath.Join(dir, kubeadmIssuerHostPatchFile))
+	t.Cleanup(func() { _ = os.RemoveAll(n.ExtraMounts[0].HostPath) })
+	raw, err := os.ReadFile(filepath.Join(n.ExtraMounts[0].HostPath, kubeadmIssuerHostPatchFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +70,103 @@ func TestWriteIssuerHostPatch(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("patch missing %q:\n%s", want, body)
 		}
+	}
+	assertIssuerHostKubeadmPatches(t, n)
+}
+
+type nopLoopbackForward struct{}
+
+func (nopLoopbackForward) Ensure(context.Context, ClusterProvider, string) error { return nil }
+func (nopLoopbackForward) Remove(context.Context, ClusterProvider, string) error { return nil }
+
+func TestResolveConfig_LoopbackForwardAddsIssuerHost(t *testing.T) {
+	spec := ClusterSpec{
+		Name:  "oidc",
+		Nodes: []NodeSpec{{Role: "control-plane"}, {Role: "worker"}},
+	}
+	auth := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "alice",
+				Issuer:  "https://fleetshift-sandbox.localhost:8085/dex",
+			},
+		},
+		Audience: []domain.Audience{"fleetshift"},
+	}
+
+	t.Run("with loopback forward", func(t *testing.T) {
+		a := &Agent{loopbackForward: nopLoopbackForward{}}
+		raw, source, err := a.resolveConfig(spec, auth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if source != ConfigSourceOIDC {
+			t.Fatalf("source = %q, want %q", source, ConfigSourceOIDC)
+		}
+		cfg := unmarshalKindConfig(t, raw)
+		cleanupIssuerHostMounts(t, cfg)
+		if len(cfg.Nodes) != 2 {
+			t.Fatalf("nodes = %d", len(cfg.Nodes))
+		}
+		assertIssuerHostKubeadmPatches(t, cfg.Nodes[0])
+		if len(cfg.Nodes[0].ExtraMounts) != 1 {
+			t.Fatalf("control-plane mounts = %+v", cfg.Nodes[0].ExtraMounts)
+		}
+		if cfg.Nodes[1].Role != "worker" || len(cfg.Nodes[1].ExtraMounts) != 0 || len(cfg.Nodes[1].KubeadmConfigPatches) != 0 {
+			t.Fatalf("worker unexpectedly received issuer-host overlay: %+v", cfg.Nodes[1])
+		}
+	})
+
+	t.Run("without loopback forward", func(t *testing.T) {
+		a := &Agent{}
+		raw, source, err := a.resolveConfig(spec, auth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if source != ConfigSourceOIDC {
+			t.Fatalf("source = %q, want %q", source, ConfigSourceOIDC)
+		}
+		cfg := unmarshalKindConfig(t, raw)
+		if len(cfg.Nodes[0].ExtraMounts) != 0 || len(cfg.Nodes[0].KubeadmConfigPatches) != 0 {
+			t.Fatalf("nil loopbackForward should not add hostAliases: %+v", cfg.Nodes[0])
+		}
+	})
+}
+
+func unmarshalKindConfig(t *testing.T, raw []byte) kindConfig {
+	t.Helper()
+	var cfg kindConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func cleanupIssuerHostMounts(t *testing.T, cfg kindConfig) {
+	t.Helper()
+	for _, n := range cfg.Nodes {
+		for _, m := range n.ExtraMounts {
+			if m.ContainerPath == kubeadmIssuerHostPatchesDir {
+				t.Cleanup(func() { _ = os.RemoveAll(m.HostPath) })
+			}
+		}
+	}
+}
+
+func assertIssuerHostKubeadmPatches(t *testing.T, n kindNode) {
+	t.Helper()
+	hasInit := false
+	hasJoin := false
+	for _, p := range n.KubeadmConfigPatches {
+		if strings.Contains(p, "kind: InitConfiguration") && strings.Contains(p, kubeadmIssuerHostPatchesDir) {
+			hasInit = true
+		}
+		if strings.Contains(p, "kind: JoinConfiguration") && strings.Contains(p, kubeadmIssuerHostPatchesDir) {
+			hasJoin = true
+		}
+	}
+	if !hasInit || !hasJoin {
+		t.Fatalf("missing issuer-host kubeadm patches init=%v join=%v patches=%v", hasInit, hasJoin, n.KubeadmConfigPatches)
 	}
 }
 

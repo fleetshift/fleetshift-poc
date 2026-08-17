@@ -156,6 +156,33 @@ func TestEnsureSandboxPKI_LegacyIPOnlyLeafRegenerates(t *testing.T) {
 	assertLeafSAN(t, replaced)
 }
 
+func TestEnsureSandboxPKI_ExpiredLeafRegenerates(t *testing.T) {
+	paths := testSandboxPKIPaths(t.TempDir())
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeExpiredLeaf(t, paths); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := os.ReadFile(paths.LeafCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := aioinit.EnsureSandboxPKI(paths, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := os.ReadFile(paths.LeafCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(expired) == string(replaced) {
+		t.Fatal("expired leaf was not regenerated")
+	}
+	assertLeafSAN(t, replaced)
+	assertKeyMatchesCert(t, paths.LeafKey, replaced)
+}
+
 func TestEnsureSandboxPKI_MismatchedCAKeyFails(t *testing.T) {
 	paths := testSandboxPKIPaths(t.TempDir())
 	uid, gid := os.Getuid(), os.Getgid()
@@ -276,6 +303,56 @@ func writeLegacyIPLeaf(t *testing.T, paths aioinit.SandboxPKIPaths) error {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(paths.LeafCert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0644); err != nil {
+		return err
+	}
+	if err := os.Chmod(paths.LeafKey, 0600); err != nil {
+		return err
+	}
+	return os.WriteFile(paths.LeafKey, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0400)
+}
+
+func writeExpiredLeaf(t *testing.T, paths aioinit.SandboxPKIPaths) error {
+	t.Helper()
+	caPEM, err := os.ReadFile(paths.CACert)
+	if err != nil {
+		return err
+	}
+	caKeyPEM, err := os.ReadFile(paths.CAKey)
+	if err != nil {
+		return err
+	}
+	cb, _ := pem.Decode(caPEM)
+	caCert, err := x509.ParseCertificate(cb.Bytes)
+	if err != nil {
+		return err
+	}
+	kb, _ := pem.Decode(caKeyPEM)
+	caKey, err := x509.ParseECPrivateKey(kb.Bytes)
+	if err != nil {
+		return err
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(100),
+		Subject:      pkix.Name{CommonName: "FleetShift AIO Gateway"},
+		NotBefore:    time.Now().Add(-2 * time.Hour),
+		NotAfter:     time.Now().Add(-time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{aioinit.PublicHost},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
 	if err != nil {

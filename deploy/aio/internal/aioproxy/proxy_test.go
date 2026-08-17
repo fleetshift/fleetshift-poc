@@ -34,18 +34,6 @@ const (
 func TestProxy_New_PublicOrigin(t *testing.T) {
 	dex := mustURL(t, "http://127.0.0.1:1")
 	app := mustURL(t, "http://127.0.0.1:1")
-	_, err := aioproxy.New(aioproxy.Config{DexURL: dex, AppURL: app})
-	if err == nil || !strings.Contains(err.Error(), "public origin is required") {
-		t.Fatalf("New() = %v, want public origin required", err)
-	}
-	_, err = aioproxy.New(aioproxy.Config{
-		PublicOrigin: publicOrigin + "/dex",
-		DexURL:       dex,
-		AppURL:       app,
-	})
-	if err == nil || !strings.Contains(err.Error(), "path must be empty") {
-		t.Fatalf("New() = %v, want path rejected", err)
-	}
 	p, err := aioproxy.New(aioproxy.Config{
 		PublicOrigin: publicOrigin + "/",
 		DexURL:       dex,
@@ -60,6 +48,85 @@ func TestProxy_New_PublicOrigin(t *testing.T) {
 	p.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("derived host rejected canonical request: status=%d", rr.Code)
+	}
+}
+
+func TestProxy_New_RejectsBadConfig(t *testing.T) {
+	dex := mustURL(t, "http://127.0.0.1:1")
+	app := mustURL(t, "http://127.0.0.1:1")
+	tests := []struct {
+		name string
+		cfg  aioproxy.Config
+		want string
+	}{
+		{
+			name: "missing origin",
+			cfg:  aioproxy.Config{DexURL: dex, AppURL: app},
+			want: "public origin is required",
+		},
+		{
+			name: "origin path",
+			cfg: aioproxy.Config{
+				PublicOrigin: publicOrigin + "/dex",
+				DexURL:       dex,
+				AppURL:       app,
+			},
+			want: "path must be empty",
+		},
+		{
+			name: "origin userinfo",
+			cfg: aioproxy.Config{
+				PublicOrigin: "https://u:p@" + canonicalHost,
+				DexURL:       dex,
+				AppURL:       app,
+			},
+			want: "userinfo",
+		},
+		{
+			name: "origin scheme",
+			cfg: aioproxy.Config{
+				PublicOrigin: "ftp://" + canonicalHost,
+				DexURL:       dex,
+				AppURL:       app,
+			},
+			want: "scheme must be http or https",
+		},
+		{
+			name: "nil dex",
+			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, AppURL: app},
+			want: "dex upstream is required",
+		},
+		{
+			name: "nil app",
+			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, DexURL: dex},
+			want: "app upstream is required",
+		},
+		{
+			name: "dex userinfo",
+			cfg: aioproxy.Config{
+				PublicOrigin: publicOrigin,
+				DexURL:       mustURL(t, "http://u:p@127.0.0.1:1"),
+				AppURL:       app,
+			},
+			want: "userinfo",
+		},
+		{
+			name: "dex scheme",
+			cfg: aioproxy.Config{
+				PublicOrigin: publicOrigin,
+				DexURL:       mustURL(t, "ftp://127.0.0.1:1"),
+				AppURL:       app,
+			},
+			want: "scheme must be http or https",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := aioproxy.New(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("New() = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -154,9 +221,25 @@ func TestProxy_PreservesEncodedPath(t *testing.T) {
 	}
 }
 
+func TestProxy_EncodedDexSlashStaysOnApp(t *testing.T) {
+	dex, app := recordingUpstreams(t)
+	p := newTestProxy(t, dex.URL, app.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/dex%2Fauth", nil)
+	req.Host = canonicalHost
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.Bytes())
+	}
+	if got := rr.Header().Get("X-Upstream"); got != "app" {
+		t.Fatalf("X-Upstream = %q, want app", got)
+	}
+}
+
 func TestProxy_DropsSpoofedForwardingHeaders(t *testing.T) {
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, h := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Real-IP", "X-Forwarded-User", "Forwarded"} {
+		for _, h := range aioproxy.ForwardingHeaders {
 			if v := r.Header.Get(h); v != "" {
 				t.Errorf("upstream saw %s=%q", h, v)
 			}
@@ -173,15 +256,11 @@ func TestProxy_DropsSpoofedForwardingHeaders(t *testing.T) {
 	t.Cleanup(dex.Close)
 	p := newTestProxy(t, dex.URL, app.URL)
 
-	rr := doProxy(t, p, http.MethodGet, "/api/ui/config", nil, map[string]string{
-		"X-Forwarded-For":   "1.2.3.4",
-		"X-Forwarded-Host":  "evil.example",
-		"X-Forwarded-Proto": "http",
-		"X-Forwarded-Port":  "80",
-		"X-Real-IP":         "1.2.3.4",
-		"X-Forwarded-User":  "admin",
-		"Forwarded":         "for=1.2.3.4",
-	})
+	headers := make(map[string]string, len(aioproxy.ForwardingHeaders))
+	for _, h := range aioproxy.ForwardingHeaders {
+		headers[h] = "spoofed"
+	}
+	rr := doProxy(t, p, http.MethodGet, "/api/ui/config", nil, headers)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}

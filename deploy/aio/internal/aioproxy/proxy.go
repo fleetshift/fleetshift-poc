@@ -22,9 +22,9 @@ const (
 	maxHeaderBytes    = 1 << 20
 )
 
-// forwardingHeaders are client-supplied proxy and identity headers removed
+// ForwardingHeaders are client-supplied proxy and identity headers removed
 // before the upstream request.
-var forwardingHeaders = []string{
+var ForwardingHeaders = []string{
 	"Forwarded",
 	"X-Forwarded-For",
 	"X-Forwarded-Host",
@@ -230,7 +230,7 @@ func newUpstream(target *url.URL, transport http.RoundTripper) *httputil.Reverse
 
 // dropForwardingHeaders removes client-supplied forwarding and identity headers from h.
 func dropForwardingHeaders(h http.Header) {
-	for _, name := range forwardingHeaders {
+	for _, name := range ForwardingHeaders {
 		h.Del(name)
 	}
 }
