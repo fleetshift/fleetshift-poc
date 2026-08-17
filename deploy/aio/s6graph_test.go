@@ -46,14 +46,17 @@ func TestS6ProxyGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	fsBody := string(fsRun)
-	if !strings.Contains(fsBody, "https://fleetshift-sandbox.localhost:8085/dex/.well-known/openid-configuration") {
-		t.Fatal("fleetshift run must probe public Dex discovery")
+	if !strings.Contains(fsBody, ". /run/fleetshift/public.env") {
+		t.Fatal("fleetshift run must source public.env for Dex discovery")
+	}
+	if !strings.Contains(fsBody, "${DEX_DISCOVERY_URL}") {
+		t.Fatal("fleetshift run must probe Dex discovery from public.env")
 	}
 	if !strings.Contains(fsBody, "--cacert /data/sandbox/pki/ca.crt") {
 		t.Fatal("fleetshift run must trust the sandbox CA")
 	}
-	if !strings.Contains(fsBody, "--noproxy fleetshift-sandbox.localhost") {
-		t.Fatal("fleetshift run must bypass HTTP_PROXY for fleetshift-sandbox.localhost")
+	if !strings.Contains(fsBody, `--noproxy "${PUBLIC_HOST}"`) {
+		t.Fatal("fleetshift run must bypass HTTP_PROXY for PUBLIC_HOST")
 	}
 	if strings.Contains(fsBody, "curl -k") || strings.Contains(fsBody, "curl -sk") {
 		t.Fatal("fleetshift run must not use curl -k")

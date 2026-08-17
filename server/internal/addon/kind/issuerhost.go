@@ -2,30 +2,57 @@ package kind
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
-	// LoopbackIssuerHostEnv names the peer-Dex issuer host injected into
-	// kube-apiserver hostAliases.
-	LoopbackIssuerHostEnv = "KIND_LOOPBACK_ISSUER_HOST"
-
 	kubeadmIssuerHostPatchesDir = "/etc/kubernetes/patches/oidc-issuer-host"
 	kubeadmIssuerHostPatchFile  = "kube-apiserver0+merge.yaml"
 )
 
-// validateLoopbackIssuerHost requires hostname to equal the issuer URL host.
-func validateLoopbackIssuerHost(issuerURL, hostname string) error {
+// applyLoopbackIssuerHost extra-mounts a kubeadm hostAliases patch for the
+// issuer hostname so kube-apiserver can reach a loopback-forwarded IdP.
+// Already-loopback hosts (localhost / 127.0.0.0/8 / ::1) are left unchanged.
+func applyLoopbackIssuerHost(config *kindConfig, issuerURL string) error {
+	host, err := issuerHostname(issuerURL)
+	if err != nil {
+		return err
+	}
+	if isLoopbackHostname(host) {
+		return nil
+	}
+	patchDir, err := writeIssuerHostPatch(host)
+	if err != nil {
+		return err
+	}
+	applyIssuerHostOverlay(config, patchDir)
+	return nil
+}
+
+// issuerHostname returns the host (no port) from issuerURL.
+func issuerHostname(issuerURL string) (string, error) {
 	u, err := url.Parse(issuerURL)
 	if err != nil {
-		return fmt.Errorf("%s: parse issuer: %w", LoopbackIssuerHostEnv, err)
+		return "", fmt.Errorf("parse issuer: %w", err)
 	}
-	if u.Hostname() != hostname {
-		return fmt.Errorf("%s %q does not match issuer host %q", LoopbackIssuerHostEnv, hostname, u.Hostname())
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("issuer host is empty")
 	}
-	return nil
+	return host, nil
+}
+
+// isLoopbackHostname reports whether host is localhost or a loopback address.
+func isLoopbackHostname(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // writeIssuerHostPatch writes a kubeadm strategic-merge patch that adds

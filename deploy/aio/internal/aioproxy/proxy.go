@@ -43,21 +43,20 @@ var forwardingHeaders = []string{
 }
 
 // Config is the AIO TLS-edge configuration. DexURL and AppURL are the Dex and
-// FleetShift loopback upstreams.
+// FleetShift loopback upstreams. The accepted Host header is derived from
+// PublicOrigin.
 type Config struct {
-	ListenAddr    string
-	CertFile      string
-	KeyFile       string
-	PublicOrigin  string
-	CanonicalHost string
-	DexURL        *url.URL
-	AppURL        *url.URL
+	ListenAddr   string
+	CertFile     string
+	KeyFile      string
+	PublicOrigin string
+	DexURL       *url.URL
+	AppURL       *url.URL
 }
 
 // Proxy terminates the AIO gateway certificate and multiplexes /dex to Dex
 // and every other path to FleetShift.
 type Proxy struct {
-	listenAddr    string
 	certFile      string
 	keyFile       string
 	publicOrigin  string
@@ -68,13 +67,12 @@ type Proxy struct {
 }
 
 // New constructs a Proxy for cfg. DexURL and AppURL must be non-nil absolute
-// http or https URLs without userinfo.
+// http or https URLs without userinfo. PublicOrigin must be an absolute http
+// or https origin; its host is the only accepted Host header.
 func New(cfg Config) (*Proxy, error) {
-	if cfg.CanonicalHost == "" {
-		return nil, fmt.Errorf("canonical host is required")
-	}
-	if cfg.PublicOrigin == "" {
-		return nil, fmt.Errorf("public origin is required")
+	origin, host, err := parsePublicOrigin(cfg.PublicOrigin)
+	if err != nil {
+		return nil, err
 	}
 	if err := checkUpstream("dex", cfg.DexURL); err != nil {
 		return nil, err
@@ -85,11 +83,10 @@ func New(cfg Config) (*Proxy, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	p := &Proxy{
-		listenAddr:    cfg.ListenAddr,
 		certFile:      cfg.CertFile,
 		keyFile:       cfg.KeyFile,
-		publicOrigin:  cfg.PublicOrigin,
-		canonicalHost: cfg.CanonicalHost,
+		publicOrigin:  origin,
+		canonicalHost: host,
 		dex:           newUpstream(cfg.DexURL, transport),
 		app:           newUpstream(cfg.AppURL, transport),
 	}
@@ -131,10 +128,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ListenAndServe serves HTTPS on the configured address until ctx is cancelled.
 func (p *Proxy) ListenAndServe(ctx context.Context) error {
-	if p.listenAddr == "" {
+	if p.server.Addr == "" {
 		return fmt.Errorf("listen address is required")
 	}
-	ln, err := net.Listen("tcp", p.listenAddr)
+	ln, err := net.Listen("tcp", p.server.Addr)
 	if err != nil {
 		return err
 	}
@@ -155,6 +152,37 @@ func (p *Proxy) ListenAndServe(ctx context.Context) error {
 	case err := <-errc:
 		return err
 	}
+}
+
+// parsePublicOrigin validates that raw is an absolute http or https origin
+// with no userinfo, query, fragment, or path other than "/". It returns the
+// canonical origin (no trailing slash) and the URL host (name + port).
+func parsePublicOrigin(raw string) (origin, host string, err error) {
+	if raw == "" {
+		return "", "", fmt.Errorf("public origin is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("public origin: %w", err)
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return "", "", fmt.Errorf("public origin scheme must be http or https")
+	}
+	if u.User != nil {
+		return "", "", fmt.Errorf("public origin must not include userinfo")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", "", fmt.Errorf("public origin must not include query or fragment")
+	}
+	if u.Host == "" {
+		return "", "", fmt.Errorf("public origin host is required")
+	}
+	if u.Path != "" && u.Path != "/" {
+		return "", "", fmt.Errorf("public origin path must be empty or /")
+	}
+	return u.Scheme + "://" + u.Host, u.Host, nil
 }
 
 // checkUpstream reports whether u is an http(s) URL with a host and no userinfo.

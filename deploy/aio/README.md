@@ -88,7 +88,6 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (adds `gcphcp` when gateway/config set) |
 | Container socket | `CONTAINER_HOST` | `unix:///var/run/docker.sock` |
 | Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | `fleetshift:8085` on Dex-on (empty disables) |
-| Kind issuer host | `KIND_LOOPBACK_ISSUER_HOST` | `fleetshift-sandbox.localhost` on Dex-on (empty disables) |
 
 Registry id and subject expression must be set together when overriding either.
 Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive
@@ -151,16 +150,15 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
   intentionally empty to disable)
 - On Dex-on only: `KIND_LOOPBACK_FORWARD_TO=fleetshift:8085` so kind
   control-plane nodes run a loopback TCP proxy (`127.0.0.1:8085` →
-  `fleetshift:8085`, the AIO TLS edge). A TCP proxy binary is run as a
-  systemd unit on the node (not iptables DNAT) so Fedora and macOS behave
-  the same. Podman DNS resolves the `fleetshift` alias, so AIO restarts keep
-  working. Override with a different `host:port`, or set the variable empty
-  to disable.
-- On Dex-on only: `KIND_LOOPBACK_ISSUER_HOST=fleetshift-sandbox.localhost` so
-  kube-apiserver static Pods get a `hostAliases` mapping to `127.0.0.1`
-  before first start. That mapping is installed via a kubeadm patch
-  directory extra-mounted into control-plane nodes. Set the variable empty
-  to disable.
+  `fleetshift:8085`, the AIO TLS edge). The kind addon also installs a
+  kube-apiserver `hostAliases` mapping for the OIDC issuer hostname
+  (via a kubeadm patch directory extra-mounted into control-plane nodes)
+  so that name resolves to `127.0.0.1` before first start. A TCP proxy
+  binary is run as a systemd unit on the node (not iptables DNAT) so
+  Fedora and macOS behave the same. Podman DNS resolves the `fleetshift`
+  alias, so AIO restarts keep working. Override with a different
+  `host:port`, or set the variable empty to disable both the proxy and
+  the hostAliases overlay.
 
 Join `--network kind:alias=fleetshift`. Without that alias the default
 destination host does not resolve from kind nodes. No host `/etc/hosts`
@@ -264,12 +262,11 @@ show `/init` as PID 1.
 
 | Path | Role |
 |---|---|
-| `cmd/aio-init` | Init helper: Dex-on/off branch, PKI, Dex config, serve argv, hosts alias |
+| `cmd/aio-init` | Init helper: Dex-on/off branch, PKI, Dex config, serve argv, hosts alias, public.env |
 | `cmd/aio-proxy` | TLS edge: terminates the gateway cert and reverse-proxies Dex and FleetShift |
 | `cmd/kind-loopback-forward` | TCP proxy copied onto kind control-planes for the public origin |
-| `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `gcphcp`, `kind`) |
+| `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `gcphcp`, `kind`, `hosts`) |
 | `internal/aioproxy` | Reverse-proxy implementation used by `aio-proxy` |
-| `internal/hostalias` | Append-only `/etc/hosts` mapping inside the AIO container |
 | `internal/loopbackforward` | Proxy implementation used by `kind-loopback-forward` |
 | `s6/` | s6-overlay v3 service defs (copied to `/etc/s6-overlay/`) |
 

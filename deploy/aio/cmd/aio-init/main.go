@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/hostalias"
 )
 
 const (
@@ -41,7 +40,7 @@ func run() error {
 	if err := prepareDataLayout(); err != nil {
 		return err
 	}
-	if err := hostalias.Ensure(hostsPath, "127.0.0.1", aioinit.PublicHost, aioinit.HostsMarker); err != nil {
+	if err := aioinit.EnsureHostsAlias(hostsPath, "127.0.0.1", aioinit.PublicHost, aioinit.HostsMarker); err != nil {
 		return fmt.Errorf("hosts alias: %w", err)
 	}
 	endpoints := aioinit.FixedEndpoints
@@ -102,7 +101,10 @@ func run() error {
 	if err := os.Chown(aioinit.ServeExecPath, 0, 0); err != nil {
 		return err
 	}
-	if err := aioinit.ConfigureKindEnv(aioinit.KindEnvPath, dexOn, endpoints.GatewayListen); err != nil {
+	if err := aioinit.WritePublicEnv(aioinit.PublicEnvPath, dexOn); err != nil {
+		return fmt.Errorf("write public env: %w", err)
+	}
+	if err := aioinit.ConfigureKindEnv(aioinit.KindEnvPath, dexOn); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "aio-init: dexOn=%v issuer=%s\n", dexOn, in.Issuer)

@@ -31,6 +31,38 @@ const (
 	canonicalHost = "fleetshift-sandbox.localhost:8085"
 )
 
+func TestProxy_New_PublicOrigin(t *testing.T) {
+	dex := mustURL(t, "http://127.0.0.1:1")
+	app := mustURL(t, "http://127.0.0.1:1")
+	_, err := aioproxy.New(aioproxy.Config{DexURL: dex, AppURL: app})
+	if err == nil || !strings.Contains(err.Error(), "public origin is required") {
+		t.Fatalf("New() = %v, want public origin required", err)
+	}
+	_, err = aioproxy.New(aioproxy.Config{
+		PublicOrigin: publicOrigin + "/dex",
+		DexURL:       dex,
+		AppURL:       app,
+	})
+	if err == nil || !strings.Contains(err.Error(), "path must be empty") {
+		t.Fatalf("New() = %v, want path rejected", err)
+	}
+	p, err := aioproxy.New(aioproxy.Config{
+		PublicOrigin: publicOrigin + "/",
+		DexURL:       dex,
+		AppURL:       app,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/", nil)
+	req.Host = canonicalHost
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("derived host rejected canonical request: status=%d", rr.Code)
+	}
+}
+
 func TestProxy_RoutesDexAndApp(t *testing.T) {
 	dex, app := recordingUpstreams(t)
 	p := newTestProxy(t, dex.URL, app.URL)
@@ -365,13 +397,12 @@ func TestProxy_ListenAndServeTLS(t *testing.T) {
 	_ = ln.Close()
 
 	p, err := aioproxy.New(aioproxy.Config{
-		ListenAddr:    addr,
-		CertFile:      certFile,
-		KeyFile:       keyFile,
-		PublicOrigin:  publicOrigin,
-		CanonicalHost: canonicalHost,
-		DexURL:        mustURL(t, dex.URL),
-		AppURL:        mustURL(t, app.URL),
+		ListenAddr:   addr,
+		CertFile:     certFile,
+		KeyFile:      keyFile,
+		PublicOrigin: publicOrigin,
+		DexURL:       mustURL(t, dex.URL),
+		AppURL:       mustURL(t, app.URL),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -445,10 +476,9 @@ func recordingUpstreams(t *testing.T) (dex, app *httptest.Server) {
 func newTestProxy(t *testing.T, dexURL, appURL string) *aioproxy.Proxy {
 	t.Helper()
 	p, err := aioproxy.New(aioproxy.Config{
-		PublicOrigin:  publicOrigin,
-		CanonicalHost: canonicalHost,
-		DexURL:        mustURL(t, dexURL),
-		AppURL:        mustURL(t, appURL),
+		PublicOrigin: publicOrigin,
+		DexURL:       mustURL(t, dexURL),
+		AppURL:       mustURL(t, appURL),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -190,21 +190,6 @@ func TestLoadServeConfig(t *testing.T) {
 				OIDCIssuer: "https://issuer.example/oidc",
 			},
 		},
-		{
-			name: "ui origin accepted",
-			flags: serveFlags{
-				grpcAddr: ":50051",
-				httpAddr: "127.0.0.1:8086",
-				dbPath:   bootstrap.DefaultSQLitePath,
-				uiOrigin: "https://fleetshift-sandbox.localhost:8085",
-			},
-			want: bootstrap.Config{
-				GRPCAddr: ":50051",
-				HTTPAddr: "127.0.0.1:8086",
-				Database: bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
-				UIOrigin: "https://fleetshift-sandbox.localhost:8085",
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -307,7 +292,6 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 		got.OIDCRegistrySubjectExpression != want.OIDCRegistrySubjectExpression ||
 		got.OIDCPublicKeyClaimExpression != want.OIDCPublicKeyClaimExpression ||
 		got.GCPHCPConfigPath != want.GCPHCPConfigPath ||
-		got.UIOrigin != want.UIOrigin ||
 		string(got.OIDCCABundle) != string(want.OIDCCABundle) {
 		t.Fatalf("config mismatch:\n got: %#v\nwant: %#v", got, want)
 	}

@@ -1,6 +1,4 @@
-// Package hostalias appends a single marked /etc/hosts mapping inside the AIO
-// container. It does not edit the user's host file.
-package hostalias
+package aioinit
 
 import (
 	"bufio"
@@ -9,11 +7,11 @@ import (
 	"strings"
 )
 
-// Ensure appends `ip hostname # marker` to path when that exact mapping is
-// missing. It returns if the exact line already exists or hostname already
-// maps to ip. A different IP for hostname is an error. path must already
-// exist; the file is opened for append and is never replaced.
-func Ensure(path, ip, hostname, marker string) error {
+// EnsureHostsAlias appends `ip hostname # marker` to path when that exact
+// mapping is missing. It returns if the exact line already exists or hostname
+// already maps to ip. A different IP for hostname is an error. path must
+// already exist; the file is opened for append and is never replaced.
+func EnsureHostsAlias(path, ip, hostname, marker string) error {
 	if ip == "" || hostname == "" || marker == "" {
 		return fmt.Errorf("hosts alias: ip, hostname, and marker are required")
 	}

@@ -20,7 +20,6 @@ func TestApplyServeDefaultsAndArgs(t *testing.T) {
 	for _, want := range []string{
 		"serve",
 		"--http-addr\x00127.0.0.1:8086",
-		"--ui-origin\x00https://fleetshift-sandbox.localhost:8085",
 		"--oidc-issuer\x00https://fleetshift-sandbox.localhost:8085/dex",
 		"--oidc-resource-audience\x00fleetshift",
 		"--oidc-ui-client-id\x00fleetshift-ui",

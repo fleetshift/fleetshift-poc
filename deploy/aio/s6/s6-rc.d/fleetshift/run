@@ -3,13 +3,15 @@
 # through the AIO TLS edge so the serve bootstrap budget is not consumed by Dex boot.
 set -eu
 if [ -f /run/fleetshift/dex.enabled ]; then
+	# shellcheck disable=SC1091
+	. /run/fleetshift/public.env
 	i=0
 	ready=0
 	while [ "$i" -lt 30 ]; do
 		if curl -sf --max-time 2 \
 			--cacert /data/sandbox/pki/ca.crt \
-			--noproxy fleetshift-sandbox.localhost \
-			"https://fleetshift-sandbox.localhost:8085/dex/.well-known/openid-configuration" \
+			--noproxy "${PUBLIC_HOST}" \
+			"${DEX_DISCOVERY_URL}" \
 			>/dev/null 2>&1; then
 			ready=1
 			break
@@ -18,7 +20,7 @@ if [ -f /run/fleetshift/dex.enabled ]; then
 		sleep 1
 	done
 	if [ "$ready" -ne 1 ]; then
-		echo "aio: peer Dex discovery was not ready at https://fleetshift-sandbox.localhost:8085/dex" >&2
+		echo "aio: peer Dex discovery was not ready at ${PUBLIC_ORIGIN}/dex" >&2
 		exit 1
 	fi
 fi
@@ -28,8 +30,8 @@ export HOME=/data
 
 # Optional kind packaging defaults (written by aio-init when a container
 # engine socket is mounted): KIND_EXPERIMENTAL_DOCKER_NETWORK and, on Dex-on,
-# KIND_LOOPBACK_FORWARD_TO for the control-plane loopback TCP proxy and
-# KIND_LOOPBACK_ISSUER_HOST for kube-apiserver hostAliases.
+# KIND_LOOPBACK_FORWARD_TO for the control-plane loopback TCP proxy (which also
+# installs kube-apiserver hostAliases for the issuer hostname).
 if [ -f /run/fleetshift/kind.env ]; then
 	set -a
 	# shellcheck disable=SC1091

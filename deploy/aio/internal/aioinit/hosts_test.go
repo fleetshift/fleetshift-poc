@@ -1,4 +1,4 @@
-package hostalias_test
+package aioinit_test
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/hostalias"
+	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
 )
 
 const (
@@ -17,12 +17,12 @@ const (
 	originalBody = "127.0.0.1 localhost\n::1 localhost ip6-localhost\n"
 )
 
-func TestEnsure_AppendsMarkedLine(t *testing.T) {
+func TestEnsureHostsAlias_AppendsMarkedLine(t *testing.T) {
 	path := writeHosts(t, originalBody)
-	if err := hostalias.Ensure(path, testIP, testHost, testMarker); err != nil {
+	if err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker); err != nil {
 		t.Fatal(err)
 	}
-	body := readFile(t, path)
+	body := readHosts(t, path)
 	if !strings.HasPrefix(body, originalBody) {
 		t.Fatalf("existing content was not preserved:\n%s", body)
 	}
@@ -34,51 +34,51 @@ func TestEnsure_AppendsMarkedLine(t *testing.T) {
 	}
 }
 
-func TestEnsure_IdempotentExactLine(t *testing.T) {
+func TestEnsureHostsAlias_IdempotentExactLine(t *testing.T) {
 	path := writeHosts(t, originalBody+wantLine+"\n")
-	if err := hostalias.Ensure(path, testIP, testHost, testMarker); err != nil {
+	if err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker); err != nil {
 		t.Fatal(err)
 	}
-	body := readFile(t, path)
+	body := readHosts(t, path)
 	if strings.Count(body, wantLine) != 1 {
 		t.Fatalf("exact line was duplicated:\n%s", body)
 	}
 }
 
-func TestEnsure_IdempotentExistingMapping(t *testing.T) {
+func TestEnsureHostsAlias_IdempotentExistingMapping(t *testing.T) {
 	path := writeHosts(t, "127.0.0.1 localhost fleetshift-sandbox.localhost\n")
-	if err := hostalias.Ensure(path, testIP, testHost, testMarker); err != nil {
+	if err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker); err != nil {
 		t.Fatal(err)
 	}
-	body := readFile(t, path)
+	body := readHosts(t, path)
 	if strings.Contains(body, wantLine) {
 		t.Fatalf("appended a second mapping for the same IP:\n%s", body)
 	}
 }
 
-func TestEnsure_ConflictingMapping(t *testing.T) {
+func TestEnsureHostsAlias_ConflictingMapping(t *testing.T) {
 	path := writeHosts(t, "10.0.0.1 fleetshift-sandbox.localhost\n")
-	err := hostalias.Ensure(path, testIP, testHost, testMarker)
+	err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker)
 	if err == nil || !strings.Contains(err.Error(), "conflicting hosts mapping") {
-		t.Fatalf("Ensure() = %v, want conflicting hosts mapping", err)
+		t.Fatalf("EnsureHostsAlias() = %v, want conflicting hosts mapping", err)
 	}
-	if readFile(t, path) != "10.0.0.1 fleetshift-sandbox.localhost\n" {
+	if readHosts(t, path) != "10.0.0.1 fleetshift-sandbox.localhost\n" {
 		t.Fatal("conflicting file was modified")
 	}
 }
 
-func TestEnsure_MissingNewlineStillAppends(t *testing.T) {
+func TestEnsureHostsAlias_MissingNewlineStillAppends(t *testing.T) {
 	path := writeHosts(t, "127.0.0.1 localhost")
-	if err := hostalias.Ensure(path, testIP, testHost, testMarker); err != nil {
+	if err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker); err != nil {
 		t.Fatal(err)
 	}
-	body := readFile(t, path)
+	body := readHosts(t, path)
 	if !strings.Contains(body, "127.0.0.1 localhost\n"+wantLine+"\n") {
 		t.Fatalf("expected newline before append:\n%q", body)
 	}
 }
 
-func TestEnsure_ReadOnly(t *testing.T) {
+func TestEnsureHostsAlias_ReadOnly(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can write a 0444 file")
 	}
@@ -87,17 +87,17 @@ func TestEnsure_ReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0644) })
-	err := hostalias.Ensure(path, testIP, testHost, testMarker)
+	err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker)
 	if err == nil {
 		t.Fatal("expected read-only failure")
 	}
 }
 
-func TestEnsure_MissingFile(t *testing.T) {
+func TestEnsureHostsAlias_MissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "no-such-hosts")
-	err := hostalias.Ensure(path, testIP, testHost, testMarker)
+	err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker)
 	if err == nil || !strings.Contains(err.Error(), "read hosts file") {
-		t.Fatalf("Ensure() = %v, want read hosts file", err)
+		t.Fatalf("EnsureHostsAlias() = %v, want read hosts file", err)
 	}
 }
 
@@ -110,7 +110,7 @@ func writeHosts(t *testing.T, body string) string {
 	return path
 }
 
-func readFile(t *testing.T, path string) string {
+func readHosts(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {

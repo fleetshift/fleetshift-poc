@@ -7,13 +7,55 @@ import (
 	"testing"
 )
 
-func TestValidateLoopbackIssuerHost(t *testing.T) {
-	if err := validateLoopbackIssuerHost("https://fleetshift-sandbox.localhost:8085/dex", "fleetshift-sandbox.localhost"); err != nil {
+func TestIssuerHostname(t *testing.T) {
+	got, err := issuerHostname("https://fleetshift-sandbox.localhost:8085/dex")
+	if err != nil {
 		t.Fatal(err)
 	}
-	err := validateLoopbackIssuerHost("https://127.0.0.1:8085/dex", "fleetshift-sandbox.localhost")
-	if err == nil || !strings.Contains(err.Error(), "does not match issuer host") {
-		t.Fatalf("validateLoopbackIssuerHost() = %v, want mismatch", err)
+	if got != "fleetshift-sandbox.localhost" {
+		t.Fatalf("issuerHostname = %q", got)
+	}
+	if _, err := issuerHostname("https:///dex"); err == nil {
+		t.Fatal("expected empty host error")
+	}
+}
+
+func TestIsLoopbackHostname(t *testing.T) {
+	for _, host := range []string{"localhost", "127.0.0.1", "::1"} {
+		if !isLoopbackHostname(host) {
+			t.Fatalf("isLoopbackHostname(%q) = false", host)
+		}
+	}
+	if isLoopbackHostname("fleetshift-sandbox.localhost") {
+		t.Fatal("DNS .localhost name is not a loopback address")
+	}
+}
+
+func TestApplyLoopbackIssuerHost_SkipsLoopback(t *testing.T) {
+	cfg := toKindConfig(ClusterSpec{Name: "x", Nodes: []NodeSpec{{Role: "control-plane"}}})
+	if err := applyLoopbackIssuerHost(&cfg, "https://127.0.0.1:8085/dex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Nodes[0].ExtraMounts) != 0 || len(cfg.Nodes[0].KubeadmConfigPatches) != 0 {
+		t.Fatalf("loopback issuer should not add hostAliases: %+v", cfg.Nodes[0])
+	}
+}
+
+func TestApplyLoopbackIssuerHost_AddsPatchForDNSHost(t *testing.T) {
+	cfg := toKindConfig(ClusterSpec{Name: "x", Nodes: []NodeSpec{{Role: "control-plane"}}})
+	if err := applyLoopbackIssuerHost(&cfg, "https://fleetshift-sandbox.localhost:8085/dex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Nodes[0].ExtraMounts) != 1 {
+		t.Fatalf("mounts = %+v", cfg.Nodes[0].ExtraMounts)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(cfg.Nodes[0].ExtraMounts[0].HostPath) })
+	raw, err := os.ReadFile(filepath.Join(cfg.Nodes[0].ExtraMounts[0].HostPath, kubeadmIssuerHostPatchFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "- fleetshift-sandbox.localhost") {
+		t.Fatalf("patch missing hostname:\n%s", raw)
 	}
 }
 

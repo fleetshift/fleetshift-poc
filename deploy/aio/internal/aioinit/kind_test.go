@@ -95,7 +95,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 		t.Setenv("CONTAINER_HOST", "")
 		clearEnv(t, kindExperimentalNetKey)
-		if err := ConfigureKindEnv(path, true, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -107,7 +107,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
-		if err := ConfigureKindEnv(path, false, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, false); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -121,16 +121,13 @@ func TestConfigureKindEnv(t *testing.T) {
 		if strings.Contains(body, loopbackForwardToEnvKey+"=") {
 			t.Fatalf("Dex-off should omit loopback forward: %q", body)
 		}
-		if strings.Contains(body, loopbackIssuerHostEnvKey+"=") {
-			t.Fatalf("Dex-off should omit issuer host: %q", body)
-		}
 	})
 
 	t.Run("preserves explicit network override", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		t.Setenv(kindExperimentalNetKey, "custom-net")
-		if err := ConfigureKindEnv(path, false, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -143,7 +140,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		t.Setenv(kindExperimentalNetKey, "")
-		if err := ConfigureKindEnv(path, false, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -157,8 +154,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		clearEnv(t, loopbackForwardToEnvKey)
-		clearEnv(t, loopbackIssuerHostEnvKey)
-		if err := ConfigureKindEnv(path, true, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -173,10 +169,6 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("kind.env missing %q, got %q", want, body)
 		}
-		wantHost := loopbackIssuerHostEnvKey + "=" + PublicHost + "\n"
-		if !strings.Contains(body, wantHost) {
-			t.Fatalf("kind.env missing %q, got %q", wantHost, body)
-		}
 	})
 
 	t.Run("preserves explicit loopback forward override", func(t *testing.T) {
@@ -184,7 +176,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		t.Setenv(loopbackForwardToEnvKey, "10.89.0.2:5556")
-		if err := ConfigureKindEnv(path, true, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -205,7 +197,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		t.Setenv(loopbackForwardToEnvKey, "")
-		if err := ConfigureKindEnv(path, true, ":8085"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -218,44 +210,6 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 		if strings.Contains(body, loopbackForwardToEnvKey+"=") {
 			t.Fatalf("empty loopback forward override should not be rewritten: %q", body)
-		}
-	})
-
-	t.Run("preserves explicit issuer host override", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "kind.env")
-		withUnixSocket(t)
-		clearEnv(t, kindExperimentalNetKey)
-		clearEnv(t, loopbackForwardToEnvKey)
-		t.Setenv(loopbackIssuerHostEnvKey, "other.localhost")
-		if err := ConfigureKindEnv(path, true, ":8085"); err != nil {
-			t.Fatal(err)
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := string(raw)
-		if strings.Contains(body, loopbackIssuerHostEnvKey+"=") {
-			t.Fatalf("explicit issuer host should not be rewritten: %q", body)
-		}
-	})
-
-	t.Run("preserves empty issuer host override", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "kind.env")
-		withUnixSocket(t)
-		clearEnv(t, kindExperimentalNetKey)
-		clearEnv(t, loopbackForwardToEnvKey)
-		t.Setenv(loopbackIssuerHostEnvKey, "")
-		if err := ConfigureKindEnv(path, true, ":8085"); err != nil {
-			t.Fatal(err)
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := string(raw)
-		if strings.Contains(body, loopbackIssuerHostEnvKey+"=") {
-			t.Fatalf("empty issuer host override should not be rewritten: %q", body)
 		}
 	})
 }

@@ -30,16 +30,6 @@ func DeriveUIOrigin(httpAddr string) (string, error) {
 	return "http://" + net.JoinHostPort(host, port), nil
 }
 
-// advertisedUIOrigin returns the trusted uiOrigin advertised to the browser.
-// Config.UIOrigin wins when set; otherwise the origin is derived from the
-// HTTP listen address.
-func advertisedUIOrigin(cfg Config) (string, error) {
-	if cfg.UIOrigin != "" {
-		return cfg.UIOrigin, nil
-	}
-	return DeriveUIOrigin(cfg.HTTPAddr)
-}
-
 // splitHostPort parses an HTTP listen address into host and port. A leading
 // colon form (":8080") yields an empty host.
 func splitHostPort(addr string) (host, port string, err error) {
@@ -125,9 +115,9 @@ func registerUIHTTP(topMux *http.ServeMux, deps uiHTTPDeps) error {
 		AuthMethods: deps.authMethods, Verifier: deps.verifier, Store: deps.store, ProvenanceSvc: deps.provenanceSvc,
 	})
 
-	uiOrigin, err := advertisedUIOrigin(deps.cfg)
+	uiOrigin, err := DeriveUIOrigin(deps.cfg.HTTPAddr)
 	if err != nil {
-		return fmt.Errorf("advertise UI origin: %w", err)
+		return fmt.Errorf("derive UI origin: %w", err)
 	}
 	uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
 		WebDir:         deps.cfg.WebDir,

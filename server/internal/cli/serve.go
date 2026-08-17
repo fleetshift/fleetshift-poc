@@ -39,7 +39,6 @@ type serveFlags struct {
 	oidcPublicKeyClaimExpression  string
 	addons                        string
 	gcphcpConfig                  string
-	uiOrigin                      string
 }
 
 // newServeCmd builds the serve Cobra command and passes explicit --db selection
@@ -74,7 +73,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.oidcPublicKeyClaimExpression, "oidc-public-key-claim-expression", os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION"), "CEL expression extracting signer SPKI from ID token claims (mutually exclusive with registry mapping)")
 	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
-	cmd.Flags().StringVar(&f.uiOrigin, "ui-origin", "", "trusted public UI origin advertised to the browser (optional; defaults to the HTTP listen address)")
 	return cmd
 }
 

@@ -74,9 +74,6 @@ func assembleProductionAddons(
 			}
 			kindOpts = append(kindOpts, kindaddon.WithLoopbackForward(fwd))
 		}
-		if host := strings.TrimSpace(os.Getenv(kindaddon.LoopbackIssuerHostEnv)); host != "" {
-			kindOpts = append(kindOpts, kindaddon.WithLoopbackIssuerHost(host))
-		}
 		kindAgent := kindaddon.NewAgent(
 			deps.DeliveryReporter,
 			func(logger kindlog.Logger) kindaddon.ClusterProvider {

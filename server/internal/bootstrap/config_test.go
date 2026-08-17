@@ -438,61 +438,6 @@ func TestNewConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "ui origin accepted",
-			in: bootstrap.ConfigInput{
-				GRPCAddr: ":50051",
-				HTTPAddr: "127.0.0.1:8086",
-				DBPath:   bootstrap.DefaultSQLitePath,
-				UIOrigin: "https://fleetshift-sandbox.localhost:8085/",
-			},
-			want: bootstrap.Config{
-				GRPCAddr: ":50051",
-				HTTPAddr: "127.0.0.1:8086",
-				Database: bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
-				UIOrigin: "https://fleetshift-sandbox.localhost:8085",
-			},
-		},
-		{
-			name: "ui origin rejects path",
-			in: bootstrap.ConfigInput{
-				GRPCAddr: ":50051",
-				HTTPAddr: ":8080",
-				DBPath:   bootstrap.DefaultSQLitePath,
-				UIOrigin: "https://fleetshift-sandbox.localhost:8085/dex",
-			},
-			wantErr: "path must be empty or /",
-		},
-		{
-			name: "ui origin rejects query",
-			in: bootstrap.ConfigInput{
-				GRPCAddr: ":50051",
-				HTTPAddr: ":8080",
-				DBPath:   bootstrap.DefaultSQLitePath,
-				UIOrigin: "https://fleetshift-sandbox.localhost:8085?x=1",
-			},
-			wantErr: "query is not allowed",
-		},
-		{
-			name: "ui origin rejects fragment",
-			in: bootstrap.ConfigInput{
-				GRPCAddr: ":50051",
-				HTTPAddr: ":8080",
-				DBPath:   bootstrap.DefaultSQLitePath,
-				UIOrigin: "https://fleetshift-sandbox.localhost:8085#x",
-			},
-			wantErr: "fragment is not allowed",
-		},
-		{
-			name: "ui origin rejects userinfo",
-			in: bootstrap.ConfigInput{
-				GRPCAddr: ":50051",
-				HTTPAddr: ":8080",
-				DBPath:   bootstrap.DefaultSQLitePath,
-				UIOrigin: "https://user:pass@fleetshift-sandbox.localhost:8085",
-			},
-			wantErr: "userinfo is not allowed",
-		},
-		{
 			name: "empty oidc authority allowed at config parse",
 			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
@@ -561,7 +506,6 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 		got.OIDCRegistrySubjectExpression != want.OIDCRegistrySubjectExpression ||
 		got.OIDCPublicKeyClaimExpression != want.OIDCPublicKeyClaimExpression ||
 		got.GCPHCPConfigPath != want.GCPHCPConfigPath ||
-		got.UIOrigin != want.UIOrigin ||
 		string(got.OIDCCABundle) != string(want.OIDCCABundle) {
 		t.Fatalf("config mismatch:\n got: %#v\nwant: %#v", got, want)
 	}

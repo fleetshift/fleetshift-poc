@@ -35,13 +35,12 @@ func run() error {
 		return fmt.Errorf("app upstream: %w", err)
 	}
 	proxy, err := aioproxy.New(aioproxy.Config{
-		ListenAddr:    endpoints.GatewayListen,
-		CertFile:      pki.LeafCert,
-		KeyFile:       pki.LeafKey,
-		PublicOrigin:  endpoints.PublicOrigin,
-		CanonicalHost: aioinit.CanonicalHost,
-		DexURL:        dexURL,
-		AppURL:        appURL,
+		ListenAddr:   endpoints.GatewayListen,
+		CertFile:     pki.LeafCert,
+		KeyFile:      pki.LeafKey,
+		PublicOrigin: endpoints.PublicOrigin,
+		DexURL:       dexURL,
+		AppURL:       appURL,
 	})
 	if err != nil {
 		return err

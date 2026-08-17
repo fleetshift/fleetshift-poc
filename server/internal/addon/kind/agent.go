@@ -31,7 +31,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -124,18 +123,17 @@ type ClusterProviderFactory func(logger log.Logger) ClusterProvider
 
 // Agent implements [domain.DeliveryAgent] for kind clusters.
 type Agent struct {
-	reporter           domain.DeliveryReporter
-	providerFactory    ClusterProviderFactory
-	observer           AgentObserver
-	oidcCABundle       []byte
-	tokenVerifier      domain.OIDCTokenVerifier
-	oidcConfig         *domain.OIDCConfig
-	inventory          *InventoryWatcher
-	generations        GenerationStore
-	indexingRuntime    kubernetes.IndexingRuntime
-	bootstrapSA        func(context.Context, []byte, domain.TargetID) (domain.SecretRef, []byte, error)
-	loopbackForward    LoopbackForward
-	loopbackIssuerHost string
+	reporter        domain.DeliveryReporter
+	providerFactory ClusterProviderFactory
+	observer        AgentObserver
+	oidcCABundle    []byte
+	tokenVerifier   domain.OIDCTokenVerifier
+	oidcConfig      *domain.OIDCConfig
+	inventory       *InventoryWatcher
+	generations     GenerationStore
+	indexingRuntime kubernetes.IndexingRuntime
+	bootstrapSA     func(context.Context, []byte, domain.TargetID) (domain.SecretRef, []byte, error)
+	loopbackForward LoopbackForward
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -205,16 +203,11 @@ func WithPlatformSABootstrap(fn func(context.Context, []byte, domain.TargetID) (
 }
 
 // WithLoopbackForward attaches an optional loopback TCP proxy on kind
-// control-plane nodes (see [LoopbackForward]). Nil is a no-op.
+// control-plane nodes (see [LoopbackForward]). When set, OIDC cluster create
+// also installs kube-apiserver hostAliases for the issuer hostname unless
+// that host is already loopback. Nil is a no-op.
 func WithLoopbackForward(f LoopbackForward) AgentOption {
 	return func(a *Agent) { a.loopbackForward = f }
-}
-
-// WithLoopbackIssuerHost installs a kube-apiserver hostAliases mapping for
-// hostname on control-plane nodes so the peer-Dex issuer resolves to node
-// loopback. Empty is a no-op.
-func WithLoopbackIssuerHost(hostname string) AgentOption {
-	return func(a *Agent) { a.loopbackIssuerHost = strings.TrimSpace(hostname) }
 }
 
 // NewAgent returns an Agent. The reporter is the addon's client
@@ -886,15 +879,10 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 
 		config := toKindConfig(spec)
 		applyOIDCOverlay(&config, oidcSpec, string(issuer), string(auth.Audience[0]), caCertHostPath)
-		if a.loopbackIssuerHost != "" {
-			if err := validateLoopbackIssuerHost(string(issuer), a.loopbackIssuerHost); err != nil {
+		if a.loopbackForward != nil {
+			if err := applyLoopbackIssuerHost(&config, string(issuer)); err != nil {
 				return nil, "", err
 			}
-			patchDir, err := writeIssuerHostPatch(a.loopbackIssuerHost)
-			if err != nil {
-				return nil, "", err
-			}
-			applyIssuerHostOverlay(&config, patchDir)
 		}
 
 		raw, err := json.Marshal(config)
