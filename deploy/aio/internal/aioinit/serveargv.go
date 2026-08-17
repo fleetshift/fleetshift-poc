@@ -90,6 +90,7 @@ func ServeArgs(in ServeConfig) []string {
 		"serve",
 		"--http-addr", in.Endpoints.HTTPListen,
 		"--grpc-addr", in.Endpoints.GRPCListen,
+		"--ui-origin", in.Endpoints.PublicOrigin,
 		"--db", in.DBPath,
 		"--web-dir", in.WebDir,
 		"--log-level", in.LogLevel,

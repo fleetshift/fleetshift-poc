@@ -19,8 +19,9 @@ func TestApplyServeDefaultsAndArgs(t *testing.T) {
 	joined := strings.Join(args, "\x00")
 	for _, want := range []string{
 		"serve",
-		"--http-addr\x00:8085",
-		"--oidc-issuer\x00https://127.0.0.1:5556/dex",
+		"--http-addr\x00127.0.0.1:8086",
+		"--ui-origin\x00https://fleetshift-sandbox.localhost:8085",
+		"--oidc-issuer\x00https://fleetshift-sandbox.localhost:8085/dex",
 		"--oidc-resource-audience\x00fleetshift",
 		"--oidc-ui-client-id\x00fleetshift-ui",
 		"--oidc-ui-scope\x00openid profile email groups audience:server:client_id:fleetshift",

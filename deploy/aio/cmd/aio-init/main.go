@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/hostalias"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	// instead of parking on s6-pause (Dex-off).
 	dexEnabledFlag = "/run/fleetshift/dex.enabled"
 	runDir         = "/run/fleetshift"
+	hostsPath      = "/etc/hosts"
 )
 
 func main() {
@@ -38,6 +40,9 @@ func run() error {
 	}
 	if err := prepareDataLayout(); err != nil {
 		return err
+	}
+	if err := hostalias.Ensure(hostsPath, "127.0.0.1", aioinit.PublicHost, aioinit.HostsMarker); err != nil {
+		return fmt.Errorf("hosts alias: %w", err)
 	}
 	endpoints := aioinit.FixedEndpoints
 
@@ -63,19 +68,18 @@ func run() error {
 		GCPHCPConfig:       gcp.GCPHCPConfig,
 	}
 
+	sandboxPKI := aioinit.DefaultSandboxPKIPaths()
+	if err := aioinit.EnsureSandboxPKI(sandboxPKI, fleetshiftUID, fleetshiftGID); err != nil {
+		return fmt.Errorf("sandbox pki: %w", err)
+	}
+
 	if dexOn {
 		if err := enableDex(); err != nil {
 			return err
 		}
-		sandboxPKI := aioinit.DefaultSandboxPKIPaths()
-		if err := aioinit.EnsureSandboxPKI(sandboxPKI, dexUID, dexGID); err != nil {
-			return fmt.Errorf("sandbox pki: %w", err)
-		}
 		if err := aioinit.InstallDexConfig(aioinit.DexRenderInput{
 			Issuer:    aioinit.PeerDexIssuer,
 			Endpoints: endpoints,
-			TLSCert:   sandboxPKI.LeafCert,
-			TLSKey:    sandboxPKI.LeafKey,
 		}, aioinit.DefaultDexPaths(), dexUID, dexGID); err != nil {
 			return fmt.Errorf("dex config: %w", err)
 		}
@@ -98,7 +102,7 @@ func run() error {
 	if err := os.Chown(aioinit.ServeExecPath, 0, 0); err != nil {
 		return err
 	}
-	if err := aioinit.ConfigureKindEnv(aioinit.KindEnvPath, dexOn, endpoints.DexListen); err != nil {
+	if err := aioinit.ConfigureKindEnv(aioinit.KindEnvPath, dexOn, endpoints.GatewayListen); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "aio-init: dexOn=%v issuer=%s\n", dexOn, in.Issuer)

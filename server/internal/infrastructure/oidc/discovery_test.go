@@ -2,8 +2,13 @@ package oidc_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 )
@@ -36,6 +41,65 @@ func TestDiscoveryClient_RejectsWithoutCA(t *testing.T) {
 	_, err := dc.FetchMetadata(context.Background(), idp.IssuerURL())
 	if err == nil {
 		t.Fatal("FetchMetadata should fail without CA for self-signed server")
+	}
+}
+
+func TestDiscoveryClient_RejectsMismatchedIssuer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"issuer":"https://other.example/dex",
+			"authorization_endpoint":"https://other.example/dex/auth",
+			"token_endpoint":"https://other.example/dex/token",
+			"jwks_uri":"https://other.example/dex/keys"
+		}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	dc := oidc.NewDiscoveryClient(srv.Client())
+	_, err := dc.FetchMetadata(context.Background(), domain.IssuerURL(srv.URL))
+	if err == nil || !strings.Contains(err.Error(), "does not match requested issuer") {
+		t.Fatalf("FetchMetadata() = %v, want mismatched issuer", err)
+	}
+}
+
+func TestDiscoveryClient_RejectsIncompleteMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "missing authorization_endpoint",
+			body: `{"issuer":%q,"token_endpoint":"https://example/token","jwks_uri":"https://example/keys"}`,
+			want: "authorization_endpoint",
+		},
+		{
+			name: "missing token_endpoint",
+			body: `{"issuer":%q,"authorization_endpoint":"https://example/auth","jwks_uri":"https://example/keys"}`,
+			want: "token_endpoint",
+		},
+		{
+			name: "missing jwks_uri",
+			body: `{"issuer":%q,"authorization_endpoint":"https://example/auth","token_endpoint":"https://example/token"}`,
+			want: "jwks_uri",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var issuer string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, tt.body, issuer)
+			}))
+			t.Cleanup(srv.Close)
+			issuer = srv.URL
+			dc := oidc.NewDiscoveryClient(srv.Client())
+			_, err := dc.FetchMetadata(context.Background(), domain.IssuerURL(issuer))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("FetchMetadata() = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

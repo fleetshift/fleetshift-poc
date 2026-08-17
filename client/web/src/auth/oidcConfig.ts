@@ -1,4 +1,5 @@
 import type { AuthProviderProps } from "react-oidc-context";
+import type { NavigateFunction } from "react-router-dom";
 
 interface UIConfig {
   oidc: {
@@ -8,7 +9,9 @@ interface UIConfig {
   };
 }
 
-export async function fetchOidcConfig(): Promise<AuthProviderProps> {
+export async function fetchOidcConfig(
+  navigate: NavigateFunction,
+): Promise<AuthProviderProps> {
   const res = await fetch("/api/ui/config");
   if (!res.ok) {
     throw new Error(
@@ -20,13 +23,23 @@ export async function fetchOidcConfig(): Promise<AuthProviderProps> {
   return {
     authority: data.oidc.authority,
     client_id: data.oidc.clientId,
-    redirect_uri: window.location.origin + window.location.pathname,
+    redirect_uri: window.location.origin + "/auth/callback",
     silent_redirect_uri: window.location.origin + "/silent-renew.html",
     post_logout_redirect_uri: window.location.origin + "/",
-    scope: data.oidc.scope || "openid profile email roles",
+    response_type: "code",
+    scope: data.oidc.scope ?? "",
     automaticSilentRenew: true,
     onSigninCallback: () => {
-      window.history.replaceState({}, document.title, window.location.pathname);
+      let postLoginRedirect = window.sessionStorage.getItem(
+        "post_login_redirect_pathname",
+      );
+
+      if (!postLoginRedirect || postLoginRedirect === "/auth/callback") {
+        postLoginRedirect = "/";
+      }
+
+      window.history.replaceState({}, document.title, postLoginRedirect);
+      navigate(postLoginRedirect, { replace: true });
     },
   };
 }

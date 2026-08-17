@@ -2,25 +2,38 @@
 // sandbox PKI, peer Dex config, serve argv, GCP HCP intent, and kind networking.
 package aioinit
 
-// Endpoints is the sealed AIO listen set and matching UI origin/callback URLs.
+const (
+	// PublicHost is the sealed browser-facing DNS name.
+	PublicHost = "fleetshift-sandbox.localhost"
+	// CanonicalHost is the HTTP Host the AIO TLS edge accepts (name + port).
+	CanonicalHost = "fleetshift-sandbox.localhost:8085"
+	// PeerDexIssuer is the public peer-Dex issuer (Dex-on only). Scheme, host,
+	// port, and path must match discovery issuer and ID-token iss exactly.
+	PeerDexIssuer = "https://fleetshift-sandbox.localhost:8085/dex"
+	// HostsMarker tags the AIO-container /etc/hosts mapping.
+	HostsMarker = "fleetshift-aio"
+)
+
+// Endpoints is the sealed AIO public origin plus internal listen addresses.
+// PublicOrigin is the browser-facing URL. HTTPListen and DexListen are
+// container-loopback upstreams and must not leak into OIDC or UI metadata.
 type Endpoints struct {
-	UIOrigin   string
-	UICallback string
-	HTTPListen string
-	GRPCListen string
-	// DexListen is the reserved peer-Dex listen address (":5556"). Dex may be
-	// parked on Dex-off; the port stays part of the sealed set.
-	DexListen string
+	PublicOrigin  string
+	UICallback    string
+	SilentRenew   string
+	GatewayListen string
+	HTTPListen    string
+	DexListen     string
+	GRPCListen    string
 }
 
-// FixedEndpoints is the sealed AIO endpoint set (8085 / 50051 / 5556).
+// FixedEndpoints is the sealed AIO endpoint set.
 var FixedEndpoints = Endpoints{
-	UIOrigin:   "http://127.0.0.1:8085",
-	UICallback: "http://127.0.0.1:8085/auth/callback",
-	HTTPListen: ":8085",
-	GRPCListen: ":50051",
-	DexListen:  ":5556",
+	PublicOrigin:  "https://fleetshift-sandbox.localhost:8085",
+	UICallback:    "https://fleetshift-sandbox.localhost:8085/auth/callback",
+	SilentRenew:   "https://fleetshift-sandbox.localhost:8085/silent-renew.html",
+	GatewayListen: ":8085",
+	HTTPListen:    "127.0.0.1:8086",
+	DexListen:     "127.0.0.1:5556",
+	GRPCListen:    ":50051",
 }
-
-// PeerDexIssuer is the loopback issuer URL for peer Dex (Dex-on only).
-const PeerDexIssuer = "https://127.0.0.1:5556/dex"

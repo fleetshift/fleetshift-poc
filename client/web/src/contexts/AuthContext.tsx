@@ -12,6 +12,7 @@ import {
   AuthProvider as OidcAuthProvider,
   useAuth as useOidcAuth,
 } from "react-oidc-context";
+import { useNavigate } from "react-router-dom";
 
 import {
   installFetchInterceptor,
@@ -99,7 +100,9 @@ function KeycloakAuthInner({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    oidcRef.current.signoutRedirect();
+    setUser(null);
+    fetchedForToken.current = undefined;
+    void oidcRef.current.removeUser();
   }, []);
 
   if (oidc.isLoading) {
@@ -132,12 +135,13 @@ export function AuthProvider({
 }) {
   const [oidcProps, setOidcProps] = useState<AuthProviderProps | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchOidcConfig()
+    fetchOidcConfig(navigate)
       .then(setOidcProps)
       .catch((err) => setError(err.message));
-  }, []);
+  }, [navigate]);
 
   if (error) {
     if (requireAuth) {

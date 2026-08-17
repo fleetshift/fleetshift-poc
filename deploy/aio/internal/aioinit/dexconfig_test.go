@@ -20,8 +20,6 @@ func TestInstallDexConfig(t *testing.T) {
 	err := aioinit.InstallDexConfig(aioinit.DexRenderInput{
 		Issuer:    aioinit.PeerDexIssuer,
 		Endpoints: aioinit.FixedEndpoints,
-		TLSCert:   "/data/sandbox/pki/server.crt",
-		TLSKey:    "/data/sandbox/pki/server.key",
 	}, paths, uid, gid)
 	if err != nil {
 		t.Fatal(err)
@@ -32,21 +30,32 @@ func TestInstallDexConfig(t *testing.T) {
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"issuer: https://127.0.0.1:5556/dex",
+		"issuer: https://fleetshift-sandbox.localhost:8085/dex",
+		"http: 127.0.0.1:5556",
 		"preferredUsername: \"dev-user\"",
 		"id: fleetshift-ui",
 		"id: fleetshift-cli",
 		"id: fleetshift-signing",
-		"http://127.0.0.1:8085/auth/callback",
-		"allowedOrigins:",
-		"- http://127.0.0.1:8085",
+		"https://fleetshift-sandbox.localhost:8085/auth/callback",
+		"https://fleetshift-sandbox.localhost:8085/silent-renew.html",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("config missing %q\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, "fleetshift-ops") || strings.Contains(body, "fleetshift-dev") {
-		t.Fatal("plaintext passwords must not appear in Dex config")
+	for _, bad := range []string{
+		"tlsCert:",
+		"tlsKey:",
+		"allowedOrigins:",
+		"fleetshift-ops",
+		"fleetshift-dev",
+	} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("config unexpectedly contains %q\n%s", bad, body)
+		}
+	}
+	if strings.Contains(body, "web:\n  https:") || strings.Contains(body, "web:\r\n  https:") {
+		t.Fatalf("peer Dex must listen on HTTP, not HTTPS:\n%s", body)
 	}
 	if !strings.Contains(body, "$2") {
 		t.Fatal("expected bcrypt hashes in config")

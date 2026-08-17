@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -30,7 +29,7 @@ const (
 	serialMaxBits = 128
 )
 
-// SandboxPKIPaths holds absolute paths for Dex-on sandbox CA and leaf material.
+// SandboxPKIPaths holds absolute paths for the AIO gateway CA and leaf material.
 type SandboxPKIPaths struct {
 	Dir      string
 	CACert   string
@@ -50,10 +49,11 @@ func DefaultSandboxPKIPaths() SandboxPKIPaths {
 	}
 }
 
-// EnsureSandboxPKI generates or reuses the Dex-on sandbox CA and leaf.
-// Leaf SAN is IP 127.0.0.1 only. dexUID/dexGID own the leaf private key
-// (0400); the CA cert is world-readable.
-func EnsureSandboxPKI(paths SandboxPKIPaths, dexUID, dexGID int) error {
+// EnsureSandboxPKI generates or reuses the AIO gateway CA and leaf.
+// The leaf DNS SAN is exactly fleetshift-sandbox.localhost. leafUID/leafGID
+// own the leaf private key (0400) so the unprivileged aio-proxy can read it;
+// the CA cert is world-readable and the CA private key stays root-only.
+func EnsureSandboxPKI(paths SandboxPKIPaths, leafUID, leafGID int) error {
 	if err := os.MkdirAll(paths.Dir, 0755); err != nil {
 		return fmt.Errorf("sandbox pki dir: %w", err)
 	}
@@ -65,7 +65,7 @@ func EnsureSandboxPKI(paths SandboxPKIPaths, dexUID, dexGID int) error {
 	if err := ensureLeaf(paths, caCert, caKey); err != nil {
 		return err
 	}
-	return applySandboxPKIOwnership(paths, dexUID, dexGID)
+	return applySandboxPKIOwnership(paths, leafUID, leafGID)
 }
 
 // loadOrCreateCA reuses a valid on-disk CA or creates a new one when absent.
@@ -146,12 +146,12 @@ func ensureLeaf(paths SandboxPKIPaths, caCert *x509.Certificate, caKey *ecdsa.Pr
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "FleetShift Sandbox Dex"},
+		Subject:      pkix.Name{CommonName: "FleetShift AIO Gateway"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(leafValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     []string{PublicHost},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
 	if err != nil {
@@ -188,7 +188,7 @@ func leafOK(paths SandboxPKIPaths, caCert *x509.Certificate) bool {
 	if time.Now().After(cert.NotAfter) || time.Now().Before(cert.NotBefore) {
 		return false
 	}
-	if len(cert.IPAddresses) != 1 || !cert.IPAddresses[0].Equal(net.ParseIP("127.0.0.1")) {
+	if !leafIdentityOK(cert) {
 		return false
 	}
 	roots := x509.NewCertPool()
@@ -197,9 +197,26 @@ func leafOK(paths SandboxPKIPaths, caCert *x509.Certificate) bool {
 	return err == nil
 }
 
-// applySandboxPKIOwnership sets root ownership on CA material and dexUID:dexGID on the
+// leafIdentityOK reports whether cert is the sealed AIO gateway leaf: exact
+// DNS SAN, no IP SAN, and server-auth EKU.
+func leafIdentityOK(cert *x509.Certificate) bool {
+	if len(cert.DNSNames) != 1 || cert.DNSNames[0] != PublicHost {
+		return false
+	}
+	if len(cert.IPAddresses) != 0 {
+		return false
+	}
+	for _, u := range cert.ExtKeyUsage {
+		if u == x509.ExtKeyUsageServerAuth {
+			return true
+		}
+	}
+	return false
+}
+
+// applySandboxPKIOwnership sets root ownership on CA material and leafUID:leafGID on the
 // leaf key when running as root. Non-root callers keep creator ownership.
-func applySandboxPKIOwnership(paths SandboxPKIPaths, dexUID, dexGID int) error {
+func applySandboxPKIOwnership(paths SandboxPKIPaths, leafUID, leafGID int) error {
 	if err := os.Chmod(paths.LeafKey, 0400); err != nil {
 		return err
 	}
@@ -215,7 +232,7 @@ func applySandboxPKIOwnership(paths SandboxPKIPaths, dexUID, dexGID int) error {
 			return err
 		}
 	}
-	if err := os.Chown(paths.LeafKey, dexUID, dexGID); err != nil {
+	if err := os.Chown(paths.LeafKey, leafUID, leafGID); err != nil {
 		return fmt.Errorf("chown leaf key: %w", err)
 	}
 	return nil
@@ -280,6 +297,7 @@ func ecdsaPublicKeysEqual(pub *ecdsa.PublicKey, want any) error {
 // writePEMFile atomically writes a PEM block to path with mode.
 func writePEMFile(path, typ string, der []byte, mode os.FileMode) error {
 	tmp := path + ".tmp"
+	_ = os.Remove(tmp)
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
@@ -293,7 +311,10 @@ func writePEMFile(path, typ string, der []byte, mode os.FileMode) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 // mustMarshalEC marshals an EC private key or panics.

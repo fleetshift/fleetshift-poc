@@ -119,6 +119,7 @@ type ConfigInput struct {
 	OIDCPublicKeyClaimExpression  string
 	Addons                        string
 	GCPHCPConfigPath              string
+	UIOrigin                      string
 }
 
 // Config is the normalized typed production configuration accepted by
@@ -158,6 +159,12 @@ type Config struct {
 
 	// GCPHCPConfigPath is required when AddonGCPHCP is enabled.
 	GCPHCPConfigPath string
+
+	// UIOrigin is an optional trusted public origin advertised on
+	// /api/ui/config. Empty means derive from HTTPAddr. Must be an absolute
+	// http or https origin with no userinfo, query, fragment, or path other
+	// than "/".
+	UIOrigin string
 }
 
 // NewConfig parses resolved edge input into a normalized Config. It performs
@@ -214,6 +221,13 @@ func NewConfig(in ConfigInput) (Config, error) {
 		OIDCPublicKeyClaimExpression:  strings.TrimSpace(in.OIDCPublicKeyClaimExpression),
 		Addons:                        normalizeAddonList(in.Addons),
 		GCPHCPConfigPath:              in.GCPHCPConfigPath,
+	}
+	if uiOrigin := strings.TrimSpace(in.UIOrigin); uiOrigin != "" {
+		canonical, err := parseUIOrigin(uiOrigin)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.UIOrigin = canonical
 	}
 	if err := cfg.checkInvariants(); err != nil {
 		return Config{}, err
@@ -413,6 +427,38 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// parseUIOrigin validates that raw is an absolute http or https origin with no
+// userinfo, query, fragment, or path other than "/". The returned value has
+// no trailing slash.
+func parseUIOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid ui origin: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	switch scheme {
+	case "http", "https":
+	default:
+		return "", fmt.Errorf("invalid ui origin: scheme must be http or https")
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("invalid ui origin: userinfo is not allowed")
+	}
+	if u.RawQuery != "" {
+		return "", fmt.Errorf("invalid ui origin: query is not allowed")
+	}
+	if u.Fragment != "" {
+		return "", fmt.Errorf("invalid ui origin: fragment is not allowed")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("invalid ui origin: host is required")
+	}
+	if u.Path != "" && u.Path != "/" {
+		return "", fmt.Errorf("invalid ui origin: path must be empty or /")
+	}
+	return scheme + "://" + u.Host, nil
 }
 
 // parseCAPEM requires data to contain at least one parseable PEM CERTIFICATE

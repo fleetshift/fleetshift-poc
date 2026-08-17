@@ -147,16 +147,15 @@ into `fleetshift serve`. Demo users: `ops@fleetshift.local` /
 podman run -d --rm -it \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  -p 127.0.0.1:5556:5556 \
   quay.io/stolostron/fleetshift:latest
 ```
 
-Open http://127.0.0.1:8085. Build locally with `task image:aio` when iterating
-on this repo.
+Open https://fleetshift-sandbox.localhost:8085 and accept the browser's
+certificate warning (unknown sandbox CA — Advanced/Proceed or Accept Risk).
+Do not install the CA, edit `/etc/hosts`, or visit another port. Build locally
+with `task image:aio` when iterating on this repo.
 
-Browsers will see Dex's sandbox CA as an unknown authority; continue only the
-interstitial for `https://127.0.0.1:5556` (do not import the CA). External
-issuer, kind, GCP HCP, env defaults, and fleetctl:
+External issuer, kind, GCP HCP, env defaults, and fleetctl:
 [deploy/aio/README.md](deploy/aio/README.md).
 
 ## Day One Setup

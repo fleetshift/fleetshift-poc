@@ -55,6 +55,7 @@ func loadServeConfig(f *serveFlags, sel serveSelections) (bootstrap.Config, erro
 		OIDCPublicKeyClaimExpression:  f.oidcPublicKeyClaimExpression,
 		Addons:                        f.addons,
 		GCPHCPConfigPath:              resolveGCPHCPConfigPath(f.gcphcpConfig),
+		UIOrigin:                      f.uiOrigin,
 	})
 }
 

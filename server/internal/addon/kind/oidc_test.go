@@ -98,6 +98,35 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 	}
 }
 
+func TestAgent_Deliver_IssuerHostMismatch_FailsDelivery(t *testing.T) {
+	provider := newFakeProvider()
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithLoopbackIssuerHost("fleetshift-sandbox.localhost"))
+
+	auth := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "alice",
+				Issuer:  "https://127.0.0.1:8085/dex",
+			},
+		},
+		Audience: []domain.Audience{"fleetshift"},
+	}
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1",
+		[]domain.Manifest{{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name":"mismatch"}`)}},
+		auth, nil, 1)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	result := <-reporter.done
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q (%s)", result.State, domain.DeliveryStateFailed, result.Message)
+	}
+	if provider.hasCluster("fs--mismatch") {
+		t.Error("cluster should not have been created")
+	}
+}
+
 func TestAgent_Deliver_RecreateValidatesConfigBeforeDelete(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
