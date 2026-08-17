@@ -33,7 +33,7 @@ http_port="${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 
 echo ""
 echo "==> FleetShift stack is running!"
-echo "    FleetShift:      http://localhost:${http_port}"
+echo "    FleetShift:      http://127.0.0.1:${http_port}"
 
 if [ -z "${OIDC_ISSUER_URL:-}" ]; then
   # Dex-on: copy the sandbox CA so fleetctl and the browser can trust the

@@ -252,10 +252,13 @@ podman run -d --rm -it \
 Open http://127.0.0.1:8085. Build locally with `task image:aio` when iterating
 on this repo.
 
-Browsers will see Dex's sandbox CA as an unknown authority. For a bare
-`podman run` sandbox, click through the interstitial for
-`https://127.0.0.1:5556`. From a repo checkout, trust the CA once instead so no
-click-through is needed: `npx nx run pd:trust-cert` (`--remove` to undo).
+Browsers will see Dex's sandbox CA as an unknown authority. Browser login needs
+that CA trusted — clicking through the `https://127.0.0.1:5556` interstitial is
+not enough, because the SPA's background token requests to the issuer fail TLS
+with no interstitial to accept. From a repo checkout (bare image or compose):
+`npx nx run pd:trust-cert` (`--remove` to undo). Without a checkout, copy the CA
+and trust it in your OS/browser store manually:
+`podman cp <ctr>:/data/sandbox/pki/ca.crt ./ca.crt`.
 External issuer, kind, GCP HCP, env defaults, and fleetctl:
 [deploy/aio/README.md](deploy/aio/README.md).
 
