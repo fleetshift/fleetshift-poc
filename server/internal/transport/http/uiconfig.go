@@ -245,7 +245,7 @@ func buildScalprumConfig(registry pluginRegistry) map[string]interface{} {
 
 	for name, entry := range registry.Plugins {
 		entry = prefixPluginEntry(entry)
-		cfg := map[string]interface{}{
+		cfg := map[string]any{
 			"name":             entry.Name,
 			"manifestLocation": entry.ManifestPath,
 			"pluginManifest":   entry.PluginManifest,

@@ -60,12 +60,9 @@ The sandbox certificate is intentionally browser-untrusted (private CA). In an
 unmanaged desktop Chrome, Firefox, or Safari profile that allows overrides,
 accept the top-level warning (Advanced → Proceed / Accept the Risk). That is
 the only certificate interstitial for the SPA, API, WebSockets, and peer Dex:
-they share this origin. Do not install the CA, copy it to the host trust
-store, edit `/etc/hosts`, open DevTools, or visit another port.
+they share this origin.
 
-Enterprise browser policy, prior HSTS state, or a managed profile can disable
-the override; that is a documented limitation, not an application error. Host
-CLIs (`curl`, `fleetctl`, Go clients) still need a scoped `--cacert` /
+Host CLIs (`curl`, `fleetctl`, Go clients) still need a scoped `--cacert` /
 `--oidc-ca-file`; they do not pick up the browser exception.
 
 `.localhost` names can resolve to both `127.0.0.1` and `::1`. The documented
@@ -177,8 +174,7 @@ When a live unix socket is present at `CONTAINER_HOST`, packaging writes
   the hostAliases overlay.
 
 Join `--network kind:alias=fleetshift`. Without that alias the default
-destination host does not resolve from kind nodes. No host `/etc/hosts`
-entry is required.
+destination host does not resolve from kind nodes.
 
 On Linux, rootless Podman does not listen on `/var/run/docker.sock` (that
 path is Docker, or a macOS `podman machine` helper symlink). The API socket
@@ -249,19 +245,6 @@ fleetctl deployments list
 `auth login` opens a browser to Dex; sign in with a demo user above. Omit the
 `audience:server:client_id:fleetshift` scope and API calls fail with `aud` not
 satisfied (`fleetshift-cli` only).
-
-## Upgrading from the Dex `:5556` issuer
-
-A persisted `/data/fleetshift.db` can still contain AuthMethod issuer
-`https://127.0.0.1:5556/dex`. FleetShift treats that stored method as
-authoritative, so changing image defaults does not migrate it. For this
-sandbox iteration, start with a fresh data directory. In the Podman
-development flow that is `npx nx run fleetshift-poc:pd:clean` (or `task pd:clean`)
-before launching the new image. Raw `podman run --rm` without a mounted data
-volume already starts fresh. This reset is not a prerequisite for a first run.
-
-This sandbox TLS edge is not a production ingress. Cluster deployments must
-use an operator-provided, normally trusted certificate and hostname.
 
 ---
 
