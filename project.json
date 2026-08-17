@@ -166,6 +166,11 @@
       "options": { "command": "task pd:cert-init" },
       "cache": false
     },
+    "pd:trust-cert": {
+      "executor": "nx:run-commands",
+      "options": { "command": "task pd:trust-cert" },
+      "cache": false
+    },
     "pd:reset-keycloak": {
       "executor": "nx:run-commands",
       "options": { "command": "task pd:reset-keycloak" },

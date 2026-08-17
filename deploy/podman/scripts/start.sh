@@ -36,18 +36,13 @@ echo "==> FleetShift stack is running!"
 echo "    FleetShift:      http://localhost:${http_port}"
 
 if [ -z "${OIDC_ISSUER_URL:-}" ]; then
-  # Dex-on: copy the sandbox CA so fleetctl can trust the loopback issuer.
-  mkdir -p "$COMPOSE_DIR/.certs"
-  echo "==> Copying Dex sandbox CA to .certs/ca.crt (for fleetctl)"
-  ca_deadline=$((SECONDS + 30))
-  until compose cp fleetshift-server:/data/sandbox/pki/ca.crt "$COMPOSE_DIR/.certs/ca.crt" 2>/dev/null; do
-    if (( SECONDS >= ca_deadline )); then
-      echo "    WARN: sandbox CA not ready yet. Copy it later with:" >&2
-      echo "      podman compose cp fleetshift-server:/data/sandbox/pki/ca.crt deploy/podman/.certs/ca.crt" >&2
-      break
-    fi
-    sleep 1
-  done
+  # Dex-on: copy the sandbox CA so fleetctl and the browser can trust the
+  # loopback issuer.
+  echo "==> Copying Dex sandbox CA to .certs/ca.crt (for fleetctl and browser)"
+  if ! copy_sandbox_ca; then
+    echo "    WARN: sandbox CA not ready yet. Copy it later with:" >&2
+    echo "      podman compose cp fleetshift-server:/data/sandbox/pki/ca.crt deploy/podman/.certs/ca.crt" >&2
+  fi
 
   cat <<EOF
 
@@ -64,6 +59,10 @@ if [ -z "${OIDC_ISSUER_URL:-}" ]; then
       --oidc-ca-file deploy/podman/.certs/ca.crt \\
       --scopes 'openid,profile,email,audience:server:client_id:fleetshift'
     bin/fleetctl auth login
+
+  Browser login: the UI redirects to Dex at https://127.0.0.1:5556/dex, which
+  uses the sandbox CA above. Trust it once so the browser stops warning:
+    npx nx run pd:trust-cert      (or: task pd:trust-cert)
 EOF
 else
   echo ""

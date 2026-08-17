@@ -67,3 +67,19 @@ ensure_podman_ready() {
 generate_password() {
   openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16
 }
+
+# copy_sandbox_ca copies the Dex-on sandbox CA out of the running server
+# container to .certs/ca.crt on the host. fleetctl trusts it via --oidc-ca-file
+# and trust-dex-ca.sh installs it into the browser/OS trust store. Retries until
+# the container has generated the PKI (up to ~30s). Returns non-zero on timeout.
+copy_sandbox_ca() {
+  local dest="$COMPOSE_DIR/.certs/ca.crt"
+  mkdir -p "$COMPOSE_DIR/.certs"
+  local deadline=$((SECONDS + 30))
+  until compose cp fleetshift-server:/data/sandbox/pki/ca.crt "$dest" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      return 1
+    fi
+    sleep 1
+  done
+}
