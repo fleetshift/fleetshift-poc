@@ -53,7 +53,7 @@ func TestS6ProxyGraph(t *testing.T) {
 		t.Fatal("fleetshift run must trust the sandbox CA")
 	}
 	if !strings.Contains(fsBody, "--noproxy fleetshift-sandbox.localhost") {
-		t.Fatal("fleetshift run must bypass HTTP_PROXY for the branded host")
+		t.Fatal("fleetshift run must bypass HTTP_PROXY for fleetshift-sandbox.localhost")
 	}
 	if strings.Contains(fsBody, "curl -k") || strings.Contains(fsBody, "curl -sk") {
 		t.Fatal("fleetshift run must not use curl -k")

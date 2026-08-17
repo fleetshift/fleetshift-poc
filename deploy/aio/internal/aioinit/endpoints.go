@@ -1,9 +1,10 @@
-// Package aioinit holds FleetShift AIO packaging helpers: sealed endpoints,
-// sandbox PKI, peer Dex config, serve argv, GCP HCP intent, and kind networking.
+// Package aioinit holds FleetShift AIO packaging helpers: public origin and
+// listen addresses, sandbox PKI, peer Dex config, serve argv, GCP HCP intent,
+// and kind networking.
 package aioinit
 
 const (
-	// PublicHost is the sealed browser-facing DNS name.
+	// PublicHost is the browser-facing DNS name.
 	PublicHost = "fleetshift-sandbox.localhost"
 	// CanonicalHost is the HTTP Host the AIO TLS edge accepts (name + port).
 	CanonicalHost = "fleetshift-sandbox.localhost:8085"
@@ -14,9 +15,9 @@ const (
 	HostsMarker = "fleetshift-aio"
 )
 
-// Endpoints is the sealed AIO public origin plus internal listen addresses.
-// PublicOrigin is the browser-facing URL. HTTPListen and DexListen are
-// container-loopback upstreams and must not leak into OIDC or UI metadata.
+// Endpoints is the AIO public origin plus internal listen addresses.
+// PublicOrigin is the browser-facing URL. HTTPListen and DexListen are the
+// FleetShift and Dex container-loopback binds.
 type Endpoints struct {
 	PublicOrigin  string
 	UICallback    string
@@ -27,7 +28,7 @@ type Endpoints struct {
 	GRPCListen    string
 }
 
-// FixedEndpoints is the sealed AIO endpoint set.
+// FixedEndpoints is the AIO endpoint set.
 var FixedEndpoints = Endpoints{
 	PublicOrigin:  "https://fleetshift-sandbox.localhost:8085",
 	UICallback:    "https://fleetshift-sandbox.localhost:8085/auth/callback",

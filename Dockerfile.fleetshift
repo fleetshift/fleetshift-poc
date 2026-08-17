@@ -40,8 +40,6 @@ ARG TARGETARCH
 
 FROM ${WEB_IMAGE} AS web-assets
 FROM ${DEX_IMAGE} AS dex-bin
-# Go 1.25.13 includes the ReverseProxy fix for GO-2026-4976 (>= 1.25.10 required).
-# Multi-arch index digest for docker.io/library/golang:1.25.13.
 FROM golang:1.25.13@sha256:cbff9d1a9041b316010f2da6b701b6c0d597718cb90928c85eb597334a0d23d4 AS aio-builder
 WORKDIR /src
 COPY deploy/aio/go.mod deploy/aio/go.sum ./
@@ -71,13 +69,7 @@ COPY deploy/aio/s6/ /etc/s6-overlay/
 
 RUN set -eux; \
 	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy /usr/local/bin/render-gcphcp-config.sh \
-		/etc/s6-overlay/scripts/aio-init \
-		/etc/s6-overlay/s6-rc.d/dex/run \
-		/etc/s6-overlay/s6-rc.d/dex/finish \
-		/etc/s6-overlay/s6-rc.d/aio-proxy/run \
-		/etc/s6-overlay/s6-rc.d/aio-proxy/finish \
-		/etc/s6-overlay/s6-rc.d/fleetshift/run \
-		/etc/s6-overlay/s6-rc.d/fleetshift/finish; \
+		/etc/s6-overlay/scripts/aio-init; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends curl ca-certificates xz-utils; \
 	arch="$TARGETARCH"; \

@@ -211,8 +211,8 @@ func WithLoopbackForward(f LoopbackForward) AgentOption {
 }
 
 // WithLoopbackIssuerHost installs a kube-apiserver hostAliases mapping for
-// hostname on control-plane nodes so the branded peer-Dex issuer resolves to
-// node loopback. Empty is a no-op.
+// hostname on control-plane nodes so the peer-Dex issuer resolves to node
+// loopback. Empty is a no-op.
 func WithLoopbackIssuerHost(hostname string) AgentOption {
 	return func(a *Agent) { a.loopbackIssuerHost = strings.TrimSpace(hostname) }
 }

@@ -197,8 +197,8 @@ func leafOK(paths SandboxPKIPaths, caCert *x509.Certificate) bool {
 	return err == nil
 }
 
-// leafIdentityOK reports whether cert is the sealed AIO gateway leaf: exact
-// DNS SAN, no IP SAN, and server-auth EKU.
+// leafIdentityOK reports whether cert is the AIO gateway leaf: exact DNS SAN,
+// no IP SAN, and server-auth EKU.
 func leafIdentityOK(cert *x509.Certificate) bool {
 	if len(cert.DNSNames) != 1 || cert.DNSNames[0] != PublicHost {
 		return false

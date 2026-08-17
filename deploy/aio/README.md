@@ -268,7 +268,7 @@ show `/init` as PID 1.
 | `cmd/aio-proxy` | TLS edge: terminates the gateway cert and reverse-proxies Dex and FleetShift |
 | `cmd/kind-loopback-forward` | TCP proxy copied onto kind control-planes for the public origin |
 | `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `gcphcp`, `kind`) |
-| `internal/edgeproxy` | Reverse-proxy implementation used by `aio-proxy` |
+| `internal/aioproxy` | Reverse-proxy implementation used by `aio-proxy` |
 | `internal/hostalias` | Append-only `/etc/hosts` mapping inside the AIO container |
 | `internal/loopbackforward` | Proxy implementation used by `kind-loopback-forward` |
 | `s6/` | s6-overlay v3 service defs (copied to `/etc/s6-overlay/`) |
@@ -288,7 +288,7 @@ source format:
   loopback HTTP; `aio-proxy` serves `https://fleetshift-sandbox.localhost:8085`;
   packaging wires AuthMethod/UI defaults into serve.
 - **Dex-off:** `OIDC_ISSUER_URL` set. No `dex.enabled` flag; the `dex` longrun
-  parks on `s6-pause`. The AIO TLS edge and branded callback stay the same.
+  parks on `s6-pause`. The AIO TLS edge and public callback stay the same.
   Packaging forwards the issuer and fills the same defaults for omitted fields.
 
 ### Identities

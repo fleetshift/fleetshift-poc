@@ -1,5 +1,5 @@
-// Command aio-proxy is the AIO TLS edge: it terminates the sandbox gateway
-// certificate and reverse-proxies peer Dex and FleetShift on one origin.
+// Command aio-proxy terminates the sandbox gateway certificate and
+// reverse-proxies peer Dex and FleetShift on one origin.
 package main
 
 import (
@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/edgeproxy"
+	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioproxy"
 )
 
 func main() {
@@ -21,6 +21,8 @@ func main() {
 	}
 }
 
+// run loads AIO endpoint and PKI paths, constructs the TLS edge, and serves
+// until SIGINT or SIGTERM.
 func run() error {
 	endpoints := aioinit.FixedEndpoints
 	pki := aioinit.DefaultSandboxPKIPaths()
@@ -32,7 +34,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("app upstream: %w", err)
 	}
-	proxy, err := edgeproxy.New(edgeproxy.Config{
+	proxy, err := aioproxy.New(aioproxy.Config{
 		ListenAddr:    endpoints.GatewayListen,
 		CertFile:      pki.LeafCert,
 		KeyFile:       pki.LeafKey,

@@ -15,7 +15,7 @@ const (
 	dexConfigDir = "/data/sandbox/dex"
 	// dexConfigPath is the Dex config file (mode 0600, dex UID/GID).
 	dexConfigPath = "/data/sandbox/dex/config.yaml"
-	// dexDBPath is the sealed Dex SQLite store.
+	// dexDBPath is the Dex SQLite store.
 	dexDBPath = "/data/sandbox/dex/dex.db"
 
 	bcryptCost = 12

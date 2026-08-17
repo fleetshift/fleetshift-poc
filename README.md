@@ -152,8 +152,7 @@ podman run -d --rm -it \
 
 Open https://fleetshift-sandbox.localhost:8085 and accept the browser's
 certificate warning (unknown sandbox CA — Advanced/Proceed or Accept Risk).
-Do not install the CA, edit `/etc/hosts`, or visit another port. Build locally
-with `task image:aio` when iterating on this repo.
+Build locally with `task image:aio` when iterating on this repo.
 
 External issuer, kind, GCP HCP, env defaults, and fleetctl:
 [deploy/aio/README.md](deploy/aio/README.md).

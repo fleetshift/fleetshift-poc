@@ -169,7 +169,8 @@ type Config struct {
 
 // NewConfig parses resolved edge input into a normalized Config. It performs
 // no I/O or resource acquisition. On success the returned Config satisfies
-// listen-address, database-selection, URL, CA, addon, and GCP path invariants.
+// listen-address, database-selection, URL, UI origin, CA, addon, and GCP path
+// invariants.
 func NewConfig(in ConfigInput) (Config, error) {
 	if in.DatabaseURLFileSet && in.DatabaseURL != "" {
 		return Config{}, fmt.Errorf("--database-url-file and --database-url are mutually exclusive")

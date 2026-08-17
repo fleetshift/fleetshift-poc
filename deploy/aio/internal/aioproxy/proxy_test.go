@@ -1,4 +1,4 @@
-package edgeproxy_test
+package aioproxy_test
 
 import (
 	"bufio"
@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/edgeproxy"
+	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioproxy"
 )
 
 const (
@@ -364,7 +364,7 @@ func TestProxy_ListenAndServeTLS(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	p, err := edgeproxy.New(edgeproxy.Config{
+	p, err := aioproxy.New(aioproxy.Config{
 		ListenAddr:    addr,
 		CertFile:      certFile,
 		KeyFile:       keyFile,
@@ -442,9 +442,9 @@ func recordingUpstreams(t *testing.T) (dex, app *httptest.Server) {
 	return dex, app
 }
 
-func newTestProxy(t *testing.T, dexURL, appURL string) *edgeproxy.Proxy {
+func newTestProxy(t *testing.T, dexURL, appURL string) *aioproxy.Proxy {
 	t.Helper()
-	p, err := edgeproxy.New(edgeproxy.Config{
+	p, err := aioproxy.New(aioproxy.Config{
 		PublicOrigin:  publicOrigin,
 		CanonicalHost: canonicalHost,
 		DexURL:        mustURL(t, dexURL),
@@ -464,7 +464,7 @@ func withQuery(q string) reqOption {
 	}
 }
 
-func doProxy(t *testing.T, p *edgeproxy.Proxy, method, path string, body io.Reader, headers map[string]string, opts ...reqOption) *httptest.ResponseRecorder {
+func doProxy(t *testing.T, p *aioproxy.Proxy, method, path string, body io.Reader, headers map[string]string, opts ...reqOption) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, "https://"+canonicalHost+path, body)
 	req.Host = canonicalHost

@@ -1,6 +1,6 @@
-// Package edgeproxy is the AIO-only TLS edge: one public origin, two fixed
-// loopback upstreams (peer Dex and FleetShift).
-package edgeproxy
+// Package aioproxy terminates the AIO gateway certificate and reverse-proxies
+// peer Dex and FleetShift on one public origin.
+package aioproxy
 
 import (
 	"context"
@@ -22,6 +22,8 @@ const (
 	maxHeaderBytes    = 1 << 20
 )
 
+// forwardingHeaders are client-supplied proxy and identity headers removed
+// before the upstream request.
 var forwardingHeaders = []string{
 	"Forwarded",
 	"X-Forwarded-For",
@@ -40,8 +42,8 @@ var forwardingHeaders = []string{
 	"X-Forwarded-Client-Cert",
 }
 
-// Config is the sealed AIO proxy configuration. Upstream URLs must be fixed
-// loopback http(s) targets; this process is not a general reverse proxy.
+// Config is the AIO TLS-edge configuration. DexURL and AppURL are the Dex and
+// FleetShift loopback upstreams.
 type Config struct {
 	ListenAddr    string
 	CertFile      string
@@ -155,6 +157,7 @@ func (p *Proxy) ListenAndServe(ctx context.Context) error {
 	}
 }
 
+// checkUpstream reports whether u is an http(s) URL with a host and no userinfo.
 func checkUpstream(name string, u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("%s upstream is required", name)
@@ -173,6 +176,9 @@ func checkUpstream(name string, u *url.URL) error {
 	return nil
 }
 
+// newUpstream returns a reverse proxy that sends requests to target, restores
+// the incoming query and Host, drops client forwarding and identity headers,
+// and strips HSTS from responses.
 func newUpstream(target *url.URL, transport http.RoundTripper) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -194,12 +200,14 @@ func newUpstream(target *url.URL, transport http.RoundTripper) *httputil.Reverse
 	}
 }
 
+// dropForwardingHeaders removes client-supplied forwarding and identity headers from h.
 func dropForwardingHeaders(h http.Header) {
 	for _, name := range forwardingHeaders {
 		h.Del(name)
 	}
 }
 
+// isWebSocket reports whether r is a WebSocket upgrade request.
 func isWebSocket(r *http.Request) bool {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		return false
