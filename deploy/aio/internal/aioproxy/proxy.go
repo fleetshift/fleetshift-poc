@@ -20,6 +20,8 @@ const (
 	idleTimeout       = 120 * time.Second
 	shutdownTimeout   = 5 * time.Second
 	maxHeaderBytes    = 1 << 20
+	idpPath           = "/idp"
+	idpPathSlash      = "/idp/"
 )
 
 // ForwardingHeaders are client-supplied proxy and identity headers removed
@@ -54,7 +56,7 @@ type Config struct {
 	AppURL       *url.URL
 }
 
-// Proxy terminates the AIO gateway certificate and multiplexes /dex to Dex
+// Proxy terminates the AIO gateway certificate and multiplexes /idp to Dex
 // and every other path to FleetShift.
 type Proxy struct {
 	certFile      string
@@ -103,7 +105,7 @@ func New(cfg Config) (*Proxy, error) {
 
 // ServeHTTP routes a request to Dex or FleetShift after Host and WebSocket
 // Origin checks. Encoded paths are classified with EscapedPath so a cleaned
-// path cannot cross the /dex routing boundary.
+// path cannot cross the /idp routing boundary.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Host != p.canonicalHost {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -119,7 +121,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	path := r.URL.EscapedPath()
-	if path == "/dex" || strings.HasPrefix(path, "/dex/") {
+	if path == idpPath || strings.HasPrefix(path, idpPathSlash) {
 		p.dex.ServeHTTP(w, r)
 		return
 	}

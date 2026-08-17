@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -262,6 +263,57 @@ func TestExpectedSurface_KindGCPTargetsAndSchemasLive(t *testing.T) {
 		if !found {
 			t.Errorf("missing activated schema type %q", rt)
 		}
+	}
+}
+
+func TestUIHTTP_AppPrefix(t *testing.T) {
+	webDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(webDir, "index.html"), []byte("<html>app</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "plugin-registry.json"), []byte(`{"plugins":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := startTestServerWithConfig(t, ConfigInput{WebDir: webDir})
+	base := "http://" + srv.Endpoints().HTTP.Dial
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	for _, path := range []string{"/", "/app"} {
+		resp, err := client.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusFound {
+			t.Errorf("GET %s status = %d, want %d body %s", path, resp.StatusCode, http.StatusFound, body)
+		}
+		if loc := resp.Header.Get("Location"); loc != "/app/" {
+			t.Errorf("GET %s Location = %q, want /app/", path, loc)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, base+"/app/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept", "text/html")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /app/ status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "app") {
+		t.Errorf("GET /app/ body = %q", body)
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 )
 
 func TestIssuerHostname(t *testing.T) {
-	got, err := issuerHostname("https://fleetshift-sandbox.localhost:8085/dex")
+	got, err := issuerHostname("https://fleetshift-sandbox.localhost:8085/idp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestApplyLoopbackIssuerHost_SkipsLoopback(t *testing.T) {
 
 func TestApplyLoopbackIssuerHost_AddsPatchForDNSHost(t *testing.T) {
 	cfg := toKindConfig(ClusterSpec{Name: "x", Nodes: []NodeSpec{{Role: "control-plane"}}})
-	if err := applyLoopbackIssuerHost(&cfg, "https://fleetshift-sandbox.localhost:8085/dex"); err != nil {
+	if err := applyLoopbackIssuerHost(&cfg, "https://fleetshift-sandbox.localhost:8085/idp"); err != nil {
 		t.Fatal(err)
 	}
 	n := cfg.Nodes[0]
@@ -88,7 +88,7 @@ func TestResolveConfig_LoopbackForwardAddsIssuerHost(t *testing.T) {
 		Caller: &domain.SubjectClaims{
 			FederatedIdentity: domain.FederatedIdentity{
 				Subject: "alice",
-				Issuer:  "https://fleetshift-sandbox.localhost:8085/dex",
+				Issuer:  "https://fleetshift-sandbox.localhost:8085/idp",
 			},
 		},
 		Audience: []domain.Audience{"fleetshift"},
@@ -218,7 +218,7 @@ func TestApplyOIDCOverlay_CAMountCoexistsWithIssuerHost(t *testing.T) {
 		Name:  "oidc",
 		Nodes: []NodeSpec{{Role: "control-plane"}, {Role: "worker"}},
 	})
-	applyOIDCOverlay(&cfg, &OIDCSpec{}, "https://fleetshift-sandbox.localhost:8085/dex", "fleetshift", "/tmp/oidc-ca.pem")
+	applyOIDCOverlay(&cfg, &OIDCSpec{}, "https://fleetshift-sandbox.localhost:8085/idp", "fleetshift", "/tmp/oidc-ca.pem")
 	applyIssuerHostOverlay(&cfg, "/tmp/kind-oidc-hostalias")
 
 	if len(cfg.KubeadmConfigPatches) != 1 || !strings.Contains(cfg.KubeadmConfigPatches[0], "oidc-issuer-url") {

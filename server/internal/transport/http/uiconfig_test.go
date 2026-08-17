@@ -496,4 +496,18 @@ func TestHandleConfig_IncludesPluginFields(t *testing.T) {
 			t.Fatalf("missing plugin bootstrap field %q", key)
 		}
 	}
+	if resp["assetsHost"] != "/app" {
+		t.Fatalf("assetsHost = %v, want /app", resp["assetsHost"])
+	}
+	entries, ok := resp["pluginEntries"].([]any)
+	if !ok || len(entries) != 1 {
+		t.Fatalf("pluginEntries = %v", resp["pluginEntries"])
+	}
+	entry, ok := entries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("pluginEntries[0] = %T", entries[0])
+	}
+	if entry["manifestPath"] != "/app/plugins/core/plugin-manifest.json" {
+		t.Fatalf("manifestPath = %v", entry["manifestPath"])
+	}
 }

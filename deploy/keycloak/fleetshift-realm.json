@@ -71,8 +71,8 @@
       "redirectUris": [
         "http://localhost:8085/*",
         "http://localhost:8888/*",
-        "https://fleetshift-sandbox.localhost:8085/auth/callback",
-        "https://fleetshift-sandbox.localhost:8085/silent-renew.html"
+        "https://fleetshift-sandbox.localhost:8085/app/auth/callback",
+        "https://fleetshift-sandbox.localhost:8085/app/silent-renew.html"
       ],
       "webOrigins": [
         "http://localhost:8085",

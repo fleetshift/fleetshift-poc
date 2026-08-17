@@ -67,7 +67,7 @@ func TestProxy_New_RejectsBadConfig(t *testing.T) {
 		{
 			name: "origin path",
 			cfg: aioproxy.Config{
-				PublicOrigin: publicOrigin + "/dex",
+				PublicOrigin: publicOrigin + "/idp",
 				DexURL:       dex,
 				AppURL:       app,
 			},
@@ -138,15 +138,16 @@ func TestProxy_RoutesDexAndApp(t *testing.T) {
 		path string
 		want string
 	}{
-		{path: "/dex", want: "dex"},
-		{path: "/dex/", want: "dex"},
-		{path: "/dex/.well-known/openid-configuration", want: "dex"},
-		{path: "/dex/auth", want: "dex"},
-		{path: "/dexevil", want: "app"},
+		{path: "/idp", want: "dex"},
+		{path: "/idp/", want: "dex"},
+		{path: "/idp/.well-known/openid-configuration", want: "dex"},
+		{path: "/idp/auth", want: "dex"},
+		{path: "/idpevil", want: "app"},
 		{path: "/", want: "app"},
+		{path: "/app/", want: "app"},
 		{path: "/api/ui/config", want: "app"},
-		{path: "/auth/callback", want: "app"},
-		{path: "/assets/app.js", want: "app"},
+		{path: "/app/auth/callback", want: "app"},
+		{path: "/app/assets/app.js", want: "app"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -169,8 +170,8 @@ func TestProxy_PreservesQueryPOSTCookiesRedirects(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		w.Header().Set("X-Query", r.URL.RawQuery)
 		w.Header().Set("X-Body", string(body))
-		w.Header().Set("Set-Cookie", "dex-session=abc; Path=/dex; HttpOnly; Secure; SameSite=Lax")
-		w.Header().Set("Location", publicOrigin+"/dex/approval")
+		w.Header().Set("Set-Cookie", "dex-session=abc; Path=/idp; HttpOnly; Secure; SameSite=Lax")
+		w.Header().Set("Location", publicOrigin+"/idp/approval")
 		w.WriteHeader(http.StatusFound)
 	}))
 	t.Cleanup(dex.Close)
@@ -180,7 +181,7 @@ func TestProxy_PreservesQueryPOSTCookiesRedirects(t *testing.T) {
 	t.Cleanup(app.Close)
 	p := newTestProxy(t, dex.URL, app.URL)
 
-	rr := doProxy(t, p, http.MethodPost, "/dex/token", strings.NewReader("a=1&b=2"), map[string]string{
+	rr := doProxy(t, p, http.MethodPost, "/idp/token", strings.NewReader("a=1&b=2"), map[string]string{
 		"Content-Type": "application/x-www-form-urlencoded",
 	}, withQuery("code=x&state=y"))
 	if rr.Code != http.StatusFound {
@@ -195,7 +196,7 @@ func TestProxy_PreservesQueryPOSTCookiesRedirects(t *testing.T) {
 	if !strings.Contains(rr.Header().Get("Set-Cookie"), "dex-session=abc") {
 		t.Fatalf("Set-Cookie = %q", rr.Header().Get("Set-Cookie"))
 	}
-	if rr.Header().Get("Location") != publicOrigin+"/dex/approval" {
+	if rr.Header().Get("Location") != publicOrigin+"/idp/approval" {
 		t.Fatalf("Location = %q", rr.Header().Get("Location"))
 	}
 }
@@ -212,20 +213,20 @@ func TestProxy_PreservesEncodedPath(t *testing.T) {
 	t.Cleanup(app.Close)
 	p := newTestProxy(t, dex.URL, app.URL)
 
-	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/dex/foo%2Fbar", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/idp/foo%2Fbar", nil)
 	req.Host = canonicalHost
 	rr := httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
-	if rr.Header().Get("X-Escaped") != "/dex/foo%2Fbar" {
+	if rr.Header().Get("X-Escaped") != "/idp/foo%2Fbar" {
 		t.Fatalf("escaped path = %q", rr.Header().Get("X-Escaped"))
 	}
 }
 
-func TestProxy_EncodedDexSlashStaysOnApp(t *testing.T) {
+func TestProxy_EncodedIdpSlashStaysOnApp(t *testing.T) {
 	dex, app := recordingUpstreams(t)
 	p := newTestProxy(t, dex.URL, app.URL)
 
-	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/dex%2Fauth", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/idp%2Fauth", nil)
 	req.Host = canonicalHost
 	rr := httptest.NewRecorder()
 	p.ServeHTTP(rr, req)

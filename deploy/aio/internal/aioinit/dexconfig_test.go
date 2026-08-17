@@ -30,14 +30,14 @@ func TestInstallDexConfig(t *testing.T) {
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"issuer: https://fleetshift-sandbox.localhost:8085/dex",
+		"issuer: https://fleetshift-sandbox.localhost:8085/idp",
 		"http: 127.0.0.1:5556",
 		"preferredUsername: \"dev-user\"",
 		"id: fleetshift-ui",
 		"id: fleetshift-cli",
 		"id: fleetshift-signing",
-		"https://fleetshift-sandbox.localhost:8085/auth/callback",
-		"https://fleetshift-sandbox.localhost:8085/silent-renew.html",
+		"https://fleetshift-sandbox.localhost:8085/app/auth/callback",
+		"https://fleetshift-sandbox.localhost:8085/app/silent-renew.html",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("config missing %q\n%s", want, body)

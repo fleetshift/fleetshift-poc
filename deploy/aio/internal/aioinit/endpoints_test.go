@@ -12,8 +12,8 @@ func TestFixedEndpoints(t *testing.T) {
 	origin := "https://" + net.JoinHostPort(PublicHost, gatewayPort)
 	want := Endpoints{
 		PublicOrigin:  origin,
-		UICallback:    origin + "/auth/callback",
-		SilentRenew:   origin + "/silent-renew.html",
+		UICallback:    origin + "/app/auth/callback",
+		SilentRenew:   origin + "/app/silent-renew.html",
 		GatewayListen: ":" + gatewayPort,
 		HTTPListen:    net.JoinHostPort("127.0.0.1", httpPort),
 		DexListen:     net.JoinHostPort("127.0.0.1", dexPort),
@@ -28,7 +28,7 @@ func TestFixedEndpoints(t *testing.T) {
 	if FixedEndpoints != want {
 		t.Fatalf("FixedEndpoints = %+v, want %+v", FixedEndpoints, want)
 	}
-	if PeerDexIssuer != origin+"/dex" {
+	if PeerDexIssuer != origin+"/idp" {
 		t.Fatalf("PeerDexIssuer = %q", PeerDexIssuer)
 	}
 	if PeerDexIssuer[len(PeerDexIssuer)-1] == '/' {

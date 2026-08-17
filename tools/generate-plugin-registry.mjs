@@ -27,6 +27,37 @@ const pluginMeta = [
 
 const metaByName = new Map(pluginMeta.map((p) => [p.name, p]));
 
+const APP_BASENAME = "/app";
+
+function prefixPluginManifest(manifest) {
+  const out = { ...manifest };
+  const base = out.baseURL;
+  if (!base || base === "/" || base === "auto") {
+    out.baseURL = APP_BASENAME + "/";
+  } else if (
+    typeof base === "string" &&
+    base.startsWith("/") &&
+    base !== APP_BASENAME &&
+    !base.startsWith(APP_BASENAME + "/")
+  ) {
+    out.baseURL = APP_BASENAME + base;
+  }
+  if (Array.isArray(out.loadScripts)) {
+    out.loadScripts = out.loadScripts.map((s) => {
+      if (
+        typeof s === "string" &&
+        s.startsWith("/") &&
+        s !== APP_BASENAME &&
+        !s.startsWith(APP_BASENAME + "/")
+      ) {
+        return APP_BASENAME + s;
+      }
+      return s;
+    });
+  }
+  return out;
+}
+
 function findManifests(dir, base) {
   const results = [];
   let entries;
@@ -46,7 +77,7 @@ function findManifests(dir, base) {
   return results;
 }
 
-const registry = { assetsHost: "", plugins: {} };
+const registry = { assetsHost: "/app", plugins: {} };
 const manifests = distDirs.flatMap((dir) => findManifests(dir, dir));
 if (manifests.length === 0) {
   throw new Error(`No plugin manifests found under ${distDirs.join(", ")}`);
@@ -71,8 +102,8 @@ for (const { path: filePath, rel } of manifests) {
     key: meta.key,
     label: meta.label,
     persona: meta.persona,
-    manifestPath: "/" + rel.split(sep).join("/"),
-    pluginManifest: manifest,
+    manifestPath: APP_BASENAME + "/" + rel.split(sep).join("/"),
+    pluginManifest: prefixPluginManifest(manifest),
   };
 }
 

@@ -150,7 +150,7 @@ podman run -d --rm -it \
   quay.io/stolostron/fleetshift:latest
 ```
 
-Open https://fleetshift-sandbox.localhost:8085 and accept the browser's
+Open https://fleetshift-sandbox.localhost:8085 (redirects to `/app`) and accept the browser's
 certificate warning (unknown sandbox CA — Advanced/Proceed or Accept Risk).
 Build locally with `task image:aio` when iterating on this repo.
 

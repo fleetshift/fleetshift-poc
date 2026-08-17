@@ -20,7 +20,7 @@ if [ -f /run/fleetshift/dex.enabled ]; then
 		sleep 1
 	done
 	if [ "$ready" -ne 1 ]; then
-		echo "aio: peer Dex discovery was not ready at ${PUBLIC_ORIGIN}/dex" >&2
+		echo "aio: peer Dex discovery was not ready at ${PUBLIC_ORIGIN}/idp" >&2
 		exit 1
 	fi
 fi

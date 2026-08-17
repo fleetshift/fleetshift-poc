@@ -99,8 +99,43 @@ func (kr *knownRoutes) reload() []string {
 	return prefixes
 }
 
+// UIPathPrefix is the public URL prefix for the SPA and its static assets.
+const UIPathPrefix = "/app"
+
+// PrefixUIAssetPath rewrites an origin-rooted asset path so it is served under
+// UIPathPrefix. Relative paths and paths already under the prefix are unchanged
+// except empty and "/" which become "/app/".
+func PrefixUIAssetPath(p string) string {
+	if p == "" || p == "/" {
+		return UIPathPrefix + "/"
+	}
+	if p == UIPathPrefix || strings.HasPrefix(p, UIPathPrefix+"/") {
+		return p
+	}
+	if strings.HasPrefix(p, "/") {
+		return UIPathPrefix + p
+	}
+	return p
+}
+
+// redirectToUI issues a 302 to /app/.
+func redirectToUI(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, UIPathPrefix+"/", http.StatusFound)
+}
+
+// MountUI registers GET/HEAD redirects from / and /app to /app/, and serves
+// webDir under /app/.
+func MountUI(mux *http.ServeMux, webDir string) {
+	mux.HandleFunc("GET /{$}", redirectToUI)
+	mux.HandleFunc("HEAD /{$}", redirectToUI)
+	mux.HandleFunc("GET "+UIPathPrefix, redirectToUI)
+	mux.HandleFunc("HEAD "+UIPathPrefix, redirectToUI)
+	mux.Handle(UIPathPrefix+"/", http.StripPrefix(UIPathPrefix, NewStaticHandler(webDir)))
+}
+
 // NewStaticHandler serves frontend assets from webDir with SPA fallback for
 // HTML document requests. Unknown client routes return index.html with 404.
+// Paths are the stripped SPA paths (e.g. /setup), not the public /app prefix.
 func NewStaticHandler(webDir string) http.Handler {
 	absWebDir, err := filepath.Abs(webDir)
 	if err != nil {

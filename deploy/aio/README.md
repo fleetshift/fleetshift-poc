@@ -28,7 +28,7 @@ podman build -f Dockerfile.fleetshift \
 ## Quick start (Dex-on)
 
 Bare run needs **no** OIDC flags. Packaging starts peer Dex behind the AIO TLS
-edge at `https://fleetshift-sandbox.localhost:8085/dex` and fills AuthMethod/UI
+edge at `https://fleetshift-sandbox.localhost:8085/idp` and fills AuthMethod/UI
 defaults for `serve`.
 
 ```bash
@@ -38,7 +38,17 @@ podman run -d --rm -it \
   quay.io/stolostron/fleetshift:latest
 ```
 
-Open https://fleetshift-sandbox.localhost:8085.
+Open https://fleetshift-sandbox.localhost:8085 (redirects to `/app`).
+
+Public paths on this origin:
+
+| Path | Serves |
+|------|--------|
+| `/idp` | Peer Dex (Dex-on only) |
+| `/app` | SPA and static assets |
+| `/api`, `/v1`, `/apis` | FleetShift HTTP APIs |
+| `/livez`, `/readyz` | Health probes |
+| `/` | Redirect to `/app/` |
 
 The sandbox certificate is intentionally browser-untrusted (private CA). In an
 unmanaged desktop Chrome, Firefox, or Safari profile that allows overrides,
@@ -75,7 +85,7 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 
 | Setting | Env (AIO) | Packaging default |
 |---|---|---|
-| Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://fleetshift-sandbox.localhost:8085/dex` when unset |
+| Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://fleetshift-sandbox.localhost:8085/idp` when unset |
 | UI client | `OIDC_UI_CLIENT_ID` | `fleetshift-ui` |
 | UI scope | `OIDC_UI_SCOPE` | `openid profile email groups audience:server:client_id:fleetshift` |
 | Resource audience | `OIDC_RESOURCE_AUDIENCE` | `fleetshift` |
@@ -98,8 +108,8 @@ Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive
 Presence of `OIDC_ISSUER_URL` skips peer Dex and forwards that issuer into the
 same serve bootstrap path. The AIO UI/API edge stays
 `https://fleetshift-sandbox.localhost:8085`; do not proxy the external IdP
-under `/dex`. Register that origin, `/auth/callback`, and `/silent-renew.html`
-on the external client. Packaging still fills omitted fields above. Pass
+under `/idp`. Register that origin, `/app/auth/callback`, and
+`/app/silent-renew.html` on the external client. Packaging still fills omitted fields above. Pass
 `OIDC_CA_FILE` only when discovery/TLS needs non-system trust. Issuer URL
 shape, CA readability/PEM, and registry/claim pairing are validated by
 `fleetshift serve`. Packaging fills omitted AuthMethod/UI defaults and
@@ -206,8 +216,8 @@ podman run -d --rm -it \
 Combine with the kind flags above when you also need local cluster provisioning
 (still keep `OIDC_ISSUER_URL`). The AIO UI remains
 `https://fleetshift-sandbox.localhost:8085`; register that origin,
-`/auth/callback`, and `/silent-renew.html` on the external IdP. `/dex` is not
-used in this mode.
+`/app/auth/callback`, and `/app/silent-renew.html` on the external IdP. `/idp`
+is not used in this mode.
 
 ## Fleetctl against Dex-on
 
@@ -219,7 +229,7 @@ store:
 podman cp <container>:/data/sandbox/pki/ca.crt .
 
 fleetctl auth setup \
-  --issuer-url https://fleetshift-sandbox.localhost:8085/dex \
+  --issuer-url https://fleetshift-sandbox.localhost:8085/idp \
   --client-id fleetshift-cli \
   --key-enrollment-client-id fleetshift-signing \
   --oidc-ca-file ca.crt \

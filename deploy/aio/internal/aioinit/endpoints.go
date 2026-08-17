@@ -31,7 +31,7 @@ func publicOrigin() string {
 
 // PeerDexIssuer is the public peer-Dex issuer (Dex-on only). Scheme, host,
 // port, and path must match discovery issuer and ID-token iss exactly.
-var PeerDexIssuer = publicOrigin() + "/dex"
+var PeerDexIssuer = publicOrigin() + "/idp"
 
 // Endpoints is the AIO public origin plus internal listen addresses.
 // PublicOrigin is the browser-facing URL. HTTPListen and DexListen are the
@@ -50,8 +50,8 @@ type Endpoints struct {
 // fixed listen ports.
 var FixedEndpoints = Endpoints{
 	PublicOrigin:  publicOrigin(),
-	UICallback:    publicOrigin() + "/auth/callback",
-	SilentRenew:   publicOrigin() + "/silent-renew.html",
+	UICallback:    publicOrigin() + "/app/auth/callback",
+	SilentRenew:   publicOrigin() + "/app/silent-renew.html",
 	GatewayListen: ":" + gatewayPort,
 	HTTPListen:    net.JoinHostPort("127.0.0.1", httpPort),
 	DexListen:     net.JoinHostPort("127.0.0.1", dexPort),

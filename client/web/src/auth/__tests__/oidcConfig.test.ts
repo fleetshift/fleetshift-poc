@@ -43,7 +43,7 @@ describe("fetchOidcConfig", () => {
   it("uses a fixed callback path and restores the deep SPA route", async () => {
     window.sessionStorage.setItem(
       "post_login_redirect_pathname",
-      "/overview/clusters",
+      "/app/overview/clusters",
     );
     vi.stubGlobal(
       "fetch",
@@ -51,7 +51,7 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://fleetshift-sandbox.localhost:8085/dex",
+            authority: "https://fleetshift-sandbox.localhost:8085/idp",
             clientId: "fleetshift-ui",
             scope: "openid profile email groups",
           },
@@ -63,15 +63,15 @@ describe("fetchOidcConfig", () => {
     const props = await fetchOidcConfig(mockNavigate);
 
     expect(props.redirect_uri).toBe(
-      "https://fleetshift-sandbox.localhost:8085/auth/callback",
+      "https://fleetshift-sandbox.localhost:8085/app/auth/callback",
     );
     expect(props.silent_redirect_uri).toBe(
-      "https://fleetshift-sandbox.localhost:8085/silent-renew.html",
+      "https://fleetshift-sandbox.localhost:8085/app/silent-renew.html",
     );
     expect(props.response_type).toBe("code");
     expect(props.automaticSilentRenew).toBe(true);
     expect(props.authority).toBe(
-      "https://fleetshift-sandbox.localhost:8085/dex",
+      "https://fleetshift-sandbox.localhost:8085/idp",
     );
 
     props.onSigninCallback?.({} as never);
@@ -84,7 +84,7 @@ describe("fetchOidcConfig", () => {
   it("does not treat the callback path as a post-login destination", async () => {
     window.sessionStorage.setItem(
       "post_login_redirect_pathname",
-      "/auth/callback",
+      "/app/auth/callback",
     );
     vi.stubGlobal(
       "fetch",
@@ -92,7 +92,7 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://fleetshift-sandbox.localhost:8085/dex",
+            authority: "https://fleetshift-sandbox.localhost:8085/idp",
             clientId: "fleetshift-ui",
             scope: "openid",
           },

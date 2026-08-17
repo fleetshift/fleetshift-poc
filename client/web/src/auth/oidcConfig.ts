@@ -1,6 +1,15 @@
 import type { AuthProviderNoUserManagerProps } from "react-oidc-context";
 import type { NavigateFunction } from "react-router-dom";
 
+import {
+  APP_BASENAME,
+  AUTH_CALLBACK_PATH,
+  SILENT_RENEW_PATH,
+  isAuthCallbackPath,
+  stripAppBasename,
+  toBrowserPath,
+} from "../appBase";
+
 interface UIConfig {
   oidc: {
     authority: string;
@@ -23,9 +32,9 @@ export async function fetchOidcConfig(
   return {
     authority: data.oidc.authority,
     client_id: data.oidc.clientId,
-    redirect_uri: window.location.origin + "/auth/callback",
-    silent_redirect_uri: window.location.origin + "/silent-renew.html",
-    post_logout_redirect_uri: window.location.origin + "/",
+    redirect_uri: window.location.origin + AUTH_CALLBACK_PATH,
+    silent_redirect_uri: window.location.origin + SILENT_RENEW_PATH,
+    post_logout_redirect_uri: window.location.origin + APP_BASENAME + "/",
     response_type: "code",
     scope: data.oidc.scope ?? "",
     automaticSilentRenew: true,
@@ -34,12 +43,13 @@ export async function fetchOidcConfig(
         "post_login_redirect_pathname",
       );
 
-      if (!postLoginRedirect || postLoginRedirect === "/auth/callback") {
-        postLoginRedirect = "/";
+      if (!postLoginRedirect || isAuthCallbackPath(postLoginRedirect)) {
+        postLoginRedirect = `${APP_BASENAME}/`;
       }
 
-      window.history.replaceState({}, document.title, postLoginRedirect);
-      navigate(postLoginRedirect, { replace: true });
+      const browserPath = toBrowserPath(postLoginRedirect);
+      window.history.replaceState({}, document.title, browserPath);
+      navigate(stripAppBasename(browserPath), { replace: true });
     },
   };
 }
