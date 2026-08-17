@@ -86,25 +86,36 @@ AIO fills omitted AuthMethod/UI fields. These are **packaging** defaults, not
 `fleetshift serve` binary defaults. Compose/Kubernetes use a different config
 surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 
-| Setting | Env (AIO) | Packaging default |
+**Required from you** — everything else may be left unset.
+
+| Mode | You must set |
+|---|---|
+| Dex-on (default) | nothing |
+| Dex-off | `OIDC_ISSUER_URL` |
+| Dex-off + GCP HCP | `OIDC_ISSUER_URL` and `GCPHCP_GATEWAY_URL` (or `GCPHCP_CONFIG`) |
+| Kind | a live engine socket mounted at `CONTAINER_HOST` |
+
+**Optional — packaging fills if omitted.** Set an env var only to override.
+
+| Setting | Env | If omitted |
 |---|---|---|
-| Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://fleetshift-sandbox.localhost:8085/idp` when unset |
+| Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://fleetshift-sandbox.localhost:8085/idp` (Dex-on). Setting this switches to Dex-off; there is no packaging issuer in that mode. |
 | UI client | `OIDC_UI_CLIENT_ID` | `fleetshift-ui` |
 | UI scope | `OIDC_UI_SCOPE` | `openid profile email groups audience:server:client_id:fleetshift` |
 | Resource audience | `OIDC_RESOURCE_AUDIENCE` | `fleetshift` |
 | Enrollment audience | `OIDC_KEY_ENROLLMENT_AUDIENCE` | `fleetshift-signing` |
-| Registry ID | `OIDC_REGISTRY_ID` | `github.com` (when not using public-key claim) |
-| Registry subject | `OIDC_REGISTRY_SUBJECT_EXPRESSION` | `claims.preferred_username` |
-| Public-key claim | `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` | none (caller-chosen; mutually exclusive with registry) |
-| OIDC CA | `OIDC_CA_FILE` | sandbox CA on Dex-on; optional on Dex-off |
+| Registry ID | `OIDC_REGISTRY_ID` | `github.com`, unless a public-key claim is set |
+| Registry subject | `OIDC_REGISTRY_SUBJECT_EXPRESSION` | `claims.preferred_username`, unless a public-key claim is set |
+| Public-key claim | `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` | unset (registry mapping is used instead) |
+| OIDC CA | `OIDC_CA_FILE` | sandbox CA on Dex-on. Dex-off: unset unless discovery/TLS needs non-system trust |
 | Log level | `FLEETSHIFT_LOG_LEVEL` | `debug` |
-| Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (adds `gcphcp` when gateway/config set) |
-| Container socket | `CONTAINER_HOST` | `unix:///var/run/docker.sock` |
-| Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | `fleetshift:8085` on Dex-on (empty disables) |
+| Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (`gcphcp` is appended when gateway/config is set) |
+| Container socket | `CONTAINER_HOST` | image default `unix:///var/run/docker.sock`. Override only if the mount path differs |
+| Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | Dex-on + live socket: `fleetshift:8085`. Set empty to disable. Not written on Dex-off |
 
-Registry id and subject expression must be set together when overriding either.
-Registry mapping and `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive
-(`fleetshift serve` enforces this).
+If you override registry ID or subject expression, set both. Registry mapping and
+`OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive (`fleetshift serve`
+enforces this).
 
 ## External issuer (Dex-off)
 
