@@ -128,13 +128,51 @@ npx nx run web:dev
 
 This skips the Docker web-builder and bind-mounts the monorepo-root `web/` directory (from `tools/merge-web.mjs`) into the container. The watch build rebuilds on source changes, and the Go backend picks up the new assets — just refresh the browser.
 
+**Open the UI at `http://127.0.0.1:8085` — not `localhost`.** With the built-in
+Dex sandbox IdP, peer Dex issues at `https://127.0.0.1:5556/dex` and only
+registers the `127.0.0.1` redirect URI and CORS origin. A `localhost:8085` tab
+loads the SPA but fails the OIDC redirect (`redirect_uri did not match`).
+
+**Trust the Dex CA once** so the browser stops warning on the login redirect:
+
+```bash
+task pd:trust-cert     # macOS: adds the sandbox CA to the login keychain
+                       # task pd:trust-cert -- --remove   to undo
+```
+
+Clicking through Chrome's "proceed anyway" only covers `127.0.0.1:5556` for that
+session and does not fix the app login (the SPA calls Dex in the background,
+which Chrome still blocks on an untrusted cert). `pd:trust-cert` is the real fix.
+
 ## Configuration
 
 Copy `.env.template` to `.env` and edit. All available settings are documented in the template. Command-line variables always override `.env`.
 
-This stack configures `fleetshift-server` with compose/`KEY_REGISTRY_*` /
-`PUBLIC_KEY_CLAIM_EXPR`. The AIO image uses different env names — see
-[deploy/aio/README.md](../aio/README.md).
+This stack runs the all-in-one image, so `fleetshift-server` is configured with
+the AIO OIDC env names (`OIDC_ISSUER_URL`, `OIDC_UI_SCOPE`,
+`OIDC_REGISTRY_ID` / `OIDC_REGISTRY_SUBJECT_EXPRESSION` /
+`OIDC_PUBLIC_KEY_CLAIM_EXPRESSION`, …). The Kubernetes deploy reads the same
+`.env` but uses different names (`KEY_REGISTRY_*`, `PUBLIC_KEY_CLAIM_EXPR`,
+`OIDC_AUDIENCE`) — see [deploy/aio/README.md](../aio/README.md) and
+[deploy/kubernetes/README.md](../kubernetes/README.md).
+
+### External OIDC scopes
+
+Leaving `OIDC_ISSUER_URL` unset uses the built-in Dex sandbox IdP, whose default
+UI scope requests a Dex-specific resource audience:
+
+```
+OIDC_UI_SCOPE="openid profile email groups audience:server:client_id:fleetshift"
+```
+
+A general external OIDC provider (Keycloak, etc.) does **not** understand the
+`audience:server:client_id:...` syntax and rejects the login with an invalid
+scope error. When you set `OIDC_ISSUER_URL` to an external issuer, override the
+scope with plain values and configure the token audience in the IdP instead:
+
+```
+OIDC_UI_SCOPE="openid profile email"
+```
 
 ### `gcphcp` Addon Toggle
 
