@@ -26,13 +26,6 @@ const DISMISS_KEY = "fleetshift:setup-checklist-dismissed";
 
 const SETUP_STEPS = [
   {
-    id: "initial-setup",
-    label: "Authentication",
-    ctaText: "Configure authentication",
-    scope: "settings-plugin",
-    module: "AuthSettingsPage",
-  },
-  {
     id: "signing-key-enrollment",
     label: "Signing key",
     ctaText: "Enroll signing key",

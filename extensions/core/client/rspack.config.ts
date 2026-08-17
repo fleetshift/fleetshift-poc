@@ -307,23 +307,6 @@ const SettingsPlugin = new FleetshiftPlugin({
       keywords: ["settings", "preferences", "nav", "order", "navigation"],
     }),
     createModule({
-      id: "auth-settings",
-      label: "Authentication",
-      group: "settings",
-      component: { $codeRef: "AuthSettingsPage.default" },
-      icon: { $codeRef: "AuthIcon.default" },
-      description:
-        "Configure authentication provider, backing store, and OIDC settings",
-      keywords: [
-        "auth",
-        "authentication",
-        "oidc",
-        "identity",
-        "keycloak",
-        "login",
-      ],
-    }),
-    createModule({
       id: "extensions",
       label: "Extensions",
       group: "settings",
@@ -349,8 +332,6 @@ const SettingsPlugin = new FleetshiftPlugin({
     exposedModules: {
       SettingsPage: p("./src/plugins/settings-plugin/SettingsPage.tsx"),
       SettingsIcon: p("./src/plugins/settings-plugin/SettingsIcon.tsx"),
-      AuthSettingsPage: p("./src/plugins/setup-plugin/InitialSetupForm.tsx"),
-      AuthIcon: p("./src/plugins/settings-plugin/AuthIcon.tsx"),
       ExtensionsPage: p("./src/plugins/setup-plugin/WhatsNextPage.tsx"),
       ExtensionsIcon: p("./src/plugins/setup-plugin/ExtensionsIcon.tsx"),
     },
@@ -359,16 +340,6 @@ const SettingsPlugin = new FleetshiftPlugin({
 
 const SetupPlugin = new FleetshiftPlugin({
   extensions: [
-    createSetup({
-      id: "initial-setup",
-      label: "Authentication",
-      description: "Configure authentication provider and backing store.",
-      path: "auth",
-      component: { $codeRef: "InitialSetupForm.default" },
-      requires: [],
-      requiresAuth: false,
-      priority: 0,
-    }),
     createSetup({
       id: "whats-next",
       label: "What's Next",
@@ -388,7 +359,6 @@ const SetupPlugin = new FleetshiftPlugin({
     name: "setup-plugin",
     version: "1.0.0",
     exposedModules: {
-      InitialSetupForm: p("./src/plugins/setup-plugin/InitialSetupForm.tsx"),
       WhatsNextPage: p("./src/plugins/setup-plugin/WhatsNextPage.tsx"),
       SetupProgress: p("./src/plugins/setup-plugin/useSetupProgress.ts"),
     },
