@@ -17,7 +17,6 @@ x-fleetshift-server: &fleetshift-server
     KIND_EXPERIMENTAL_DOCKER_NETWORK: kind
     CONTAINER_HOST: "unix:///var/run/docker.sock"
   ports:
-    # Publish on host loopback only; do not bind 0.0.0.0 or ::.
     - "127.0.0.1:${FLEETSHIFT_SERVER_HTTP_PORT}:${FLEETSHIFT_SERVER_HTTP_PORT}"
     - "127.0.0.1:${FLEETSHIFT_SERVER_GRPC_PORT}:${FLEETSHIFT_SERVER_GRPC_PORT}"
   volumes:

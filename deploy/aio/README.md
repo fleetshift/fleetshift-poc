@@ -38,17 +38,23 @@ podman run -d --rm -it \
   quay.io/stolostron/fleetshift:latest
 ```
 
-Open https://fleetshift-sandbox.localhost:8085 (redirects to `/app`).
+Open https://fleetshift-sandbox.localhost:8085 — the exact path `/` redirects
+to `/app/`.
 
-Public paths on this origin:
+Routing on this origin is prefix-based, not a catch-all into the SPA:
+
+1. **Edge** — `/idp`… goes to peer Dex (Dex-on only). Every other path is
+   forwarded to FleetShift.
+2. **FleetShift** — serves the paths below. Only exact `/` and `/app` redirect
+   to `/app/`. Unknown paths return 404; they are not rewritten into `/app`.
 
 | Path | Serves |
 |------|--------|
-| `/idp` | Peer Dex (Dex-on only) |
-| `/app` | SPA and static assets |
-| `/api`, `/v1`, `/apis` | FleetShift HTTP APIs |
+| `/idp`… | Peer Dex (Dex-on only) |
+| `/app`… | SPA and static assets |
+| `/api`, `/v1`, `/apis`… | FleetShift HTTP APIs |
 | `/livez`, `/readyz` | Health probes |
-| `/` | Redirect to `/app/` |
+| `/` or `/app` (exact) | 302 to `/app/` |
 
 The sandbox certificate is intentionally browser-untrusted (private CA). In an
 unmanaged desktop Chrome, Firefox, or Safari profile that allows overrides,
