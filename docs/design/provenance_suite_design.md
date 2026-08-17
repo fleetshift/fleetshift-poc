@@ -65,6 +65,10 @@ how trust reached a verifier, and how the resulting signature is verified
   public keys, certificates, or signer-selected labels itself.
 - Trust configuration and ordered delivery reuse as much implementation as is
   defensible.
+- The common provenance data model stays deliberately small: an aggregate of
+  media-typed signed items plus additional typed verification material. Initial
+  suites may reuse the same standard format inside that extension point without
+  making the core depend permanently on it.
 - Suite-specific state advances transactionally with delivery-agent state.
 - A new suite can be added by implementing bounded client, manager, and agent
   interfaces plus a conformance test contract.
@@ -93,11 +97,11 @@ how trust reached a verifier, and how the resulting signature is verified
   envelope. The predicate contains FleetShift authorization or evidence data.
 - **Signed evidence item:** One producer's independently signed assertion. It
   consists of one in-toto statement and its DSSE envelope and signature,
-  encoded with the suite's stable per-item verification material. Additional
-  dynamic proof material may travel separately. A Sigstore Bundle is one
-  signed-evidence-item format; despite its name, it is not the aggregate
-  FleetShift evidence bundle. The v3 suite needs an analogous continuity bundle
-  for each signed item.
+  encoded as an immutable, media-typed `SignedEvidence` value. Additional
+  dynamic proof material may travel separately. Both initial suites use a
+  standard Sigstore Bundle for this per-item encoding, but the common type does
+  not require that format. Despite its name, a Sigstore Bundle is not the
+  aggregate FleetShift evidence bundle.
 - **Attestation evidence bundle:** FleetShift's aggregate collection of the
   independently signed evidence items needed to verify one delivery. The
   resource manager assembles it over time from user requests, addon outputs,
@@ -233,7 +237,7 @@ principal from verified evidence plus accepted policy.
 
 ### 6.2 DSSE, in-toto, and per-item suite representation
 
-The three formats serve different layers for each independently signed item:
+The formats serve different layers for each independently signed item:
 
 ```text
 in-toto Statement
@@ -244,8 +248,12 @@ DSSE envelope
     payload type + statement bytes + producer's signature
         |
         v
-per-item suite representation
+signed-evidence representation
     DSSE envelope + material needed to verify that one signature
+        |
+        v
+SignedEvidence
+    media type + immutable serialized representation
 ```
 
 The DSSE signature is produced by that evidence item's user, workload, or
@@ -253,46 +261,68 @@ addon signing session at the time the statement is created. It covers only the
 typed in-toto statement in that envelope—not later evidence and not the final
 FleetShift aggregate.
 
-For the Sigstore suite, the representation of one signed evidence item is one
-standard Sigstore Bundle. In the initial profile it contains one DSSE envelope
-and signature together with the producer's Fulcio certificate, RFC 3161
-timestamp, and any configured transparency evidence. “Bundle” in the Sigstore
-type name does not mean that it contains the other FleetShift attestations for
-the delivery.
+Both initial suites use one standard Sigstore Bundle v0.3 as the representation
+of each signed evidence item. They select different standard verification-
+material forms inside it:
 
-For v3, the analogous representation is one continuity bundle containing one
-DSSE envelope plus stable signer-evidence selectors such as identity ID and
-signing-state digest. Large dynamic map/history proofs can be carried once in
-delivery-wide suite verification material and keyed by the digest of each
-continuity bundle that uses them.
+- The Sigstore keyless suite uses a Fulcio leaf certificate, RFC 3161
+  timestamp, and any configured transparency evidence.
+- The v3 suite uses the Bundle's public-key identifier form. Its hint and the
+  DSSE signature's matching `keyid` select the signing-state proof and key, but
+  grant no authority themselves. Dynamic authenticated-map, key-history,
+  rotation, and delivery proofs travel in delivery-wide verification material
+  and may be shared by many items.
 
-The common layer treats either representation as immutable typed bytes:
+The authenticated suite profile, not the Bundle, determines which form is
+valid. The initial v3 profile rejects certificate-based Bundle verification
+material; the initial Sigstore keyless profile rejects a public-key-only
+Bundle. Sharing the media type must not become an implicit fallback between
+trust mechanisms.
+
+“Bundle” in the Sigstore type name does not mean that it contains the other
+FleetShift attestations for the delivery. It contains one independently signed
+item and the stable material or selector needed to begin verifying that item.
+
+The common layer treats every representation as immutable typed bytes:
 
 ```text
-SignedEvidenceItem {
+SignedEvidence {
     media_type
     bytes
 }
 ```
 
-Initial media types could be:
+Both initial suites emit:
 
 ```text
 application/vnd.dev.sigstore.bundle.v0.3+json
-application/vnd.fleetshift.continuity-bundle.v1+json
 ```
 
-The resource manager stores each item by digest and later delivers the exact
-same bytes. It may add more independently signed items as fulfillment evolves,
-but it never translates an existing signature or wraps the aggregate evidence
-set in a manager-generated provenance signature.
+This is an initial profile rule, not a permanent restriction on the extension
+point. A future suite may register another signed-evidence media type if a new
+standard or trust mechanism does not fit the Sigstore Bundle model. The common
+layer stores, digests, bounds, and routes the typed bytes; only the selected
+suite parses their format. The common verifier sees the resulting
+`VerifiedStatement`, not certificates, public-key hints, or format-specific
+proofs.
+
+The resource manager stores each item by a domain-separated digest over both
+`media_type` and the exact `bytes`, then later delivers the same typed value.
+The media type is part of the identity because changing parsers must not
+preserve an item's digest. When a format also carries an internal media type,
+as Sigstore Bundle does, the suite requires it to match the outer value. The
+manager may add more independently signed items as fulfillment evolves, but it
+never translates an existing signature or wraps the aggregate evidence set in
+a manager-generated provenance signature.
 
 The suite parses and verifies one item's bytes and returns its common in-toto
 statement. Trying to normalize certificates, continuity state, timestamps,
 Rekor entries, and future transparency proofs into one universal `Signature`
-struct would leak every implementation into the common verifier. The complete
-standard Sigstore Bundle should therefore remain intact rather than becoming a
-custom almost-Sigstore wire format.
+struct would leak every implementation into the common verifier. Each standard
+Sigstore Bundle should therefore remain intact rather than becoming a custom
+almost-Sigstore wire format. Reuse happens inside the extension point because
+both initial suite implementations can share Bundle and DSSE parsing without
+making those details part of the core abstraction.
 
 ### 6.3 Verifiable relationships and derived input
 
@@ -346,18 +376,27 @@ signed evidence items. It has no aggregate DSSE signature:
 AttestationEvidenceBundle {
     root_evidence_id
     items {
-        item_digest -> SignedEvidenceItem
+        item_digest -> SignedEvidence
     }
     lookup_indexes // optional, non-authoritative
 }
 ```
 
-Every map key must equal the digest of the exact encoded signed item. Semantic
-IDs inside verified statements remain distinct from these storage digests;
-lookup indexes may map semantic IDs to candidate item digests, but the verifier
-checks the mapping against the decoded signed statements.
+Every map key must equal the domain-separated digest of the exact
+`SignedEvidence` media type and bytes. Semantic IDs inside verified statements
+remain distinct from these storage digests; lookup indexes may map semantic IDs
+to candidate item digests, but the verifier checks the mapping against the
+decoded signed statements.
 
-The complete delivery package keeps three concerns separate:
+Within the provenance portion of a delivery, there are two top-level payloads:
+
+1. `AttestationEvidenceBundle`, the aggregate of independently signed items;
+   and
+2. `DeliveryVerificationMaterial`, the additional common and suite-specific
+   support needed to verify those items for this delivery.
+
+The complete delivery package keeps those two provenance payloads separate
+from applicable content:
 
 ```text
 DeliveryPackage {
@@ -394,10 +433,16 @@ the server-assembled set of independently signed statements used to decide
 whether that content is authorized. `DeliveryVerificationMaterial` supplies
 replaceable trust, ordering, identity-history, or transparency proofs needed
 to verify the signed items; it is not content attestation evidence itself.
+Some per-item verification material remains inside a signed-evidence format,
+such as the certificate and timestamp in a Sigstore keyless Bundle or the
+public-key hint in a v3 Bundle. `DeliveryVerificationMaterial` holds additional
+material that is delivery-wide, shareable, replaceable, or not representable in
+that per-item format.
 
 The delivery journal commits the digest of `DeliveryContent` and a canonical
 attestation-evidence digest covering the nominated root and the sorted exact
-signed-item digests and bytes. Reconstructable lookup indexes are excluded.
+signed-item digests, media types, and bytes. Reconstructable lookup indexes are
+excluded.
 That commitment proves exact delivery ordering and prevents later substitution
 relative to an agent's checkpoint, but it does not make the resource manager an
 attestation signer. Trust updates and reconstructable proofs are likewise not
@@ -488,7 +533,10 @@ type UnsignedStatement struct {
     Statement     []byte // canonical in-toto Statement bytes
 }
 
-type SignedEvidenceItem = TypedBytes
+type SignedEvidence struct {
+    MediaType string
+    Bytes     []byte
+}
 
 type CredentialFacts struct {
     ExternalIssuer  string
@@ -538,11 +586,11 @@ one binary, so each role has its own factory registry rather than one giant
 
 ```go
 type SuiteDescriptor struct {
-    ID                         SuiteID
-    ProtocolVersion            string
-    AcceptedEvidenceMediaTypes []string
+    ID                            SuiteID
+    ProtocolVersion               string
+    AcceptedEvidenceMediaTypes    []string
     SuiteVerificationMaterialType string
-    SuiteCheckpointType        string
+    SuiteCheckpointType           string
 }
 
 type ClientSuiteFactory interface {
@@ -587,7 +635,7 @@ type ClientSuite interface {
 }
 
 type SigningSession interface {
-    Sign(context.Context, UnsignedStatement) (SignedEvidenceItem, error)
+    Sign(context.Context, UnsignedStatement) (SignedEvidence, error)
     PrincipalHint() PrincipalHint
     Close() error
 }
@@ -680,7 +728,7 @@ type VerificationMaterialAssemblyRequest struct {
 }
 
 type RequestVerificationRequest struct {
-    Evidence       SignedEvidenceItem
+    Evidence       SignedEvidence
     EvidenceKind   EvidenceKind
     DomainID       string
     TenantID       string
@@ -741,7 +789,7 @@ type BeginVerificationRequest struct {
 type VerificationSession interface {
     VerifyEvidenceItem(
         context.Context,
-        SignedEvidenceItem,
+        SignedEvidence,
         EvidenceKind,
     ) (VerifiedStatement, *VerificationResult, error)
 
@@ -1012,7 +1060,7 @@ depends on that identity.
 | Client key acquisition        | Load/create continuity/device key; create session key      | Create ephemeral P-256 key                                 |
 | Identity ceremony             | Nonce-bound OIDC enrollment; later continuity              | OIDC-authenticated Fulcio issuance per signing session     |
 | FleetShift control operations | Enrollment, rotation, recovery, tombstone                  | Normally none                                              |
-| Signed evidence item          | One FleetShift continuity bundle containing one DSSE item  | One standard Sigstore Bundle v0.3 containing one DSSE item |
+| Signed evidence item          | Standard Sigstore Bundle v0.3 using a public-key hint      | Standard Sigstore Bundle v0.3 using a Fulcio certificate   |
 | Aggregate attestation bundle  | Common FleetShift collection of independently signed items | Common FleetShift collection of independently signed items |
 | Trusted wall-clock time       | Not required for user delivery                             | RFC 3161 token in current profile                          |
 | Low-churn trust               | TUF-carried v3 trust manifest and common policy            | TUF-carried Sigstore TrustedRoot and common policy         |
@@ -1028,24 +1076,32 @@ depends on that identity.
 
 The current v3 `ContentAttestation` should be replaced by the common
 `delivery-authorization/v1` statement, carried as one independently signed
-continuity bundle. Other evidence kinds use the same per-item shape with their
-own in-toto predicates and their own producer signatures:
+Sigstore Bundle. Other evidence kinds use the same standard per-item format
+with their own in-toto predicates and producer signatures:
 
 ```text
-ContinuityBundle {
-    media_type
-    dsse_envelope
-    identity_id_hint
-    signing_state_digest_hint
-    delegation_chain[]
+Sigstore Bundle v0.3 {
+    verification_material.public_key.hint = signing_state_digest_hint
+    dsse_envelope {
+        payload_type = application/vnd.in-toto+json
+        payload = FleetShift in-toto statement
+        signatures[0].keyid = signing_state_digest_hint
+        signatures[0].sig = continuity signature
+    }
 }
 ```
 
-The identity and state fields are proof-selection hints. The signature and
-delivered evidence must demonstrate them; neither is trusted directly.
+The public-key hint and DSSE `keyid` are matching proof-selection hints. They
+are not signed by DSSE and grant no identity or authority. The v3 verifier uses
+them to find candidate proof material, verifies that material from its retained
+checkpoint, obtains the authenticated continuity key and identity state, and
+then requires that key to verify the DSSE signature. Substitution of a hint or
+proof therefore either resolves to the same authenticated key state or fails
+signature, history, or policy verification.
 
 Delivery-wide v3 verification material contains identity proofs keyed to the
-exact independently signed items that need them:
+exact independently signed items that need them. Delegation, map, history, and
+rotation material belongs here rather than in a custom per-item wrapper:
 
 ```text
 ContinuityVerificationMaterial {
@@ -1089,10 +1145,14 @@ design separates.
 
 Each signed evidence item is one unmodified Sigstore Bundle already used by the
 POC. Its DSSE payload uses the same FleetShift predicate schemas as the
-continuity suite. A delivery with a user input, addon manifests, placement,
-fulfillment relation, and update history therefore carries several independent
-Sigstore Bundles created by their respective producers. FleetShift's aggregate
-attestation evidence bundle collects them but has no aggregate DSSE signature.
+continuity suite. Bundle/DSSE decoding, structural limits, media-type checks,
+and statement parsing should be shared with the v3 implementation inside the
+suite extension packages; their credential and proof verification diverges
+after that common parsing. A delivery with a user input, addon manifests,
+placement, fulfillment relation, and update history therefore carries several
+independent Sigstore Bundles created by their respective producers.
+FleetShift's aggregate attestation evidence bundle collects them but has no
+aggregate DSSE signature.
 
 Most per-item verification material remains inside each standard bundle:
 
@@ -1141,7 +1201,9 @@ the common engine:
 - `AcquireSigner` creates or loads a client-held key and registers it through
   a suite control operation or native service.
 - Each signed evidence item carries DSSE plus a stable key/transparency
-  selector.
+  selector. The suite may reuse the Sigstore Bundle public-key form, as v3
+  does, or register a different `SignedEvidence` media type without changing
+  the aggregate or verifier interfaces.
 - TUF distributes the transparency service's bootstrap keys, policy, and
   witness configuration unless the provider provisions an equivalent anchor.
 - `AssembleVerificationMaterial` obtains inclusion, consistency, and
@@ -1158,7 +1220,9 @@ contract do not change.
 ## 14. Security invariants
 
 1. **Pinned selection:** suite and trust updater are selected from provisioned
-   or authenticated local state, never from untrusted package data.
+   or authenticated local state, never from untrusted package data. The profile
+   also pins accepted signed-evidence media types and allowed verification-
+   material forms within a shared format.
 2. **No fallback:** parse, trust, or verification failure in the selected suite
    is terminal for that attempt.
 3. **Original signed items:** every exact user, workload, or addon signed item
@@ -1170,7 +1234,9 @@ contract do not change.
    evidence but never establish a relationship. Every accepted relationship is
    contained in or deterministically derived from verified signed statements.
 6. **Purpose separation:** predicate type, DSSE payload type, signed-evidence
-   media type, evidence kind, and suite protocol are checked together.
+   media type, evidence kind, and suite protocol are checked together. The
+   signed-evidence digest commits both media type and bytes, and any inner media
+   type must match the outer typed value.
 7. **Derived identity:** principal and anchor IDs come from verified evidence
    and accepted policy, never from an unauthenticated signer label.
 8. **Exact-one policy match:** zero or ambiguous identity-policy matches fail.
@@ -1263,6 +1329,7 @@ Common cases include:
 - signed/outer generation mismatch;
 - purpose and predicate confusion;
 - signed-evidence media-type relabeling;
+- outer/inner media-type mismatch and typed-evidence digest mismatch;
 - injection or omission of an independently signed evidence item;
 - outer-reference or lookup-index retargeting without a corresponding signed
   relationship;
@@ -1282,11 +1349,12 @@ Common cases include:
 - migration/downgrade rejection.
 
 V3-specific cases retain enrollment substitution, map/history proof tamper,
-rotation cutoff, stale-agent, exception, and historical-state coverage.
+rotation cutoff, stale-agent, exception, historical-state coverage, public-key
+hint/DSSE `keyid` mismatch, and rejection of certificate-based Bundle material.
 
 Sigstore-specific cases retain Fulcio proof-of-possession, certificate path,
-identity extension, RFC 3161, TrustedRoot, and optional transparency evidence
-coverage.
+identity extension, RFC 3161, TrustedRoot, optional transparency evidence, and
+rejection of a public-key-only Bundle under the keyless profile.
 
 The existing Sigstore parity inventory is a useful precedent: test-name parity
 alone is insufficient, so negative tests should pin the intended rejection
@@ -1296,9 +1364,10 @@ layer and forbid conversion into soft boolean assertions.
 
 1. Define common in-toto predicate schemas and canonical cross-language test
    vectors for each independently signed evidence kind. Replace v3's simple
-   `ContentAttestation` with one DSSE continuity bundle per signed assertion,
-   without introducing a signature over the aggregate evidence set or changing
-   its continuity proofs.
+   `ContentAttestation` with one standard Sigstore Bundle v0.3 per signed
+   assertion, using its public-key verification-material form and a matching
+   DSSE `keyid`. Do not introduce a signature over the aggregate evidence set
+   or change the existing continuity proofs.
 2. Extract the v3 delivery log into a common journal package. Keep all existing
    cutoff, catch-up, stale checkpoint, and lost-ack tests.
 3. Introduce `DeliveryContent`, `AttestationEvidenceBundle`,
@@ -1330,8 +1399,10 @@ These are recommendations for the first POC, not final product commitments:
 3. Require every evidence relationship to be expressed by, or
    deterministically verified from, signed statement content; aggregate indexes
    are lookup aids only.
-4. Keep each official Sigstore Bundle whole; create a separate v3 continuity
-   bundle rather than a fake common certificate/key-binding structure.
+4. Require both initial suites to emit complete standard Sigstore Bundle v0.3
+   items: certificate verification material for Sigstore keyless and public-key
+   hints for v3. Keep `SignedEvidence` media-typed so a future suite may use a
+   different standard without changing the common interfaces.
 5. Use TUF for profile, policy, and low-churn trust material in every initial
    deployment.
 6. Use one common per-tenant delivery journal for every suite.
@@ -1381,9 +1452,17 @@ manifest's separate update-policy machinery smaller than currently designed.
 
 ### Signed evidence item details
 
-Should a continuity bundle put identity/state selectors in DSSE `keyid`, in a
-typed verification-material block, or both? They must remain lookup hints and
-must be checked against authenticated history.
+The provisional v3 profile puts the same signing-state selector in the Sigstore
+Bundle's `verificationMaterial.publicKey.hint` and the DSSE signature's
+`keyid`, as required by the Bundle model. It remains only a lookup hint and must
+resolve through authenticated history to the key that verifies the signature.
+The POC must confirm that maintained Sigstore libraries accept and preserve
+this standard public-key Bundle form without keyless-specific assumptions.
+
+Which compatibility and registration rules allow a future suite to introduce
+a new `SignedEvidence.media_type`? The core should require a pinned suite to
+declare exact accepted media types and size limits, but it should not need a
+new universal signature or verification-material schema.
 
 Do request authorization statements need a stable signed provenance-domain ID
 in addition to tenant ID and predicate type to prevent cross-instance replay?
