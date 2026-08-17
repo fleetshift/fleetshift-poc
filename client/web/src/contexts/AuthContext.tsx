@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { AuthProviderProps } from "react-oidc-context";
+import type { AuthProviderNoUserManagerProps } from "react-oidc-context";
 import {
   AuthProvider as OidcAuthProvider,
   useAuth as useOidcAuth,
@@ -133,7 +133,9 @@ export function AuthProvider({
   children: ReactNode;
   requireAuth?: boolean;
 }) {
-  const [oidcProps, setOidcProps] = useState<AuthProviderProps | null>(null);
+  const [oidcProps, setOidcProps] = useState<AuthProviderNoUserManagerProps | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 

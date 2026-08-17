@@ -1,4 +1,4 @@
-import type { AuthProviderProps } from "react-oidc-context";
+import type { AuthProviderNoUserManagerProps } from "react-oidc-context";
 import type { NavigateFunction } from "react-router-dom";
 
 interface UIConfig {
@@ -11,7 +11,7 @@ interface UIConfig {
 
 export async function fetchOidcConfig(
   navigate: NavigateFunction,
-): Promise<AuthProviderProps> {
+): Promise<AuthProviderNoUserManagerProps> {
   const res = await fetch("/api/ui/config");
   if (!res.ok) {
     throw new Error(
