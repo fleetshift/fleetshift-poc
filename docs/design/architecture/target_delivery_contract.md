@@ -126,6 +126,11 @@ Delivery authorization and attestation verification apply as defined in [core_mo
 
 #### Journaling
 
+Here, a journal is target-side operational state used for convergence and
+crash recovery. It is distinct from the cryptographic
+[delivery log](../provenance_suite_design.md#10-shared-append-only-delivery-log)
+used for provenance ordering and rollback detection.
+
 A goal of this delivery protocol is to minimize the amount of state that an addon needs to keep track of to participate as a high quality target. However, fulfillment guarantees MAY still require a journal of some kind (like AppliedMW in OCM) to inventory what is happening in the target in more detail as a result of a delivery. Fleetshift could potentially provide APIs to keep track of such a journal as a service to addon developers.
 
 There are two cases where this may be needed:

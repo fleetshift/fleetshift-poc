@@ -7,7 +7,12 @@
 - we need a "mark & sweep" protocol for detecting stale objects
 - need relationships (see ID note)
 - history / alias processing
-- 
+- what guarantees do we have? what do we require? how should consistency be achieved?
+    - 
+
+## Fleetlet / agent bootstrap
+
+- How can we abstract some of this from addons while making them responsible for handling the sensitive credential part?
 
 ## Old
 

@@ -2,6 +2,8 @@
 
 This document describes a novel approach to authentication for a management plane, under the overall governing principle that a compromise to the customer-facing management platform MUST NOT compromise an entire multi-tenant provider estate.
 
+> **Terminology:** `Deployment` in user workflows and examples means the user-facing resource. It is a thin owner/proxy for the internal `Fulfillment` kernel object. Placement, generation, delivery, and removal operate on Fulfillment so the same authorization model also works for managed resources, campaigns, and future owner-resource types. The hybrid POC predates this split and still uses deployment-shaped names in several wire objects.
+
 This leads to a few key constraints:
 
 - No highly privileged service accounts
@@ -290,13 +292,13 @@ The delivery agent verifies the entire chain recursively:
 
 > **Note:** The current POC (`poc/attestation/hybrid/mutation.py:derive_constraints`) accumulates prior constraints forward unconditionally. This is a known divergence from the intended per-layer model and should be revisited.
 
-**Update attestations are themselves deployments.** An update attestation has its own input, strategies, and signer. Its placement strategy naturally gates which deployments the update applies to — the update is verified with the target deployment as the placement target. This means an upgrade planner addon can sign which deployment IDs a patch is allowed to touch.
+**Update attestations use the same intent model.** The hybrid POC represents an update authorization as a deployment-shaped attestation with its own input, strategies, and signer. In the current kernel model, its placement/applicability strategy gates which owner resources or Fulfillments the update may affect. A signed selector may resolve dynamically; an upgrade planner or delegated placement addon can instead sign an applicable resource/Fulfillment scope. Concrete delivery, generation, and removal remain keyed by Fulfillment rather than assuming every owner is a user-facing `Deployment`.
 
 **Anti-replay.** A compromised platform can't forge a user signature (no user signing key). Residual attacks:
 
-- **Replay:** present an old signature. Defense: `expected_generation` in the signed content. The delivery agent tracks a monotonic generation per deployment and rejects operations where `expected_generation != local_generation + 1`. Generation numbers increment through derivation chains.
+- **Replay:** present an old signature. Defense: `expected_generation` in the signed content when exact compare-and-swap semantics are required. The delivery agent tracks a monotonic generation per Fulfillment and rejects such operations where `expected_generation != local_generation + 1`. Generation numbers increment through derivation chains. Dynamic-scope authorizations may not know each selected Fulfillment's generation at signing time; every concrete delivery is still fenced against target-local Fulfillment state.
 - **Withholding:** refuse to deliver a validly signed operation (DoS). Observable — the user sees their deployment isn't progressing.
-- **Misdirection:** deliver a legitimately signed operation to the wrong target. Defense: the signed content includes target scope (deployment_id, placement strategy); the delivery agent checks consistency.
+- **Misdirection:** deliver a legitimately signed operation to the wrong target. Defense: the signed content includes an owner-resource/Fulfillment scope or placement strategy; the delivery agent checks it against the resolved Fulfillment and authoritative target identity.
 
 **Management-plane concurrency control.** The management plane exposes two orthogonal precondition mechanisms on mutation requests (e.g. resume). `etag` is a weak domain-state token (per AIP-154 and RFC 9110 Section 8.8.1, `W/`-prefixed) that changes whenever any relevant API-visible state changes — not just generation-advancing mutations (for example, `state`). `expected_generation` is an explicit version-lineage claim that the client signs into provenance; delivery agents verify it for anti-replay. Clients can combine both for exact-snapshot writes, supply only `expected_generation` for low-churn generation-bound writes, or omit both for unsigned legacy operations.
 
@@ -304,22 +306,22 @@ The delivery agent verifies the entire chain recursively:
 
 If a compromised platform can trigger removal of all resources (by manipulating placement or sending unsigned deletions), the signing model hasn't bought much. The delivery agent must be able to independently verify that any placement or removal action is legitimate.
 
-Removal is a first-class delivery action (`RemoveByDeploymentId` in `poc/attestation/hybrid/model.py`), verified through the same constraint system as puts. The placement and removal scenarios are tested in `poc/attestation/hybrid/test_delivery.py`. The signed input's placement strategy determines when removal is allowed — this is an emergent property of the strategy, not a separate flag:
+Removal is a first-class delivery action, verified through the same constraint system as puts. The current delivery contract calls it `RemoveByFulfillmentId`; `poc/attestation/hybrid/model.py` still uses the legacy `RemoveByDeploymentId` name because that POC predates the separate Fulfillment aggregate. The placement and removal scenarios are tested in `poc/attestation/hybrid/test_delivery.py`. The signed input's placement strategy determines when removal is allowed — this is an emergent property of the strategy, not a separate flag:
 
-- **Predicate placement**: the strategy-implied constraint allows removal only when the predicate does *not* match the target. If the target still matches, removal is rejected. This means a deployment "sticks" to targets that match its predicate — the platform cannot remove it by simply asserting removal.
-- **Addon placement**: the strategy-implied constraint allows removal only when the target is *not* in the signed placement evidence's target list. The placement evidence must be signed by the named addon, and its `deployment_id` must match the attested deployment, preventing cross-deployment replay.
+- **Predicate placement**: the strategy-implied constraint allows removal only when the predicate does *not* match the target. If the target still matches, removal is rejected. This means a Fulfillment "sticks" to targets that match its predicate — the platform cannot remove it by simply asserting removal.
+- **Addon placement**: the strategy-implied constraint allows removal only when the target is *not* in the signed placement evidence's target list. The placement evidence must be signed by the named addon and bind the resolved Fulfillment. The hybrid POC's legacy `deployment_id` check models the same anti-substitution requirement for its deployment-shaped input.
 
-In both cases, the `deployment_id` in the removal action must match the signed input's `deployment_id`, preventing confused-deputy attacks.
+In both cases, the `fulfillment_id` in the removal action must match the enclosing delivery's resolved `fulfillment_id`, and the verifier must establish the owning signed input's relationship to that Fulfillment. A `DeploymentID`, managed-resource identity, or other owner-resource ID cannot substitute for the kernel Fulfillment identity.
 
 The same core principle of external trust anchors applies here along several dimensions:
 
 **1. Self-assessed placement (predicate strategy).** The signed intent includes a CEL predicate (e.g., label selectors). The delivery agent evaluates the predicate against its own locally-trusted identity. No platform involvement — the agent decides for itself whether it matches. For pool-based placement, pool membership can be derived from cluster labels (self-assessable) or explicitly assigned with admin-signed provenance.
 
-**2. External placement authority (addon strategy).** When placement decisions come from outside the platform (scoring addons, external capacity services), they carry their own signing authority as `PlacementEvidence`. The delivery agent verifies the evidence independently: the signature is valid against the named trust anchor, the `deployment_id` binds the evidence to this specific deployment, and the current target is consistent with the signed target list. The platform consumes these decisions but doesn't control them at the enforcement point.
+**2. External placement authority (addon strategy).** When placement decisions come from outside the platform (scoring addons, external capacity services), they carry their own signing authority as `PlacementEvidence`. The delivery agent verifies the evidence independently: the signature is valid against the named trust anchor, the `fulfillment_id` binds the evidence to this specific Fulfillment, and the current target is consistent with the signed target list. The platform consumes these decisions but doesn't control them at the enforcement point. The hybrid POC's `deployment_id` field is the legacy form of this binding.
 
 **3. Change provenance for placement-affecting state.** When the platform delivers a removal or rescheduling decision, the triggering state change (label removal, pool membership update, etc.) is itself a signed action — the same signing model applies to placement-affecting operations as to deployment intents. The delivery agent verifies: the state change was signed by an authorized user, the change means the placement constraints no longer match, therefore removal is legitimate.
 
-**4. Sticky deployments.** Pool-based placements (e.g., hosted control planes on management clusters) can use placement strategies that inherently resist removal. With predicate placement, the deployment stays as long as the target matches. With addon placement, the deployment stays as long as the signed evidence includes this target. Explicit signed deletion requires a separate signed attestation. Provider draining a management cluster is an elevated lifecycle operation with provider-level authorization.
+**4. Sticky placement.** Pool-based placements (e.g., hosted control planes on management clusters) can use placement strategies that inherently resist removal. With predicate placement, the Fulfillment stays on a target as long as that target matches. With addon placement, it stays as long as the signed evidence includes the target. Explicit signed deletion requires a separate signed attestation. Provider draining a management cluster is an elevated lifecycle operation with provider-level authorization.
 
 Examples of how these compose:
 
@@ -364,7 +366,7 @@ An attestation pairs a signed input (the authorization) with a concrete delivery
 Attestation:
     attestation_id: string
     input: SignedInput | DerivedInput
-    output: PutManifests | RemoveByDeploymentId
+    output: PutManifests | RemoveByFulfillmentId
 
 SignedInput:
     content: InputContent             // polymorphic: DeploymentContent, ManagedResourceContent, etc.
@@ -379,12 +381,12 @@ PutManifests:
     signature: OutputSignature?       // optional addon signature over manifests
     placement: PlacementEvidence?     // optional signed placement decision
 
-RemoveByDeploymentId:
-    deployment_id: string             // must match input's deployment_id
+RemoveByFulfillmentId:
+    fulfillment_id: string            // must match the enclosing delivery's fulfillment_id
     placement: PlacementEvidence?
 ```
 
-The signed envelope (what the user actually signs) includes the deployment content, output constraints, validity bound, and optional expected generation. This means the signer authorizes not just the deployment spec but also the rules the eventual output must satisfy.
+The signed envelope (what the user actually signs) includes the owner-resource input content, output constraints, validity bound, and optional expected Fulfillment generation. That input may be a user-facing `Deployment`, a managed resource, or another Fulfillment-owning concept. This means the signer authorizes not just the resource intent but also the rules the eventual output must satisfy.
 
 **Validation:**
 
@@ -420,7 +422,8 @@ verify_input(signed_input: SignedInput):
 verify_input(derived_input: DerivedInput):
     // recursive — see "Updates, derivation chains, and anti-replay"
     verified_prior = verify_input(prior_input)
-    verified_update = verify_attestation(update_attestation, target={id: deployment_id})
+    update_target = resolve_owner_and_fulfillment(verified_prior)
+    verified_update = verify_attestation(update_attestation, target=update_target)
     derived_content = apply_update(verified_prior.content, verified_update.spec_update)
     derived_constraints = update.output_constraints  // per-layer: update governs the final output
 ```
@@ -505,6 +508,8 @@ This means a compromised platform can invoke the addon (it can send messages thr
 - Secure bootstrap of cluster-side label/identity state for placement enforcement. How does a cluster initially receive its labels through a non-platform authority?
 - Trust model for scoring addons and external scoring services. How does a delivery agent know to trust a particular scoring addon's signatures? (Partially addressed by the addon key lifecycle section above — the same signing and registration model applies to scoring addons, placement addons, and manifest-generating addons.)
 - Addon signing: for addons with highly dynamic output (e.g., per-target customization that varies with target state), what is the right granularity for structural schemas? Per-addon-version? Per-deployment? Or purely optional?
+- External-output binding: when must an addon-signed manifest or `spec_update` bind the exact authorization, prior input, target, or source generation, and when is reusable output intentional? A resource-manager-supplied value is useful only if the producer derives it from what it processed or the verifier cross-checks it against authoritative state.
+- Authorization use: what signed fields and durable target state distinguish standing authorization, once-per-target use, and snapshot/campaign semantics when a dynamic selector may resolve after signing? Generation fencing alone does not make this distinction.
 - Trust bundle rotation: what is the acceptable overlap window for addon CA rotation? Should the platform enforce a minimum overlap duration as a prerequisite for addon registration with by-value trust bundles?
 - Multi-signature policy: when to require vs. allow multiple signers, quorum rules for critical deployments.
 - Can different key registries be pluggable? The high-level API is the same (validate this signature for this user) but implementations differ (key binding bundles, git hosting platform endpoints, etc.).

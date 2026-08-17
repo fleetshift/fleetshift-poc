@@ -463,7 +463,7 @@ This means `sigstore-go` verification should extract the full certificate extens
 | `make_key_binding` (`build.py`) | Not needed -- Fulcio handles identity-to-key binding |
 | `content_hash` (`crypto.py`) | OCI content digest (SHA-256) |
 
-Types that remain unchanged: `DeploymentContent`, `ManagedResourceContent`, `OutputConstraint`, `TrustAnchorConstraint`, `TrustAnchorSubject`, `StrategySpec`, `DerivedInput`, `PlacementEvidence`, `PutManifests`, `RemoveByDeploymentId`, `ManifestEnvelope`, `VerifiedInput`, `VerifiedOutput`, `VerificationResult`, `VerificationContext`, `FulfillmentState`.
+Types that remain unchanged within the legacy POC model: `DeploymentContent`, `ManagedResourceContent`, `OutputConstraint`, `TrustAnchorConstraint`, `TrustAnchorSubject`, `StrategySpec`, `DerivedInput`, `PlacementEvidence`, `PutManifests`, `RemoveByDeploymentId`, `ManifestEnvelope`, `VerifiedInput`, `VerifiedOutput`, `VerificationResult`, `VerificationContext`, `FulfillmentState`. The shared delivery contract has since generalized `RemoveByDeploymentId` to `RemoveByFulfillmentId`; this alternative did not yet model the separation between a user-facing `Deployment` and its owned Fulfillment.
 
 ## Fulcio deployment model
 
