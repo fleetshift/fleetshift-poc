@@ -8,7 +8,7 @@
     "extensions/core/client",
     "extensions/gcphcp/client",
     "extensions/kind/client",
-    "poc/e2e-dummy-app"
+    "e2e/web"
   ],
   "devDependencies": {
     "@module-federation/enhanced": "2.8.1",
