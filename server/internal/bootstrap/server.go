@@ -56,6 +56,7 @@ type Server struct {
 	dynamicHTTPConn   *grpc.ClientConn
 	kubeIndexing      *kubernetesInProcessIndexing
 	indexReplayDone   <-chan struct{}
+	addonCloseHooks   []func(context.Context) error // reverse-order add-on closers
 	shutdownGrace     time.Duration
 	serveErrCh        chan error
 	shutdownRequested bool
@@ -372,7 +373,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		DeliveryReporter:  deliveryReporter,
 		InventoryReporter: inventoryReporter,
 		Indexing:          kubeIndexing,
-		IndexCtx:          appCtx,
+		AppCtx:            appCtx,
 	}
 
 	var specs []AddonSpec
@@ -384,9 +385,11 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if err != nil {
 		return fail(err)
 	}
-	if err := enableAndConnectAddons(ctx, addonMgr, specs, logger); err != nil {
+	addonCloseHooks, err := enableAndConnectAddons(ctx, addonMgr, specs, logger)
+	if err != nil {
 		return fail(err)
 	}
+	srv.addonCloseHooks = addonCloseHooks
 
 	// One-shot startup replay recovers persisted Kubernetes targets; it must
 	// not block listen/readiness. Close joins the replay goroutine before StopAll.
@@ -532,6 +535,15 @@ func (s *Server) shutdown() error {
 
 	// Cancel app-owned work and join producers.
 	s.appCancel()
+
+	// Close addon hooks in reverse registration order. Each hook should
+	// observe appCtx cancellation and join its in-flight work.
+	for _, hook := range s.addonCloseHooks {
+		closeCtx, cancel := context.WithTimeout(context.Background(), s.shutdownGrace)
+		join(hook(closeCtx))
+		cancel()
+	}
+
 	if s.indexReplayDone != nil {
 		select {
 		case <-s.indexReplayDone:
