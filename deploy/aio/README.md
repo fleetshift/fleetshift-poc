@@ -101,7 +101,7 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 |---|---|---|
 | Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://fleetshift-sandbox.localhost:8085/idp` (Dex-on). Setting this switches to Dex-off; there is no packaging issuer in that mode. |
 | UI client | `OIDC_UI_CLIENT_ID` | `fleetshift-ui` |
-| UI scope | `OIDC_UI_SCOPE` | `openid profile email groups audience:server:client_id:fleetshift` |
+| UI scope | `OIDC_UI_SCOPE` | Dex-on: `openid profile email groups audience:server:client_id:fleetshift`. Dex-off: `openid profile email` |
 | Resource audience | `OIDC_RESOURCE_AUDIENCE` | `fleetshift` |
 | Enrollment audience | `OIDC_KEY_ENROLLMENT_AUDIENCE` | `fleetshift-signing` |
 | Registry ID | `OIDC_REGISTRY_ID` | `github.com`, unless a public-key claim is set |
@@ -123,11 +123,13 @@ Presence of `OIDC_ISSUER_URL` skips peer Dex and forwards that issuer into the
 same serve bootstrap path. The AIO UI/API edge stays
 `https://fleetshift-sandbox.localhost:8085`; do not proxy the external IdP
 under `/idp`. Register that origin, `/app/auth/callback`, and
-`/app/silent-renew.html` on the external client. Packaging still fills omitted fields above. Pass
-`OIDC_CA_FILE` only when discovery/TLS needs non-system trust. Issuer URL
-shape, CA readability/PEM, and registry/claim pairing are validated by
-`fleetshift serve`. Packaging fills omitted AuthMethod/UI defaults and
-forwards the resolved serve argv.
+`/app/silent-renew.html` on the external client. Packaging still fills omitted
+fields above, but UI scope becomes portable OIDC (`openid profile email`)
+instead of Dex cross-client audience scopes that Keycloak rejects as
+`invalid_scope`. Pass `OIDC_CA_FILE` only when discovery/TLS needs non-system
+trust. Issuer URL shape, CA readability/PEM, and registry/claim pairing are
+validated by `fleetshift serve`. Packaging fills omitted AuthMethod/UI defaults
+and forwards the resolved serve argv.
 
 Minimal:
 
@@ -149,7 +151,7 @@ podman run -d --rm -it \
   -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
   -e OIDC_CA_FILE=/path/to/ca.crt \
   -e OIDC_UI_CLIENT_ID=fleetshift-ui \
-  -e OIDC_UI_SCOPE='openid profile email groups audience:server:client_id:fleetshift' \
+  -e OIDC_UI_SCOPE='openid profile email' \
   -e OIDC_RESOURCE_AUDIENCE=fleetshift \
   -e OIDC_KEY_ENROLLMENT_AUDIENCE=fleetshift-signing \
   -e OIDC_REGISTRY_ID=github.com \

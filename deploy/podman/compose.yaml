@@ -50,7 +50,7 @@ services:
       - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
       - --oidc-issuer=${OIDC_ISSUER_URL:-}
       - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
-      - --oidc-ui-scope=${OIDC_UI_SCOPE:-openid profile email groups audience:server:client_id:fleetshift}
+      - --oidc-ui-scope=${OIDC_UI_SCOPE:-openid profile email}
       - --oidc-resource-audience=${OIDC_RESOURCE_AUDIENCE:-fleetshift}
       - --oidc-key-enrollment-audience=${OIDC_KEY_ENROLLMENT_AUDIENCE:-fleetshift-signing}
       - --oidc-public-key-claim-expression=${PUBLIC_KEY_CLAIM_EXPR:-}
