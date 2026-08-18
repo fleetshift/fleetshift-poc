@@ -9,8 +9,14 @@ import (
 const (
 	// DefaultUIClientID is the browser OIDC client ID.
 	DefaultUIClientID = "fleetshift-ui"
-	// DefaultUIScope is the browser OIDC scope string.
-	DefaultUIScope = "openid profile email groups audience:server:client_id:fleetshift"
+	// DefaultPeerDexUIScope is the Dex-on browser scope (Issuer == PeerDexIssuer).
+	// audience:server:client_id:fleetshift is Dex cross-client trust so access
+	// tokens include the fleetshift resource-server audience.
+	DefaultPeerDexUIScope = "openid profile email groups audience:server:client_id:fleetshift"
+	// DefaultExternalIssuerUIScope is the Dex-off browser scope (any other Issuer).
+	// Standard OIDC only: Keycloak and other IdPs reject Dex's
+	// audience:server:client_id:… scope with invalid_scope.
+	DefaultExternalIssuerUIScope = "openid profile email"
 	// DefaultResourceAudience is the ordinary AuthMethod audience.
 	DefaultResourceAudience = "fleetshift"
 	// DefaultEnrollmentAudience is the signing enrollment audience.
@@ -49,14 +55,16 @@ type ServeConfig struct {
 }
 
 // ApplyServeDefaults fills packaging defaults for omitted AuthMethod/UI fields.
-// OIDC wire invariants (issuer URL, CA, registry pairing) are enforced by
-// fleetshift serve when the generated argv runs.
+// Omitted UIScope uses DefaultPeerDexUIScope when Issuer is PeerDexIssuer,
+// otherwise DefaultExternalIssuerUIScope. OIDC wire invariants (issuer URL, CA,
+// registry pairing) are enforced by fleetshift serve when the generated argv
+// runs.
 func ApplyServeDefaults(in ServeConfig) ServeConfig {
 	if in.UIClientID == "" {
 		in.UIClientID = DefaultUIClientID
 	}
 	if in.UIScope == "" {
-		in.UIScope = DefaultUIScope
+		in.UIScope = uiScopeForIssuer(in.Issuer)
 	}
 	if in.ResourceAudience == "" {
 		in.ResourceAudience = DefaultResourceAudience
@@ -82,6 +90,14 @@ func ApplyServeDefaults(in ServeConfig) ServeConfig {
 		in.LogLevel = defaultServeLogLevel
 	}
 	return in
+}
+
+// uiScopeForIssuer is the omitted-OIDC_UI_SCOPE packaging value for issuer.
+func uiScopeForIssuer(issuer string) string {
+	if issuer == PeerDexIssuer {
+		return DefaultPeerDexUIScope
+	}
+	return DefaultExternalIssuerUIScope
 }
 
 // ServeArgs returns the argv for `fleetshift` including the serve subcommand.

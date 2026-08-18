@@ -67,7 +67,7 @@ fi
 cat > "${K8S_DIR}/config.env" <<EOF
 OIDC_ISSUER_URL=${OIDC_ISSUER_URL}
 OIDC_UI_CLIENT_ID=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
-OIDC_UI_SCOPE=${OIDC_UI_SCOPE:-openid profile email groups audience:server:client_id:fleetshift}
+OIDC_UI_SCOPE=${OIDC_UI_SCOPE:-openid profile email}
 OIDC_CLI_CLIENT_ID=${OIDC_CLI_CLIENT_ID}
 OIDC_RESOURCE_AUDIENCE=${OIDC_RESOURCE_AUDIENCE:-${OIDC_AUDIENCE:-fleetshift}}
 OIDC_KEY_ENROLLMENT_AUDIENCE=${OIDC_KEY_ENROLLMENT_AUDIENCE:-fleetshift-signing}

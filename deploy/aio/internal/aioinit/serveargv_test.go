@@ -23,7 +23,7 @@ func TestApplyServeDefaultsAndArgs(t *testing.T) {
 		"--oidc-issuer\x00https://fleetshift-sandbox.localhost:8085/idp",
 		"--oidc-resource-audience\x00fleetshift",
 		"--oidc-ui-client-id\x00fleetshift-ui",
-		"--oidc-ui-scope\x00openid profile email groups audience:server:client_id:fleetshift",
+		"--oidc-ui-scope\x00" + aioinit.DefaultPeerDexUIScope,
 		"--oidc-registry-id\x00github.com",
 		"--oidc-registry-subject-expression\x00claims.preferred_username",
 		"--oidc-ca-file\x00/data/sandbox/pki/ca.crt",
@@ -36,6 +36,36 @@ func TestApplyServeDefaultsAndArgs(t *testing.T) {
 		if strings.Contains(joined, bad) {
 			t.Fatalf("forbidden flag %s present", bad)
 		}
+	}
+}
+
+func TestApplyServeDefaults_ExternalIssuerUsesPortableUIScope(t *testing.T) {
+	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
+		Endpoints: aioinit.FixedEndpoints,
+		Issuer:    "https://keycloak.example/realms/fleetshift",
+	})
+	if in.UIScope != aioinit.DefaultExternalIssuerUIScope {
+		t.Fatalf("UIScope = %q, want %q", in.UIScope, aioinit.DefaultExternalIssuerUIScope)
+	}
+	args := aioinit.ServeArgs(in)
+	joined := strings.Join(args, "\x00")
+	want := "--oidc-ui-scope\x00" + aioinit.DefaultExternalIssuerUIScope
+	if !strings.Contains(joined, want) {
+		t.Fatalf("args missing %q in %v", want, args)
+	}
+	if strings.Contains(joined, "audience:server:client_id:") {
+		t.Fatalf("external issuer must not default Dex audience scope: %v", args)
+	}
+}
+
+func TestApplyServeDefaults_ExplicitUIScopeWinsOnExternalIssuer(t *testing.T) {
+	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
+		Endpoints: aioinit.FixedEndpoints,
+		Issuer:    "https://keycloak.example/realms/fleetshift",
+		UIScope:   "openid profile email groups",
+	})
+	if in.UIScope != "openid profile email groups" {
+		t.Fatalf("UIScope = %q, want explicit override", in.UIScope)
 	}
 }
 
