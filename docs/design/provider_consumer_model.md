@@ -69,7 +69,12 @@ The provider's managed resource types are also advertised to the consumer instan
 
 ## 3. Signed intent verification in delivery
 
-**Current state**: the security model (security.md) discusses signed intents for GitOps (user signs manifests, cluster-side admission validates the signature). The delivery contract does not currently include any cryptographic attestation from the originator.
+**Current design**: the [delivery security model](security.md) and
+[provenance design](architecture/provenance.md) define durable, typed evidence
+that targets can verify independently of the resource manager. This section
+motivates that mechanism for the provider/consumer/factory chain; the common
+provenance and attestation contracts, rather than the older concrete envelope
+sketched below, govern its representation.
 
 **Problem**: in the provider/consumer/factory chain, the provider platform holds credentials for factory clusters. If the provider platform is compromised, the attacker has those credentials and can create/modify/delete tenant resources on any factory cluster. Per-factory-cluster credential scoping limits blast radius between factories but not within a factory (a single HCP management cluster hosts ~80 tenants' control planes).
 

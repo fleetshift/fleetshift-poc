@@ -20,7 +20,8 @@ Read this when you are working on the kubernetes addon, extending its delivery o
 ## What is intentionally elsewhere
 
 - Core delivery contract and target model: [../architecture/target_delivery_contract.md](../architecture/target_delivery_contract.md)
-- Delivery authorization, attestation, and the trust model: [../authentication.md](../authentication.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
+- Provenance, attestation, and authenticated trust configuration: [../architecture/provenance.md](../architecture/provenance.md)
 - Fleet-wide indexing model and the inventory item shape: [../architecture/resource_indexing.md](../architecture/resource_indexing.md)
 - Addon lifecycle and capability model: [../architecture/addon_integration.md](../architecture/addon_integration.md)
 - Core vocabulary (fulfillment, strategies, delivery agents): [../architecture/core_model.md](../architecture/core_model.md)

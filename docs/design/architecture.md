@@ -12,7 +12,10 @@ This document is the entry point for the architecture. It is intentionally short
 
 ## System model
 
-The management plane is a URL-addressable service, not a cluster. It provides:
+The management plane (or "platform") is a URL-addressable service, not a cluster.
+Its customer-facing, stateful center is the **resource manager (RM)**, which
+authenticates and authorizes requests, retains desired state, and coordinates
+orchestration and delivery. The management plane provides:
 
 - the orchestration pipeline
 - the fleetlet, a transport-agnostic, channel-based message broker
@@ -44,6 +47,8 @@ Delivery authorization = CredentialPresentation × Provenance
 - `Provenance`: cryptographic proof of who authorized the operation
 
 It governs delivery authority across targets and transports rather than orchestration behavior inside a deployment plan.
+The shared threat model, time/space delivery problem, and security choices are
+described in [docs/design/security.md](security.md).
 
 ## Major moving parts
 
@@ -133,7 +138,9 @@ Start here when you need a fast map of the system. Then continue with the smalle
 
 - Read [docs/design/architecture/core_model.md](architecture/core_model.md) for the core vocabulary, strategy axes, target model, delivery contract, and single-pod invariant.
 - Read [docs/design/architecture/target_delivery_contract.md](architecture/target_delivery_contract.md) for the detailed target-side delivery protocol, reliability guarantees, generation ordering, journaling, and observation reporting.
-- Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, profile selection, trust updates, historical verification, and delivery-log integration.
+- Read [docs/design/security.md](security.md) for the delivery threat model, credential/provenance split, fulfillment security choices, and trust-anchor model.
+- Read [docs/design/authentication.md](authentication.md) for live credential verification and presentation, request signing, target credential exchange, and `PausedAuth`.
+- Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, attestation semantics, trust updates, historical verification, and delivery-log integration.
 - Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
 - Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.
@@ -146,10 +153,10 @@ Start here when you need a fast map of the system. Then continue with the smalle
 ## Related design documents
 
 - [docs/design/architecture/provenance.md](architecture/provenance.md): authority configuration and pluggable provenance verification beneath the common attestation and delivery model
-- [docs/design/authentication.md](authentication.md): credential presentation, attestation-graph and constraint semantics, and `PausedAuth`
+- [docs/design/authentication.md](authentication.md): request authentication, target credential presentation, request signing, and `PausedAuth`
 - [docs/design/trust_model_v3.md](trust_model_v3.md): proposal for OIDC-bound user key continuity, authenticated trust distribution, and delivery ordering beneath the existing attestation model
 - [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to fulfillments
 - [docs/design/addon-ui-architecture.md](addon-ui-architecture.md): addon bundle model, OCI artifact distribution, shell integration, and UI plugin capability
 - [docs/design/provider_consumer_model.md](provider_consumer_model.md): provider/consumer/factory topology built on top of the core architecture
 - [docs/design/mcoa_migration.md](mcoa_migration.md): migration notes from the current MCOA architecture to this model
-- [docs/design/security.md](security.md): redirect to the authentication design
+- [docs/design/security.md](security.md): cross-cutting delivery security and trust model

@@ -1,10 +1,15 @@
 # Hybrid attestation prototype
 
-This directory is a Python proof of concept for the provenance and verification side of the authentication model in `docs/design/authentication.md`.
+This directory is a Python proof of concept for FleetShift's common attestation
+graph and target-side verification. The current design is
+`docs/design/architecture/provenance.md`; this POC still uses the older raw-key
+and `trust_anchor_id` representation preserved in
+`docs/design/archive/jwt_and_raw_key_provenance.md`.
 
 It is trying to answer one narrow question:
 
-> If the management plane is only a courier, what evidence does a target need in order to accept a delivery, an update, or a removal?
+> If the resource manager is a provenance courier, what evidence does a target
+> need in order to accept a delivery, an update, or a removal independently?
 
 The answer explored here is a prototype that combines:
 
@@ -12,7 +17,11 @@ The answer explored here is a prototype that combines:
 - addons may sign opaque outputs such as rendered manifests, placement decisions, or update plans
 - the target verifies the whole chain locally from a self-contained bundle plus external trust anchors
 
-The end design document is broader than this prototype. It also covers credential presentation, transport choices, workflow states like `PausedAuth`, and operational trust distribution. This prototype mostly isolates the target-side verification core.
+The current provenance design is broader than this prototype. Credential
+presentation and `PausedAuth` are defined separately in
+`docs/design/authentication.md`; transport and apply behavior have their own
+architecture documents. This prototype isolates the target-side attestation
+core.
 
 ## What this prototype combines
 
@@ -125,7 +134,9 @@ In the tests, there are usually at least two anchors:
 - a tenant/user anchor, standing in for an external user identity system
 - an addon anchor, standing in for addon-local trust
 
-That matches the design goal in `authentication.md`: the platform is not the trust root. The verifier relies on out-of-band anchors.
+That matches the current provenance design's goal: RM storage and routing do not
+make evidence authentic. The POC's out-of-band anchors stand in for
+authenticated authority and profile configuration.
 
 ### 6. Verification is meant to be explainable
 
@@ -176,7 +187,7 @@ The tests cover a fairly wide slice of the design space:
 - missing relation evidence fails closed
 - managed resource and deployment attestations coexist in the same bundle
 
-## Mapping to `docs/design/authentication.md`
+## Mapping to the current provenance design
 
 This prototype is closest to the provenance half of the design.
 
@@ -185,12 +196,17 @@ This prototype is closest to the provenance half of the design.
 - Every accepted delivery is justified by signed history.
 - Verification happens at the target, not just in the platform.
 - Addon-produced opaque artifacts can be independently trusted.
-- Trust anchors are external to the platform.
-- The platform can act as a courier for verification material instead of a standing authority.
+- Evidence authority is independent from ordinary RM database claims.
+- The RM can act as a courier for verification material without gaining
+  provenance authority.
 
 ### Intentionally simplified
 
-- `KeyBinding` is only a proof-of-possession binding over a raw public key. It is not yet the real OIDC/JWT-backed binding bundle described in the design doc.
+- `TrustAnchor`, `TrustStore`, and `KeyBinding` model one old raw-key mechanism
+  directly in common code. Current design selects typed profiles through an
+  authenticated authority config. The more complete JWT-binding mechanism that
+  this POC once anticipated is historical rather than a missing current
+  requirement.
 - There is no modeling of credential presentation yet:
   - run as me
   - run as workload

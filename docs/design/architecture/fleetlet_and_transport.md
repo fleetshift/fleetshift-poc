@@ -22,7 +22,8 @@ Read this when you need to understand how addons, targets, and users communicate
 - Orchestration and rollout execution: [orchestration.md](orchestration.md)
 - Addon contracts and strategy registration: [addon_integration.md](addon_integration.md)
 - Resource indexing behavior above the index channel: [resource_indexing.md](resource_indexing.md)
-- Full authentication and trust model: [../authentication.md](../authentication.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
+- Provenance, attestation, and authenticated trust configuration: [provenance.md](provenance.md)
 
 ## Related docs
 
@@ -205,7 +206,14 @@ For example, a scored placement strategy may require scoring agents on each Kube
 
 The fleetlet itself is more sensitive than ordinary helper infrastructure. It terminates the platform transport, carries target-local trust configuration, and can expose privileged capabilities such as delivery and protocol proxying. Its image, startup configuration, and trust roots are therefore part of the target's trusted computing base.
 
-Deploying or updating the fleetlet must be authorized at the target boundary. In the simplest case, the target sees the user's own credential and admits the change directly. Otherwise, the target must be able to independently verify that the requested fleetlet image and configuration are authorized, using the same delivery-authorization model described in [core_model.md](core_model.md) and [../authentication.md](../authentication.md): target-side credential validation, provenance verification, or both.
+Deploying or updating the fleetlet must be authorized at the target boundary.
+In the simplest case, the target sees the user's own credential and admits the
+change directly. Otherwise, the target must independently verify that the
+requested fleetlet image and configuration are authorized, using the delivery-
+authorization model described in [core_model.md](core_model.md),
+[authentication.md](../authentication.md), and
+[provenance.md](provenance.md): target-side credential validation, provenance
+verification, or both.
 
 A compromised platform must not be able to silently replace the fleetlet with a different image, rewrite its trust configuration, or expand its channel profile without passing that target-side check. On Kubernetes, this points toward digest-pinned images plus admission-time verification of fleetlet image provenance and sensitive configuration, rather than treating the platform's request as sufficient authority on its own. The bootstrap path that creates the target can install the initial fleetlet, but once the target is running, fleetlet rollout should be treated as a privileged authorization event rather than an ordinary helper deployment.
 

@@ -1,6 +1,14 @@
 # Alternative provenance architecture: sigstore, OCI, and TUF
 
-This document explores an alternative foundation for the attested provenance model described in `authentication.md`. It proposes replacing the custom key lifecycle, signing, and trust distribution mechanisms with three established, composable standards: [sigstore](https://www.sigstore.dev/) (identity-bound signing and transparency), [OCI artifacts](https://specs.opencontainers.org/image-spec/?v=v1.1.0) with the [referrers API](https://specs.opencontainers.org/distribution-spec/?v=v1.1.1) (content-addressed storage and distribution), and [TUF](https://theupdateframework.github.io/specification/latest/) (secure trust root distribution and rotation).
+> **Status: historical design exploration.** This document compares Sigstore,
+> OCI, and TUF with the former raw-key/JWT-binding design now preserved in
+> [archive/jwt_and_raw_key_provenance.md](archive/jwt_and_raw_key_provenance.md).
+> The current design is
+> [architecture/provenance.md](architecture/provenance.md). References below to
+> provenance mechanisms in `authentication.md` describe that former layout.
+
+This document explores an alternative foundation for that older attested
+provenance model. It proposes replacing the custom key lifecycle, signing, and trust distribution mechanisms with three established, composable standards: [sigstore](https://www.sigstore.dev/) (identity-bound signing and transparency), [OCI artifacts](https://specs.opencontainers.org/image-spec/?v=v1.1.0) with the [referrers API](https://specs.opencontainers.org/distribution-spec/?v=v1.1.1) (content-addressed storage and distribution), and [TUF](https://theupdateframework.github.io/specification/latest/) (secure trust root distribution and rotation).
 
 The constraint evaluation model, strategy-implied policy, derivation chains, and credential presentation concerns from `authentication.md` are not replaced. They are retained as a FleetShift-specific policy layer on top of these standards.
 

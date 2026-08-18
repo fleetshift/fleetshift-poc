@@ -11,7 +11,8 @@ Read this when you are working in an area that still has intentional design unce
 ## What is intentionally elsewhere
 
 - Stable architecture overview: [../architecture.md](../architecture.md)
-- Full authentication design: [../authentication.md](../authentication.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
+- Provenance and authenticated trust configuration: [provenance.md](provenance.md)
 - Provider/factory proposals: [../provider_consumer_model.md](../provider_consumer_model.md)
 
 ## Related docs
@@ -44,7 +45,10 @@ The built-in default is `immediate`. Non-trivial rollout remains addon-driven th
 
 **Options:** platform-managed mTLS as part of the fleetlet channel, addon-bundled certificates in generated manifests, or a dedicated `CertService`.
 
-**Partial progress:** [authentication.md](../authentication.md) already covers user and addon key distribution, including key binding bundles, external key sources, and addon-oriented approaches such as SPIFFE/SPIRE and cert-manager. Fleetlet-to-platform mTLS provisioning remains open as a separate concern.
+**Partial progress:** [provenance.md](provenance.md) defines how well-known
+provenance types, including workload-oriented certificate mechanisms, are
+selected through authenticated authority configuration. Fleetlet-to-platform
+mTLS certificate provisioning remains open as a separate transport concern.
 
 ### Proxy delivery mechanics
 

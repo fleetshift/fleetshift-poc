@@ -1,13 +1,14 @@
 # Sigstore + TUF attestation POC (Mode A)
 
 End-to-end proof of concept for the lightweight Sigstore-based provenance
-architecture discussed against `docs/design/authentication.md` and
-`docs/design/sigstore_oci_alternative.md`.
+architecture explored in `docs/design/sigstore_oci_alternative.md`. The current
+profile and trust-update model is documented in
+`docs/design/architecture/provenance.md`.
 
 It answers the same core question as `../hybrid/`:
 
-> If the management plane is only a courier, what evidence does a target need
-> in order to accept a delivery?
+> If the resource manager is a provenance courier, what evidence does a target
+> need in order to accept a delivery independently?
 
 …using **Fulcio-shaped identity binding**, **TSA trusted time**, **DSSE +
 in-toto** (cosign attestation shape), and **TUF** for trust + constraint

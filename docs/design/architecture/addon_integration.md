@@ -24,7 +24,8 @@ Read this when you are designing or implementing an addon, extending the strateg
 - Orchestration semantics: [orchestration.md](orchestration.md)
 - Fleetlet channels and request routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
 - Full managed-resource design: [../managed_resources.md](../managed_resources.md)
-- Full authentication and signing model: [../authentication.md](../authentication.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
+- Provenance, addon evidence, and attestation constraints: [provenance.md](provenance.md)
 - Two-layer API model, resource identity, and extension API packages: [resource_identity_and_api.md](resource_identity_and_api.md)
 
 ## Related docs
@@ -43,7 +44,8 @@ In practice, that means:
 - delivery agents can verify addon-produced material independently
 - the platform remains an orchestrator and courier rather than the only trusted authority
 
-The full signing model lives in [../authentication.md](../authentication.md).
+The provenance and addon-evidence model lives in
+[provenance.md](provenance.md).
 
 ## Addon lifecycle
 

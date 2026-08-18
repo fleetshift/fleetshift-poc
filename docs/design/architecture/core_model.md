@@ -19,7 +19,7 @@ Read this when you need the platform's core mental model before diving into exec
 
 - Execution semantics, invalidation, rollout planning, and `DeploymentGroup`: [orchestration.md](orchestration.md)
 - Fleetlets, channels, and platform routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
-- Credential presentation and attestation semantics: [../authentication.md](../authentication.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
 - Authority configuration, provenance profiles, and trust updates: [provenance.md](provenance.md)
 - Managed resources: [../managed_resources.md](../managed_resources.md)
 - Recursive platforms and provisioning: [platform_hierarchy.md](platform_hierarchy.md)
@@ -103,14 +103,23 @@ Delivery authorization is a first-class cross-cutting concern:
 Delivery authorization = CredentialPresentation × Provenance
 ```
 
-- **Credential presentation**: whose credential applies resources at the target. The user's own token, a delegation service account, or the delivery agent's own service account are all valid modes.
-- **Provenance**: cryptographic proof of who authorized the operation. A delivery can carry a user signature that the delivery agent verifies before applying.
+- **Credential presentation**: whose credential applies resources at the target. The user's own token, a delegation service account, the delivery agent's own service account, or a pre-provisioned standalone service identity are all valid modes.
+- **Provenance**: durable cryptographic evidence of which principal
+  authenticated an exact, purpose-typed assertion. A delivery may contain user,
+  addon, placement, relation, or trust-update evidence verified at the target.
 
 These are orthogonal. Any provenance mode can compose with any credential-presentation mode. They describe delivery authority, not orchestration behavior, so they are not modeled as a fourth strategy axis.
 
-When credentials or attestation are missing, expired, or insufficient, the fulfillment transitions to `PausedAuth`. This is the universal fallback: it pauses the fulfillment in a recoverable state until an authorized user resumes it with fresh approval.
+When credentials, provenance, or authenticated trust state are missing,
+expired, or insufficient but repairable, the fulfillment transitions to
+`PausedAuth`. It remains recoverably paused until acceptable replacement
+authorization is supplied.
 
-This document keeps only the architectural boundary. The full trust model, signing model, and operational details live in [../authentication.md](../authentication.md).
+This document keeps only the architectural boundary. Credential presentation
+and `PausedAuth` live in [authentication.md](../authentication.md); provenance,
+attestation, and trust configuration live in [provenance.md](provenance.md).
+The shared threat model and security choices live in
+[security.md](../security.md).
 
 ## Strategy types
 
@@ -206,6 +215,10 @@ Addon-registered targets participate in the same pipeline as built-in targets. T
 
 ### Delivery-agent requirements
 
-Every delivery agent must support at least one mode from the authentication model described in [../authentication.md](../authentication.md). It verifies that an authorized user approved the operation before applying, whether by validating a bearer token, verifying a provenance attestation, or some future mode.
+Every delivery agent must support at least one mode from the authentication and
+provenance models described in [authentication.md](../authentication.md) and
+[provenance.md](provenance.md). Before applying, it enforces the matched policy
+through credential validation, provenance and attestation verification, or a
+configured composition of them.
 
 Verification, apply, and status reporting belong in the delivery agent itself. There is no separate broadly privileged reconciler that blindly trusts the platform. Target-side credentials never leave the target environment.

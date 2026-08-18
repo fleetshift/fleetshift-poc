@@ -22,9 +22,10 @@ root.
 
 ## What is intentionally elsewhere
 
-- Credential-presentation modes, signed-input semantics, derived inputs,
-  strategy-implied constraints, placement, removal, and `PausedAuth`:
-  [authentication.md](../authentication.md)
+- The governing delivery threat model, time/space problem, security choices,
+  and shared trust-anchor model: [security.md](../security.md)
+- Live credential-presentation modes, request authentication, and
+  `PausedAuth`: [authentication.md](../authentication.md)
 - The target apply, acknowledgement, generation, and recovery contract:
   [target_delivery_contract.md](target_delivery_contract.md)
 - OIDC enrollment, user-key continuity, authenticated history, and rotation
@@ -37,10 +38,12 @@ root.
 ## Related docs
 
 - [architecture.md](../architecture.md)
+- [security.md](../security.md)
 - [core_model.md](core_model.md)
 - [addon_integration.md](addon_integration.md)
 - [authentication.md](../authentication.md)
 - [trust_model_v3.md](../trust_model_v3.md)
+- [Archived JWT and raw-key provenance](../archive/jwt_and_raw_key_provenance.md)
 - [Hybrid attestation prototype](../../../poc/attestation/hybrid/README.md)
 - [Sigstore/TUF bundle prototype](../../../poc/attestation/sigstore_tuf_bundle/README.md)
 
@@ -111,19 +114,38 @@ the resulting action.
 
 ## Security Objective And Threat Model
 
+The broader delivery security model is defined in
+[security.md](../security.md). This section states the narrower guarantee and
+threat boundary of provenance verification.
+
 The resource manager remains FleetShift's primary API and authorization
 engine. It authenticates callers, evaluates stateful permissions, stores
 intent and evidence, coordinates addons, builds deliveries, and routes them to
 targets. Reproducing all of that policy at every target is not a goal.
 
-The provenance design adds a narrower end-to-end guarantee:
+This is still a substantial change from the usual management-plane boundary.
+In many fleet and GitOps systems, the controller's accepted input and
+privileged apply path share one trust boundary: after controller compromise,
+the target cannot distinguish authentic user or workload intent from a
+fabricated command. FleetShift instead carries content-bound assertions
+through the management plane for independent verification at the target.
+
+The provenance design therefore adds a narrower end-to-end guarantee:
 
 > A resource-manager compromise cannot forge a user or workload's provenance,
 > alter the content authenticated by that provenance, substitute trust relative
 > to an established verifier's accepted state, or make an unauthorized trust
 > transition self-authorizing.
 
-A compromised resource manager may still:
+This boundary applies established identity, signature, attestation,
+continuity, transparency, and authenticated-update techniques to typed
+management deliveries. The continuity/v3 baseline provides verifier-local
+history and ordering, not trusted time or global fork detection. Profiles may
+add a TSA to constrain backdating, require log or witness proofs for
+acceptance, and use monitors or gossip to expose equivocation. Target-retained
+state makes the RM a courier rather than the source of provenance.
+
+The common baseline still permits a compromised resource manager to:
 
 - bypass its own tenant, workspace, or resource authorization rules;
 - route authentic evidence in ways ordinary service policy would reject;
@@ -132,6 +154,12 @@ A compromised resource manager may still:
 - return incorrect query results unless a separate request-integrity mechanism
   covers them; and
 - present different not-yet-pinned histories to different new verifiers.
+
+With a more operationally intensive profile and target policy—using
+independent authorities, trusted time, witnessed transparency, and
+monitoring—the RM could approach an untrusted courier even for delivery
+authorization; it would still control availability and remain trusted for any
+stateful policy not reproduced at the target.
 
 Only constraints deliberately retained in authenticated target trust state or
 signed attestation content are expected to survive resource-manager
@@ -433,10 +461,110 @@ otherwise valid delivery into an outage. Package structure, item digests,
 counts, byte sizes, graph depth, and proof work remain bounded and
 integrity-checked before untrusted input can cause unbounded work.
 
-The detailed input, derivation, strategy, placement, removal, and generation
-semantics remain those in [authentication.md](../authentication.md) and the
-[hybrid prototype](../../../poc/attestation/hybrid/README.md). A provenance
-profile neither replaces nor branches those semantics.
+### Intent and output authentication
+
+An authenticated root intent may describe desired state rather than the final
+target payload. For example, a user can authenticate a deployment spec and its
+manifest and placement strategies before an addon renders manifests or a
+placement service selects targets. The common evaluator checks that every
+derived output is permitted by the authenticated intent and supporting
+assertions.
+
+This is the normal **intent-authentication** path. It avoids requiring a new
+user interaction whenever deterministic or separately authenticated output is
+regenerated. Its guarantee depends on the constraints relating intent to
+output: an unconstrained opaque derivation would give the RM or addon more
+authority than an exact binding.
+
+For higher-assurance, lower-churn operations, an assertion may instead
+authenticate the exact manifests, target decision, or other concrete output.
+That removes the corresponding derivation freedom but requires new evidence
+whenever those bytes change. Intent and exact-output assertions can also
+compose: the root authenticates which addon or derivation is allowed, while a
+supporting assertion authenticates the exact result.
+
+Provenance profiles only establish the assertions. The common graph determines
+whether their subjects, purposes, and relationships justify the one delivery
+action.
+
+### Derived inputs and update chains
+
+An ordinary content update may be authenticated directly as a new root intent
+or derived from an earlier authenticated input. A derived input contains or
+references:
+
+- the exact prior input;
+- an independently authenticated update assertion;
+- a deterministic transformation or well-known update operation;
+- preconditions over the prior content; and
+- any constraints governing the new result.
+
+The evaluator verifies the prior input and update assertion independently,
+checks their subject and fulfillment relationship, evaluates the preconditions,
+applies the deterministic transformation, and confirms that protected identity
+or scope fields were not rewritten. The resulting content digest must equal the
+digest used by later graph relationships and delivery.
+
+Constraints apply at the layer whose output they govern. A prior input's
+constraint is not blindly copied onto every descendant, and a later update
+cannot erase the authenticated relationship needed to justify its own input.
+Strategy-implied constraints are derived from the final applicable strategy.
+Chain depth and cumulative transformation work are bounded.
+
+This derivation mechanism concerns application content. A
+`trust-config-update/v1` is likewise ordinary authenticated content, but its
+predecessor and successor checks are defined separately in
+[Trust Updates](#trust-updates).
+
+### Strategy, placement, and removal constraints
+
+Known strategy types contribute deterministic constraints from trusted
+verifier code. Unknown strategy types fail closed. Common examples are:
+
+- **Inline manifests:** delivered manifests must exactly match the authenticated
+  manifest content.
+- **Addon manifests:** the root intent identifies the permitted addon or addon
+  relationship, and a separate assertion from that addon authenticates the
+  exact manifest set.
+- **Predicate placement:** a put is allowed only when the predicate matches
+  target-local authenticated identity or labels; removal is allowed only when
+  it no longer matches.
+- **Addon placement:** a separately authenticated placement decision must bind
+  the applicable fulfillment and target set; the put or removal must agree with
+  that decision.
+
+An addon signature alone never authorizes its output for arbitrary tenant
+content. The graph must connect the addon's authenticated identity and exact
+output to a root intent or authenticated addon registration that permits that
+relationship. Optional structural constraints—such as allowed resource types,
+namespaces, or label requirements—can further limit correctly signed but
+unexpected addon output.
+
+Removal is authenticated as rigorously as put. The action's fulfillment must
+match the enclosing delivery and the owning authenticated intent. An
+owner-resource ID, RM-selected graph edge, or unrelated placement assertion
+cannot substitute for that fulfillment relationship.
+
+### Generation and replay checks
+
+When an operation requires exact compare-and-swap semantics, its authenticated
+content includes an expected fulfillment generation. The target compares that
+value with target-local state before applying the concrete action. Directly
+authenticated and derived updates advance the same lineage; an old assertion
+cannot be replayed over a newer generation merely because its signature still
+verifies.
+
+Dynamic-scope assertions may intentionally omit one concrete generation when
+they authorize a standing or selector-based relationship. The applicable
+content type and constraints must define whether authorization is standing,
+once per target, or snapshot-scoped. The common delivery log supplies durable
+ordering and rollback resistance but does not silently turn a reusable
+assertion into single-use authorization.
+
+The [hybrid prototype](../../../poc/attestation/hybrid/README.md) exercises
+these graph, derivation, placement, removal, and constraint semantics using an
+older raw-key evidence representation and some deployment-shaped field names.
+A provenance profile neither replaces nor branches the common semantics.
 
 ### Shared-authority delivery example
 
@@ -468,6 +596,11 @@ the RM or a tenant user from manufacturing addon evidence.
 Credential presentation is associated with the root authorization by default.
 Supporting historical or addon assertions ordinarily carry durable provenance,
 not live bearer credentials.
+
+The credential modes, target exchanges, secret-lifetime concerns, and
+`PausedAuth` workflow are defined in
+[authentication.md](../authentication.md). This section defines only their
+intersection with provenance selection and verification.
 
 A delivery policy may allow:
 
@@ -502,8 +635,12 @@ historical evidence and cannot authenticate supporting graph assertions. The
 same mechanism can protect operations that have no delivery or provenance,
 such as read-only queries.
 
-The exact request-signature representation, freshness mechanism, and
-non-IdP key-binding ceremony remain profile- or credential-method-specific.
+Request signing is owned by a typed credential method. The exact
+request-signature representation, freshness mechanism, and non-IdP
+key-binding ceremony are credential-method-specific. An implementation may
+share key or verification machinery with a provenance profile, but the
+provenance profile does not become the protocol owner merely because
+machinery is shared.
 
 ## Component Responsibilities
 
@@ -984,8 +1121,6 @@ different security and availability tradeoffs.
 - Should clients sign claimed provenance type and authority attributes, or
   should verifiers derive all of them from authenticated evidence? A focused
   threat-model and POC comparison should decide this.
-- What exact request-signing representation and non-IdP key-binding ceremony
-  should the first credential method implement?
 - What are the concrete strongly typed lifecycle APIs for continuity/v3,
   OIDC request-signing key binding, and adapted TUF administration?
 - What canonical encodings and cross-language test vectors define each common

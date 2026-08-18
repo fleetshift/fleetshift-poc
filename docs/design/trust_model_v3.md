@@ -20,7 +20,13 @@ The priority is keeping the security improvement operationally unobtrusive.
 
 ### Relationship to the existing attestation design
 
-This proposal does not define a replacement signed-input or delivery-authorization language. It inherits the signed input, derived input, output constraint, placement, addon-signature, generation, put, and removal semantics described in [authentication.md](authentication.md#provenance-attestation-protocol-and-validation) and exercised by the [hybrid attestation prototype](../../poc/attestation/hybrid/README.md). Where those semantics overlap, that existing design and its tests remain authoritative.
+This proposal does not define a replacement attestation or delivery-
+authorization language. It inherits the input, derivation, constraint,
+placement, addon-evidence, generation, put, and removal semantics described in
+[provenance.md](architecture/provenance.md#evidence-and-attestation-semantics)
+and exercised by the
+[hybrid attestation prototype](../../poc/attestation/hybrid/README.md). Where
+those semantics overlap, that common design and its tests remain authoritative.
 
 This proposal focuses on the previously unresolved trust-distribution problem:
 
@@ -1213,7 +1219,14 @@ The system requires:
 * sufficient keys, delegations, and authorization evidence to validate every current or retained delivery;
 * retention and compaction rules that do not remove evidence still required by a supported verifier or a deliverable fulfillment.
 
-The delivery log itself does not require semantic authorization for every appended leaf. It establishes ordering and append-only continuity. A rotation marker has no authority unless an authenticated per-principal key event references it and the transition signatures validate. Authentic provenance comes from the independently verified signature and key-continuity chain; permission to act and consistency between signed input and concrete output retain the resource-manager authorization and attestation semantics inherited from the broader authentication design.
+The delivery log itself does not require semantic authorization for every
+appended leaf. It establishes ordering and append-only continuity. A rotation
+marker has no authority unless an authenticated per-principal key event
+references it and the transition signatures validate. Authentic provenance
+comes from the independently verified signature and key-continuity chain;
+permission to act and consistency between authenticated input and concrete
+output retain the resource-manager authorization and common attestation
+semantics defined in [provenance.md](architecture/provenance.md).
 
 Historical public keys and authorization objects are therefore not retained merely because they once existed. They remain available only while referenced by:
 

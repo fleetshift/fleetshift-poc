@@ -16,7 +16,8 @@ Read this when you need to understand who owns what, how access is scoped, and w
 
 ## What is intentionally elsewhere
 
-- Delivery authorization, trust anchors, provenance, and `PausedAuth`: [../authentication.md](../authentication.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
+- Delivery provenance and authenticated authority configuration: [provenance.md](provenance.md)
 - Provider/factory topology proposals: [../provider_consumer_model.md](../provider_consumer_model.md)
 - Recursive platforms as a stronger isolation boundary: [platform_hierarchy.md](platform_hierarchy.md)
 - Addon contracts and managed resources: [addon_integration.md](addon_integration.md)

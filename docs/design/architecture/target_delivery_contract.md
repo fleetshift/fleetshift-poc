@@ -22,9 +22,9 @@ Read this when you need the full target-side delivery protocol — how targets a
 - Orchestration execution, invalidation, and rollout planning: [orchestration.md](orchestration.md)
 - Fleet-wide indexing of observations and inventory search: [resource_indexing.md](resource_indexing.md)
 - Fleetlet transport and channel model: [fleetlet_and_transport.md](fleetlet_and_transport.md)
-- Credential presentation and attestation semantics: [../authentication.md](../authentication.md)
-- Authority configuration, provenance profiles, and cryptographic delivery
-  ordering: [provenance.md](provenance.md)
+- Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
+- Authority configuration, provenance profiles, attestation semantics, and
+  cryptographic delivery ordering: [provenance.md](provenance.md)
 - Managed-resource projection and condition-event history: [../managed_resources.md](../managed_resources.md)
 
 ## Related docs
@@ -118,7 +118,14 @@ This is not more complex than what a Kubernetes controller already handles. A st
 
 #### Delivery authorization
 
-Delivery authorization and attestation verification apply as defined in [core_model.md](core_model.md) and [authentication.md](../authentication.md). The delivery carries auth credentials and an optional attestation. The addon verifies attestation before applying; if verification fails, it reports an auth failure rather than acking. The platform transitions the fulfillment to `PausedAuth` until an authorized user resumes it.
+Delivery authorization applies as defined in [core_model.md](core_model.md),
+[authentication.md](../authentication.md), and
+[provenance.md](provenance.md). The delivery carries the credentials and
+provenance evidence required by authenticated policy. The target verifies them
+and the common attestation graph before applying. Missing or expired material
+that can be renewed causes a recoverable authorization result and the RM places
+the fulfillment in `PausedAuth`; malformed or contradictory packages are
+rejected and never acknowledged as accepted work.
 
 > NOTE: We may be able to offload attestation to the common fleetlet. We should try to. At the very least, it would have to be reusable via libraries.
 
