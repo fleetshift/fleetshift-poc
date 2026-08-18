@@ -300,6 +300,7 @@ source format:
 
 ### Identities
 
-- FleetShift and aio-proxy: `1000:1000`
+- FleetShift: `1000:1000`
 - Dex: `1001:1001`
+- aio-proxy: `1002:1002` (owns the gateway leaf key; cannot read `/data` or Dex state)
 - s6 starts as container root only to initialize and drop privileges

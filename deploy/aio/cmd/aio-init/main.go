@@ -17,6 +17,8 @@ const (
 	fleetshiftGID = 1000
 	dexUID        = 1001
 	dexGID        = 1001
+	proxyUID      = 1002
+	proxyGID      = 1002
 
 	// dexEnabledFlag is written on Dex-on so the s6-rc dex longrun execs Dex
 	// instead of parking on s6-pause (Dex-off).
@@ -68,7 +70,7 @@ func run() error {
 	}
 
 	sandboxPKI := aioinit.DefaultSandboxPKIPaths()
-	if err := aioinit.EnsureSandboxPKI(sandboxPKI, fleetshiftUID, fleetshiftGID); err != nil {
+	if err := aioinit.EnsureSandboxPKI(sandboxPKI, proxyUID, proxyGID); err != nil {
 		return fmt.Errorf("sandbox pki: %w", err)
 	}
 
@@ -129,7 +131,7 @@ func prepareDataLayout() error {
 }
 
 // ensureOwnedDir creates path and, when running as root, sets ownership to uid:gid.
-// aio-init runs as root under s6 (then fleetshift/dex drop privileges); chown only
+// aio-init runs as root under s6 (then fleetshift/dex/aio-proxy drop privileges); chown only
 // works in that case. Non-root callers (e.g. unit tests) still get the directory
 // but skip chown, which would fail with EPERM.
 func ensureOwnedDir(path string, uid, gid int) error {

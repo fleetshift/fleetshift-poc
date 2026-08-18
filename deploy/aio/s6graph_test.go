@@ -34,8 +34,11 @@ func TestS6ProxyGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(run)
-	if !strings.Contains(body, "s6-setuidgid 1000:1000") {
-		t.Fatalf("aio-proxy must run as 1000:1000:\n%s", body)
+	if !strings.Contains(body, "s6-setuidgid 1002:1002") {
+		t.Fatalf("aio-proxy must run as 1002:1002:\n%s", body)
+	}
+	if strings.Contains(body, "s6-setuidgid 1000:1000") {
+		t.Fatalf("aio-proxy must not share the FleetShift uid:\n%s", body)
 	}
 	if !strings.Contains(body, "/usr/local/bin/aio-proxy") {
 		t.Fatalf("aio-proxy run script missing binary:\n%s", body)
@@ -46,6 +49,12 @@ func TestS6ProxyGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	fsBody := string(fsRun)
+	if !strings.Contains(fsBody, "-u 1000") && !strings.Contains(fsBody, "s6-setuidgid 1000:1000") {
+		t.Fatal("fleetshift run must drop to 1000:1000")
+	}
+	if strings.Contains(fsBody, "1002:1002") {
+		t.Fatal("fleetshift run must not use the aio-proxy uid")
+	}
 	if !strings.Contains(fsBody, ". /run/fleetshift/public.env") {
 		t.Fatal("fleetshift run must source public.env for Dex discovery")
 	}

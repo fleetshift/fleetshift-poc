@@ -12,7 +12,7 @@ import (
 const (
 	// PublicHost is the browser-facing DNS name.
 	PublicHost = "fleetshift-sandbox.localhost"
-	// HostsMarker tags the AIO-container /etc/hosts mapping.
+	// HostsMarker tags (comments) the AIO-container /etc/hosts mapping.
 	HostsMarker = "fleetshift-aio"
 
 	gatewayPort = "8085"
@@ -63,9 +63,13 @@ var FixedEndpoints = Endpoints{
 func WritePublicEnv(path string, dexOn bool) error {
 	var b strings.Builder
 	b.WriteString("PUBLIC_HOST=" + PublicHost + "\n")
-	b.WriteString("PUBLIC_ORIGIN=" + FixedEndpoints.PublicOrigin + "\n")
+	b.WriteString("PUBLIC_ORIGIN=")
+	b.WriteString(FixedEndpoints.PublicOrigin)
+	b.WriteString("\n")
 	if dexOn {
-		b.WriteString("DEX_DISCOVERY_URL=" + PeerDexIssuer + "/.well-known/openid-configuration\n")
+		b.WriteString("DEX_DISCOVERY_URL=")
+		b.WriteString(PeerDexIssuer)
+		b.WriteString("/.well-known/openid-configuration\n")
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

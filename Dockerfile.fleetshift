@@ -89,12 +89,15 @@ RUN set -eux; \
 	tar -C / -Jxpf /tmp/s6-overlay-${s6arch}.tar.xz; \
 	rm -f /tmp/s6-overlay-*.tar.xz; \
 	rm -rf /var/lib/apt/lists/*; \
-	# FleetShift 1000:1000; Dex 1001:1001.
+	# FleetShift 1000:1000; Dex 1001:1001; aio-proxy 1002:1002.
 	if ! id -u fleetshift >/dev/null 2>&1; then \
 		useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin fleetshift; \
 	fi; \
 	if ! id -u dex >/dev/null 2>&1; then \
 		useradd --uid 1001 --system --home-dir /nonexistent --shell /usr/sbin/nologin dex; \
+	fi; \
+	if ! id -u aio-proxy >/dev/null 2>&1; then \
+		useradd --uid 1002 --system --home-dir /nonexistent --shell /usr/sbin/nologin aio-proxy; \
 	fi; \
 	mkdir -p /data /data/sandbox /run/fleetshift; \
 	chown -R fleetshift:fleetshift /data /srv/web; \

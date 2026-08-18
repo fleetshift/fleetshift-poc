@@ -1,4 +1,4 @@
 #!/command/with-contenv sh
 # AIO TLS edge. Terminates the sandbox certificate and reverse-proxies Dex and FleetShift.
 set -eu
-exec s6-setuidgid 1000:1000 /usr/local/bin/aio-proxy
+exec s6-setuidgid 1002:1002 /usr/local/bin/aio-proxy

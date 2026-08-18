@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -206,12 +207,7 @@ func leafIdentityOK(cert *x509.Certificate) bool {
 	if len(cert.IPAddresses) != 0 {
 		return false
 	}
-	for _, u := range cert.ExtKeyUsage {
-		if u == x509.ExtKeyUsageServerAuth {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cert.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 }
 
 // applySandboxPKIOwnership sets root ownership on CA material and leafUID:leafGID on the
