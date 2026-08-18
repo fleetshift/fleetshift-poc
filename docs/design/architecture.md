@@ -133,6 +133,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 
 - Read [docs/design/architecture/core_model.md](architecture/core_model.md) for the core vocabulary, strategy axes, target model, delivery contract, and single-pod invariant.
 - Read [docs/design/architecture/target_delivery_contract.md](architecture/target_delivery_contract.md) for the detailed target-side delivery protocol, reliability guarantees, generation ordering, journaling, and observation reporting.
+- Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, profile selection, trust updates, historical verification, and delivery-log integration.
 - Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
 - Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.
@@ -144,7 +145,8 @@ Start here when you need a fast map of the system. Then continue with the smalle
 
 ## Related design documents
 
-- [docs/design/authentication.md](authentication.md): full delivery-authorization model, including credential presentation, provenance, trust anchors, and `PausedAuth`
+- [docs/design/architecture/provenance.md](architecture/provenance.md): authority configuration and pluggable provenance verification beneath the common attestation and delivery model
+- [docs/design/authentication.md](authentication.md): credential presentation, attestation-graph and constraint semantics, and `PausedAuth`
 - [docs/design/trust_model_v3.md](trust_model_v3.md): proposal for OIDC-bound user key continuity, authenticated trust distribution, and delivery ordering beneath the existing attestation model
 - [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to fulfillments
 - [docs/design/addon-ui-architecture.md](addon-ui-architecture.md): addon bundle model, OCI artifact distribution, shell integration, and UI plugin capability

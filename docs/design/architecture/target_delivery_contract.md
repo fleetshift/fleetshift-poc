@@ -22,7 +22,9 @@ Read this when you need the full target-side delivery protocol — how targets a
 - Orchestration execution, invalidation, and rollout planning: [orchestration.md](orchestration.md)
 - Fleet-wide indexing of observations and inventory search: [resource_indexing.md](resource_indexing.md)
 - Fleetlet transport and channel model: [fleetlet_and_transport.md](fleetlet_and_transport.md)
-- Full authentication and trust design: [../authentication.md](../authentication.md)
+- Credential presentation and attestation semantics: [../authentication.md](../authentication.md)
+- Authority configuration, provenance profiles, and cryptographic delivery
+  ordering: [provenance.md](provenance.md)
 - Managed-resource projection and condition-event history: [../managed_resources.md](../managed_resources.md)
 
 ## Related docs
@@ -128,7 +130,7 @@ Delivery authorization and attestation verification apply as defined in [core_mo
 
 Here, a journal is target-side operational state used for convergence and
 crash recovery. It is distinct from the cryptographic
-[delivery log](../provenance_suite_design.md#10-shared-append-only-delivery-log)
+[delivery log](provenance.md#common-append-only-delivery-log)
 used for provenance ordering and rollback detection.
 
 A goal of this delivery protocol is to minimize the amount of state that an addon needs to keep track of to participate as a high quality target. However, fulfillment guarantees MAY still require a journal of some kind (like AppliedMW in OCM) to inventory what is happening in the target in more detail as a result of a delivery. Fleetshift could potentially provide APIs to keep track of such a journal as a service to addon developers.

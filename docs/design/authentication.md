@@ -162,6 +162,12 @@ This is the most novel model. It relies on provenance, transport authentication,
 
 > The provenance model described in this section has a working prototype in `poc/attestation/hybrid/`. The prototype isolates the target-side verification core — the attestation data model, constraint evaluation, strategy-implied policy, update chains, and trust anchor verification. See `poc/attestation/hybrid/README.md` for a guide to the prototype and its mapping to this design. Where this section and the prototype cover the same ground, the prototype's concrete model is authoritative.
 
+Authenticated authority configuration, provenance-profile selection, trust
+updates, historical verification, and delivery-log integration are defined in
+[architecture/provenance.md](architecture/provenance.md). This section remains
+authoritative for the attestation and constraint semantics above that profile
+boundary.
+
 The proposed [V3 trust-distribution model](trust_model_v3.md) inherits this attestation model rather than replacing it. It explores how ordinary OIDC enrollment, user key continuity, authenticated current state, and ordered delivery commitments can replace or supplement the key-binding and trust-distribution layer without requiring Fulcio, a timestamp authority, or dedicated transparency witnesses.
 
 When supported, a delivery agent independently verifies that a real user signed the operation and that the delivered result satisfies the constraints carried by the attestation. This authentic-provenance check composes with all credential presentations. It tightens the scope of what a compromised platform can do, especially in the "run as platform" case, but does not imply that the agent reproduces the resource manager's complete authorization policy.

@@ -19,7 +19,8 @@ Read this when you need the platform's core mental model before diving into exec
 
 - Execution semantics, invalidation, rollout planning, and `DeploymentGroup`: [orchestration.md](orchestration.md)
 - Fleetlets, channels, and platform routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
-- Full authentication and trust design: [../authentication.md](../authentication.md)
+- Credential presentation and attestation semantics: [../authentication.md](../authentication.md)
+- Authority configuration, provenance profiles, and trust updates: [provenance.md](provenance.md)
 - Managed resources: [../managed_resources.md](../managed_resources.md)
 - Recursive platforms and provisioning: [platform_hierarchy.md](platform_hierarchy.md)
 
@@ -27,6 +28,7 @@ Read this when you need the platform's core mental model before diving into exec
 
 - [../architecture.md](../architecture.md)
 - [addon_integration.md](addon_integration.md)
+- [provenance.md](provenance.md)
 - [tenancy_and_permissions.md](tenancy_and_permissions.md)
 
 ## Deployment as three strategy axes
