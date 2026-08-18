@@ -23,7 +23,13 @@ type UIConfigOptions struct {
 	// defaults for either field.
 	OIDCUIClientID string
 	OIDCUIScope    string
-	Logger         *slog.Logger
+	// OIDCMetadataPath, when nonempty, is advertised as oidc.metadataUrl so the
+	// browser fetches OIDC discovery (and thus every endpoint) through the
+	// server's own loopback proxy over HTTP instead of the internal HTTPS
+	// issuer — avoiding a sandbox-CA import. Same-origin relative path; the
+	// client resolves it against its own origin.
+	OIDCMetadataPath string
+	Logger           *slog.Logger
 	// AuthMiddleware, when non-nil, wraps routes that serve
 	// user-specific data (e.g. /api/ui/user-config → navLayout).
 	// Global bootstrap routes (/api/ui/config, /api/ui/plugin-registry)
@@ -112,6 +118,9 @@ type oidcConfig struct {
 	ClientID              string `json:"clientId"`
 	Scope                 string `json:"scope"`
 	AuthorizationEndpoint string `json:"authorizationEndpoint,omitempty"`
+	// MetadataURL overrides where the browser fetches OIDC discovery; when set
+	// it points at the server's loopback proxy (see UIConfigOptions.OIDCMetadataPath).
+	MetadataURL string `json:"metadataUrl,omitempty"`
 }
 
 // handleConfig serves GET /api/ui/config: oidc, authConfigured, optional
@@ -119,8 +128,9 @@ type oidcConfig struct {
 func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		oidc := oidcConfig{
-			ClientID: opts.OIDCUIClientID,
-			Scope:    opts.OIDCUIScope,
+			ClientID:    opts.OIDCUIClientID,
+			Scope:       opts.OIDCUIScope,
+			MetadataURL: opts.OIDCMetadataPath,
 		}
 
 		resp := map[string]any{

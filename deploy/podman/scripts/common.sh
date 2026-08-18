@@ -69,8 +69,8 @@ generate_password() {
 }
 
 # copy_sandbox_ca copies the Dex-on sandbox CA out of the running server
-# container to .certs/ca.crt on the host. fleetctl trusts it via --oidc-ca-file
-# and trust-dex-ca.sh installs it into the browser/OS trust store. Retries until
+# container to .certs/ca.crt on the host. fleetctl trusts it via --oidc-ca-file.
+# (The browser needs no trust — the server proxies Dex over HTTP.) Retries until
 # the container has generated the PKI (up to ~30s). Returns non-zero on timeout.
 copy_sandbox_ca() {
   local dest="$COMPOSE_DIR/.certs/ca.crt"

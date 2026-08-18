@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -87,6 +88,34 @@ type uiHTTPDeps struct {
 	provenanceSvc *domain.ProvenanceService
 	setupHub      *transporthttp.SetupHub
 	eventHub      *transporthttp.EventHub
+	// oidcHTTPClient carries the OIDC issuer's CA trust; reused as the internal
+	// transport for the browser loopback OIDC proxy. Nil when no CA bundle.
+	oidcHTTPClient *http.Client
+}
+
+// loopbackOIDCProxyUpstream reports whether the configured OIDC issuer is a
+// self-signed loopback HTTPS issuer (i.e. the AIO's peer Dex) that the browser
+// cannot reach without importing the sandbox CA — the case the loopback proxy
+// exists to remove. It returns the issuer URL (path trimmed of trailing slash)
+// to mount the proxy under. Non-loopback / external issuers, http issuers, and
+// issuers without a CA bundle or path prefix are left untouched.
+func loopbackOIDCProxyUpstream(cfg Config) (*url.URL, bool) {
+	if len(cfg.OIDCCABundle) == 0 || cfg.OIDCIssuer == "" {
+		return nil, false
+	}
+	u, err := url.Parse(cfg.OIDCIssuer)
+	if err != nil {
+		return nil, false
+	}
+	if strings.ToLower(u.Scheme) != "https" || !isLoopbackHost(u.Hostname()) {
+		return nil, false
+	}
+	p := strings.TrimRight(u.Path, "/")
+	if p == "" {
+		return nil, false // need a path prefix to mount the proxy under
+	}
+	u.Path = p
+	return u, true
 }
 
 // registerUIHTTP mounts /api/ui/* routes and optional SPA static assets on topMux.
@@ -120,14 +149,33 @@ func registerUIHTTP(topMux *http.ServeMux, deps uiHTTPDeps) error {
 	if err != nil {
 		return fmt.Errorf("derive UI origin: %w", err)
 	}
+
+	// Loopback OIDC proxy: when the issuer is the self-signed loopback Dex,
+	// serve its endpoints under our own HTTP origin so the browser never has to
+	// trust the sandbox CA. Mounted at the issuer's own path prefix so Dex's
+	// path-absolute links resolve unchanged.
+	var oidcMetadataPath string
+	if upstream, ok := loopbackOIDCProxyUpstream(deps.cfg); ok {
+		var transport http.RoundTripper
+		if deps.oidcHTTPClient != nil {
+			transport = deps.oidcHTTPClient.Transport
+		}
+		proxy := transporthttp.NewOIDCLoopbackProxy(upstream, uiOrigin, transport)
+		topMux.Handle(upstream.Path+"/", proxy)
+		oidcMetadataPath = upstream.Path + "/.well-known/openid-configuration"
+		deps.logger.Info("serving loopback OIDC proxy for browser",
+			"prefix", upstream.Path, "issuer", deps.cfg.OIDCIssuer)
+	}
+
 	uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
-		WebDir:         deps.cfg.WebDir,
-		UIOrigin:       uiOrigin,
-		OIDCUIClientID: deps.cfg.OIDCUIClientID,
-		OIDCUIScope:    deps.cfg.OIDCUIScope,
-		Logger:         deps.logger,
-		AuthMiddleware: httpAuthn.Wrap,
-		AuthSnapshot:   uiAuthFunc(deps.authMethods),
+		WebDir:           deps.cfg.WebDir,
+		UIOrigin:         uiOrigin,
+		OIDCUIClientID:   deps.cfg.OIDCUIClientID,
+		OIDCUIScope:      deps.cfg.OIDCUIScope,
+		OIDCMetadataPath: oidcMetadataPath,
+		Logger:           deps.logger,
+		AuthMiddleware:   httpAuthn.Wrap,
+		AuthSnapshot:     uiAuthFunc(deps.authMethods),
 	})
 	topMux.Handle("/api/ui/", uiMux)
 	if deps.cfg.WebDir != "" {

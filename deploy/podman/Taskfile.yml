@@ -122,12 +122,6 @@ tasks:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env rm -f -s web-builder
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env up --build web-builder
 
-  trust-cert:
-    desc: Trust the built-in Dex sandbox CA so the browser accepts the loopback issuer (macOS keychain; --remove to undo)
-    env: *deploy_env
-    cmds:
-      - ./scripts/trust-dex-ca.sh {{.CLI_ARGS}}
-
   test-attestation:
     desc: Run the end-to-end attestation flow
     env: *deploy_env

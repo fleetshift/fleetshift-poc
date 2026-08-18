@@ -41,12 +41,17 @@ podman run -d --rm -it \
 Open https://fleetshift-sandbox.localhost:8085 — the exact path `/` redirects
 to `/app/`.
 
-Browsers in the same host network namespace will see Dex's sandbox CA as an
-unknown authority. Browser login needs that CA trusted — clicking through the
-`https://127.0.0.1:5556` interstitial is not enough, because the SPA's
-background token requests to the issuer fail TLS with no interstitial to accept.
-Copy the sandbox CA and trust it in your OS/browser store (from a repo checkout,
-`npx nx run pd:trust-cert` automates this):
+Browser login needs no CA trust. The server reverse-proxies the loopback Dex
+under its own HTTP origin (`/dex`) whenever the issuer is a loopback HTTPS URL
+with a CA bundle (i.e. Dex-on), so the browser reaches every OIDC endpoint over
+plain HTTP and never sees the sandbox CA. The ID-token `iss` and the browser
+`authority` stay the internal `https://127.0.0.1:5556/dex`; only the browser's
+discovery fetch is redirected to the proxy. Browser-only runs can drop
+`-p 127.0.0.1:5556:5556`.
+
+Non-browser clients (e.g. `fleetctl`) reach Dex over HTTPS directly, so they need
+the sandbox CA as a scoped trust root — copy it out and pass it via
+`--oidc-ca-file`:
 
 1. **Edge** — `/idp`… goes to peer Dex (Dex-on only). Every other path is
    forwarded to FleetShift.
@@ -74,9 +79,6 @@ Host CLIs (`curl`, `fleetctl`, Go clients) still need a scoped `--cacert` /
 command publishes IPv4 loopback only. If a supported platform does not fall
 back to IPv4, add a second `[::1]:8085:8085` publish for that platform — never
 replace the scoped bind with `0.0.0.0` or `::`.
-
-Non-browser clients can use the same file as a scoped trust root
-(`--oidc-ca-file`).
 
 ### Demo users (Dex-on)
 

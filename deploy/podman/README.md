@@ -133,16 +133,10 @@ Dex sandbox IdP, peer Dex issues at `https://127.0.0.1:5556/dex` and only
 registers the `127.0.0.1` redirect URI and CORS origin. A `localhost:8085` tab
 loads the SPA but fails the OIDC redirect (`redirect_uri did not match`).
 
-**Trust the Dex CA once** so the browser stops warning on the login redirect:
-
-```bash
-task pd:trust-cert     # macOS: adds the sandbox CA to the login keychain
-                       # task pd:trust-cert -- --remove   to undo
-```
-
-Clicking through Chrome's "proceed anyway" only covers `127.0.0.1:5556` for that
-session and does not fix the app login (the SPA calls Dex in the background,
-which Chrome still blocks on an untrusted cert). `pd:trust-cert` is the real fix.
+**No browser CA trust needed.** The server reverse-proxies the loopback Dex
+under its own HTTP origin (`/dex`), so the browser reaches the issuer over plain
+HTTP and never sees the sandbox CA. Only `fleetctl` (HTTPS to Dex directly) needs
+the CA — `start.sh` copies it to `.certs/ca.crt`; pass it via `--oidc-ca-file`.
 
 ## Configuration
 

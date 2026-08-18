@@ -36,9 +36,9 @@ echo "==> FleetShift stack is running!"
 echo "    FleetShift:      http://127.0.0.1:${http_port}"
 
 if [ -z "${OIDC_ISSUER_URL:-}" ]; then
-  # Dex-on: copy the sandbox CA so fleetctl and the browser can trust the
-  # loopback issuer.
-  echo "==> Copying Dex sandbox CA to .certs/ca.crt (for fleetctl and browser)"
+  # Dex-on: copy the sandbox CA so fleetctl can trust the loopback issuer.
+  # (The browser needs no trust — the server proxies Dex over HTTP.)
+  echo "==> Copying Dex sandbox CA to .certs/ca.crt (for fleetctl)"
   if ! copy_sandbox_ca; then
     echo "    WARN: sandbox CA not ready yet. Copy it later with:" >&2
     echo "      podman compose cp fleetshift-server:/data/sandbox/pki/ca.crt deploy/podman/.certs/ca.crt" >&2
@@ -60,9 +60,9 @@ if [ -z "${OIDC_ISSUER_URL:-}" ]; then
       --scopes 'openid,profile,email,audience:server:client_id:fleetshift'
     bin/fleetctl auth login
 
-  Browser login: the UI redirects to Dex at https://127.0.0.1:5556/dex, which
-  uses the sandbox CA above. Trust it once so the browser stops warning:
-    npx nx run pd:trust-cert      (or: task pd:trust-cert)
+  Browser login: no CA trust needed. The server reverse-proxies Dex under its
+  own HTTP origin, so the browser reaches the issuer over plain HTTP. Just open
+  http://127.0.0.1:${http_port} and log in.
 EOF
 else
   echo ""

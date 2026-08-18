@@ -147,8 +147,9 @@ npx nx run web:dev:watch           # terminal 2 alt: watch only (skip initial bu
 
 Then open the app at **http://127.0.0.1:8085** — use `127.0.0.1`, not
 `localhost`. Peer Dex only registers the `127.0.0.1` redirect URI and CORS
-origin, so a `localhost` tab fails the login redirect. Trust the Dex sandbox CA
-once so the browser stops warning: `npx nx run pd:trust-cert`.
+origin, so a `localhost` tab fails the login redirect. No CA trust needed: the
+server reverse-proxies the loopback Dex under its own HTTP origin, so the browser
+never touches the sandbox HTTPS issuer.
 
 ```bash
 npx nx run web:test:ct      # component tests (playwright)
@@ -199,7 +200,6 @@ npx nx run pd:status                                 # show container status
 npx nx run pd:logs                                   # tail all logs
 npx nx run pd:rebuild                                # rebuild and restart
 npx nx run pd:rebuild-web                            # rebuild web assets only
-npx nx run pd:trust-cert                             # trust the Dex sandbox CA (browser)
 npx nx run pd:clock-drift                            # fix podman clock drift
 npx nx run pd:test-attestation                       # test attestation flow
 
@@ -252,13 +252,11 @@ podman run -d --rm -it \
 Open http://127.0.0.1:8085. Build locally with `task image:aio` when iterating
 on this repo.
 
-Browsers will see Dex's sandbox CA as an unknown authority. Browser login needs
-that CA trusted — clicking through the `https://127.0.0.1:5556` interstitial is
-not enough, because the SPA's background token requests to the issuer fail TLS
-with no interstitial to accept. From a repo checkout (bare image or compose):
-`npx nx run pd:trust-cert` (`--remove` to undo). Without a checkout, copy the CA
-and trust it in your OS/browser store manually:
-`podman cp <ctr>:/data/sandbox/pki/ca.crt ./ca.crt`.
+Browser login needs no CA trust: the server reverse-proxies the loopback Dex
+under its own HTTP origin (`/dex`), so the browser reaches the issuer over plain
+HTTP and never sees the sandbox CA. `fleetctl`, which talks to Dex over HTTPS
+directly, still needs the CA as a scoped trust root
+(`podman cp <ctr>:/data/sandbox/pki/ca.crt ./ca.crt`, then `--oidc-ca-file`).
 External issuer, kind, GCP HCP, env defaults, and fleetctl:
 [deploy/aio/README.md](deploy/aio/README.md).
 
