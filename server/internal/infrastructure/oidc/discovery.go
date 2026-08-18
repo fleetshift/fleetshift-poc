@@ -24,6 +24,7 @@ func NewDiscoveryClient(client *http.Client) *DiscoveryClient {
 	return &DiscoveryClient{HTTP: client}
 }
 
+// discoveryDocument is the subset of OpenID Provider Metadata this client consumes.
 type discoveryDocument struct {
 	Issuer                string `json:"issuer"`
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
@@ -32,7 +33,8 @@ type discoveryDocument struct {
 }
 
 // FetchMetadata retrieves the OIDC discovery document from the issuer's
-// well-known endpoint.
+// well-known endpoint. The document issuer must equal issuerURL, and
+// authorization, token, and JWKS endpoints are required.
 func (c *DiscoveryClient) FetchMetadata(ctx context.Context, issuerURL domain.IssuerURL) (domain.OIDCMetadata, error) {
 	endpoint := string(issuerURL) + "/.well-known/openid-configuration"
 
@@ -57,6 +59,15 @@ func (c *DiscoveryClient) FetchMetadata(ctx context.Context, issuerURL domain.Is
 		return domain.OIDCMetadata{}, fmt.Errorf("decode discovery document: %w", err)
 	}
 
+	if doc.Issuer != string(issuerURL) {
+		return domain.OIDCMetadata{}, fmt.Errorf("discovery issuer %q does not match requested issuer %q", doc.Issuer, issuerURL)
+	}
+	if doc.AuthorizationEndpoint == "" {
+		return domain.OIDCMetadata{}, fmt.Errorf("discovery document missing authorization_endpoint")
+	}
+	if doc.TokenEndpoint == "" {
+		return domain.OIDCMetadata{}, fmt.Errorf("discovery document missing token_endpoint")
+	}
 	if doc.JWKSURI == "" {
 		return domain.OIDCMetadata{}, fmt.Errorf("discovery document missing jwks_uri")
 	}

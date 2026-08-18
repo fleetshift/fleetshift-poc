@@ -15,7 +15,7 @@ services:
       - KC_HOSTNAME_STRICT=false
       - KC_HEALTH_ENABLED=true
     ports:
-      - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
+      - "127.0.0.1:${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
     volumes:
       - ./.certs/keycloak.crt:/opt/keycloak/certs/keycloak.crt:ro,z
       - ./.certs/keycloak.key:/opt/keycloak/certs/keycloak.key:ro,z

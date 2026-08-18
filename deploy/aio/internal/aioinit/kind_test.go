@@ -95,7 +95,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 		t.Setenv("CONTAINER_HOST", "")
 		clearEnv(t, kindExperimentalNetKey)
-		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -107,7 +107,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
-		if err := ConfigureKindEnv(path, false, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, false); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -127,7 +127,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		t.Setenv(kindExperimentalNetKey, "custom-net")
-		if err := ConfigureKindEnv(path, false, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -140,7 +140,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		t.Setenv(kindExperimentalNetKey, "")
-		if err := ConfigureKindEnv(path, false, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -154,7 +154,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		clearEnv(t, loopbackForwardToEnvKey)
-		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -165,7 +165,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		want := loopbackForwardToEnvKey + "=fleetshift:5556\n"
+		want := loopbackForwardToEnvKey + "=fleetshift:8085\n"
 		if !strings.Contains(body, want) {
 			t.Fatalf("kind.env missing %q, got %q", want, body)
 		}
@@ -176,7 +176,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		t.Setenv(loopbackForwardToEnvKey, "10.89.0.2:5556")
-		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)
@@ -197,7 +197,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
 		t.Setenv(loopbackForwardToEnvKey, "")
-		if err := ConfigureKindEnv(path, true, ":5556"); err != nil {
+		if err := ConfigureKindEnv(path, true); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(path)

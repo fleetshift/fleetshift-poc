@@ -14,6 +14,8 @@ class ModuleFederationPlugin extends BaseMFPlugin {
 
 import * as buildUtils from "@fleetshift/build-utils";
 
+import { APP_BASENAME } from "./src/appBase";
+
 const {
   createPfModuleReplacementPlugin,
   createPfTransformImport,
@@ -32,7 +34,7 @@ const config: Configuration = {
   },
   entry: "./src/index.ts",
   output: {
-    publicPath: "/",
+    publicPath: `${APP_BASENAME}/`,
     path: path.resolve(configDir, "dist"),
     chunkFilename: "shell/[name].js",
     clean: true,

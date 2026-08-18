@@ -90,6 +90,7 @@ type uiHTTPDeps struct {
 }
 
 // registerUIHTTP mounts /api/ui/* routes and optional SPA static assets on topMux.
+// The SPA is served under /app; GET/HEAD / and /app redirect to /app/.
 func registerUIHTTP(topMux *http.ServeMux, deps uiHTTPDeps) error {
 	// HTTP auth middleware — mirrors the gRPC authn interceptor: if
 	// auth methods are configured require a valid OIDC Bearer token,
@@ -130,8 +131,8 @@ func registerUIHTTP(topMux *http.ServeMux, deps uiHTTPDeps) error {
 	})
 	topMux.Handle("/api/ui/", uiMux)
 	if deps.cfg.WebDir != "" {
-		topMux.Handle("/", transporthttp.NewStaticHandler(deps.cfg.WebDir))
-		deps.logger.Info("serving frontend assets", "web-dir", deps.cfg.WebDir)
+		transporthttp.MountUI(topMux, deps.cfg.WebDir)
+		deps.logger.Info("serving frontend assets", "web-dir", deps.cfg.WebDir, "path", transporthttp.UIPathPrefix)
 	}
 	return nil
 }

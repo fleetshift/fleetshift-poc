@@ -148,5 +148,5 @@ npx nx run fleetshift-poc:ui:test   # vitest
 ## Verification
 
 - Don't run builds to verify. Use LSP diagnostics + browser MCP.
-- App served on port 8085. `/debug` route for plugin/nav troubleshooting.
+- App served on port 8085. `/app/debug` route for plugin/nav troubleshooting.
 - `npx nx run fleetshift-poc:ui:lint` + `npx nx run fleetshift-poc:ui:test` before done.

@@ -15,7 +15,7 @@ const (
 	dexConfigDir = "/data/sandbox/dex"
 	// dexConfigPath is the Dex config file (mode 0600, dex UID/GID).
 	dexConfigPath = "/data/sandbox/dex/config.yaml"
-	// dexDBPath is the sealed Dex SQLite store.
+	// dexDBPath is the Dex SQLite store.
 	dexDBPath = "/data/sandbox/dex/dex.db"
 
 	bcryptCost = 12
@@ -24,13 +24,12 @@ const (
 	devPassword = "fleetshift-dev"
 )
 
-// DexRenderInput is the peer-Dex issuer, endpoints, and TLS material needed to
-// write Dex config (Dex-on only).
+// DexRenderInput is the peer-Dex issuer and public endpoint metadata needed to
+// write Dex config (Dex-on only). Dex listens on container-loopback HTTP;
+// TLS is terminated at the AIO edge.
 type DexRenderInput struct {
 	Issuer    string
 	Endpoints Endpoints
-	TLSCert   string
-	TLSKey    string
 }
 
 // DexPaths holds Dex config and SQLite install locations.
@@ -76,11 +75,9 @@ func InstallDexConfig(in DexRenderInput, paths DexPaths, dexUID, dexGID int) err
 
 	data := dexTemplateData{
 		Issuer:         in.Issuer,
-		Listen:         "0.0.0.0" + in.Endpoints.DexListen, // Dex web.https is host:port, not a URL
-		UIOrigin:       in.Endpoints.UIOrigin,
+		Listen:         in.Endpoints.DexListen,
 		UICallback:     in.Endpoints.UICallback,
-		TLSCert:        in.TLSCert,
-		TLSKey:         in.TLSKey,
+		SilentRenew:    in.Endpoints.SilentRenew,
 		DBPath:         paths.DBPath,
 		OpsHash:        string(opsHash),
 		DevHash:        string(devHash),
@@ -117,10 +114,8 @@ func InstallDexConfig(in DexRenderInput, paths DexPaths, dexUID, dexGID int) err
 type dexTemplateData struct {
 	Issuer         string
 	Listen         string
-	UIOrigin       string
 	UICallback     string
-	TLSCert        string
-	TLSKey         string
+	SilentRenew    string
 	DBPath         string
 	OpsHash        string
 	DevHash        string
@@ -143,11 +138,7 @@ storage:
   config:
     file: {{.DBPath}}
 web:
-  https: {{.Listen}}
-  tlsCert: {{.TLSCert}}
-  tlsKey: {{.TLSKey}}
-  allowedOrigins:
-    - {{.UIOrigin}}
+  http: {{.Listen}}
 oauth2:
   skipApprovalScreen: true
   passwordConnector: local
@@ -182,6 +173,7 @@ staticClients:
     public: true
     redirectURIs:
       - {{.UICallback}}
+      - {{.SilentRenew}}
   - id: fleetshift-cli
     name: FleetShift CLI
     public: true

@@ -2,6 +2,7 @@ import { getExtensionStore } from "@fleetshift/common";
 import { ScalprumProvider } from "@scalprum/react-core";
 import { PropsWithChildren, useMemo, useRef } from "react";
 
+import { APP_BASENAME } from "../../appBase";
 import { useAppConfig } from "../../contexts/AppConfigContext";
 import PluginLoader from "./PluginLoader";
 import { scopeListenersRef, scopeRef } from "./ScopeBridge";
@@ -85,10 +86,18 @@ const ScalprumShell = ({ children }: PropsWithChildren) => {
               Array.isArray(newManifest.loadScripts)
             ) {
               newManifest.loadScripts = newManifest.loadScripts.map(
-                (script: string) =>
-                  script.startsWith("http")
-                    ? script
-                    : `${assetsHost}/${script}`,
+                (script: string) => {
+                  if (script.startsWith("http")) {
+                    return script;
+                  }
+                  const host = assetsHost || APP_BASENAME;
+                  if (script.startsWith("/")) {
+                    return script === host || script.startsWith(host + "/")
+                      ? script
+                      : `${host}${script}`;
+                  }
+                  return `${host.replace(/\/$/, "")}/${script}`;
+                },
               );
             }
             return newManifest;

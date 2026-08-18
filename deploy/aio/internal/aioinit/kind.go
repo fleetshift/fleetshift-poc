@@ -22,10 +22,11 @@ const (
 // ConfigureKindEnv writes path when a container engine socket is mounted.
 // Always defaults KIND_EXPERIMENTAL_DOCKER_NETWORK=kind unless that variable
 // is already present in the environment (including empty). On Dex-on, also
-// writes KIND_LOOPBACK_FORWARD_TO=fleetshift:<dex-port> unless that variable
-// is already set (operator pin, including empty to disable). The kind addon
-// reads that env to install a loopback TCP proxy on control-plane nodes.
-func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
+// writes KIND_LOOPBACK_FORWARD_TO=fleetshift:<gateway-port> unless that
+// variable is already set (operator pin, including empty to disable). The
+// kind addon reads that env to install a loopback TCP proxy on control-plane
+// nodes and, when forwarding, kube-apiserver hostAliases for the issuer host.
+func ConfigureKindEnv(path string, dexOn bool) error {
 	_ = os.Remove(path)
 	if !containerEngineSocketPresent() {
 		return nil
@@ -39,8 +40,7 @@ func ConfigureKindEnv(path string, dexOn bool, dexListen string) error {
 
 	if dexOn {
 		if _, set := os.LookupEnv(loopbackForwardToEnvKey); !set {
-			port := strings.TrimPrefix(dexListen, ":")
-			destination := net.JoinHostPort(loopbackForwardHost, port)
+			destination := net.JoinHostPort(loopbackForwardHost, gatewayPort)
 			b.WriteString(loopbackForwardToEnvKey + "=")
 			b.WriteString(destination)
 			b.WriteString("\n")

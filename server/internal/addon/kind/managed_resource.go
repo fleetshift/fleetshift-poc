@@ -187,9 +187,10 @@ type kindConfig struct {
 }
 
 type kindNode struct {
-	Role        string      `json:"role"`
-	Image       string      `json:"image,omitempty"`
-	ExtraMounts []kindMount `json:"extraMounts,omitempty"`
+	Role                 string      `json:"role"`
+	Image                string      `json:"image,omitempty"`
+	ExtraMounts          []kindMount `json:"extraMounts,omitempty"`
+	KubeadmConfigPatches []string    `json:"kubeadmConfigPatches,omitempty"`
 }
 
 type kindMount struct {

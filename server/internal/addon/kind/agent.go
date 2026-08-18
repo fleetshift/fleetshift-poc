@@ -203,7 +203,9 @@ func WithPlatformSABootstrap(fn func(context.Context, []byte, domain.TargetID) (
 }
 
 // WithLoopbackForward attaches an optional loopback TCP proxy on kind
-// control-plane nodes (see [LoopbackForward]). Nil is a no-op.
+// control-plane nodes (see [LoopbackForward]). When set, OIDC cluster create
+// also installs kube-apiserver hostAliases for the issuer hostname unless
+// that host is already loopback. Nil is a no-op.
 func WithLoopbackForward(f LoopbackForward) AgentOption {
 	return func(a *Agent) { a.loopbackForward = f }
 }
@@ -877,6 +879,11 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 
 		config := toKindConfig(spec)
 		applyOIDCOverlay(&config, oidcSpec, string(issuer), string(auth.Audience[0]), caCertHostPath)
+		if a.loopbackForward != nil {
+			if err := applyLoopbackIssuerHost(&config, string(issuer)); err != nil {
+				return nil, "", err
+			}
+		}
 
 		raw, err := json.Marshal(config)
 		if err != nil {

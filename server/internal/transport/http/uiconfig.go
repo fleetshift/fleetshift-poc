@@ -171,12 +171,12 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 			pages := generatePluginPages(registry)
 			entries := make([]pluginEntry, 0, len(registry.Plugins))
 			for _, e := range registry.Plugins {
-				entries = append(entries, e)
+				entries = append(entries, prefixPluginEntry(e))
 			}
 			resp["scalprumConfig"] = buildScalprumConfig(registry)
 			resp["pluginPages"] = pages
 			resp["pluginEntries"] = entries
-			resp["assetsHost"] = ""
+			resp["assetsHost"] = UIPathPrefix
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -238,11 +238,14 @@ func handleUserConfig(opts UIConfigOptions) http.HandlerFunc {
 	}
 }
 
+// buildScalprumConfig maps the plugin registry into the scalprum config object
+// advertised on /api/ui/config, with asset paths under UIPathPrefix.
 func buildScalprumConfig(registry pluginRegistry) map[string]interface{} {
 	config := make(map[string]interface{})
 
 	for name, entry := range registry.Plugins {
-		cfg := map[string]interface{}{
+		entry = prefixPluginEntry(entry)
+		cfg := map[string]any{
 			"name":             entry.Name,
 			"manifestLocation": entry.ManifestPath,
 			"pluginManifest":   entry.PluginManifest,
@@ -251,6 +254,23 @@ func buildScalprumConfig(registry pluginRegistry) map[string]interface{} {
 	}
 
 	return config
+}
+
+// prefixPluginEntry rewrites origin-rooted plugin asset paths onto /app.
+func prefixPluginEntry(e pluginEntry) pluginEntry {
+	e.ManifestPath = PrefixUIAssetPath(e.ManifestPath)
+	e.PluginManifest.BaseURL = PrefixUIAssetPath(e.PluginManifest.BaseURL)
+	if len(e.PluginManifest.LoadScripts) > 0 {
+		scripts := make([]string, len(e.PluginManifest.LoadScripts))
+		copy(scripts, e.PluginManifest.LoadScripts)
+		for i, s := range scripts {
+			if strings.HasPrefix(s, "/") {
+				scripts[i] = PrefixUIAssetPath(s)
+			}
+		}
+		e.PluginManifest.LoadScripts = scripts
+	}
+	return e
 }
 
 var builtinPages = []pluginPage{
