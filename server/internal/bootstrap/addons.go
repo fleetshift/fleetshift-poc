@@ -17,6 +17,7 @@ import (
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
@@ -166,25 +167,62 @@ func assembleProductionAddons(
 		})
 	}
 
+	if enabled[AddonScripted] {
+		codec, err := scripted.NewCodec(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("scripted addon codec: %w", err)
+		}
+		planner := scripted.NewPlanner()
+		scriptedAgent := scripted.NewAgent(
+			deps.DeliveryReporter,
+			deps.InventoryReporter,
+			codec,
+			planner,
+			deps.AppCtx,
+		)
+		specs = append(specs, AddonSpec{
+			Descriptor: scripted.Descriptor(),
+			Connect: application.ConnectInput{
+				Agent: scriptedAgent,
+				Targets: []domain.TargetInfo{domain.NewTargetInfo(
+					scripted.TargetID,
+					scripted.TargetType,
+					"Local Scripted Provider",
+					domain.TargetStateReady,
+					nil,
+					nil,
+					[]domain.ManifestType{scripted.ManagedManifestType},
+				)},
+				Schemas: []domain.ExtensionResourceSchema{scripted.Schema()},
+			},
+			Close: scriptedAgent.Close,
+		})
+	}
+
 	return specs, nil
 }
 
 // enableAndConnectAddons runs Enable/Connect and post-connect hooks for each
 // spec. A claimed DeliveryCapability requires a non-nil Connect.Agent.
-func enableAndConnectAddons(ctx context.Context, addonMgr *application.AddonManager, specs []AddonSpec, logger *slog.Logger) error {
+// It returns close hooks in reverse registration order for shutdown.
+func enableAndConnectAddons(ctx context.Context, addonMgr *application.AddonManager, specs []AddonSpec, logger *slog.Logger) ([]func(context.Context) error, error) {
+	var closeHooks []func(context.Context) error
 	for _, spec := range specs {
 		if err := addonMgr.Enable(ctx, spec.Descriptor); err != nil {
-			return fmt.Errorf("enable %s addon: %w", spec.Descriptor.ID, err)
+			return nil, fmt.Errorf("enable %s addon: %w", spec.Descriptor.ID, err)
 		}
 		if err := rejectNilClaimedAgent(spec); err != nil {
-			return err
+			return nil, err
 		}
 		if err := addonMgr.Connect(ctx, spec.Descriptor.ID, spec.Connect); err != nil {
-			return fmt.Errorf("connect %s addon: %w", spec.Descriptor.ID, err)
+			return nil, fmt.Errorf("connect %s addon: %w", spec.Descriptor.ID, err)
+		}
+		if spec.Close != nil {
+			closeHooks = append(closeHooks, spec.Close)
 		}
 		if spec.AfterConnect != nil {
 			if err := spec.AfterConnect(ctx); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if spec.AfterConnectBestEffort != nil {
@@ -193,7 +231,11 @@ func enableAndConnectAddons(ctx context.Context, addonMgr *application.AddonMana
 			}
 		}
 	}
-	return nil
+	// Reverse for shutdown order.
+	for i, j := 0, len(closeHooks)-1; i < j; i, j = i+1, j-1 {
+		closeHooks[i], closeHooks[j] = closeHooks[j], closeHooks[i]
+	}
+	return closeHooks, nil
 }
 
 // newProductionKeyResolver builds the built-in key registry resolver.
