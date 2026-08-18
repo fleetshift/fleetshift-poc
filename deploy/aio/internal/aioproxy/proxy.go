@@ -19,18 +19,15 @@ const (
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 120 * time.Second
 	shutdownTimeout   = 5 * time.Second
-	maxHeaderBytes    = 1 << 20
 	idpPath           = "/idp"
 	idpPathSlash      = "/idp/"
 )
 
-// ForwardingHeaders are client-supplied proxy and identity headers removed
-// before the upstream request.
+// ForwardingHeaders are extra hop and identity headers a client can spoof
+// (address, proto, or authenticated user). ReverseProxy.Rewrite already
+// drops Forwarded and X-Forwarded-For/Host/Proto; these names are not in
+// that set and must not reach Dex or FleetShift.
 var ForwardingHeaders = []string{
-	"Forwarded",
-	"X-Forwarded-For",
-	"X-Forwarded-Host",
-	"X-Forwarded-Proto",
 	"X-Forwarded-Port",
 	"X-Forwarded-Ssl",
 	"X-Forwarded-Prefix",
@@ -44,16 +41,16 @@ var ForwardingHeaders = []string{
 	"X-Forwarded-Client-Cert",
 }
 
-// Config is the AIO TLS-edge configuration. DexURL and AppURL are the Dex and
-// FleetShift loopback upstreams. The accepted Host header is derived from
-// PublicOrigin.
+// Config is the AIO TLS-edge configuration. DexURL and FleetShiftURL are the
+// Dex and FleetShift loopback upstreams. The accepted Host header is derived
+// from PublicOrigin.
 type Config struct {
-	ListenAddr   string
-	CertFile     string
-	KeyFile      string
-	PublicOrigin string
-	DexURL       *url.URL
-	AppURL       *url.URL
+	ListenAddr    string
+	CertFile      string
+	KeyFile       string
+	PublicOrigin  string
+	DexURL        *url.URL
+	FleetShiftURL *url.URL
 }
 
 // Proxy terminates the AIO gateway certificate and multiplexes /idp to Dex
@@ -64,13 +61,13 @@ type Proxy struct {
 	publicOrigin  string
 	canonicalHost string
 	dex           *httputil.ReverseProxy
-	app           *httputil.ReverseProxy
+	fleetshift    *httputil.ReverseProxy
 	server        *http.Server
 }
 
-// New constructs a Proxy for cfg. DexURL and AppURL must be non-nil absolute
-// http or https URLs without userinfo. PublicOrigin must be an absolute http
-// or https origin; its host is the only accepted Host header.
+// New constructs a Proxy for cfg. DexURL and FleetShiftURL must be non-nil
+// absolute http or https URLs without userinfo. PublicOrigin must be an
+// absolute http or https origin; its host is the only accepted Host header.
 func New(cfg Config) (*Proxy, error) {
 	origin, host, err := parsePublicOrigin(cfg.PublicOrigin)
 	if err != nil {
@@ -79,7 +76,7 @@ func New(cfg Config) (*Proxy, error) {
 	if err := checkUpstream("dex", cfg.DexURL); err != nil {
 		return nil, err
 	}
-	if err := checkUpstream("app", cfg.AppURL); err != nil {
+	if err := checkUpstream("fleetshift", cfg.FleetShiftURL); err != nil {
 		return nil, err
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -90,14 +87,13 @@ func New(cfg Config) (*Proxy, error) {
 		publicOrigin:  origin,
 		canonicalHost: host,
 		dex:           newUpstream(cfg.DexURL, transport),
-		app:           newUpstream(cfg.AppURL, transport),
+		fleetshift:    newUpstream(cfg.FleetShiftURL, transport),
 	}
 	p.server = &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           p,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
-		MaxHeaderBytes:    maxHeaderBytes,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 	return p, nil
@@ -125,7 +121,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.dex.ServeHTTP(w, r)
 		return
 	}
-	p.app.ServeHTTP(w, r)
+	p.fleetshift.ServeHTTP(w, r)
 }
 
 // ListenAndServe serves HTTPS on the configured address until ctx is cancelled.

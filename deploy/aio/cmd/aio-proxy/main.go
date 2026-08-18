@@ -30,17 +30,17 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("dex upstream: %w", err)
 	}
-	appURL, err := url.Parse("http://" + endpoints.HTTPListen)
+	fleetshiftURL, err := url.Parse("http://" + endpoints.HTTPListen)
 	if err != nil {
-		return fmt.Errorf("app upstream: %w", err)
+		return fmt.Errorf("fleetshift upstream: %w", err)
 	}
 	proxy, err := aioproxy.New(aioproxy.Config{
-		ListenAddr:   endpoints.GatewayListen,
-		CertFile:     pki.LeafCert,
-		KeyFile:      pki.LeafKey,
-		PublicOrigin: endpoints.PublicOrigin,
-		DexURL:       dexURL,
-		AppURL:       appURL,
+		ListenAddr:    endpoints.GatewayListen,
+		CertFile:      pki.LeafCert,
+		KeyFile:       pki.LeafKey,
+		PublicOrigin:  endpoints.PublicOrigin,
+		DexURL:        dexURL,
+		FleetShiftURL: fleetshiftURL,
 	})
 	if err != nil {
 		return err
