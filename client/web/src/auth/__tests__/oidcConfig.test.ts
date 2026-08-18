@@ -73,6 +73,7 @@ describe("fetchOidcConfig", () => {
     expect(props.authority).toBe(
       "https://fleetshift-sandbox.localhost:8085/idp",
     );
+    expect(props.scope).toBe("openid profile email groups");
 
     props.onSigninCallback?.({} as never);
     expect(window.history.replaceState).toHaveBeenCalled();
@@ -104,5 +105,46 @@ describe("fetchOidcConfig", () => {
     const props = await fetchOidcConfig(mockNavigate);
     props.onSigninCallback?.({} as never);
     expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true });
+  });
+
+  it("omits scope when the server value is empty so oidc-client-ts can default to openid", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          oidc: {
+            authority: "https://fleetshift-sandbox.localhost:8085/idp",
+            clientId: "fleetshift-ui",
+            scope: "",
+          },
+        }),
+      }),
+    );
+
+    const { fetchOidcConfig } = await import("../oidcConfig");
+    const props = await fetchOidcConfig(mockNavigate);
+    expect(props).not.toHaveProperty("scope");
+  });
+});
+
+describe("oidcClientScope", () => {
+  it("returns undefined for missing, empty, or whitespace-only values", async () => {
+    const { oidcClientScope } = await import("../oidcConfig");
+    expect(oidcClientScope(undefined)).toBeUndefined();
+    expect(oidcClientScope("")).toBeUndefined();
+    expect(oidcClientScope("   ")).toBeUndefined();
+  });
+
+  it("passes through a configured scope that already includes openid", async () => {
+    const { oidcClientScope } = await import("../oidcConfig");
+    expect(oidcClientScope("openid profile email groups")).toBe(
+      "openid profile email groups",
+    );
+  });
+
+  it("prepends openid when a configured scope omits it", async () => {
+    const { oidcClientScope } = await import("../oidcConfig");
+    expect(oidcClientScope("profile email")).toBe("openid profile email");
   });
 });

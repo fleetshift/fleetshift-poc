@@ -14,8 +14,20 @@ interface UIConfig {
   oidc: {
     authority: string;
     clientId: string;
-    scope: string;
+    scope?: string;
   };
+}
+
+// oidc-client-ts supplies `openid` only when `scope` is omitted, not when it is "".
+export function oidcClientScope(raw: string | undefined): string | undefined {
+  const tokens = (raw ?? "").trim().split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) {
+    return undefined;
+  }
+  if (!tokens.includes("openid")) {
+    tokens.unshift("openid");
+  }
+  return tokens.join(" ");
 }
 
 export async function fetchOidcConfig(
@@ -28,6 +40,7 @@ export async function fetchOidcConfig(
     );
   }
   const data: UIConfig = await res.json();
+  const scope = oidcClientScope(data.oidc.scope);
 
   return {
     authority: data.oidc.authority,
@@ -36,7 +49,7 @@ export async function fetchOidcConfig(
     silent_redirect_uri: window.location.origin + SILENT_RENEW_PATH,
     post_logout_redirect_uri: window.location.origin + APP_BASENAME + "/",
     response_type: "code",
-    scope: data.oidc.scope ?? "",
+    ...(scope !== undefined ? { scope } : {}),
     automaticSilentRenew: true,
     onSigninCallback: () => {
       let postLoginRedirect = window.sessionStorage.getItem(
