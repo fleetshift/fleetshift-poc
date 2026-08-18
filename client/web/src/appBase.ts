@@ -18,10 +18,7 @@ export function stripAppBasename(pathname: string): string {
 }
 
 export function toBrowserPath(pathname: string): string {
-  if (
-    pathname === APP_BASENAME ||
-    pathname.startsWith(`${APP_BASENAME}/`)
-  ) {
+  if (pathname === APP_BASENAME || pathname.startsWith(`${APP_BASENAME}/`)) {
     return pathname === APP_BASENAME ? `${APP_BASENAME}/` : pathname;
   }
   if (!pathname.startsWith("/")) {

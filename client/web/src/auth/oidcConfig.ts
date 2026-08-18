@@ -20,7 +20,10 @@ interface UIConfig {
 
 // oidc-client-ts supplies `openid` only when `scope` is omitted, not when it is "".
 export function oidcClientScope(raw: string | undefined): string | undefined {
-  const tokens = (raw ?? "").trim().split(/\s+/).filter((t) => t.length > 0);
+  const tokens = (raw ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
   if (tokens.length === 0) {
     return undefined;
   }

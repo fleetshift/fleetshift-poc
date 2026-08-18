@@ -50,13 +50,16 @@ func EnsureHostsAlias(path, ip, hostname, marker string) error {
 	if err != nil {
 		return fmt.Errorf("open hosts file: %w", err)
 	}
-	defer f.Close()
 	prefix := ""
 	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
 		prefix = "\n"
 	}
 	if _, err := f.WriteString(prefix + wantLine + "\n"); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("append hosts alias: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close hosts file: %w", err)
 	}
 	return nil
 }

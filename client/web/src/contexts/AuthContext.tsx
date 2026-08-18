@@ -133,9 +133,8 @@ export function AuthProvider({
   children: ReactNode;
   requireAuth?: boolean;
 }) {
-  const [oidcProps, setOidcProps] = useState<AuthProviderNoUserManagerProps | null>(
-    null,
-  );
+  const [oidcProps, setOidcProps] =
+    useState<AuthProviderNoUserManagerProps | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
