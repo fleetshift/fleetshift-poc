@@ -2933,6 +2933,42 @@ func TestOrchestration_DeletedFulfillment_StopsCleanly(t *testing.T) {
 // Late target registration
 // ---------------------------------------------------------------------------
 
+// retryDelayObserver signals when orchestration begins a durable retry
+// delay, then holds the workflow until release is closed. Tests use
+// this to land side effects (e.g. late target registration) inside
+// the RetryDelay / ContinueAsNew window.
+type retryDelayObserver struct {
+	domain.NoOpFulfillmentObserver
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func newRetryDelayObserver() *retryDelayObserver {
+	return &retryDelayObserver{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (o *retryDelayObserver) RunStarted(ctx context.Context, _ domain.FulfillmentID) (context.Context, domain.FulfillmentRunProbe) {
+	return ctx, &retryDelayProbe{observer: o, ctx: ctx}
+}
+
+type retryDelayProbe struct {
+	domain.NoOpFulfillmentRunProbe
+	observer *retryDelayObserver
+	ctx      context.Context
+}
+
+func (p *retryDelayProbe) RetryDelayStarted(time.Duration) {
+	p.observer.once.Do(func() { close(p.observer.started) })
+	select {
+	case <-p.observer.release:
+	case <-p.ctx.Done():
+	}
+}
+
 // TestOrchestration_StaticTarget_LateRegistration verifies that a
 // deployment targeting a not-yet-registered target eventually reaches
 // active once the target appears in the pool.
@@ -2941,7 +2977,8 @@ func TestOrchestration_DeletedFulfillment_StopsCleanly(t *testing.T) {
 //  1. Create a fulfillment with static placement targeting "late-target"
 //  2. "late-target" does NOT exist in the target pool
 //  3. Start orchestration (runs asynchronously via memworkflow)
-//  4. Register "late-target" after a short delay
+//  4. Wait for RetryDelayStarted, then register "late-target" during
+//     the durable retry delay
 //  5. Verify the fulfillment reaches active with "late-target" resolved
 func TestOrchestration_StaticTarget_LateRegistration(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
@@ -2978,10 +3015,12 @@ func TestOrchestration_StaticTarget_LateRegistration(t *testing.T) {
 	reporter := application.NewDeliveryReportService(store, reg)
 	recordingAgent.Reporter = reporter
 
+	obs := newRetryDelayObserver()
 	orchSpec := domain.NewOrchestrationWorkflowSpec(
 		store, router, domain.StrategyFactory{Store: store}, reg,
 		domain.WithAckRetryInterval(5*time.Second),
 		domain.WithRetryDelay(10*time.Millisecond),
+		domain.WithFulfillmentObserver(obs),
 	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -2996,29 +3035,31 @@ func TestOrchestration_StaticTarget_LateRegistration(t *testing.T) {
 		t.Fatalf("Start orchestration: %v", err)
 	}
 
-	// Register the target after a short delay — this simulates a kind
-	// cluster finishing provisioning while the deployment's orchestration
-	// is already running.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		tx, err := store.Begin(context.Background())
-		if err != nil {
-			t.Errorf("begin tx for late target: %v", err)
-			return
-		}
-		defer tx.Rollback()
-		if err := tx.Targets().Create(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-			ID:   "late-target",
-			Type: "test",
-			Name: "late-cluster",
-		})); err != nil {
-			t.Errorf("create late target: %v", err)
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			t.Errorf("commit late target: %v", err)
-		}
-	}()
+	// Wait for the durable retry delay so registration lands in the
+	// RetryDelay / ContinueAsNew window — simulating a kind cluster
+	// finishing provisioning while orchestration is already running.
+	select {
+	case <-obs.started:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for retry delay to start")
+	}
+
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx for late target: %v", err)
+	}
+	defer tx.Rollback()
+	if err := tx.Targets().Create(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "late-target",
+		Type: "test",
+		Name: "late-cluster",
+	})); err != nil {
+		t.Fatalf("create late target: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit late target: %v", err)
+	}
+	close(obs.release)
 
 	if _, err := exec.AwaitResult(ctx); err != nil {
 		t.Fatalf("orchestration should complete successfully, got: %v", err)
