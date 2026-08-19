@@ -202,7 +202,6 @@ npx nx run pd:logs                                   # tail all logs
 npx nx run pd:rebuild                                # rebuild and restart
 npx nx run pd:rebuild-web                            # rebuild AIO image (baked UI) and restart
 npx nx run pd:clock-drift                            # fix podman clock drift
-npx nx run pd:test-attestation                       # test attestation flow
 
 # Or via Taskfile directly:
 task pd:dev LOCAL_WEB=true

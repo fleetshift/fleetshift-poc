@@ -87,7 +87,6 @@ All tasks use the `podman:` namespace (alias `pd:`).
 | `podman:status` | Show running containers |
 | `podman:restart:<service>` | Restart a specific container |
 | `podman:rebuild-web` | Rebuild the AIO image (baked UI) and restart |
-| `podman:test-attestation` | Run end-to-end attestation flow |
 
 ## Full Stack Dev Mode
 

@@ -166,11 +166,6 @@
       "options": { "command": "task pd:clock-drift" },
       "cache": false
     },
-    "pd:test-attestation": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:test-attestation" },
-      "cache": false
-    },
     "kc:deploy": {
       "executor": "nx:run-commands",
       "options": { "command": "task keycloak:deploy" },
