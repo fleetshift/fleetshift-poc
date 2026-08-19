@@ -71,11 +71,13 @@
       "redirectUris": [
         "http://localhost:8085/*",
         "http://localhost:8888/*",
-        "http://127.0.0.1:8085/*"
+        "http://127.0.0.1:8085/*",
+        "https://fleetshift-sandbox.localhost:8085/*"
       ],
       "webOrigins": [
         "http://localhost:8085",
-        "http://127.0.0.1:8085"
+        "http://127.0.0.1:8085",
+        "https://fleetshift-sandbox.localhost:8085"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"

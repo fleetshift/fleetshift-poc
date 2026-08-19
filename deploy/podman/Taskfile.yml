@@ -116,11 +116,11 @@ tasks:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env restart {{.CONTAINER}}
 
   rebuild-web:
-    desc: Rebuild frontend assets without restarting the server
-    env: *deploy_env
+    desc: Rebuild the AIO image (baked UI) and restart the stack
     cmds:
-      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env rm -f -s web-builder
-      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env up --build web-builder
+      - task: rebuild
+        vars:
+          BUILD: "true"
 
   test-attestation:
     desc: Run the end-to-end attestation flow

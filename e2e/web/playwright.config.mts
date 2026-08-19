@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = process.env['BASE_URL'] || 'http://127.0.0.1:8085';
+const baseURL =
+  process.env['BASE_URL'] || 'https://fleetshift-sandbox.localhost:8085';
 
 export default defineConfig({
   testDir: './tests',
@@ -16,6 +17,9 @@ export default defineConfig({
   ],
   use: {
     baseURL,
+    // Private sandbox CA: do not update-ca-trust on the runner. Hostname
+    // still has to be fleetshift-sandbox.localhost (aio-proxy Host allowlist).
+    ignoreHTTPSErrors: true,
     trace: 'on-first-retry',
     // Capture visual evidence for failed tests (kept out of the repo via
     // test-results/, useful for debugging slow cluster-lifecycle journeys).

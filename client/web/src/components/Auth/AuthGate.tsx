@@ -9,19 +9,22 @@ const AuthGate = ({ children }: PropsWithChildren) => {
   const loginTriggered = useRef(false);
 
   const startLogin = useCallback(() => {
-    if (!loading && !user && !authError && !loginTriggered.current) {
-      loginTriggered.current = true;
-      window.sessionStorage.setItem(
-        "post_login_redirect_pathname",
-        window.location.pathname,
-      );
-      login();
-    }
-  }, [loading, user, authError, startLogin]);
+    beginLogin(login, window.location.pathname);
+  }, [login]);
 
   useEffect(() => {
-    startLogin();
-  }, [startLogin]);
+    if (
+      shouldAutoStartLogin({
+        loading,
+        hasUser: Boolean(user),
+        authError,
+        alreadyTriggered: loginTriggered.current,
+      })
+    ) {
+      loginTriggered.current = true;
+      startLogin();
+    }
+  }, [loading, user, authError, startLogin]);
 
   if (authError) {
     return <AuthErrorState onSignIn={startLogin} />;

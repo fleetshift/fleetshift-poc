@@ -161,16 +161,6 @@
       "options": { "command": "task pd:pull" },
       "cache": false
     },
-    "pd:cert-init": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:cert-init" },
-      "cache": false
-    },
-    "pd:reset-keycloak": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:reset-keycloak" },
-      "cache": false
-    },
     "pd:clock-drift": {
       "executor": "nx:run-commands",
       "options": { "command": "task pd:clock-drift" },

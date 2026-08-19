@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
-export const CLUSTERS_PATH = "/core/clusters";
+export const CLUSTERS_PATH = "/app/core/clusters";
 
 // Kind clusters render state ACTIVE ("Active") or RUNNING ("Running") once
 // ready (observed: Kind reports "Active"); CREATING/PROVISIONING while still

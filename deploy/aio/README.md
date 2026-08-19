@@ -41,17 +41,7 @@ podman run -d --rm -it \
 Open https://fleetshift-sandbox.localhost:8085 — the exact path `/` redirects
 to `/app/`.
 
-Browser login needs no CA trust. The server reverse-proxies the loopback Dex
-under its own HTTP origin (`/dex`) whenever the issuer is a loopback HTTPS URL
-with a CA bundle (i.e. Dex-on), so the browser reaches every OIDC endpoint over
-plain HTTP and never sees the sandbox CA. The ID-token `iss` and the browser
-`authority` stay the internal `https://127.0.0.1:5556/dex`; only the browser's
-discovery fetch is redirected to the proxy. Browser-only runs can drop
-`-p 127.0.0.1:5556:5556`.
-
-Non-browser clients (e.g. `fleetctl`) reach Dex over HTTPS directly, so they need
-the sandbox CA as a scoped trust root — copy it out and pass it via
-`--oidc-ca-file`:
+Routing on this origin is prefix-based, not a catch-all into the SPA:
 
 1. **Edge** — `/idp`… goes to peer Dex (Dex-on only). Every other path is
    forwarded to FleetShift.

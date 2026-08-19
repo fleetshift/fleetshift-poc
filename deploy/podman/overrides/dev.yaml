@@ -1,18 +1,8 @@
-# Dev override — build the UI from source.
+# Dev override — layered by DEV=true (task podman:dev).
 #
-# Layered by DEV=true (task podman:dev). The all-in-one server image is built
-# from source by scripts/start.sh via `task image:aio`; here we only switch the
-# web-builder to build the UI from source so the served assets are fresh.
+# The all-in-one image is built from source by scripts/start.sh via
+# `task image:aio`. This overlay is a no-op merge so existing COMPOSE_FILES
+# layering keeps working.
 
 services:
-
-  # ── Frontend builder — build from source instead of the prebuilt image ──
-
-  web-builder:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.web
-      args:
-        NX_SELF_HOSTED_REMOTE_CACHE_SERVER: "${NX_SELF_HOSTED_REMOTE_CACHE_SERVER:-}"
-        NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: "${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:-}"
-    privileged: true
+  fleetshift-server: {}

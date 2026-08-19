@@ -13,7 +13,7 @@ ensure_podman_ready
 # Include every override that can define a service (dev, nx-cache) so compose
 # can find them all regardless of how the stack was started.
 # shellcheck disable=SC2034 # used by compose() in common.sh
-COMPOSE_FILES="-f $COMPOSE_DIR/compose.yaml -f $COMPOSE_DIR/overrides/dev.yaml -f $COMPOSE_DIR/overrides/nx-cache.yaml"
+COMPOSE_FILES="-f $COMPOSE_DIR/compose.yaml -f $COMPOSE_DIR/overrides/dev.yaml -f $COMPOSE_DIR/overrides/local-web.yaml -f $COMPOSE_DIR/overrides/nx-cache.yaml"
 
 if [ "${1:-}" = "--clean" ]; then
   echo "==> Stopping stack and removing all data"

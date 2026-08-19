@@ -10,7 +10,7 @@ test.describe("login screen", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   test("form controls are labelled", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/app/");
 
     await expect(page.locator("h2")).toContainText("Log in to Your Account");
     await expect(
@@ -29,7 +29,7 @@ test.describe("authenticated console", () => {
   test.use({ storageState: ".auth/ops.json" });
 
   test("exposes navigation and main landmarks", async ({ page }) => {
-    await page.goto("/core/clusters");
+    await page.goto("/app/core/clusters");
 
     await expect(page.getByRole("navigation")).toBeVisible();
     await expect(page.getByRole("main")).toBeVisible();
@@ -43,7 +43,7 @@ test.describe("authenticated console", () => {
   });
 
   test("create cluster form fields are labelled", async ({ page }) => {
-    await page.goto("/core/clusters?create=kind");
+    await page.goto("/app/core/clusters?create=kind");
 
     const wizard = page.getByRole("dialog", { name: "Create cluster" });
     await expect(wizard.getByLabel("Cluster name")).toBeVisible();

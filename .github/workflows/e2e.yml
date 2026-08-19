@@ -90,10 +90,11 @@ jobs:
 
       # Run the single AIO container (API + baked-in UI + peer Dex sandbox).
       # Empty .env => built-in Dex with the ops@/dev@ personas the tests use.
-      # Only 8085 is published: the browser reaches the proxied Dex and gRPC-web
-      # through it, so 5556/50051 stay internal.
+      # Only 8085 is published: the browser reaches Dex under /idp through the
+      # HTTPS edge. Dex 5556 and FleetShift HTTP 8086 stay unpublished.
       - name: Run sandbox
         run: |
+          echo '127.0.0.1 fleetshift-sandbox.localhost' | sudo tee -a /etc/hosts
           podman run -d --name fleetshift \
             --privileged --user 0:0 \
             --env-file .env \
@@ -105,8 +106,24 @@ jobs:
 
       - name: Wait for sandbox to be ready
         run: |
-          echo "Waiting for sandbox to be ready..."
-          npx wait-on http://localhost:8085 -d 2000 -l -t 1m
+          echo "Waiting for HTTPS origin to be ready..."
+          # aio-proxy Host-allowlists fleetshift-sandbox.localhost (421 otherwise).
+          # -k is readiness-only; Playwright uses ignoreHTTPSErrors for the private CA.
+          for i in $(seq 1 60); do
+            if curl -skf --resolve fleetshift-sandbox.localhost:8085:127.0.0.1 \
+              https://fleetshift-sandbox.localhost:8085/readyz >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -skf --resolve fleetshift-sandbox.localhost:8085:127.0.0.1 \
+            https://fleetshift-sandbox.localhost:8085/readyz
+          if podman port fleetshift | grep -q 5556; then
+            echo "Dex port 5556 must not be published" >&2
+            podman port fleetshift
+            exit 1
+          fi
+          echo "BASE_URL=https://fleetshift-sandbox.localhost:8085" >> "$GITHUB_ENV"
 
       # Cache the browser binaries keyed on the installed Playwright version, so
       # a browser download only happens when @playwright/test actually changes.

@@ -11,7 +11,7 @@ test.describe("operator persona", () => {
   test.use({ storageState: ".auth/ops.json" });
 
   test("lands on the console identified as the operator", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/app/");
 
     await expect(
       page.getByRole("button", { name: OPERATOR.usernameLabel }),
@@ -25,7 +25,7 @@ test.describe("developer persona", () => {
   test.use({ storageState: ".auth/dev.json" });
 
   test("lands on the console identified as the developer", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/app/");
 
     await expect(
       page.getByRole("button", { name: DEVELOPER.usernameLabel }),

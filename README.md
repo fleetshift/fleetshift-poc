@@ -72,7 +72,7 @@ fleetctl, and packaging internals:
 
 | Path | What you launch | Guide |
 |------|-----------------|-------|
-| Local compose stack | Multi-service harness (server, web builder, Keycloak, optional Postgres) | [deploy/podman/](deploy/podman/README.md) |
+| Local compose stack | All-in-one image via compose/Taskfile (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
 | Keycloak (OpenShift) | External OIDC for cluster/compose `AUTH=external` | [deploy/keycloak/](deploy/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
@@ -135,8 +135,8 @@ Builds are cached — unchanged sources skip recompilation entirely.
 
 ### UI development
 
-`web:dev` is **not** a standalone dev server — it rebuilds the SPA shell and MF
-plugins on change into the repo-root `web/` dir, which the running all-in-one
+`web:dev` is **not** a standalone TLS origin — it rebuilds the SPA shell and
+MF plugins on change into the repo-root `web/` dir, which the running AIO
 stack serves. Run it in a second terminal alongside the stack:
 
 ```bash
@@ -145,11 +145,8 @@ npx nx run web:dev                 # terminal 2: full build, then watch-rebuild
 npx nx run web:dev:watch           # terminal 2 alt: watch only (skip initial build)
 ```
 
-Then open the app at **http://127.0.0.1:8085** — use `127.0.0.1`, not
-`localhost`. Peer Dex only registers the `127.0.0.1` redirect URI and CORS
-origin, so a `localhost` tab fails the login redirect. No CA trust needed: the
-server reverse-proxies the loopback Dex under its own HTTP origin, so the browser
-never touches the sandbox HTTPS issuer.
+Then open **https://fleetshift-sandbox.localhost:8085** (redirects to `/app`)
+and accept the browser certificate warning. Dex is same-origin under `/idp`.
 
 ```bash
 npx nx run web:test:ct      # component tests (playwright)
@@ -187,8 +184,12 @@ task image:push             # push server, server-local, and web to DEV_REGISTRY
 
 The local harness (`task pd:*` / `task podman:*`) runs the all-in-one image via
 compose and is documented in [deploy/podman/README.md](deploy/podman/README.md).
-Commands are also available through Nx; env vars (`LOCAL_WEB`, `DEV`, `BUILD`,
-`NX_CACHE`) pass through to the Taskfile.
+Copy `.env.template` to `.env` first. Commands are also available through Nx;
+env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to Taskfile.
+
+Open https://fleetshift-sandbox.localhost:8085 after `pd:up` / `pd:dev`. If a
+persisted volume still has the old `https://127.0.0.1:5556/dex` issuer, run
+`npx nx run pd:clean` once.
 
 ```bash
 npx nx run pd:dev                                    # build AIO from source, start stack
@@ -199,7 +200,7 @@ npx nx run pd:clean                                  # stop + remove volumes
 npx nx run pd:status                                 # show container status
 npx nx run pd:logs                                   # tail all logs
 npx nx run pd:rebuild                                # rebuild and restart
-npx nx run pd:rebuild-web                            # rebuild web assets only
+npx nx run pd:rebuild-web                            # rebuild AIO image (baked UI) and restart
 npx nx run pd:clock-drift                            # fix podman clock drift
 npx nx run pd:test-attestation                       # test attestation flow
 
@@ -212,53 +213,6 @@ then parks) — see the OIDC scope caveat in `.env.template`.
 
 Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain
 Taskfile-only — they target remote clusters, not local compose.
-
-## Configuration
-
-For the **compose stack** and **Kubernetes** deployments, copy `.env.template`
-to `.env` and edit. Settings are documented in the template.
-
-The **all-in-one image** does not use `.env`; configure it with container env
-vars (`-e`). See [deploy/aio/README.md](deploy/aio/README.md).
-
-## Run
-
-Both local options below typically use podman as the container engine. Pick by
-**what you launch**, not by the engine:
-
-| Path | What you launch | Guide |
-|------|-----------------|-------|
-| All-in-one image | One container (`quay.io/stolostron/fleetshift`) with API + UI + peer Dex | This section + [deploy/aio/](deploy/aio/README.md) |
-| Local compose stack | All-in-one image via compose/Taskfile — source builds, local-web watch, kind network | [deploy/podman/](deploy/podman/README.md) |
-| Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
-| Keycloak (OpenShift) | External OIDC for cluster/compose `AUTH=external` | [deploy/keycloak/](deploy/keycloak/README.md) |
-| Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
-
-### All-in-one image (simplest)
-
-Sandbox for trying FleetShift — not a production deployment. Bare run needs
-**no** OIDC flags: packaging starts peer Dex and wires AuthMethod/UI defaults
-into `fleetshift serve`. Demo users: `ops@fleetshift.local` /
-`fleetshift-ops` and `dev@fleetshift.local` / `fleetshift-dev`.
-
-```bash
-podman run -d --rm -it \
-  -p 127.0.0.1:8085:8085 \
-  -p 127.0.0.1:50051:50051 \
-  -p 127.0.0.1:5556:5556 \
-  quay.io/stolostron/fleetshift:latest
-```
-
-Open http://127.0.0.1:8085. Build locally with `task image:aio` when iterating
-on this repo.
-
-Browser login needs no CA trust: the server reverse-proxies the loopback Dex
-under its own HTTP origin (`/dex`), so the browser reaches the issuer over plain
-HTTP and never sees the sandbox CA. `fleetctl`, which talks to Dex over HTTPS
-directly, still needs the CA as a scoped trust root
-(`podman cp <ctr>:/data/sandbox/pki/ca.crt ./ca.crt`, then `--oidc-ca-file`).
-External issuer, kind, GCP HCP, env defaults, and fleetctl:
-[deploy/aio/README.md](deploy/aio/README.md).
 
 ## Day One Setup
 

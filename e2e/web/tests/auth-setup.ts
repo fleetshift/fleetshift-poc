@@ -12,7 +12,7 @@ const authDir = path.join(__dirname, "..", ".auth");
 // lives in sessionStorage, so it is dumped to a sibling file that fixtures.ts
 // re-injects (keyed off the storageState path).
 async function authenticate(page: Page, persona: Persona) {
-  await page.goto("/");
+  await page.goto("/app/");
 
   // Dex login page.
   expect(await page.locator("h2").innerText()).toContain(

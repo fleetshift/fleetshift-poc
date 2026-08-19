@@ -318,15 +318,14 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	topMux.Handle("/apis/fleetshift.io/", gwMux)
 
 	if err := registerUIHTTP(topMux, uiHTTPDeps{
-		cfg:            cfg,
-		logger:         logger,
-		authMethods:    wfs.authMethodSvc,
-		verifier:       oidcDeps.Verifier,
-		store:          p.store,
-		provenanceSvc:  wfs.provenanceSvc,
-		setupHub:       setupHub,
-		eventHub:       eventHub,
-		oidcHTTPClient: oidcHTTPClient,
+		cfg:           cfg,
+		logger:        logger,
+		authMethods:   wfs.authMethodSvc,
+		verifier:      oidcDeps.Verifier,
+		store:         p.store,
+		provenanceSvc: wfs.provenanceSvc,
+		setupHub:      setupHub,
+		eventHub:      eventHub,
 	}); err != nil {
 		return fail(err)
 	}
