@@ -3,6 +3,7 @@ package scripted_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func setupIntegration(t *testing.T, opts ...domain.OrchestrationWorkflowOption) 
 	if err != nil {
 		t.Fatalf("NewCodec: %v", err)
 	}
-	agent := scripted.NewAgent(deliveryReporter, inventoryReporter, codec, scripted.NewPlanner(), appCtx)
+	agent := scripted.NewAgent(deliveryReporter, inventoryReporter, codec, scripted.NewPlanner(), appCtx, slog.Default())
 	t.Cleanup(func() { _ = agent.Close(context.Background()) })
 
 	router := delivery.NewRoutingDeliveryService()
@@ -203,7 +204,7 @@ func awaitFulfillment(ctx context.Context, t *testing.T, store domain.Store, fID
 			t.Fatalf("Begin: %v", err)
 		}
 		f, err := tx.Fulfillments().Get(ctx, fID)
-		tx.Rollback()
+		_ = tx.Rollback()
 
 		if err == nil {
 			got := f.State()

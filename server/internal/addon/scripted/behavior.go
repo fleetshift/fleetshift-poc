@@ -109,8 +109,13 @@ type SequenceOutcome struct {
 }
 
 // ResolveOutcome returns the value at min(cursor, len-1) and advances
-// the cursor.
+// the cursor. A zero-value SequenceOutcome (empty Values) returns
+// OutcomeSuccess without advancing, matching the prompt-success
+// default.
 func (s SequenceOutcome) ResolveOutcome(cursor int) (OutcomeValue, int) {
+	if len(s.Values) == 0 {
+		return OutcomeSuccess, cursor
+	}
 	idx := cursor
 	if idx >= len(s.Values) {
 		idx = len(s.Values) - 1

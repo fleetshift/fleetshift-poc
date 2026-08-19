@@ -3,6 +3,7 @@ package scripted_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+var testLogger = slog.Default()
 
 // --- test helpers ---
 
@@ -101,7 +104,7 @@ func newTestAgent(t *testing.T, reporter domain.DeliveryReporter, inventory doma
 	if err != nil {
 		t.Fatalf("NewCodec: %v", err)
 	}
-	return scripted.NewAgent(reporter, inventory, codec, scripted.NewPlanner(), ctx)
+	return scripted.NewAgent(reporter, inventory, codec, scripted.NewPlanner(), ctx, testLogger)
 }
 
 // --- tests ---
@@ -448,7 +451,7 @@ func TestAgent_Close_CancelsInFlightWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCodec: %v", err)
 	}
-	agent := scripted.NewAgent(reporter, nopInventory{}, codec, scripted.NewPlanner(), appCtx)
+	agent := scripted.NewAgent(reporter, nopInventory{}, codec, scripted.NewPlanner(), appCtx, testLogger)
 
 	// Use a long completion latency so work is still in-flight when we close.
 	_, raw := wrapSpec(t, json.RawMessage(`{
@@ -494,6 +497,107 @@ func TestAgent_Close_CancelsInFlightWork(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close did not return promptly after cancellation")
+	}
+}
+
+func TestAgent_Deliver_DuplicateDeliveryReturnsNil(t *testing.T) {
+	reporter := newChannelReporter()
+	agent := newTestAgent(t, reporter, nopInventory{})
+
+	// Use completion latency so the first delivery is still in-flight
+	// when the duplicate arrives.
+	_, raw := wrapSpec(t, json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"completion": {
+					"latency": {"constant": "0.2s"},
+					"outcome": {"constant": "SUCCESS"}
+				}
+			}
+		}
+	}`))
+	manifests := []domain.Manifest{{
+		ManifestType: scripted.ManagedManifestType,
+		Raw:          raw,
+	}}
+
+	// First delivery -- ack succeeds, completion in-flight.
+	err := agent.Deliver(context.Background(), scriptedTarget(), "d1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("first Deliver: %v", err)
+	}
+
+	// Wait for ack event from first delivery.
+	select {
+	case <-reporter.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack event")
+	}
+
+	// Duplicate delivery with same deliveryID -- returns nil
+	// immediately (ack already succeeded).
+	err = agent.Deliver(context.Background(), scriptedTarget(), "d1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("duplicate Deliver: %v", err)
+	}
+
+	// Only one completion result should be reported.
+	select {
+	case result := <-reporter.done:
+		if result.State != domain.DeliveryStateDelivered {
+			t.Errorf("result state = %v, want delivered", result.State)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	if err := agent.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestAgent_Deliver_ConflictingDeliveryID(t *testing.T) {
+	reporter := newChannelReporter()
+	agent := newTestAgent(t, reporter, nopInventory{})
+
+	// Use completion latency so first delivery is in-flight.
+	_, raw := wrapSpec(t, json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"completion": {
+					"latency": {"constant": "1s"},
+					"outcome": {"constant": "SUCCESS"}
+				}
+			}
+		}
+	}`))
+	manifests := []domain.Manifest{{
+		ManifestType: scripted.ManagedManifestType,
+		Raw:          raw,
+	}}
+
+	// First delivery.
+	err := agent.Deliver(context.Background(), scriptedTarget(), "d1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("first Deliver: %v", err)
+	}
+
+	// Wait for ack event.
+	select {
+	case <-reporter.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack event")
+	}
+
+	// Different delivery ID for the same UID, generation, operation
+	// should return ErrInvalidArgument.
+	err = agent.Deliver(context.Background(), scriptedTarget(), "d2", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != domain.ErrInvalidArgument {
+		t.Fatalf("conflicting Deliver: got %v, want ErrInvalidArgument", err)
+	}
+
+	if err := agent.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }
 

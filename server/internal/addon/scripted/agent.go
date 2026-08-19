@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -20,11 +20,12 @@ type Agent struct {
 	codec     *Codec
 	planner   *Planner
 	appCtx    context.Context
+	log       *slog.Logger
 
 	mu      sync.Mutex
 	slots   map[slotKey]*dispatchSlot
 	wg      sync.WaitGroup
-	closing atomic.Bool
+	closing bool
 }
 
 // slotKey identifies one in-flight operation for a managed resource.
@@ -38,9 +39,6 @@ type slotKey struct {
 // operation) triple.
 type dispatchSlot struct {
 	deliveryID domain.DeliveryID
-	// completionDone is closed when async completion finishes or is
-	// skipped. Nil when no completion has started.
-	completionDone chan struct{}
 }
 
 // NewAgent creates a scripted delivery agent. The codec must be
@@ -52,6 +50,7 @@ func NewAgent(
 	codec *Codec,
 	planner *Planner,
 	appCtx context.Context,
+	log *slog.Logger,
 ) *Agent {
 	return &Agent{
 		reporter:  reporter,
@@ -59,6 +58,7 @@ func NewAgent(
 		codec:     codec,
 		planner:   planner,
 		appCtx:    appCtx,
+		log:       log,
 		slots:     make(map[slotKey]*dispatchSlot),
 	}
 }
@@ -89,9 +89,13 @@ func (a *Agent) Remove(
 	return a.dispatch(ctx, target, deliveryID, manifests, generation, OperationRemove)
 }
 
-// Close cancels all in-flight work and waits for it to finish.
+// Close marks the agent as closing and waits for in-flight work to
+// finish. Cancellation of in-flight work is driven by appCtx, which is
+// owned by the caller (bootstrap shutdown).
 func (a *Agent) Close(_ context.Context) error {
-	a.closing.Store(true)
+	a.mu.Lock()
+	a.closing = true
+	a.mu.Unlock()
 	// appCtx cancellation is owned by the caller (bootstrap shutdown);
 	// we just wait for all in-flight work to join.
 	a.wg.Wait()
@@ -106,10 +110,6 @@ func (a *Agent) dispatch(
 	generation domain.Generation,
 	operation Operation,
 ) error {
-	if a.closing.Load() {
-		return fmt.Errorf("scripted: agent is closing")
-	}
-
 	// Validate target.
 	if target.ID() != TargetID {
 		return fmt.Errorf("scripted: unexpected target %q, want %q", target.ID(), TargetID)
@@ -146,25 +146,36 @@ func (a *Agent) dispatch(
 		opSpec = spec.Delivery
 	case OperationRemove:
 		opSpec = spec.Removal
+	default:
+		return fmt.Errorf("scripted: unsupported operation %v", operation)
 	}
 
-	// Arbitrate by (UID, generation, operation).
+	// Arbitrate by (UID, generation, operation). The mu lock also
+	// gates the closing check and wg reservation to prevent a race
+	// where Close sees wg at zero before we launch the goroutine.
 	key := slotKey{uid: uid, generation: gen, operation: operation}
 	a.mu.Lock()
+	if a.closing {
+		a.mu.Unlock()
+		return fmt.Errorf("scripted: agent is closing")
+	}
 	existing, hasSlot := a.slots[key]
 	if hasSlot {
 		if existing.deliveryID == deliveryID {
-			// Exact duplicate -- join in-flight result. The caller
-			// will receive the same ack outcome.
+			// Exact duplicate -- the ack already succeeded (the slot
+			// wouldn't exist otherwise). Return nil immediately; the
+			// single in-flight completion goroutine will report the
+			// result via ReportResult.
 			a.mu.Unlock()
-			// For duplicates, we re-plan with the same key so the
-			// cursor is already past this attempt.
 			return nil
 		}
 		// Different delivery ID for the same (UID, gen, op) -- conflict.
 		a.mu.Unlock()
 		return domain.ErrInvalidArgument
 	}
+	// Reserve a WaitGroup slot under the lock so Close cannot
+	// observe wg at zero between slot creation and goroutine launch.
+	a.wg.Add(1)
 	slot := &dispatchSlot{deliveryID: deliveryID}
 	a.slots[key] = slot
 	a.mu.Unlock()
@@ -181,12 +192,14 @@ func (a *Agent) dispatch(
 	// Wait for ack latency.
 	if err := a.sleepCancellable(ctx, ackDecision.Latency); err != nil {
 		a.releaseSlot(key)
+		a.wg.Done()
 		return fmt.Errorf("scripted: ack wait cancelled: %w", err)
 	}
 
 	// Apply ack outcome.
 	if ackDecision.Outcome == OutcomeFailure {
 		a.releaseSlot(key)
+		a.wg.Done()
 		return fmt.Errorf("scripted %s acknowledgement failed", operation)
 	}
 
@@ -198,12 +211,12 @@ func (a *Agent) dispatch(
 		Message:   ackMsg,
 	}); err != nil {
 		a.releaseSlot(key)
+		a.wg.Done()
 		return fmt.Errorf("scripted: report ack event: %w", err)
 	}
 
-	// Start async completion.
-	a.wg.Add(1)
-	go a.runCompletion(deliveryID, generation, uid, gen, operation, opSpec, spec.Inventory, key)
+	// Start async completion. The wg slot was reserved above.
+	go a.runCompletion(deliveryID, generation, uid, envelope.Name, gen, operation, opSpec, spec.Inventory, key)
 
 	return nil
 }
@@ -212,6 +225,7 @@ func (a *Agent) runCompletion(
 	deliveryID domain.DeliveryID,
 	generation domain.Generation,
 	uid domain.ExtensionResourceUID,
+	name domain.ResourceName,
 	gen int64,
 	operation Operation,
 	opSpec OperationSpec,
@@ -239,44 +253,55 @@ func (a *Agent) runCompletion(
 
 	if compDecision.Outcome == OutcomeFailure {
 		failMsg := fmt.Sprintf("scripted %s completion failed", operation)
-		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+		if err := a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: failMsg,
-		})
+		}); err != nil {
+			a.log.Warn("scripted: report completion failure", "deliveryID", deliveryID, "error", err)
+		}
 		return
 	}
 
 	// On successful delivery, project inventory before reporting
 	// delivered state.
 	if operation == OperationDeliver {
-		a.projectInventory(ctx, uid, generation, inv)
+		a.projectInventory(ctx, name, inv)
 	}
 
-	_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+	// On successful removal, clear planner cursor state for this
+	// resource so a same-name recreation starts fresh.
+	if operation == OperationRemove {
+		a.planner.Reset(managedResourceInstanceKey(uid))
+	}
+
+	if err := a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
-	})
+	}); err != nil {
+		a.log.Warn("scripted: report completion success", "deliveryID", deliveryID, "error", err)
+	}
 }
 
 // projectInventory idempotently replaces the managed resource's labels
 // and observation. Empty projection values clear any prior inventory.
 func (a *Agent) projectInventory(
 	ctx context.Context,
-	uid domain.ExtensionResourceUID,
-	generation domain.Generation,
+	name domain.ResourceName,
 	inv InventoryProjection,
 ) {
 	report := domain.InventoryDeltaReport{
 		ResourceType:  ResourceType,
-		Name:          domain.ResourceName(uid.String()),
+		Name:          name,
 		ReplaceLabels: inv.Labels,
 	}
 	if inv.Observation != nil {
 		obs := json.RawMessage(inv.Observation)
 		report.Observation = &obs
 	}
-	_ = a.inventory.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
+	if err := a.inventory.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
 		Reports: []domain.InventoryDeltaReport{report},
-	})
+	}); err != nil {
+		a.log.Warn("scripted: inventory projection failed", "name", name, "error", err)
+	}
 }
 
 func (a *Agent) releaseSlot(key slotKey) {

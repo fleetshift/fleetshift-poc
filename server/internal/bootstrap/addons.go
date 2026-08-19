@@ -168,7 +168,7 @@ func assembleProductionAddons(
 	}
 
 	if enabled[AddonScripted] {
-		codec, err := scripted.NewCodec(context.Background())
+		codec, err := scripted.NewCodec(deps.AppCtx)
 		if err != nil {
 			return nil, fmt.Errorf("scripted addon codec: %w", err)
 		}
@@ -179,6 +179,7 @@ func assembleProductionAddons(
 			codec,
 			planner,
 			deps.AppCtx,
+			deps.Logger.With("addon", "scripted"),
 		)
 		specs = append(specs, AddonSpec{
 			Descriptor: scripted.Descriptor(),
@@ -207,22 +208,34 @@ func assembleProductionAddons(
 // It returns close hooks in reverse registration order for shutdown.
 func enableAndConnectAddons(ctx context.Context, addonMgr *application.AddonManager, specs []AddonSpec, logger *slog.Logger) ([]func(context.Context) error, error) {
 	var closeHooks []func(context.Context) error
+
+	// reverseHooks returns the accumulated hooks in reverse order so
+	// the caller can unwind partially-connected addons on failure.
+	reverseHooks := func() []func(context.Context) error {
+		out := make([]func(context.Context) error, len(closeHooks))
+		copy(out, closeHooks)
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+		return out
+	}
+
 	for _, spec := range specs {
 		if err := addonMgr.Enable(ctx, spec.Descriptor); err != nil {
-			return nil, fmt.Errorf("enable %s addon: %w", spec.Descriptor.ID, err)
+			return reverseHooks(), fmt.Errorf("enable %s addon: %w", spec.Descriptor.ID, err)
 		}
 		if err := rejectNilClaimedAgent(spec); err != nil {
-			return nil, err
+			return reverseHooks(), err
 		}
 		if err := addonMgr.Connect(ctx, spec.Descriptor.ID, spec.Connect); err != nil {
-			return nil, fmt.Errorf("connect %s addon: %w", spec.Descriptor.ID, err)
+			return reverseHooks(), fmt.Errorf("connect %s addon: %w", spec.Descriptor.ID, err)
 		}
 		if spec.Close != nil {
 			closeHooks = append(closeHooks, spec.Close)
 		}
 		if spec.AfterConnect != nil {
 			if err := spec.AfterConnect(ctx); err != nil {
-				return nil, err
+				return reverseHooks(), err
 			}
 		}
 		if spec.AfterConnectBestEffort != nil {
@@ -231,11 +244,7 @@ func enableAndConnectAddons(ctx context.Context, addonMgr *application.AddonMana
 			}
 		}
 	}
-	// Reverse for shutdown order.
-	for i, j := 0, len(closeHooks)-1; i < j; i, j = i+1, j-1 {
-		closeHooks[i], closeHooks[j] = closeHooks[j], closeHooks[i]
-	}
-	return closeHooks, nil
+	return reverseHooks(), nil
 }
 
 // newProductionKeyResolver builds the built-in key registry resolver.

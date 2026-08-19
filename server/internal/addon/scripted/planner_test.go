@@ -76,12 +76,18 @@ func TestPlanner_IndependentKeys(t *testing.T) {
 	key1 := scripted.AttemptKey{InstanceKey: "managed-resource:uid-1", Generation: 1, Operation: scripted.OperationDeliver, Phase: scripted.PhaseAcknowledgement}
 	key2 := scripted.AttemptKey{InstanceKey: "managed-resource:uid-2", Generation: 1, Operation: scripted.OperationDeliver, Phase: scripted.PhaseAcknowledgement}
 
-	// Both start at cursor 0, should independently see FAILURE first.
-	d1 := p.Decide(behavior, key1)
-	d2 := p.Decide(behavior, key2)
-	if d1.Outcome != scripted.OutcomeFailure {
-		t.Errorf("key1 first attempt: outcome = %v, want failure", d1.Outcome)
+	// Advance key1 twice (FAILURE, SUCCESS) before checking key2.
+	d1a := p.Decide(behavior, key1)
+	if d1a.Outcome != scripted.OutcomeFailure {
+		t.Errorf("key1 first attempt: outcome = %v, want failure", d1a.Outcome)
 	}
+	d1b := p.Decide(behavior, key1)
+	if d1b.Outcome != scripted.OutcomeSuccess {
+		t.Errorf("key1 second attempt: outcome = %v, want success", d1b.Outcome)
+	}
+
+	// key2 should still be at cursor 0, independent of key1's advances.
+	d2 := p.Decide(behavior, key2)
 	if d2.Outcome != scripted.OutcomeFailure {
 		t.Errorf("key2 first attempt: outcome = %v, want failure", d2.Outcome)
 	}
@@ -148,10 +154,19 @@ func TestPlanner_StressAdapterInstanceKey(t *testing.T) {
 	canonical := scripted.AttemptKey{InstanceKey: "managed-resource:some-uid", Generation: 1, Operation: scripted.OperationDeliver, Phase: scripted.PhaseAcknowledgement}
 	stress := scripted.AttemptKey{InstanceKey: "stress-delivery:some-delivery-id", Generation: 1, Operation: scripted.OperationDeliver, Phase: scripted.PhaseAcknowledgement}
 
-	// Both should independently start at cursor 0.
-	dc := p.Decide(behavior, canonical)
+	// Advance canonical twice (FAILURE, SUCCESS) before checking stress.
+	dc1 := p.Decide(behavior, canonical)
+	if dc1.Outcome != scripted.OutcomeFailure {
+		t.Errorf("canonical first: outcome = %v, want failure", dc1.Outcome)
+	}
+	dc2 := p.Decide(behavior, canonical)
+	if dc2.Outcome != scripted.OutcomeSuccess {
+		t.Errorf("canonical second: outcome = %v, want success", dc2.Outcome)
+	}
+
+	// Stress namespace should still be at cursor 0, independent of canonical.
 	ds := p.Decide(behavior, stress)
-	if dc.Outcome != scripted.OutcomeFailure || ds.Outcome != scripted.OutcomeFailure {
-		t.Errorf("canonical=%v stress=%v, both want failure", dc.Outcome, ds.Outcome)
+	if ds.Outcome != scripted.OutcomeFailure {
+		t.Errorf("stress first: outcome = %v, want failure", ds.Outcome)
 	}
 }
