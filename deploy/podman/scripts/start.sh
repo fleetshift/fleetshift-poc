@@ -61,7 +61,7 @@ else
   echo ""
   echo "    External OIDC issuer: ${OIDC_ISSUER_URL}"
   echo "    (peer Dex is parked; the container uses your external issuer)"
-  echo "    Register ${public_origin}/app/auth/callback on that IdP."
+  echo "    Register ${public_origin}, /app/auth/callback, and /app/silent-renew.html on that IdP."
 fi
 
 echo ""

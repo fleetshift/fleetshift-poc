@@ -324,7 +324,6 @@ With hierarchical routes, breadcrumbs follow the group → module → extension 
 | Route | Breadcrumbs |
 |-------|-------------|
 | `/settings/navigation` | Settings > Navigation |
-| `/settings/auth` | Settings > Authentication |
 | `/core/clusters` | Clusters (ungrouped, no parent) |
 | `/core/clusters?create=gcphcp` | Clusters > GCP HCP |
 

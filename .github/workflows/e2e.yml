@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/aio-image.tar
-          key: aio-image-${{ hashFiles('server/**', 'cli/**', 'sdk/**', 'client/web/**', 'extensions/**', 'tools/**', 'proto/**', 'Dockerfile*', 'deploy/aio/**', 'go.*', 'package-lock.json', 'nx.json', 'tsconfig*.json') }}
+          key: aio-image-${{ hashFiles('server/**', 'cli/**', 'sdk/**', 'client/web/**', 'extensions/**', 'tools/**', 'proto/**', 'Dockerfile*', 'deploy/aio/**', 'go.*', 'package-lock.json', 'nx.json', 'tsconfig*.json', 'Taskfile.yml') }}
 
       - name: Build or load all-in-one image
         run: |

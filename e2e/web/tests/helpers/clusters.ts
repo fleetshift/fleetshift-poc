@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 export const CLUSTERS_PATH = "/app/core/clusters";
@@ -9,9 +10,9 @@ const READY_STATE = /Running|Active/;
 
 const DEFAULT_POLL_TIMEOUT = 5 * 60 * 1000;
 
-/** Generates an RFC1123-safe, unique-per-run cluster name. */
+/** Generates an RFC1123-safe cluster name unique across parallel Playwright projects. */
 export function uniqueClusterName(): string {
-  return `kind-e2e-${Date.now().toString(36)}`;
+  return `kind-e2e-${randomUUID()}`;
 }
 
 /** DataView table row for a cluster, matched by its id link. */
