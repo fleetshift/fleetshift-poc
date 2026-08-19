@@ -2,20 +2,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # shellcheck source=../../scripts/common.sh
 source "$(cd "$SCRIPT_DIR/../../scripts" && pwd)/common.sh"
 
 # Add a user to the fleetshift realm with a specific GitHub username.
 #
-# Local usage (podman deployment):
-#   ./add-user.sh --admin-password <from task podman:up output> \
-#     --username mshort@redhat.com --password mypass --github mshort55
+# OpenShift Keycloak (oc logged into the Keycloak cluster):
+#   ./add-user.sh --username you@example.com --password mypass --github ghuser
 #
-# External usage (OpenShift Keycloak, you need to be connected to the OCP cluster via oc cli):
-#   ./add-user.sh --username mshort@redhat.com --password mypass --github mshort55
+# Explicit admin API (any Keycloak, including OCP, without oc):
+#   ./add-user.sh --keycloak-url https://keycloak.example.com \
+#     --admin-password <admin> --username you@example.com --password mypass --github ghuser
 #
-# All flags can also be set via environment variables:
+# Flags can also be set via environment variables:
 #   KC_ADMIN_URL, KC_ADMIN_USER, KC_ADMIN_PASSWORD,
 #   KC_NEW_USERNAME, KC_NEW_PASSWORD, KC_NEW_GITHUB, KC_NEW_ROLES
 
@@ -57,15 +56,11 @@ done
 # ── Resolve Keycloak URL and admin credentials ───────────────────
 
 if [[ -n "$ADMIN_URL" && -n "$ADMIN_PASSWORD" ]]; then
-    # Explicit credentials provided — use directly
     KC_URL="$ADMIN_URL"
 elif [[ -n "$ADMIN_PASSWORD" ]]; then
-    # Password provided but no URL — use local deployment
-    set -a; source "$ROOT_DIR/.env"; set +a
-    KC_URL="https://${KC_HOSTNAME:-keycloak}:${KC_HTTPS_PORT:-8443}/auth"
+    error "Admin password requires --keycloak-url (or KC_ADMIN_URL). Omit both to discover OpenShift Keycloak via oc."
 else
-    # No credentials — discover from OpenShift
-    command -v oc &>/dev/null || error "'oc' CLI not found. For local usage, pass --admin-password."
+    command -v oc &>/dev/null || error "'oc' CLI not found. To skip oc, pass --keycloak-url and --admin-password."
     require_oc_login
 
     OC_NAMESPACE="${OC_NAMESPACE:-keycloak-prod}"

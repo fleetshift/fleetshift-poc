@@ -1,42 +1,17 @@
-# FleetShift deployment — AIO image via compose.
-#
-# Runs the all-in-one image (deploy/aio): a single container with the
-# FleetShift API, baked-in UI, aio-proxy TLS edge, and peer Dex under s6.
-# Packaging owns PID 1, the `fleetshift serve` argv, sandbox PKI, and Dex —
-# the compose layer only supplies env (the root .env), published ports,
-# volumes, and the host container socket.
-#
-# Public origin is https://fleetshift-sandbox.localhost:8085 (redirects to
-# /app). Dex and FleetShift HTTP listen on unpublished container loopback;
-# only 127.0.0.1:8085 (HTTPS edge) and 127.0.0.1:50051 (gRPC) are published.
-# Port 5556 is not published.
-#
-# Auth is chosen inside the container by OIDC_ISSUER_URL (read from .env):
-#   unset  → peer Dex (issuer https://fleetshift-sandbox.localhost:8085/idp)
-#   set    → that external issuer; peer Dex parks on s6-pause and never serves
-#
-# Usage (via Taskfile):
-#   task podman:up            — sqlite + built-in Dex (or external if set)
-#   task podman:dev           — build the AIO image from source, then up
-#
-# Override files are in deploy/podman/overrides/ and layered by scripts/common.sh.
-# Do not use `podman compose` directly — use `task podman:*` targets instead.
-#
-# Note: the AIO image is sqlite-only. There is no postgres backend here.
-# Persisted /data from a pre-HTTPS AIO run still has issuer
-# https://127.0.0.1:5556/dex — run `task pd:clean` once before this stack.
+# AIO image via compose. Public origin:
+#   https://fleetshift-sandbox.localhost:8085  (TLS edge; Dex under /idp)
+# Published: 127.0.0.1:8085 (HTTPS), 127.0.0.1:50051 (gRPC).
+# OIDC_ISSUER_URL unset → peer Dex; set → that issuer (Dex parks).
+# sqlite only. Use task podman:* — not podman compose directly.
+# If /data still has issuer https://127.0.0.1:5556/dex, run task pd:clean.
 
 x-fleetshift-aio: &fleetshift-aio
-  # Defaults to the all-in-one image. `task podman:dev` builds it locally as
-  # quay.io/stolostron/fleetshift:latest via the root `image:aio` target.
   image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift:latest}
   restart: unless-stopped
   privileged: true
-  # s6 starts as container root to init and drop privileges (fleetshift 1000,
-  # dex 1001). Must run as root.
+  # s6 starts as root, then drops to fleetshift 1000 / dex 1001 / aio-proxy 1002.
   user: "0:0"
-  # Ingest the root .env. aio-init reads what it needs (OIDC_*, GCPHCP_*,
-  # FLEETSHIFT_*) and ignores the rest; unset OIDC_ISSUER_URL selects peer Dex.
+  # aio-init reads OIDC_*, GCPHCP_*, FLEETSHIFT_* and ignores the rest.
   env_file:
     - ../../.env
   ports:
@@ -45,8 +20,6 @@ x-fleetshift-aio: &fleetshift-aio
   volumes:
     - ${PODMAN_SOCKET}:/var/run/docker.sock
     - /tmp:/tmp
-    # sqlite db + sandbox PKI live under /data. Baked UI is served from the
-    # image; do not shadow /srv/web unless local-web.yaml is layered.
     - fleetshift-data:/data
   networks:
     default: {}
@@ -56,11 +29,10 @@ x-fleetshift-aio: &fleetshift-aio
 
 services:
 
-  # ── Core (all-in-one: TLS edge + API + UI + peer Dex) ───────────
-
+  # Compose service name for the AIO container (proxy + API + UI + Dex).
   fleetshift-server:
     <<: *fleetshift-aio
-    # No command: s6 (PID 1) owns aio-proxy, Dex, and the fleetshift serve argv.
+    # No command: s6 is PID 1.
 
 volumes:
   fleetshift-data:

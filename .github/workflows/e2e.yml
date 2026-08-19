@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      # Install Task CLI, this is temporary until nx replaces it entirely
+      # Needed for `task image:aio` on a cache miss.
       - name: Install Task
         uses: arduino/setup-task@v3
         with:
@@ -141,7 +141,6 @@ jobs:
       - name: Install Playwright browsers
         run: |
           if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
-            # Browsers restored from cache; only the OS deps (apt) are needed.
             npx playwright install-deps chromium
           else
             npx playwright install --with-deps chromium

@@ -126,13 +126,6 @@ const SettingsPlugin = new FleetshiftPlugin({
       // ...
     }),
     createModule({
-      id: "auth-settings",
-      label: "Authentication",
-      component: { $codeRef: "AuthSettingsPage.default" },
-      icon: { $codeRef: "AuthIcon.default" },
-      // ...
-    }),
-    createModule({
       id: "extensions",
       label: "Extensions",
       component: { $codeRef: "ExtensionsPage.default" },
@@ -144,7 +137,7 @@ const SettingsPlugin = new FleetshiftPlugin({
 });
 ```
 
-Routes: `/settings/settings`, `/settings/auth-settings`, `/settings/extensions`
+Routes: `/settings/settings`, `/settings/extensions`
 
 After:
 
@@ -167,15 +160,6 @@ const SettingsPlugin = new FleetshiftPlugin({
       keywords: ["nav", "order"],
     }),
     createModule({
-      id: "auth",
-      label: "Authentication",
-      group: "settings",
-      component: { $codeRef: "AuthSettingsPage.default" },
-      icon: { $codeRef: "AuthIcon.default" },
-      description: "Configure authentication provider and OIDC settings",
-      keywords: ["auth", "oidc", "keycloak"],
-    }),
-    createModule({
       id: "extensions",
       label: "Extensions",
       group: "settings",
@@ -189,7 +173,7 @@ const SettingsPlugin = new FleetshiftPlugin({
 });
 ```
 
-Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
+Routes: `/settings/navigation`, `/settings/extensions`
 
 ## Build-Time Validation
 
@@ -212,7 +196,6 @@ Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
     { "type": "page", "pageId": "overview.overview" },
     { "type": "page", "pageId": "core.clusters" },
     { "type": "page", "pageId": "settings.settings" },
-    { "type": "page", "pageId": "settings.auth-settings" },
     { "type": "page", "pageId": "settings.extensions" }
   ]
 }
@@ -232,7 +215,6 @@ Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
       "label": "Settings",
       "children": [
         { "type": "page", "pageId": "settings.navigation" },
-        { "type": "page", "pageId": "settings.auth" },
         { "type": "page", "pageId": "settings.extensions" }
       ]
     }

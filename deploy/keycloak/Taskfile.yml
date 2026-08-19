@@ -56,18 +56,16 @@ tasks:
       vars: [USERNAME, PASSWORD, GITHUB]
     vars:
       ROLES: '{{.ROLES | default ""}}'
-      ADMIN_PASSWORD: '{{.ADMIN_PASSWORD | default ""}}'
     # Pass via env (not argv) so values are not interpolated into a shell command line.
     env:
       KC_NEW_USERNAME: '{{.USERNAME}}'
       KC_NEW_PASSWORD: '{{.PASSWORD}}'
       KC_NEW_GITHUB: '{{.GITHUB}}'
       KC_NEW_ROLES: '{{.ROLES}}'
-      KC_ADMIN_PASSWORD: '{{.ADMIN_PASSWORD}}'
     preconditions:
       - sh: 'printf %s "$KC_NEW_USERNAME" | grep -Eq "^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$"'
         msg: "USERNAME must be an email address (e.g. you@example.com)"
-      - sh: '[ -n "$KC_ADMIN_PASSWORD" ] || ({{.KC_CLUSTER_CHECK}})'
-        msg: "Wrong cluster or KC_CLUSTER_API not set. This task requires the Keycloak OCP cluster. For local mode, pass ADMIN_PASSWORD instead. Set KC_CLUSTER_API in .env and run: oc login ${KC_CLUSTER_API:-<keycloak-cluster-url>}"
+      - sh: '{{.KC_CLUSTER_CHECK}}'
+        msg: '{{.KC_CLUSTER_MSG}}'
     cmds:
       - ./scripts/add-user.sh

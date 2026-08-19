@@ -25,7 +25,7 @@ tasks:
       - sh: command -v podman
         msg: "podman is not installed."
       - sh: command -v docker-compose
-        msg: "docker-compose is not installed. Install: brew install docker-compose (podman-compose is not compatible)"
+        msg: "docker-compose is not installed. Install: brew install docker-compose (podman-compose is not supported)"
 
   up:
     desc: Start the FleetShift stack (built-in Dex unless OIDC_ISSUER_URL is set)
@@ -65,7 +65,7 @@ tasks:
           BUILD: "true"
 
   pull:
-    desc: Pull the latest all-in-one + web images
+    desc: Pull the latest all-in-one image
     env: *deploy_env
     cmds:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env pull --ignore-buildable
@@ -77,7 +77,7 @@ tasks:
       - rm -f .active-deploy
 
   clean:
-    desc: Stop all containers and remove all data (volumes, network)
+    desc: Stop all containers and remove volumes and .certs
     cmds:
       - ./scripts/stop.sh --clean
       - rm -f .active-deploy

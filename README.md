@@ -212,15 +212,3 @@ then parks) — see the OIDC scope caveat in `.env.template`.
 
 Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain
 Taskfile-only — they target remote clusters, not local compose.
-
-## Day One Setup
-
-`fleetshift serve` installs the initial AuthMethod when the store is empty and
-complete OIDC bootstrap config is present. Who supplies those flags depends on
-the path:
-
-- **AIO Dex-on:** packaging fills them automatically (including registry mapping
-  to `claims.preferred_username` for peer Dex users).
-- **AIO Dex-off / compose / Kubernetes:** packaging or deploy manifests pass
-  explicit serve flags or `.env` values. Compose/Keycloak typically uses
-  `claims.github_username` via `KEY_REGISTRY_*` in `.env.template`.

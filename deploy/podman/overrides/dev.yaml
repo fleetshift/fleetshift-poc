@@ -1,8 +1,5 @@
-# Dev override — layered by DEV=true (task podman:dev).
-#
-# The all-in-one image is built from source by scripts/start.sh via
-# `task image:aio`. This overlay is a no-op merge so existing COMPOSE_FILES
-# layering keeps working.
+# Dev overlay. start.sh already builds the AIO image when DEV=true; this file
+# exists so COMPOSE_FILES layering stays valid.
 
 services:
   fleetshift-server: {}

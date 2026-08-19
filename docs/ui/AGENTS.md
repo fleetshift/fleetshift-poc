@@ -128,8 +128,8 @@ npm workspaces are declared at the repo root. Run `npm install` from the repo ro
 npx nx run common:build    # shared types/helpers
 npx nx run plugins:build   # MF remote plugins
 npx nx run web:build       # SPA shell
-npx nx run web:dev         # dev server (http://localhost:8085)
-npx nx run web:dev:watch   # dev server with hot reload
+npx nx run web:dev         # rebuild SPA into repo-root web/ (serve via AIO + LOCAL_WEB)
+npx nx run web:dev:watch   # watch-rebuild only (skip initial build)
 npx nx run fleetshift-poc:ui:lint   # eslint + stylelint
 npx nx run fleetshift-poc:ui:test   # vitest
 ```

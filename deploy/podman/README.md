@@ -21,7 +21,7 @@ gRPC remains on `127.0.0.1:50051` (plaintext; known gap).
 ## Prerequisites
 
 - **podman** — container runtime
-- **docker-compose** — `podman-compose` is not compatible
+- **docker-compose** — `podman-compose` is not supported
 - **kind** — for local cluster provisioning
 - `.env` file — copy from `.env.template`
 
@@ -78,10 +78,10 @@ All tasks use the `podman:` namespace (alias `pd:`).
 | `podman:up` | Start the AIO stack (prebuilt image) |
 | `podman:dev` | Build the AIO image from source, then up |
 | `podman:down` | Stop containers, preserve data |
-| `podman:clean` | Stop + delete all data/volumes/network |
+| `podman:clean` | Stop + delete volumes and `.certs` |
 | `podman:rebuild` | Stop, rebuild the AIO image, restart |
 | `podman:build` | Build the AIO image without restarting |
-| `podman:pull` | Pull latest images |
+| `podman:pull` | Pull the latest all-in-one image |
 | `podman:logs` | Follow logs from all containers |
 | `podman:logs:<service>` | Tail specific service (e.g. `podman:logs:fleetshift-server`) |
 | `podman:status` | Show running containers |
@@ -111,25 +111,10 @@ Open https://fleetshift-sandbox.localhost:8085 and refresh after rebuilds.
 ## Configuration
 
 Copy `.env.template` to `.env` and edit. Command-line variables always override
-`.env`.
-
-This stack runs the all-in-one image, so `fleetshift-server` is configured with
-the AIO OIDC env names (`OIDC_ISSUER_URL`, `OIDC_UI_SCOPE`,
-`OIDC_REGISTRY_ID` / `OIDC_REGISTRY_SUBJECT_EXPRESSION` /
-`OIDC_PUBLIC_KEY_CLAIM_EXPRESSION`, …). The Kubernetes deploy reads the same
-`.env` but uses different names (`KEY_REGISTRY_*`, `PUBLIC_KEY_CLAIM_EXPR`,
-`OIDC_AUDIENCE`) — see [deploy/aio/README.md](../aio/README.md) and
+`.env`. This stack uses AIO `OIDC_*` names; Kubernetes uses different ones —
+see [deploy/aio/README.md](../aio/README.md) and
 [deploy/kubernetes/README.md](../kubernetes/README.md).
 
-### External OIDC scopes
-
-Leaving `OIDC_ISSUER_URL` unset uses the built-in Dex sandbox IdP. Packaging
-adds Dex-specific UI scopes. A general external OIDC provider (Keycloak, etc.)
-does **not** understand `audience:server:client_id:...` and rejects the login.
-When you set `OIDC_ISSUER_URL`, keep:
-
-```
-OIDC_UI_SCOPE="openid profile email"
-```
-
-and configure the token audience in the IdP instead.
+Leave `OIDC_UI_SCOPE` unset. Packaging picks Dex-on vs Dex-off from whether
+`OIDC_ISSUER_URL` is set. Setting the portable scope on Dex-on drops
+`aud=fleetshift` from access tokens.
