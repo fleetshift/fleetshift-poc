@@ -9,6 +9,9 @@ Current POCs include:
   distribution POC with offline, preassembled delivery bundles (Mode A)
 - `trust-model-v3/`: three-role OIDC enrollment, client-held continuity keys,
   signed delivery, rotation cutoff, and compromised-resource-manager POC
+- `provenance-suites/`: three-sided provenance contract (client, resource
+  manager, target) with a naive direct-key profile, authority-config
+  selection, and `AuthenticatedEvidence`
 - `inventory-identity-reconciliation/`: inventory write-path experiment where
   reported identity assertions are accepted asynchronously into a platform
     identity read model

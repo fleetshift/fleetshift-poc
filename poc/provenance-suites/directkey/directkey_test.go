@@ -1,0 +1,354 @@
+package directkey
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+)
+
+func TestVerifyRejectsNonEmptyProfileParameters(t *testing.T) {
+	client := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, client)
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	_, err = target.Verify(context.Background(), protocol.VerifyRequest{
+		Evidence:        evidence,
+		ProfileConfig:   protocol.ProfileConfig{ProvenanceType: protocol.ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"fulcio":"no"}`)},
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	})
+	if !errors.Is(err, protocol.ErrUnknownProvenanceType) {
+		t.Fatalf("error = %v, want ErrUnknownProvenanceType", err)
+	}
+}
+
+func TestVerifyRejectsAuthorityConfigForADifferentPrincipalAuthority(t *testing.T) {
+	client := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, client)
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	authority := testAuthority()
+	authority.PrincipalAuthority.Authority = "https://other.example.test"
+	_, err = target.Verify(context.Background(), protocol.VerifyRequest{
+		Evidence:        evidence,
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: authority,
+		DeliveryContext: testDeliveryContext(),
+	})
+	if !errors.Is(err, protocol.ErrUnknownAuthority) {
+		t.Fatalf("error = %v, want ErrUnknownAuthority", err)
+	}
+}
+
+func TestCreateEvidenceCarriesUserReferenceNotPublicKey(t *testing.T) {
+	client := newTestClient(t)
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
+		t.Fatalf("provenance type = %s", evidence.ProvenanceType)
+	}
+	if evidence.MediaType != MediaTypeSignature {
+		t.Fatalf("media type = %s, want %s", evidence.MediaType, MediaTypeSignature)
+	}
+
+	var asMap map[string]any
+	if err := json.Unmarshal(evidence.Bytes, &asMap); err != nil {
+		t.Fatalf("unmarshal evidence: %v", err)
+	}
+	if _, exists := asMap["public_key"]; exists {
+		t.Fatal("delivery evidence carried a public_key field")
+	}
+
+	var body SignatureBody
+	if err := json.Unmarshal(evidence.Bytes, &body); err != nil {
+		t.Fatalf("unmarshal signature body: %v", err)
+	}
+	if !body.Principal.Equal(client.Principal()) {
+		t.Fatalf("user reference = %#v, want %#v", body.Principal, client.Principal())
+	}
+	if len(body.Signature) == 0 {
+		t.Fatal("delivery evidence has no signature")
+	}
+}
+
+func TestEnrollmentSharesPublicKeyAndVerifierStoresMapping(t *testing.T) {
+	client := newTestClient(t)
+	enrollment, err := client.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	if enrollment.MediaType != MediaTypeEnrollment {
+		t.Fatalf("media type = %s, want %s", enrollment.MediaType, MediaTypeEnrollment)
+	}
+
+	target := NewTarget()
+	if err := target.AcceptEnrollment(enrollment, testAuthority()); err != nil {
+		t.Fatalf("AcceptEnrollment: %v", err)
+	}
+	got, ok := target.PublicKey(client.Principal())
+	if !ok {
+		t.Fatal("verifier did not retain the public key mapping")
+	}
+	if string(got) != string(client.PublicKey()) {
+		t.Fatal("retained public key does not match enrolled key")
+	}
+}
+
+func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
+	client := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, client)
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+
+	attacker := newTestClient(t)
+	support := protocol.SupportMaterial{
+		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
+		MediaType:      MediaTypeEnrollment,
+		Bytes:          attacker.PublicKey(),
+	}
+	authenticated, err := target.Verify(context.Background(), protocol.VerifyRequest{
+		Evidence:        evidence,
+		Support:         support,
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if authenticated.Principal.Subject != "alice" {
+		t.Fatalf("subject = %q, want alice", authenticated.Principal.Subject)
+	}
+	if authenticated.MappedFleetShiftTenant != "tenant-acme" {
+		t.Fatalf("tenant = %q, want tenant-acme", authenticated.MappedFleetShiftTenant)
+	}
+}
+
+func TestVerifyFailsWithoutEnrollment(t *testing.T) {
+	client := newTestClient(t)
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	_, err = NewTarget().Verify(context.Background(), protocol.VerifyRequest{
+		Evidence:        evidence,
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	})
+	if !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("error = %v, want ErrVerificationFailed", err)
+	}
+}
+
+func TestVerifyFailsWhenSignatureDoesNotMatchRetainedKey(t *testing.T) {
+	alice := newTestClient(t)
+	mallory := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, alice)
+
+	evidence, err := mallory.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	_, err = target.Verify(context.Background(), protocol.VerifyRequest{
+		Evidence:        evidence,
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	})
+	if !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("error = %v, want ErrVerificationFailed", err)
+	}
+}
+
+func TestFirstEnrollmentIsUnauthenticatedTOFU(t *testing.T) {
+	target := NewTarget()
+	attacker, err := NewClient(protocol.Principal{
+		Scheme:    protocol.IdentitySchemeOIDCSubV1,
+		Authority: "https://issuer.example.test",
+		Subject:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	enrollment, err := attacker.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	if err := target.AcceptEnrollment(enrollment, testAuthority()); err != nil {
+		t.Fatalf("first enrollment of claimed alice: %v", err)
+	}
+	got, ok := target.PublicKey(attacker.Principal())
+	if !ok || string(got) != string(attacker.PublicKey()) {
+		t.Fatal("TOFU enrollment did not retain the attacker's key for the claimed subject")
+	}
+}
+
+func TestAcceptEnrollmentRejectsKeySubstitutionForEstablishedPrincipal(t *testing.T) {
+	alice := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, alice)
+
+	attacker := newTestClient(t)
+	enrollment, err := attacker.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	var body EnrollmentBody
+	if err := json.Unmarshal(enrollment.Bytes, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	body.Principal = alice.Principal()
+	raw, err := encodeJSON(body)
+	if err != nil {
+		t.Fatalf("encode substituted enrollment: %v", err)
+	}
+	enrollment.Bytes = raw
+
+	err = target.AcceptEnrollment(enrollment, testAuthority())
+	if !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("error = %v, want ErrVerificationFailed", err)
+	}
+	got, _ := target.PublicKey(alice.Principal())
+	if string(got) != string(alice.PublicKey()) {
+		t.Fatal("retained mapping was replaced")
+	}
+}
+
+func TestParseHintsFailClosedOnUnknownMediaType(t *testing.T) {
+	_, err := NewTarget().ParseHints(protocol.TypedEvidence{
+		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
+		MediaType:      "application/unknown",
+		Bytes:          []byte(`{}`),
+	})
+	if !errors.Is(err, protocol.ErrUnknownMediaType) {
+		t.Fatalf("error = %v, want ErrUnknownMediaType", err)
+	}
+}
+
+func TestManagerStoresImmutableEvidenceAndEmptySupport(t *testing.T) {
+	client := newTestClient(t)
+	manager := NewManager()
+	enrollment, err := client.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	if err := manager.CommitEnrollment(context.Background(), enrollment); err != nil {
+		t.Fatalf("CommitEnrollment: %v", err)
+	}
+	key, ok := manager.PublicKey(client.Principal())
+	if !ok || string(key) != string(client.PublicKey()) {
+		t.Fatal("resource manager did not courier the enrollment public key")
+	}
+
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	identity, err := manager.StoreEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatalf("StoreEvidence: %v", err)
+	}
+	want, err := evidence.Identity()
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	if identity != want {
+		t.Fatalf("stored identity = %q, want %q", identity, want)
+	}
+	support, err := manager.AssembleSupportMaterial(context.Background(), evidence)
+	if err != nil {
+		t.Fatalf("AssembleSupportMaterial: %v", err)
+	}
+	if len(support.Bytes) != 0 {
+		t.Fatalf("support material carried %d bytes; direct-key delivery must not courier the public key", len(support.Bytes))
+	}
+}
+
+func newTestClient(t *testing.T) *Client {
+	t.Helper()
+	client, err := NewClient(protocol.Principal{
+		Scheme:    protocol.IdentitySchemeOIDCSubV1,
+		Authority: "https://issuer.example.test",
+		Subject:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return client
+}
+
+func mustEnroll(t *testing.T, target *Target, client *Client) {
+	t.Helper()
+	enrollment, err := client.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	if err := target.AcceptEnrollment(enrollment, testAuthority()); err != nil {
+		t.Fatalf("AcceptEnrollment: %v", err)
+	}
+}
+
+func testAssertion(t *testing.T) protocol.TypedAssertion {
+	t.Helper()
+	assertion, err := protocol.DeliveryAuthorization{
+		TenantID:      "tenant-acme",
+		TargetID:      "target-east",
+		FulfillmentID: "fulfillment-1",
+		Generation:    1,
+		Action:        protocol.ActionPut,
+		Payload:       []byte(`{"replicas":3}`),
+	}.Assertion()
+	if err != nil {
+		t.Fatalf("assertion: %v", err)
+	}
+	return assertion
+}
+
+func testProfile() protocol.ProfileConfig {
+	return protocol.ProfileConfig{ProvenanceType: protocol.ProvenanceTypeDirectKeyV1}
+}
+
+func testAuthority() protocol.AuthorityConfig {
+	profile := testProfile()
+	return protocol.AuthorityConfig{
+		PrincipalAuthority: protocol.PrincipalAuthority{
+			Scheme:    protocol.IdentitySchemeOIDCSubV1,
+			Authority: "https://issuer.example.test",
+		},
+		TenantMapping:      protocol.TenantMapping{StaticTenant: "tenant-acme"},
+		ProvenanceProfiles: []protocol.ProfileConfig{profile},
+		DeliveryPolicies: []protocol.DeliveryPolicy{{
+			Match: protocol.PolicyMatch{
+				ContentType:       protocol.ContentTypeDeliveryAuthorizationV1,
+				RootAuthorization: true,
+			},
+			LiveCredential: protocol.RequirementNone,
+			Provenance:     protocol.RequirementRequired,
+			Profiles:       []protocol.ProfileConfig{profile},
+		}},
+	}
+}
+
+func testDeliveryContext() protocol.DeliveryContext {
+	return protocol.DeliveryContext{
+		ClaimedTenant:     "tenant-acme",
+		ContentType:       protocol.ContentTypeDeliveryAuthorizationV1,
+		RootAuthorization: true,
+	}
+}
