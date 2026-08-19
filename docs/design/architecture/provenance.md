@@ -48,6 +48,7 @@ root.
 - [Archived JWT and raw-key provenance](../archive/jwt_and_raw_key_provenance.md)
 - [Hybrid attestation prototype](../../../poc/attestation/hybrid/README.md)
 - [Sigstore/TUF bundle prototype](../../../poc/attestation/sigstore_tuf_bundle/README.md)
+- [Provenance suite APIs prototype](../../../poc/provenance-suites/README.md)
 
 ## Overview
 
