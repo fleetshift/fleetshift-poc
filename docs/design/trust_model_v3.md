@@ -35,7 +35,17 @@ This proposal focuses on the previously unresolved trust-distribution problem:
 - ordering durable deliveries relative to key transitions; and
 - retaining only the evidence needed for current operation and supported historical verification.
 
-The wire representation may extend or reuse the standard Sigstore bundle, in-toto/DSSE, and TUF-shaped trust material explored by the [logless Sigstore bundle POC](../../poc/attestation/sigstore_tuf_bundle/README.md), provided doing so preserves this protocol's continuity and ordering properties. Reusing those formats does not imply that Fulcio, a timestamp authority, or a transparency service becomes required infrastructure.
+The initial continuity/v3 per-item encoding is Sigstore Bundle v0.3
+(`application/vnd.dev.sigstore.bundle.v0.3+json`), with the Bundle public-key
+identifier as an untrusted proof-selection hint. Authenticated history and
+delivery-log proofs remain separate support material. That is a profile-owned
+mapping in
+[provenance.md](architecture/provenance.md#initial-evidence-encodings), not a
+common-interface requirement, and it does not make Fulcio, a timestamp
+authority, or a transparency service required infrastructure. The
+[logless Sigstore bundle POC](../../poc/attestation/sigstore_tuf_bundle/README.md)
+documents and enforces the same Bundle v0.3 item shape for the Sigstore
+profile.
 
 The surrounding enrollment, continuity, delivery-ordering, and local-cutoff model has an executable three-role prototype in [`poc/trust-model-v3`](../../poc/trust-model-v3/README.md). It uses RFC 6962 logs for tenant delivery ordering and per-principal key histories, a CONIKS sparse Merkle tree for the authenticated history-head map, and a simple signed-content attestation. Storage remains in memory so persistence and derivation concerns do not obscure the core guarantees.
 
@@ -714,7 +724,7 @@ This proposal adds continuity evidence for the user-signing portion of that pack
 
 For the baseline continuity-key profile, delivery evidence therefore contains at most two identity event bodies regardless of history length. Device or session delegation adds the independently required delegation objects; it does not require replay of unrelated continuity events.
 
-The complete delivery package cryptographically binds the tenant, target, fulfillment, delivery identity, generation, action, authoritative attestation root, and signing context. The exact encoding may reuse the `DeliveryPackage`, Sigstore Bundle, in-toto Statement, and DSSE structures from the existing POC rather than creating a parallel FleetShift-only envelope.
+The complete delivery package cryptographically binds the tenant, target, fulfillment, delivery identity, generation, action, authoritative attestation root, and signing context. That aggregate package and attestation graph remain common and profile-neutral. Each independently authenticated continuity/v3 item inside them uses Sigstore Bundle v0.3 over a purpose-typed in-toto statement; the Bundle is one graph item, not the aggregate. History and delivery-log proofs travel as support material rather than as a custom per-item wrapper.
 
 The client sends its signed request or input only to the resource manager. The resource manager assembles the eventual delivery package from that signed material and any independently signed derivation, placement, or output evidence required by the authoritative attestation model.
 
@@ -1193,7 +1203,7 @@ WorkloadAttestationBundle {
 }
 ```
 
-The in-toto statement and Sigstore bundle formats may be reused where they fit, with additional objects for authenticated-map and continuity evidence.
+When this workload evidence enters the attestation graph under continuity/v3, the outer item is Sigstore Bundle v0.3. The in-toto statement remains the inner authenticated assertion. SPIFFE, Kubernetes-bridge, or other verification material and authenticated-map proofs travel as support material.
 
 ## 21. Fundamental versus flexible elements
 

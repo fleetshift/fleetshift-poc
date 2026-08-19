@@ -8,10 +8,12 @@ The trust machinery used to authenticate FleetShift delivery evidence:
 - canonical principal identity and multi-tenant authority partitioning
 - provenance profiles and deterministic profile selection
 - the boundary between profile verification and common attestation semantics
+- typed outer evidence versus inner assertion typing
 - credential presentation and request signing where they intersect provenance
 - verifier-owned profile state and the common append-only delivery log
 - trust updates and historical verification
-- the initial TUF, Sigstore, and continuity/v3 profiles
+- the initial TUF, Sigstore, and continuity/v3 profiles, including their
+  per-item encodings
 
 ## When to read this
 
@@ -70,7 +72,11 @@ environment. Sigstore can bind an OIDC identity to a short-lived certificate
 and Bundle; continuity/v3 can bind a principal to an authenticated key history
 and delivery-log position; TUF can authenticate content published by a
 repository role. They differ in signing workflow, trust anchors, retained
-state, historical verification, availability, and compromise guarantees.
+state, historical verification, availability, and compromise guarantees. The
+initial Sigstore and continuity/v3 profiles share Sigstore Bundle v0.3 as the
+per-item encoding of independently authenticated assertions. That is a
+profile-owned mapping, not a common-interface requirement. TUF continues to
+use its repository-target representation.
 
 A **provenance profile** is a configured implementation of a common contract
 across those mechanisms. The contract covers:
@@ -85,13 +91,14 @@ across those mechanisms. The contract covers:
 Authenticated delivery policy selects an ordered set of acceptable profiles.
 Once one profile verifies an assertion, the common attestation and delivery
 machinery consumes the same authenticated meaning regardless of whether the
-proof came from Sigstore, continuity/v3, TUF, or a future well-known profile.
+proof came from a Sigstore Bundle, a continuity Bundle plus couriered proofs,
+a TUF target, or a future well-known profile.
 
 ```text
-exact typed assertion
+exact purpose-typed assertion
         |
         v
-provenance-profile evidence
+TypedEvidence {provenance_type, media_type, bytes}
         |
         v
 RM storage, assembly, and delivery
@@ -309,6 +316,27 @@ does not need a second generic media-type allowlist. If a future profile needs
 to prohibit a representation otherwise supported by a type, it can introduce
 a typed constraint or a stricter provenance-type version.
 
+The common stored object is therefore typed separately from the inner
+assertion it authenticates:
+
+```text
+TypedEvidence {
+    provenance_type  // versioned verifier/protocol semantics
+    media_type       // wire representation
+    bytes            // exact immutable representation
+}
+```
+
+Evidence identity domain-separately binds all three. Changing provenance type,
+media type, or bytes produces a different item. The provenance type remains an
+untrusted routing hint until authenticated policy selects a matching profile.
+The inner assertion's content or predicate type is established only after that
+profile authenticates the bytes; it is not a substitute for the outer types
+and does not select a verifier.
+
+If a format also carries an internal media type, as Sigstore Bundle does, the
+selected profile requires it to match the outer `media_type`.
+
 Profile configuration is an authenticated entry inside an `AuthorityConfig`.
 It is not named by an RM-maintained or client-visible profile ID. An
 implementation may derive local storage keys or configuration references for
@@ -342,8 +370,9 @@ part of profile selection.
 Evidence is not authoritative until verification completes. Selection follows
 this sequence for each graph assertion:
 
-1. Parse the untrusted provenance type and enough type-specific material to
-   obtain a tentative principal scheme, authority, and optional tenant hint.
+1. Parse the untrusted provenance type, media type, and enough type-specific
+   material to obtain a tentative principal scheme, authority, and optional
+   tenant hint.
 2. Use the tentative `(scheme, authority)` only to locate the corresponding
    authenticated `AuthorityConfig`. Missing configuration fails.
 3. Use delivery context and tentative fields to locate a candidate delivery
@@ -361,6 +390,11 @@ policy, not evidence-controlled downgrade. The evidence and RM may narrow the
 search with hints, but they cannot introduce a profile, reorder the policy, or
 change a profile's anchors or constraints.
 
+A shared media type, including Sigstore Bundle v0.3, is not a search key and
+does not create fallback between provenance types. The selected profile
+validates the representation and accepts only its own verification-material
+form.
+
 Supporting addon, workload, placement, or relation evidence may authenticate
 under a different principal authority from the root authorization. The common
 attestation graph and authenticated addon relationships determine whether that
@@ -376,6 +410,19 @@ authenticated by one provenance profile. A profile proves the assertion's
 canonical bytes or digest; it does not interpret what the assertion means in
 the larger delivery graph.
 
+That unit has two typing layers:
+
+- The outer evidence is `TypedEvidence`: a versioned provenance type, a media
+  type, and the exact immutable bytes. Common storage, digesting, bounding,
+  and routing operate on this envelope. They do not parse the inner format.
+- The inner assertion has a content or predicate type that names the
+  assertion's purpose. The selected profile authenticates those bytes; the
+  common evaluator then consumes that purpose-typed content.
+
+The two layers are not interchangeable. A media type does not imply an
+assertion purpose, and an assertion's predicate type does not select a
+verifier.
+
 Examples include:
 
 - a user's delivery authorization;
@@ -385,10 +432,12 @@ Examples include:
 - a signed update or derivation; and
 - a trust-configuration update.
 
-Sigstore may carry an assertion in a DSSE/in-toto Sigstore Bundle. Continuity/v3
-may carry a signature plus authenticated history and delivery-log proofs. TUF
-may authenticate the assertion as a repository target. Those representations
-remain profile-owned.
+Evidence encodings remain profile-owned. The common interface does not require
+Sigstore Bundle, DSSE, or any one media type. The initial Sigstore and
+continuity/v3 profiles share Bundle v0.3 as their per-item representation; TUF
+uses its repository-target representation. Those mappings, and the rule that a
+shared media type is not fallback, are defined in
+[Initial evidence encodings](#initial-evidence-encodings).
 
 Successful profile verification produces a deliberately small common result:
 
@@ -407,10 +456,12 @@ AuthenticatedEvidence {
 
 The configuration digests bind the result to the exact authenticated policy
 and anchors used during verification; they are audit and state-precondition
-data, not profile selectors. `satisfied_constraints` contains only outcomes
-defined by the matched authenticated policy. Profile-specific attributes may
-influence authorization through typed constraints that define how those
-attributes are validated.
+data, not profile selectors. `content_type` and `content_digest` are the inner
+authenticated assertion. They are not the outer `TypedEvidence` media type or
+bytes digest. `satisfied_constraints` contains only outcomes defined by the
+matched authenticated policy. Profile-specific attributes may influence
+authorization through typed constraints that define how those attributes are
+validated.
 
 Profile-specific certificate, timestamp, map, history, repository-role, or
 transparency details may remain typed audit output. Generic delivery machinery
@@ -419,11 +470,16 @@ does not consume an unbounded universal facts map.
 ### Independent assertions
 
 Each user, addon, or workload authenticates its own assertion. The RM retains
-and couriers the exact evidence bytes; it does not translate them, replace
-their authorship, or create a signature that speaks for the aggregate.
+and couriers the exact `TypedEvidence` bytes; it does not translate them,
+replace their authorship, or create a signature that speaks for the aggregate.
 
 An aggregate evidence package is therefore not a new provenance authority.
 It is a collection assembled by the RM so the target can evaluate one delivery.
+The package and the attestation graph remain common and profile-neutral. They
+may contain independently authenticated items that use different provenance
+types and media formats. A Sigstore Bundle represents one such item, not the
+aggregate.
+
 No evidence author is assumed to have seen evidence created later by another
 author.
 
@@ -434,7 +490,10 @@ same profile could verify its bytes.
 
 ### Common attestation graph
 
-The attestation graph remains shared, profile-neutral trust machinery. It owns:
+The attestation graph remains shared, profile-neutral trust machinery. Graph
+items may use different provenance types and media formats; a Sigstore Bundle
+represents one independently authenticated item, not the graph itself. The
+graph owns:
 
 - root-input selection;
 - canonical statement and content digests;
@@ -666,7 +725,8 @@ The RM:
 - verifies any request credential and provenance needed for its own decision;
 - requires credential and provenance identities to agree when policy composes
   them;
-- stores original immutable evidence and content-addressed support objects;
+- stores original immutable `TypedEvidence` and content-addressed support
+  objects;
 - records resource intent and history;
 - invokes profile-specific work needed by the mutation's durable transaction;
 - commits durable deliveries to the common delivery log;
@@ -777,10 +837,10 @@ preserve the invariants above.
 
 Every durable mutation is committed to a common append-only log before
 dispatch. A delivery commitment binds the exact typed delivery, fulfillment,
-target, generation, attestation graph, immutable evidence set, and applicable
-authenticated configuration context. Trust updates and profile-specific
-ordering records use purpose-separated commitment types in the same ordering
-infrastructure.
+target, generation, attestation graph, immutable `TypedEvidence` set, and
+applicable authenticated configuration context. Trust updates and
+profile-specific ordering records use purpose-separated commitment types in
+the same ordering infrastructure.
 
 The log supports:
 
@@ -793,8 +853,8 @@ The log supports:
 
 Refreshable Merkle proofs, profile proof paths, and other reconstructable
 support material need not be part of the immutable delivery commitment. The
-profile cross-checks that refreshed material against the committed evidence,
-accepted configuration, and retained checkpoints.
+profile cross-checks that refreshed material against the committed
+`TypedEvidence`, accepted configuration, and retained checkpoints.
 
 Appending a record does not authorize its content. The log orders commitments;
 the applicable credential, provenance profile, graph, constraints, and target
@@ -884,8 +944,8 @@ TUF, Sigstore, and continuity/v3 are peers at the trust-update boundary:
 | Profile       | How it authenticates `trust-config-update/v1`                             | Profile-owned state and constraints                                                                     |
 | ------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | TUF           | Publishes the exact canonical trust-update content as a repository target | Retained TUF root/metadata; configured role, target path, version, and freshness checks                 |
-| Sigstore      | Signs the exact canonical content in a Sigstore Bundle                    | Configured Fulcio CA, OIDC issuer constraints, trusted TSA/time, and optional transparency requirements |
-| Continuity/v3 | Signs the exact canonical content with an authenticated continuity state  | Current map/history checkpoint, delivery-log branch, key-event semantics, and rotation cutoffs          |
+| Sigstore      | Signs the exact canonical content in a Sigstore Bundle v0.3               | Configured Fulcio CA, OIDC issuer constraints, trusted TSA/time, and optional transparency requirements |
+| Continuity/v3 | Signs the exact canonical content in a public-key Sigstore Bundle v0.3    | Current map/history checkpoint, delivery-log branch, key-event semantics, and rotation cutoffs          |
 
 TUF is especially suitable for low-churn trust updates, but it is neither
 mandatory nor coupled to Sigstore. A policy may also admit TUF for other
@@ -924,9 +984,10 @@ The RM remains a courier for historical objects:
   timestamp material; current authenticated configuration retains the CA/TSA
   roots and trusted-time constraints needed to verify it.
 - Continuity/v3 retains a compact current checkpoint that commits accepted
-  history. The RM supplies historical event bodies, the immediate successor
-  when needed, and current-branch map/history/log proofs. Those couriered
-  objects gain authority only by verifying against the retained checkpoint.
+  history. The RM supplies the historical Bundle, event bodies, the immediate
+  successor when needed, and current-branch map/history/log proofs. Those
+  couriered objects gain authority only by verifying against the retained
+  checkpoint.
 - TUF retains the repository state and target metadata required by its
   configured historical policy, or the authority retains an older constrained
   TUF profile.
@@ -947,12 +1008,59 @@ authority.
 Profiles share a common verification boundary and API conventions, not
 identical security guarantees.
 
+### Initial evidence encodings
+
+The common interface stores, digests, bounds, and routes `TypedEvidence`. It
+does not permanently depend on Sigstore Bundle, DSSE, or any one media type.
+Each provenance type owns its encodings.
+
+The initial signed-evidence profiles nevertheless share one per-item
+representation:
+
+```text
+application/vnd.dev.sigstore.bundle.v0.3+json
+```
+
+That choice is a profile mapping, not a universal API constraint. A later
+profile may register another media type if a mechanism does not fit the
+Sigstore Bundle model. TUF continues to use its repository-target
+representation.
+
+One Bundle represents one independently signed assertion, not the aggregate
+attestation graph. It contains exactly one DSSE signature over a purpose-typed
+in-toto statement.
+
+- Sigstore uses a Fulcio leaf certificate, RFC 3161 timestamp, and any
+  configured transparency material inside the Bundle.
+- Continuity/v3 uses the Bundle public-key identifier as an untrusted
+  proof-selection hint, with a matching DSSE `keyid`. Authenticated history
+  and delivery-log proofs remain separate support material and may be shared
+  by many items.
+
+The selected profile validates the Bundle shape and accepts only its own
+verification-material form. The initial continuity/v3 profile rejects
+certificate-based Bundles; the initial Sigstore profile rejects a public-key-
+only Bundle. Sharing the media type must not become fallback between those
+profiles.
+
+When the Bundle carries an internal media type, it must equal the outer
+`TypedEvidence.media_type`. The common layer still consumes only the
+authenticated purpose-typed assertion, whether it came from a Sigstore Bundle,
+a continuity Bundle plus couriered proofs, or a TUF target.
+
 ### Continuity/v3
 
 The continuity/v3 profile uses ordinary OIDC for initial identity enrollment,
 then user-controlled continuity, device, and session keys for durable
 provenance. An authenticated map commits each principal's history head, while
 the common delivery log orders deliveries against rotation markers.
+
+Each independently authenticated assertion is encoded as a Sigstore Bundle
+v0.3 using the public-key identifier form described in
+[Initial evidence encodings](#initial-evidence-encodings). The hint selects
+candidate proof material; it grants no identity or authority. The RM supplies
+authenticated-map, history, and delivery-log proofs as replaceable support
+material.
 
 An established verifier retains a compact map/history checkpoint and local
 delivery-log checkpoint. The RM constructs selective proofs for the exact
@@ -967,10 +1075,12 @@ time.
 
 ### Sigstore
 
-The initial Sigstore profile authenticates a standard Bundle over the exact
-FleetShift assertion. A configured Fulcio CA authenticates the certificate and
-its OIDC identity extensions. A configured RFC 3161 TSA supplies trusted
-signing time for historical validation of the short-lived certificate.
+The initial Sigstore profile authenticates a standard Bundle v0.3 over the
+exact FleetShift assertion, as defined in
+[Initial evidence encodings](#initial-evidence-encodings). A configured Fulcio
+CA authenticates the certificate and its OIDC identity extensions. A
+configured RFC 3161 TSA supplies trusted signing time for historical
+validation of the short-lived certificate.
 
 The authority config is keyed by the OIDC principal authority. The Fulcio CA,
 TSA, and any Rekor, CT, or witness configuration remain profile anchors and
@@ -986,7 +1096,8 @@ authenticated parameters must make that distinction explicit.
 The TUF profile authenticates exact content as a repository target using
 retained TUF root and metadata state. It verifies standard root rotation,
 threshold, version, expiry, snapshot, target-hash, rollback, and freeze rules
-applicable to the configured profile.
+applicable to the configured profile. TUF does not use Sigstore Bundle v0.3 as
+its evidence representation.
 
 Its canonical principal identifies the configured repository authority and
 the authenticated role that published the target. Individual threshold-key
@@ -1008,7 +1119,7 @@ the RM's ordinary database authority.
 
 Failures are classified at the layer that detects them:
 
-- unknown authority, provenance type, or configuration;
+- unknown authority, provenance type, media type, or configuration;
 - no applicable or successful profile in the ordered policy list;
 - invalid credential, request signature, provenance, tenant mapping, or
   identity agreement;
@@ -1038,7 +1149,7 @@ never makes it an uninitialized verifier.
    change chains from authenticated predecessor configuration.
 2. **Known implementations:** authenticated config selects well-known,
    trusted-code provenance types and cannot install verifier code.
-3. **Tentative hints:** provenance type, authority, tenant, subject,
+3. **Tentative hints:** provenance type, media type, authority, tenant, subject,
    certificate, key, and repository labels are untrusted until verification.
 4. **Canonical identity:** authorization compares the complete canonical
    principal and verified tenant mapping; equal strings in other authorities
@@ -1046,28 +1157,32 @@ never makes it an uninitialized verifier.
 5. **Policy-owned selection:** one unambiguous delivery policy supplies the
    ordered `any-of` profile list; the first complete success wins.
 6. **Exact content:** a profile authenticates the exact typed content and
-   purpose consumed by the common evaluator.
-7. **Independent authority:** one evidence author, aggregate, graph selector,
+   purpose consumed by the common evaluator. That inner content type is
+   distinct from the outer provenance type and media type.
+7. **Typed evidence identity:** an evidence item is identified by a
+   domain-separated binding of provenance type, media type, and exact bytes.
+   A shared media type does not permit fallback between provenance types.
+8. **Independent authority:** one evidence author, aggregate, graph selector,
    or RM operation cannot speak for another evidence author.
-8. **Authenticated relationships:** graph edges and indexes locate evidence;
+9. **Authenticated relationships:** graph edges and indexes locate evidence;
    signed content or deterministic verification establishes relationships.
-9. **Root credentials:** live credentials and request signatures apply to the
-   root authorization unless a future signed relationship explicitly says
-   otherwise.
-10. **Primary RM authorization:** provenance does not claim to reproduce all
+10. **Root credentials:** live credentials and request signatures apply to the
+    root authorization unless a future signed relationship explicitly says
+    otherwise.
+11. **Primary RM authorization:** provenance does not claim to reproduce all
     resource-manager permission policy at the target.
-11. **Courier limitation:** RM preverification, storage, routing, and proof
+12. **Courier limitation:** RM preverification, storage, routing, and proof
     construction do not replace target verification or grant provenance.
-12. **Predecessor-controlled trust:** successor config, new authorities, and
+13. **Predecessor-controlled trust:** successor config, new authorities, and
     new profiles cannot select or authorize their own installation.
-13. **Current historical policy:** old anchors or profiles are usable only
+14. **Current historical policy:** old anchors or profiles are usable only
     where current authenticated constraints admit their historical interval.
-14. **Append-only continuity:** established targets extend retained delivery
+15. **Append-only continuity:** established targets extend retained delivery
     and profile checkpoints or fail closed; they do not roll back or rebootstrap.
-15. **Crash-safe progression:** acknowledgement follows durable safe progress;
+16. **Crash-safe progression:** acknowledgement follows durable safe progress;
     partial state cannot authorize unverified content or apply an older
     delivery over a newer one.
-16. **Bounded verification:** package size, evidence count, graph depth,
+17. **Bounded verification:** package size, evidence count, graph depth,
     indexes, proof sizes, and profile-specific work have enforced limits.
 
 ## Validation
@@ -1087,6 +1202,9 @@ Common protocol tests apply to every provenance implementation:
 - immutable independent evidence, purpose/type confusion, graph/reference
   retargeting, supporting evidence under another authority, harmless unused
   evidence, and bounded package/proof processing;
+- typed-evidence identity over provenance type, media type, and bytes, inner
+  media-type mismatch, mixed provenance types in one package, and rejection of
+  cross-type fallback when two profiles share Bundle v0.3;
 - trust updates with forged, stale, wrong-predecessor, rollback, wrong-scope,
   and self-authorizing successor configurations;
 - new authorities and profiles authorized only by predecessor policy;
@@ -1104,10 +1222,12 @@ Common protocol tests apply to every provenance implementation:
 Each profile additionally tests the guarantees it claims:
 
 - continuity/v3 tests enrollment substitution, map/history tamper, exceptions,
-  stale branches, rotation cutoffs, and historical-state proof coverage;
+  stale branches, rotation cutoffs, historical-state proof coverage, and
+  rejection of certificate-based Bundles;
 - Sigstore tests Fulcio proof of possession, certificate paths, identity
   extensions, TSA and trusted-time checks, configured transparency behavior,
-  and rejection of unsupported Bundle forms; and
+  rejection of unsupported Bundle forms, and rejection of public-key-only
+  Bundles; and
 - TUF tests root rotation, thresholds, expiry, rollback/freeze protection,
   snapshot/target integrity, delegated role/path constraints, exact trust-update
   content, and crash-safe updater recovery.
@@ -1124,7 +1244,9 @@ different security and availability tradeoffs.
 - What are the concrete strongly typed lifecycle APIs for continuity/v3,
   OIDC request-signing key binding, and adapted TUF administration?
 - What canonical encodings and cross-language test vectors define each common
-  assertion and evidence digest?
+  assertion digest and the domain-separated `TypedEvidence` identity? Initial
+  per-item media types are decided in
+  [Initial evidence encodings](#initial-evidence-encodings).
 - How are profile-owned state records associated across routine config updates
   without making an RM-supplied storage key authoritative?
 - What delivery-log scope, compaction, permanent-rejection progression, and
