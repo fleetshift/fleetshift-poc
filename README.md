@@ -74,7 +74,7 @@ fleetctl, and packaging internals:
 |------|-----------------|-------|
 | Local compose stack | All-in-one image via compose/Taskfile (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
-| Keycloak (OpenShift) | External OIDC for cluster/compose `AUTH=external` | [deploy/keycloak/](deploy/keycloak/README.md) |
+| Keycloak (OpenShift) | External OIDC for cluster deploy or AIO compose (`OIDC_ISSUER_URL` in `.env`) | [deploy/keycloak/](deploy/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
 
 ## Develop in this repo
