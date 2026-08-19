@@ -525,7 +525,7 @@ func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error
 		out, err := r.runOnce(activity, deserializedIn)
 		if err != nil {
 			lastErr = err
-			if domain.IsTerminal(err) {
+			if domain.IsTerminal(err) || domain.IsPendingTarget(err) {
 				break
 			}
 			continue

@@ -187,8 +187,15 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 				Targets: []domain.TargetID{"t1", "missing"},
 			},
 		})
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("expected ErrNotFound or nil, got: %v", err)
+		if err != nil {
+			t.Fatalf("workflow should complete (not error): %v", err)
+		}
+
+		// The fulfillment should park in pending_target rather than
+		// retry endlessly or silently become active.
+		view := awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStatePendingTarget)
+		if view.Fulfillment.StatusReason() == "" {
+			t.Error("StatusReason should explain which target was not found")
 		}
 	})
 
@@ -315,8 +322,8 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Get: %v", err)
 		}
 		f := view.Fulfillment
-		if f.State() != domain.FulfillmentStateActive {
-			t.Fatalf("State = %q, want %q", f.State(), domain.FulfillmentStateActive)
+		if f.State() != domain.FulfillmentStatePendingTarget {
+			t.Fatalf("State = %q, want %q: selector matched zero targets", f.State(), domain.FulfillmentStatePendingTarget)
 		}
 		if len(f.ResolvedTargets()) != 0 {
 			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", f.ResolvedTargets())

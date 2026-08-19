@@ -9,6 +9,7 @@ export const GCP_HCP_STATE_LABELS: Record<
   DELETING: { text: "Deleting", color: "orange" },
   FAILED: { text: "Failed", color: "red" },
   PAUSED_AUTH: { text: "Paused (Auth)", color: "orange" },
+  PENDING_TARGET: { text: "Pending Target", color: "orange" },
 };
 
 export const DEFAULT_STATE_LABEL = { text: "Unknown", color: "grey" } as const;

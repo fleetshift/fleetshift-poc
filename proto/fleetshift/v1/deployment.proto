@@ -97,5 +97,10 @@ message Deployment {
 
     reserved 5;
     reserved "STATE_PAUSED_AUTH";
+
+    // No resolved target accepts the deployment's manifest type.
+    // The fulfillment is waiting for a compatible target to appear
+    // (e.g. through dynamic placement re-evaluation).
+    STATE_PENDING_TARGET = 6;
   }
 }

@@ -313,7 +313,15 @@ func (s *OrchestrationWorkflowSpec) ResolvePlacement() Activity[ResolvePlacement
 		if err != nil {
 			return nil, err
 		}
-		return placement.Resolve(ctx, in.Pool)
+		resolved, err := placement.Resolve(ctx, in.Pool)
+		if err != nil && errors.Is(err, ErrNotFound) {
+			// A missing target is not transient — wrap as
+			// ErrPendingTarget so the workflow engine treats it
+			// as non-retryable and the orchestration parks the
+			// fulfillment in pending_target state.
+			return nil, fmt.Errorf("%w: %v", ErrPendingTarget, err)
+		}
+		return resolved, err
 	})
 }
 
@@ -824,6 +832,18 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 					ResolvedTargets: resolvedIDs,
 					Auth:            f.Auth(),
 				}
+			} else if IsPendingTarget(err) {
+				// No target accepted the deployment's manifest type.
+				// This isn't a permanent failure — dynamic placement
+				// may resolve to compatible targets later.
+				probe.Error(err)
+				result = ReconciliationResult{
+					FulfillmentID:   fulfillmentID,
+					State:           FulfillmentStatePendingTarget,
+					ResolvedTargets: resolvedIDs,
+					StatusReason:    err.Error(),
+					Auth:            f.Auth(),
+				}
 			} else if err != nil {
 				probe.Error(err)
 				if !IsTerminal(err) {
@@ -901,7 +921,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	}
 
 	if len(resolved) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("%w: placement resolved zero targets", ErrPendingTarget)
 	}
 
 	ids := make([]TargetID, len(resolved))
@@ -1026,6 +1046,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 		if step.Deliver != nil {
 			// Phase 1: build inputs — generate manifests and assemble DeliverInput per target.
 			inputs := make(map[DeliveryID]DeliverInput)
+			var rejectedTargets []TargetID
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(record, s.GenerateManifests(), GenerateManifestsInput{
 					Spec:   f.ManifestStrategy(),
@@ -1041,6 +1062,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				manifests = FilterAcceptedManifests(target, manifests)
 				probe.ManifestsFiltered(target, total, len(manifests))
 				if len(manifests) == 0 {
+					rejectedTargets = append(rejectedTargets, target.ID())
 					continue
 				}
 				did := deliveryIDFor(fulfillmentID, target.ID())
@@ -1056,6 +1078,20 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					in.Attestation = AssembleDeliverAttestation(f, manifests, evidence)
 				}
 				inputs[did] = in
+			}
+
+			// If every target in this step rejected all manifests, no
+			// delivery can proceed. This is not necessarily a permanent
+			// failure — with dynamic placement, different targets may
+			// resolve later. Signal via ErrPendingTarget so the
+			// orchestration sets FulfillmentStatePendingTarget rather
+			// than FulfillmentStateFailed.
+			if len(rejectedTargets) > 0 && len(inputs) == 0 {
+				manifestTypes := manifestTypeSet(f.ManifestStrategy().Manifests)
+				return fmt.Errorf("%w: manifest types %v were rejected by all %d target(s) %v; "+
+					"verify that --resource-type matches a type the target accepts",
+					ErrPendingTarget, manifestTypes, len(rejectedTargets), rejectedTargets,
+				)
 			}
 
 			// Phase 2: dispatch + ack + complete loop.
@@ -1392,6 +1428,22 @@ func assembleRemoveAttestation(f Fulfillment, ev *ResolvedEvidence) *Attestation
 			Name: ResourceName(f.Provenance().Content.ContentID()),
 		},
 	}
+}
+
+// manifestTypeSet returns the deduplicated set of [ManifestType]s
+// present in manifests. Used in error messages to show the caller which
+// types were offered.
+func manifestTypeSet(manifests []Manifest) []ManifestType {
+	seen := make(map[ManifestType]struct{}, len(manifests))
+	out := make([]ManifestType, 0, len(manifests))
+	for _, m := range manifests {
+		if _, ok := seen[m.ManifestType]; ok {
+			continue
+		}
+		seen[m.ManifestType] = struct{}{}
+		out = append(out, m.ManifestType)
+	}
+	return out
 }
 
 // unused import guard
