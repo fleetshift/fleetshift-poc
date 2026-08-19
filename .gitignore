@@ -59,12 +59,13 @@ data/
 # Local test certs
 *.pem
 *.crt
+*.key
 
 .claude_state
 keycloak/certs/
 .worktrees/
 
-# Local mkcert certificates
+# Local podman certificates
 deploy/podman/.certs/
 
 # Nx

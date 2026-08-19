@@ -7,12 +7,12 @@ DEPLOY_DIR="$(cd "$COMPOSE_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 
 compose() {
-  # podman compose delegates to an external provider. We require docker-compose
-  # (not podman-compose) because the stack uses depends_on health checks.
+  # podman compose needs an external provider. Use docker-compose; podman-compose
+  # is not supported (the nx-cache overlay still uses depends_on health checks).
   if ! command -v docker-compose &>/dev/null; then
     echo "ERROR: docker-compose is not installed." >&2
     echo "  Install: brew install docker-compose" >&2
-    echo "  (podman-compose is not compatible — this stack requires depends_on health checks)" >&2
+    echo "  (podman-compose is not supported)" >&2
     exit 1
   fi
   # COMPOSE_FILES is set by Taskfile as a space-separated string of -f flags.
@@ -64,6 +64,16 @@ ensure_podman_ready() {
 
 }
 
-generate_password() {
-  openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16
+# copy_sandbox_ca copies the Dex-on sandbox CA to .certs/ca.crt for
+# fleetctl --oidc-ca-file. Retries up to ~30s. Returns non-zero on timeout.
+copy_sandbox_ca() {
+  local dest="$COMPOSE_DIR/.certs/ca.crt"
+  mkdir -p "$COMPOSE_DIR/.certs"
+  local deadline=$((SECONDS + 30))
+  until compose cp fleetshift-server:/data/sandbox/pki/ca.crt "$dest" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      return 1
+    fi
+    sleep 1
+  done
 }

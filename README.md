@@ -72,9 +72,9 @@ fleetctl, and packaging internals:
 
 | Path | What you launch | Guide |
 |------|-----------------|-------|
-| Local compose stack | Multi-service harness (server, web builder, Keycloak, optional Postgres) | [deploy/podman/](deploy/podman/README.md) |
+| Local compose stack | All-in-one image via compose/Taskfile (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
-| Keycloak (OpenShift) | External OIDC for cluster/compose `AUTH=external` | [deploy/keycloak/](deploy/keycloak/README.md) |
+| Keycloak (OpenShift) | External OIDC for cluster deploy or AIO compose (`OIDC_ISSUER_URL` in `.env`) | [deploy/keycloak/](deploy/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
 
 ## Develop in this repo
@@ -135,9 +135,20 @@ Builds are cached — unchanged sources skip recompilation entirely.
 
 ### UI development
 
+`web:dev` is **not** a standalone TLS origin — it rebuilds the SPA shell and
+MF plugins on change into the repo-root `web/` dir, which the running AIO
+stack serves. Run it in a second terminal alongside the stack:
+
 ```bash
-npx nx run web:dev          # dev server (http://localhost:8085)
-npx nx run web:dev:watch    # dev server with hot reload
+npx nx run pd:dev LOCAL_WEB=true   # terminal 1: stack serves UI from host web/
+npx nx run web:dev                 # terminal 2: full build, then watch-rebuild
+npx nx run web:dev:watch           # terminal 2 alt: watch only (skip initial build)
+```
+
+Then open **https://fleetshift-sandbox.localhost:8085** (redirects to `/app`)
+and accept the browser certificate warning. Dex is same-origin under `/idp`.
+
+```bash
 npx nx run web:test:ct      # component tests (playwright)
 npx nx run plugins:test:ct  # plugin component tests
 ```
@@ -171,41 +182,33 @@ task image:push             # push server, server-local, and web to DEV_REGISTRY
 
 ## Local compose stack
 
-The multi-service local harness (`task pd:*` / `task podman:*`) is documented in
-[deploy/podman/README.md](deploy/podman/README.md). Copy `.env.template` to
-`.env` first. Commands are also available through Nx; env vars (`AUTH`,
-`LOCAL_WEB`, `DB`, etc.) pass through to Taskfile.
+The local harness (`task pd:*` / `task podman:*`) runs the all-in-one image via
+compose and is documented in [deploy/podman/README.md](deploy/podman/README.md).
+Copy `.env.template` to `.env` first. Commands are also available through Nx;
+env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to Taskfile.
+
+Open https://fleetshift-sandbox.localhost:8085 after `pd:up` / `pd:dev`. If a
+persisted volume still has the old `https://127.0.0.1:5556/dex` issuer, run
+`npx nx run pd:clean` once.
 
 ```bash
-npx nx run pd:dev                                    # start local dev stack
-AUTH=external LOCAL_WEB=true npx nx run pd:dev       # with external auth + local web
-npx nx run pd:up                                     # start stack (non-dev)
+npx nx run pd:dev                                    # build AIO from source, start stack
+npx nx run pd:dev LOCAL_WEB=true                     # + serve UI from host web/ (watch mode)
+npx nx run pd:up                                     # start stack (prebuilt image)
 npx nx run pd:down                                   # stop stack
 npx nx run pd:clean                                  # stop + remove volumes
 npx nx run pd:status                                 # show container status
 npx nx run pd:logs                                   # tail all logs
 npx nx run pd:rebuild                                # rebuild and restart
-npx nx run pd:rebuild-web                            # rebuild web container only
-npx nx run pd:cert-init                              # generate local mkcert certs
-npx nx run pd:reset-keycloak                         # reset keycloak realm
+npx nx run pd:rebuild-web                            # rebuild AIO image (baked UI) and restart
 npx nx run pd:clock-drift                            # fix podman clock drift
-npx nx run pd:test-attestation                       # test attestation flow
 
 # Or via Taskfile directly:
-task pd:dev AUTH=external LOCAL_WEB=true
+task pd:dev LOCAL_WEB=true
 ```
+
+Point at an external issuer by setting `OIDC_ISSUER_URL` in `.env` (peer Dex
+then parks) — see the OIDC scope caveat in `.env.template`.
 
 Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain
 Taskfile-only — they target remote clusters, not local compose.
-
-## Day One Setup
-
-`fleetshift serve` installs the initial AuthMethod when the store is empty and
-complete OIDC bootstrap config is present. Who supplies those flags depends on
-the path:
-
-- **AIO Dex-on:** packaging fills them automatically (including registry mapping
-  to `claims.preferred_username` for peer Dex users).
-- **AIO Dex-off / compose / Kubernetes:** packaging or deploy manifests pass
-  explicit serve flags or `.env` values. Compose/Keycloak typically uses
-  `claims.github_username` via `KEY_REGISTRY_*` in `.env.template`.

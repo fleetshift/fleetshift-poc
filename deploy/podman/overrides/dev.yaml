@@ -1,28 +1,5 @@
-# Dev override — build from source with hot-reload.
-#
-# Layered on top of the base compose + db + auth overrides.
-# Activated by DEV=true (e.g. `task podman:dev`).
-# Frontend assets are built in-container via Dockerfile.web (monorepo root).
+# Dev overlay. start.sh already builds the AIO image when DEV=true; this file
+# exists so COMPOSE_FILES layering stays valid.
 
 services:
-
-  # ── Frontend builder — build from source instead of prebuilt image ──
-
-  web-builder:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.web
-      args:
-        NX_SELF_HOSTED_REMOTE_CACHE_SERVER: "${NX_SELF_HOSTED_REMOTE_CACHE_SERVER:-}"
-        NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: "${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:-}"
-    privileged: true
-
-  # ── Backend — extend base image with local tooling ──────────────
-
-  fleetshift-server:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.local
-    volumes:
-      - ${PODMAN_SOCKET}:/var/run/docker.sock
-      - /tmp:/tmp
+  fleetshift-server: {}

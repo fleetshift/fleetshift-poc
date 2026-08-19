@@ -15,13 +15,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
+      # Needed for `task image:aio` on a cache miss.
+      - name: Install Task
+        uses: arduino/setup-task@v3
+        with:
+          version: 3.x
 
       - name: Install dependencies
         run: npm ci
@@ -29,19 +34,155 @@ jobs:
       - name: Build common library
         run: npx nx run common:build
 
-      - name: Build e2e dummy app
-        run: npx nx run e2e-dummy-app:build
+      # Start the rootless podman API service so the in-container server can
+      # drive Kind through the mounted socket (docker-out-of-docker). The kind
+      # provider inside the container is podman-remote (CONTAINER_HOST points at
+      # the mounted socket), so this host-side API service is what it dials.
+      #
+      # Bind an explicit path (do not trust RemoteSocket.Path / XDG_RUNTIME_DIR),
+      # detach with setsid so it survives past this step, and verify it actually
+      # answers before continuing — a dead/unbound service surfaces later as an
+      # opaque `podman ps ... exit status 125` from inside the container.
+      - name: Start podman API service
+        run: |
+          sock=/tmp/podman-fleetshift.sock
+          setsid podman system service --time=0 "unix://${sock}" >/tmp/podman-service.log 2>&1 &
+          for i in $(seq 1 15); do
+            if [ -S "$sock" ] && podman --url "unix://${sock}" info >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          podman --url "unix://${sock}" version
+          # The service binds the socket 0600 root:root. The in-container server
+          # runs as uid 1000 (s6 drops privileges), so without this it gets
+          # permission denied → the kind addon's `podman ps` fails with exit 125.
+          # 0666 is fine on an ephemeral CI runner.
+          sudo chmod 0666 "$sock"
+          echo "PODMAN_SOCKET=${sock}" >> "$GITHUB_ENV"
+          echo "podman API service listening at ${sock}"
+
+      # Cache the built AIO image tar keyed on every build input. On a hit we
+      # podman-load it and skip the whole build (Go compile + web bundle + apt +
+      # kind/kubectl download). Any source change to those paths busts the key.
+      - name: Cache AIO image
+        id: aio-image-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/aio-image.tar
+          key: aio-image-${{ hashFiles('server/**', 'cli/**', 'sdk/**', 'client/web/**', 'extensions/**', 'tools/**', 'proto/**', 'Dockerfile*', 'deploy/aio/**', 'go.*', 'package-lock.json', 'nx.json', 'tsconfig*.json', 'Taskfile.yml') }}
+
+      - name: Build or load all-in-one image
+        run: |
+          if [ -f /tmp/aio-image.tar ]; then
+            echo "cache hit: loading AIO image"
+            podman load -i /tmp/aio-image.tar
+          else
+            echo "cache miss: building AIO image"
+            task image:aio
+            podman save -o /tmp/aio-image.tar quay.io/stolostron/fleetshift:latest
+          fi
+
+      - name: Prepare container environment
+        run: |
+          podman network exists kind || podman network create kind
+          touch .env
+
+      # Run the single AIO container (API + baked-in UI + peer Dex sandbox).
+      # Empty .env => built-in Dex with the ops@/dev@ personas the tests use.
+      # Only 8085 is published: the browser reaches Dex under /idp through the
+      # HTTPS edge. Dex 5556 and FleetShift HTTP 8086 stay unpublished.
+      - name: Run sandbox
+        run: |
+          echo '127.0.0.1 fleetshift-sandbox.localhost' | sudo tee -a /etc/hosts
+          podman run -d --name fleetshift \
+            --privileged --user 0:0 \
+            --env-file .env \
+            --network kind:alias=fleetshift \
+            -p 127.0.0.1:8085:8085 \
+            -v "${PODMAN_SOCKET}:/var/run/docker.sock" \
+            -v /tmp:/tmp \
+            quay.io/stolostron/fleetshift:latest
+
+      - name: Wait for sandbox to be ready
+        run: |
+          echo "Waiting for HTTPS origin to be ready..."
+          # aio-proxy Host-allowlists fleetshift-sandbox.localhost (421 otherwise).
+          # -k is readiness-only; Playwright uses ignoreHTTPSErrors for the private CA.
+          for i in $(seq 1 60); do
+            if curl -skf --resolve fleetshift-sandbox.localhost:8085:127.0.0.1 \
+              https://fleetshift-sandbox.localhost:8085/readyz >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -skf --resolve fleetshift-sandbox.localhost:8085:127.0.0.1 \
+            https://fleetshift-sandbox.localhost:8085/readyz
+          if podman port fleetshift | grep -q 5556; then
+            echo "Dex port 5556 must not be published" >&2
+            podman port fleetshift
+            exit 1
+          fi
+          echo "BASE_URL=https://fleetshift-sandbox.localhost:8085" >> "$GITHUB_ENV"
+
+      # Cache the browser binaries keyed on the installed Playwright version, so
+      # a browser download only happens when @playwright/test actually changes.
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: |
+          if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      # Prove the in-container kind engine path works before the slow lifecycle
+      # test spends 5 minutes polling. This is the exact command the kind addon
+      # shells out to; if it errors here we see podman's real stderr in seconds
+      # instead of an opaque "exit status 125" from the server log.
+      # Exec as uid 1000 — the user the server drops to. Running as root would
+      # hide the socket-permission problem that actually broke the kind addon.
+      - name: Smoke-test in-container kind engine access
+        run: |
+          podman exec -u 1000 fleetshift sh -lc '
+            echo "CONTAINER_HOST=$CONTAINER_HOST"
+            ls -l /var/run/docker.sock
+            kind version
+            podman info --format "{{.Host.RemoteSocket.Path}} exists={{.Host.RemoteSocket.Exists}}"
+            podman ps -a --filter label=io.x-k8s.kind.cluster
+          '
 
       - name: Run e2e tests
         run: npx nx test:e2e e2e-web -- --project=chromium
 
       - name: Upload test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-test-results
-          path: e2e/web/test-results/
+          path: |
+            e2e/web/test-results/
+            e2e/web/playwright-report/
           retention-days: 7
+
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo "===== host podman API service log ====="
+          cat /tmp/podman-service.log || true
+          echo "===== fleetshift container log ====="
+          podman logs fleetshift || true
+
+      - name: Cleanup FleetShift
+        if: always()
+        run: podman rm -f fleetshift || true

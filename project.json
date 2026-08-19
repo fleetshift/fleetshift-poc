@@ -16,9 +16,9 @@
       "options": {
         "envFile": ".env",
         "commands": [
-          "podman build -t quay.io/stolostron/fleetshift-server:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}} .",
-          "podman build -f Dockerfile.local -t quay.io/stolostron/fleetshift-server-local:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}} .",
-          "podman build -f Dockerfile.web -t quay.io/stolostron/fleetshift-web:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}} ."
+          "podman build -t localhost/fleetshift-server:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift-server:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}} .",
+          "podman build -f Dockerfile.local -t localhost/fleetshift-server-local:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift-server-local:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}} .",
+          "podman build -f Dockerfile.web -t localhost/fleetshift-web:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift-web:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}} ."
         ],
         "parallel": false
       },
@@ -29,7 +29,7 @@
       "executor": "nx:run-commands",
       "options": {
         "envFile": ".env",
-        "command": "podman build -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:${IMAGE_TAG:-latest} --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}} ."
+        "command": "podman build --pull=missing -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:${IMAGE_TAG:-latest} --build-arg WEB_IMAGE=localhost/fleetshift-web:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}} ."
       },
       "cache": false,
       "dependsOn": ["image:build"]
@@ -161,24 +161,9 @@
       "options": { "command": "task pd:pull" },
       "cache": false
     },
-    "pd:cert-init": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:cert-init" },
-      "cache": false
-    },
-    "pd:reset-keycloak": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:reset-keycloak" },
-      "cache": false
-    },
     "pd:clock-drift": {
       "executor": "nx:run-commands",
       "options": { "command": "task pd:clock-drift" },
-      "cache": false
-    },
-    "pd:test-attestation": {
-      "executor": "nx:run-commands",
-      "options": { "command": "task pd:test-attestation" },
       "cache": false
     },
     "kc:deploy": {

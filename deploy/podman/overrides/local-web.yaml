@@ -1,28 +1,11 @@
-# Local web override — serve UI from host filesystem instead of Docker build.
-#
-# Use with `npx nx run web:dev` (or tools/dev.mjs) for watch mode. Merged
-# assets land in the monorepo-root web/ directory (see tools/merge-web.mjs).
-# The web-builder init container is replaced with a no-op.
-#
-# Usage: add LOCAL_WEB=true to your task/compose invocation, or layer manually:
-#   podman compose -f compose.yaml -f overrides/local-web.yaml up
+# Bind host web/ over the AIO baked UI. Layered by LOCAL_WEB=true.
+# !override replaces the whole volumes list, so every base mount is restated.
 
 services:
 
-  # Skip the Docker web build — assets come from the host
-  web-builder:
-    image: busybox
-    command: ["true"]
-    volumes: []
-
-  # Override the web-assets volume mount with a host bind mount.
-  # !override replaces the entire volumes list so the bind mount wins
-  # over the named web-assets volume from the base compose anchor.
-  # Re-declares all mounts from base + earlier overrides (sqlite data, socket, tmp).
   fleetshift-server:
     volumes: !override
       - ${PODMAN_SOCKET}:/var/run/docker.sock
       - /tmp:/tmp
       - fleetshift-data:/data
-      - ./.certs/ca.crt:/certs/ca.crt:ro,z
       - ../../web:/srv/web:ro,z

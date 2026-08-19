@@ -215,9 +215,8 @@ podman run -d --rm -it \
 
 GCP HCP requires an external OIDC issuer (peer Dex is not supported for this
 addon). Set `OIDC_ISSUER_URL` so packaging skips Dex. Supply
-`GCPHCP_GATEWAY_URL` alone to enable the addon (no `GCPHCP_ENABLED` needed —
-unlike the compose harness). Optional `GCPHCP_*` overrides use shared renderer
-defaults:
+`GCPHCP_GATEWAY_URL` alone to enable the addon. Optional `GCPHCP_*` overrides
+use shared renderer defaults:
 
 ```bash
 podman run -d --rm -it \

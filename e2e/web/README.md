@@ -1,17 +1,14 @@
 # Web e2e tests
 
-Skeleton app for e2e web testing.
+Playwright journeys against the packaged AIO image (HTTPS origin
+`https://fleetshift-sandbox.localhost:8085`, SPA under `/app`).
 
-Once e2e test env is setup, update the `playwright.config.mts`.
+```bash
+npx nx test:e2e e2e-web
+npx nx test:e2e e2e-web -- --ui
+npx nx test:e2e e2e-web -- --project=chromium
+```
 
-Update the `url` to the site URL, remove the command config (currently starts the dummy app web server).
-
-Refer to PW docs for test writing guide: https://playwright.dev/docs/writing-tests
-
-## Running tets
-
-Use the `npx nx test:e2e e2e-web` command to run the tests.
-
-For interactive session use: `npx nx test:e2e e2e-web -- --ui`.
-
-In order to pass additional flags to the playwright command use `npx nx test:e2e e2e-web -- --<your extra flags here> --<another extra flags here> ...`
+`BASE_URL` defaults to the branded HTTPS origin. Playwright uses
+`ignoreHTTPSErrors` for the sandbox private CA; do not `update-ca-trust` on
+the host. CI asserts Dex port 5556 is not published.

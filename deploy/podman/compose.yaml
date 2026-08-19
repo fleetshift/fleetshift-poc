@@ -1,67 +1,41 @@
-# FleetShift deployment — composable via override files.
-#
-# Usage (via Taskfile):
-#   task podman:up                         — demo: sqlite + local keycloak
-#   task podman:up DEPLOY_MODE=prod        — prod: postgres + external oidc
-#   task podman:up DB=postgres AUTH=local  — override: postgres + local keycloak
-#
-# Override files are in deploy/podman/overrides/ and layered by scripts/common.sh.
-# Do not use `podman compose` directly — use `task podman:*` targets instead.
+# AIO image via compose. Public origin:
+#   https://fleetshift-sandbox.localhost:8085  (TLS edge; Dex under /idp)
+# Published: 127.0.0.1:8085 (HTTPS), 127.0.0.1:50051 (gRPC).
+# OIDC_ISSUER_URL unset → peer Dex; set → that issuer (Dex parks).
+# sqlite only. Use task podman:* — not podman compose directly.
+# If /data still has issuer https://127.0.0.1:5556/dex, run task pd:clean.
 
-# ── Shared fleetshift-server config ──────────────────────────────────
-x-fleetshift-server: &fleetshift-server
-  image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server-local:latest}
+x-fleetshift-aio: &fleetshift-aio
+  image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift:latest}
   restart: unless-stopped
   privileged: true
-  environment:
-    KIND_EXPERIMENTAL_DOCKER_NETWORK: kind
-    CONTAINER_HOST: "unix:///var/run/docker.sock"
+  # s6 starts as root, then drops to fleetshift 1000 / dex 1001 / aio-proxy 1002.
+  user: "0:0"
+  # aio-init reads OIDC_*, GCPHCP_*, FLEETSHIFT_* and ignores the rest.
+  env_file:
+    - ../../.env
   ports:
-    - "127.0.0.1:${FLEETSHIFT_SERVER_HTTP_PORT}:${FLEETSHIFT_SERVER_HTTP_PORT}"
-    - "127.0.0.1:${FLEETSHIFT_SERVER_GRPC_PORT}:${FLEETSHIFT_SERVER_GRPC_PORT}"
+    - "127.0.0.1:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}:8085"
+    - "127.0.0.1:${FLEETSHIFT_SERVER_GRPC_PORT:-50051}:50051"
   volumes:
     - ${PODMAN_SOCKET}:/var/run/docker.sock
     - /tmp:/tmp
-    - web-assets:/srv/web:ro
+    - fleetshift-data:/data
   networks:
-    - default
-    - kind
+    default: {}
+    kind:
+      aliases:
+        - fleetshift
 
 services:
 
-  # ── Frontend assets (init container) ────────────────────────────
-
-  web-builder:
-    image: ${FLEETSHIFT_WEB_IMAGE:-quay.io/stolostron/fleetshift-web:latest}
-    volumes:
-      - web-assets:/output
-
-  # ── Core ────────────────────────────────────────────────────────
-
+  # Compose service name for the AIO container (proxy + API + UI + Dex).
   fleetshift-server:
-    <<: *fleetshift-server
-    command:
-      - serve
-      - ${DB_FLAG}
-      - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
-      - --grpc-addr=:${FLEETSHIFT_SERVER_GRPC_PORT}
-      - --log-level=${FLEETSHIFT_LOG_LEVEL}
-      - --addons=${FLEETSHIFT_SERVER_ADDONS:-kind,kubernetes}
-      - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
-      - --oidc-issuer=${OIDC_ISSUER_URL:-}
-      - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
-      - --oidc-ui-scope=${OIDC_UI_SCOPE:-openid profile email}
-      - --oidc-resource-audience=${OIDC_RESOURCE_AUDIENCE:-fleetshift}
-      - --oidc-key-enrollment-audience=${OIDC_KEY_ENROLLMENT_AUDIENCE:-fleetshift-signing}
-      - --oidc-public-key-claim-expression=${PUBLIC_KEY_CLAIM_EXPR:-}
-      - --oidc-registry-id=${KEY_REGISTRY_ID:-}
-      - --oidc-registry-subject-expression=${KEY_REGISTRY_SUBJECT_EXPR:-}
-    depends_on:
-      web-builder:
-        condition: service_completed_successfully
+    <<: *fleetshift-aio
+    # No command: s6 is PID 1.
 
 volumes:
-  web-assets:
+  fleetshift-data:
 
 networks:
   default:

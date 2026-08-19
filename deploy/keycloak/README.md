@@ -35,16 +35,12 @@ oc get secret ocp-console-client-secret -n keycloak-prod \
   -o jsonpath='{.data.clientSecret}' | base64 -d
 ```
 
-Set this as `OIDC_CONSOLE_CLIENT_SECRET` in `.env` for the local podman stack, or `OCP_CONSOLE_CLIENT_SECRET` for the fleetshift server.
+This is the `ocp-console` client secret (cluster console OIDC), not the FleetShift UI.
 
 ## Add Users
 
 ```bash
-# OpenShift Keycloak (auto-discovers credentials via oc):
 task kc:add-user USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev
-
-# Local podman Keycloak (pass admin password from podman:up output):
-task kc:add-user USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev ADMIN_PASSWORD=<from-output>
 ```
 
 ## Teardown
