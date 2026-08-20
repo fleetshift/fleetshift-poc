@@ -331,7 +331,7 @@ TypedEvidence {
 Evidence identity domain-separately binds all three. Changing provenance type,
 media type, or bytes produces a different item. The provenance type remains an
 untrusted routing hint until authenticated policy selects a matching profile.
-The inner assertion's content or predicate type is established only after that
+The inner assertion's predicate type is established only after that
 profile authenticates the bytes; it is not a substitute for the outer types
 and does not select a verifier.
 
@@ -350,7 +350,7 @@ Each authority defines deterministic delivery policies. A policy matches
 bounded delivery context such as:
 
 - verified tenant partition;
-- delivery content type;
+- delivery predicate type;
 - root authorization versus supporting graph evidence; and
 - other explicitly defined scope constraints.
 
@@ -413,12 +413,15 @@ the larger delivery graph.
 
 That unit has two typing layers:
 
-- The outer evidence is `TypedEvidence`: a versioned provenance type, a media
-  type, and the exact immutable bytes. Common storage, digesting, bounding,
-  and routing operate on this envelope. They do not parse the inner format.
-- The inner assertion has a content or predicate type that names the
-  assertion's purpose. The selected profile authenticates those bytes; the
-  common evaluator then consumes that purpose-typed content.
+- The outer evidence is `TypedEvidence`: a versioned provenance type plus
+  encoded bytes (media type and the exact immutable payload). Common storage,
+  digesting, bounding, and routing operate on this envelope. They do not
+  parse the inner format. The same encoded form is used for replaceable
+  support material and for each delivered payload item; those remain distinct
+  types because their authority and lifecycle differ.
+- The inner assertion has a predicate type that names the assertion's
+  purpose. The selected profile authenticates those bytes; the common
+  evaluator then consumes that purpose-typed content.
 
 The two layers are not interchangeable. A media type does not imply an
 assertion purpose, and an assertion's predicate type does not select a
@@ -426,12 +429,14 @@ verifier.
 
 Examples include:
 
-- a user's delivery authorization;
+- a user's `deployment/v1` authorization (typed manifests);
+- a user's `managed-resource/v1` authorization (resource spec and resource
+  type);
+- a `fulfillment-relation/v1` as supporting evidence for a managed resource;
 - an addon's exact manifest set;
 - a placement decision;
-- a fulfillment relation;
 - a signed update or derivation; and
-- a trust-configuration update.
+- a `trust-config-update/v1`.
 
 Evidence encodings remain profile-owned. The common interface does not require
 Sigstore Bundle, DSSE, or any one media type. The initial Sigstore and
@@ -446,7 +451,7 @@ Successful profile verification produces a deliberately small common result:
 AuthenticatedEvidence {
     principal
     mapped_fleetshift_tenant?
-    content_type
+    predicate_type
     content_digest
     provenance_type
     authority_config_digest
@@ -457,7 +462,7 @@ AuthenticatedEvidence {
 
 The configuration digests bind the result to the exact authenticated policy
 and anchors used during verification; they are audit and state-precondition
-data, not profile selectors. `content_type` and `content_digest` are the inner
+data, not profile selectors. `predicate_type` and `content_digest` are the inner
 authenticated assertion. They are not the outer `TypedEvidence` media type or
 bytes digest. `satisfied_constraints` contains only outcomes defined by the
 matched authenticated policy. Profile-specific attributes may influence
@@ -476,7 +481,10 @@ replace their authorship, or create a signature that speaks for the aggregate.
 
 An aggregate evidence package is therefore not a new provenance authority.
 It is a collection assembled by the RM so the target can evaluate one delivery.
-The package and the attestation graph remain common and profile-neutral. They
+Each independently authenticated item is couriered as a signed statement:
+immutable `TypedEvidence` plus replaceable support material used to verify
+that evidence. Root and supporting items are the same kind of object. The
+package and the attestation graph remain common and profile-neutral. They
 may contain independently authenticated items that use different provenance
 types and media formats. A Sigstore Bundle represents one such item, not the
 aggregate.
@@ -616,7 +624,7 @@ verifies.
 
 Dynamic-scope assertions may intentionally omit one concrete generation when
 they authorize a standing or selector-based relationship. The applicable
-content type and constraints must define whether authorization is standing,
+predicate type and constraints must define whether authorization is standing,
 once per target, or snapshot-scoped. The common delivery log supplies durable
 ordering and rollback resistance but does not silently turn a reusable
 assertion into single-use authorization.
@@ -734,6 +742,11 @@ The RM:
 - assembles the attestation graph and replaceable verification material for
   the target's retained state; and
 - routes the resulting package to the target.
+
+When the RM needs routing identity from a delivery (tenant, target,
+fulfillment), it asks the selected profile to unwrap the inner statement from
+`TypedEvidence`. Common code then reads the common statement body. The RM
+does not parse profile-owned evidence encodings.
 
 RM verification is authoritative for whether the RM accepts an API request.
 It is not a substitute for target verification. The RM may repeat target-like
@@ -875,7 +888,7 @@ its retained checkpoint fails closed rather than restarting from TOFU.
 
 ### Trust update as ordinary content
 
-`trust-config-update/v1` is a well-known delivery content type, not a separate
+`trust-config-update/v1` is a well-known delivery predicate type, not a separate
 cryptographic universe. Its canonical content identifies the configuration
 scope and binds:
 
@@ -904,7 +917,7 @@ checkpoints may advance earlier, but the successor configuration cannot become
 usable before its authorization and state dependencies hold.
 
 There is no separate `TrustUpdatePolicy`: ordinary authority delivery policies
-match the `trust-config-update/v1` content type and its scope. They may require
+match the `trust-config-update/v1` predicate type and its scope. They may require
 durable provenance, a live credential, a request signature, or a supported
 composition of them.
 
@@ -1158,7 +1171,7 @@ never makes it an uninitialized verifier.
 5. **Policy-owned selection:** one unambiguous delivery policy supplies the
    ordered `any-of` profile list; the first complete success wins.
 6. **Exact content:** a profile authenticates the exact typed content and
-   purpose consumed by the common evaluator. That inner content type is
+   purpose consumed by the common evaluator. That inner predicate type is
    distinct from the outer provenance type and media type.
 7. **Typed evidence identity:** an evidence item is identified by a
    domain-separated binding of provenance type, media type, and exact bytes.
@@ -1215,7 +1228,7 @@ Common protocol tests apply to every provenance implementation:
   and rejection of fresh evidence under constraints limited to past intervals;
 - unbound workload JWTs presented as durable supporting provenance;
 - provider-authority updates authenticated only by the workload being changed;
-- profile evidence used for a content type that the matched policy does not
+- profile evidence used for a predicate type that the matched policy does not
   admit; and
 - RM assembly and forwarding of profile-specific proof material without
   authority to change profile selection or substitute for target verification.

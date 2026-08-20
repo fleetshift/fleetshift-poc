@@ -73,31 +73,36 @@ func (c *Client) CreateEnrollment() (protocol.TypedEvidence, error) {
 	}
 	return protocol.TypedEvidence{
 		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
-		MediaType:      MediaTypeEnrollment,
-		Bytes:          raw,
+		Encoded: protocol.Encoded{
+			MediaType: MediaTypeEnrollment,
+			Bytes:     raw,
+		},
 	}, nil
 }
 
-// CreateEvidence implements protocol.ClientAPI. The resulting evidence carries
-// the signature and user reference, not the public key.
+// CreateEvidence implements protocol.ClientAPI. The resulting evidence
+// carries the inner statement, a signature, and a user reference, not the
+// public key.
 func (c *Client) CreateEvidence(_ context.Context, assertion protocol.TypedAssertion) (protocol.TypedEvidence, error) {
-	if assertion.ContentType == "" || len(assertion.Bytes) == 0 {
-		return protocol.TypedEvidence{}, errors.New("assertion content type and bytes are required")
+	if assertion.PredicateType == "" || len(assertion.Bytes) == 0 {
+		return protocol.TypedEvidence{}, errors.New("assertion predicate type and bytes are required")
 	}
 	contentDigest, err := assertion.Digest()
 	if err != nil {
 		return protocol.TypedEvidence{}, err
 	}
-	signed := signatureMaterial(c.principal, assertion.ContentType, contentDigest)
+	signed := signatureMaterial(c.principal, assertion.PredicateType, contentDigest)
 	signature, err := sign(c.privateKey, purposeAssertion, signed)
 	if err != nil {
 		return protocol.TypedEvidence{}, fmt.Errorf("sign assertion: %w", err)
 	}
 	body := SignatureBody{
-		Principal:     c.principal,
-		ContentType:   assertion.ContentType,
-		ContentDigest: contentDigest,
-		Signature:     signature,
+		Principal: c.principal,
+		Assertion: protocol.TypedAssertion{
+			PredicateType: assertion.PredicateType,
+			Bytes:         append([]byte(nil), assertion.Bytes...),
+		},
+		Signature: signature,
 	}
 	raw, err := encodeJSON(body)
 	if err != nil {
@@ -105,8 +110,10 @@ func (c *Client) CreateEvidence(_ context.Context, assertion protocol.TypedAsser
 	}
 	return protocol.TypedEvidence{
 		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
-		MediaType:      MediaTypeSignature,
-		Bytes:          raw,
+		Encoded: protocol.Encoded{
+			MediaType: MediaTypeSignature,
+			Bytes:     raw,
+		},
 	}, nil
 }
 
@@ -117,10 +124,10 @@ func enrollmentProofMaterial(principal protocol.Principal, publicKey []byte) any
 	}{Principal: principal, PublicKey: publicKey}
 }
 
-func signatureMaterial(principal protocol.Principal, contentType protocol.ContentType, contentDigest protocol.Digest) any {
+func signatureMaterial(principal protocol.Principal, predicateType protocol.PredicateType, contentDigest protocol.Digest) any {
 	return struct {
-		Principal     protocol.Principal   `json:"principal"`
-		ContentType   protocol.ContentType `json:"content_type"`
-		ContentDigest protocol.Digest      `json:"content_digest"`
-	}{Principal: principal, ContentType: contentType, ContentDigest: contentDigest}
+		Principal     protocol.Principal     `json:"principal"`
+		PredicateType protocol.PredicateType `json:"predicate_type"`
+		ContentDigest protocol.Digest        `json:"content_digest"`
+	}{Principal: principal, PredicateType: predicateType, ContentDigest: contentDigest}
 }

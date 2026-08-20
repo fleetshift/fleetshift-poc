@@ -60,24 +60,57 @@ func (c *Client) DirectKey() *directkey.Client {
 	return c.profile
 }
 
-// SignDelivery creates TypedEvidence for an exact delivery authorization.
-func (c *Client) SignDelivery(ctx context.Context, authorization protocol.DeliveryAuthorization) (protocol.TypedEvidence, protocol.TypedAssertion, error) {
-	if authorization.TenantID == "" {
-		authorization.TenantID = c.tenantID
-	}
-	if authorization.TenantID != c.tenantID {
-		return protocol.TypedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("delivery tenant %q does not match client tenant %q", authorization.TenantID, c.tenantID)
-	}
-	if authorization.TargetID == "" || authorization.FulfillmentID == "" || authorization.Action == "" {
-		return protocol.TypedEvidence{}, protocol.TypedAssertion{}, errors.New("target, fulfillment, and action are required")
+// SignDeployment creates TypedEvidence for an exact deployment/v1 authorization.
+func (c *Client) SignDeployment(ctx context.Context, authorization protocol.DeploymentAuthorization) (protocol.TypedEvidence, error) {
+	if err := c.bindScope(&authorization.DeliveryScope); err != nil {
+		return protocol.TypedEvidence{}, err
 	}
 	assertion, err := authorization.Assertion()
 	if err != nil {
-		return protocol.TypedEvidence{}, protocol.TypedAssertion{}, err
+		return protocol.TypedEvidence{}, err
 	}
-	evidence, err := c.profile.CreateEvidence(ctx, assertion)
+	return c.profile.CreateEvidence(ctx, assertion)
+}
+
+// SignManagedResource creates TypedEvidence for an exact managed-resource/v1
+// authorization.
+func (c *Client) SignManagedResource(ctx context.Context, authorization protocol.ManagedResourceAuthorization) (protocol.TypedEvidence, error) {
+	if err := c.bindScope(&authorization.DeliveryScope); err != nil {
+		return protocol.TypedEvidence{}, err
+	}
+	if authorization.ResourceType == "" || authorization.ResourceName == "" {
+		return protocol.TypedEvidence{}, errors.New("resource type and name are required")
+	}
+	assertion, err := authorization.Assertion()
 	if err != nil {
-		return protocol.TypedEvidence{}, protocol.TypedAssertion{}, err
+		return protocol.TypedEvidence{}, err
 	}
-	return evidence, assertion, nil
+	return c.profile.CreateEvidence(ctx, assertion)
+}
+
+// SignFulfillmentRelation creates TypedEvidence for an exact
+// fulfillment-relation/v1 assertion. The relation is supporting evidence,
+// not a root delivery authorization.
+func (c *Client) SignFulfillmentRelation(ctx context.Context, relation protocol.FulfillmentRelation) (protocol.TypedEvidence, error) {
+	if relation.ResourceType == "" || relation.MediaType == "" {
+		return protocol.TypedEvidence{}, errors.New("resource type and media type are required")
+	}
+	assertion, err := relation.Assertion()
+	if err != nil {
+		return protocol.TypedEvidence{}, err
+	}
+	return c.profile.CreateEvidence(ctx, assertion)
+}
+
+func (c *Client) bindScope(scope *protocol.DeliveryScope) error {
+	if scope.TenantID == "" {
+		scope.TenantID = c.tenantID
+	}
+	if scope.TenantID != c.tenantID {
+		return fmt.Errorf("delivery tenant %q does not match client tenant %q", scope.TenantID, c.tenantID)
+	}
+	if scope.TargetID == "" || scope.FulfillmentID == "" || scope.Action == "" {
+		return errors.New("target, fulfillment, and action are required")
+	}
+	return nil
 }

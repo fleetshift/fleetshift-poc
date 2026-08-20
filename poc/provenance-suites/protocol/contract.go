@@ -19,29 +19,36 @@ type ClientAPI interface {
 // work inside the mutation's durable transaction, and assembles replaceable
 // support material. RM verification is authoritative only for whether the RM
 // accepts an API request; it is not target verification.
+//
+// DecodeAssertion is the evidence counterpart of DecodeDeliveryScope: it
+// unwraps the inner statement from profile-owned evidence bytes without
+// authenticating it. Common code then calls DecodeDeliveryScope on that
+// statement. The RM never parses TypedEvidence.Bytes itself.
 type ResourceManagerAPI interface {
 	ProvenanceType() ProvenanceType
 	StoreEvidence(ctx context.Context, evidence TypedEvidence) (Digest, error)
 	AssembleSupportMaterial(ctx context.Context, evidence TypedEvidence) (SupportMaterial, error)
+	CheckDelivery(evidence TypedEvidence) (TentativeHints, error)
+	DecodeAssertion(evidence TypedEvidence) (TypedAssertion, error)
 }
 
 // TargetAPI is the target side of a provenance profile.
 // ParseHints reads untrusted type-specific material only to locate
-// authenticated authority configuration. Verify produces AuthenticatedEvidence
-// against that configuration and retained profile state.
+// authenticated authority configuration and a candidate predicate type.
+// Verify produces AuthenticatedEvidence and the authenticated inner
+// assertion extracted from the statement's evidence.
 type TargetAPI interface {
 	ProvenanceType() ProvenanceType
 	ParseHints(evidence TypedEvidence) (TentativeHints, error)
-	Verify(ctx context.Context, req VerifyRequest) (AuthenticatedEvidence, error)
+	Verify(ctx context.Context, req VerifyRequest) (AuthenticatedEvidence, TypedAssertion, error)
 }
 
-// VerifyRequest is the authenticated policy and couriered material supplied
-// to a target-side profile. Retained profile state stays with the TargetAPI
-// implementation and is associated with the authenticated authority and
-// profile configuration, never with an RM-supplied profile ID.
+// VerifyRequest is the authenticated policy and one couriered signed
+// statement supplied to a target-side profile. Retained profile state stays
+// with the TargetAPI implementation and is associated with the authenticated
+// authority and profile configuration, never with an RM-supplied profile ID.
 type VerifyRequest struct {
-	Evidence        TypedEvidence
-	Support         SupportMaterial
+	Statement       SignedStatement
 	ProfileConfig   ProfileConfig
 	AuthorityConfig AuthorityConfig
 	DeliveryContext DeliveryContext
