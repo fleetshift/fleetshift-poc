@@ -64,15 +64,15 @@ type DeliveryPolicy struct {
 
 // PolicyMatch is the bounded context used to locate a delivery policy.
 type PolicyMatch struct {
-	ContentType       ContentType `json:"content_type"`
-	RootAuthorization bool        `json:"root_authorization"`
+	PredicateType     PredicateType `json:"predicate_type"`
+	RootAuthorization bool          `json:"root_authorization"`
 }
 
 // Matches reports whether delivery context selects this match. Tentative
 // tenant and subject hints are not policy keys; they are re-checked after
 // verification.
 func (m PolicyMatch) Matches(ctx DeliveryContext) bool {
-	return m.ContentType == ctx.ContentType && m.RootAuthorization == ctx.RootAuthorization
+	return m.PredicateType == ctx.PredicateType && m.RootAuthorization == ctx.RootAuthorization
 }
 
 // AuthorityConfig is keyed by canonical principal authority, not by a
@@ -127,7 +127,7 @@ type DeliveryCommitment struct {
 	TargetID              string          `json:"target_id"`
 	FulfillmentID         string          `json:"fulfillment_id"`
 	Generation            uint64          `json:"generation"`
-	ContentType           ContentType     `json:"content_type"`
+	PredicateType         PredicateType   `json:"predicate_type"`
 	Evidence              []TypedEvidence `json:"evidence"`
 	AuthorityConfigDigest Digest          `json:"authority_config_digest"`
 }

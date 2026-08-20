@@ -11,6 +11,10 @@ var (
 	// permit the evidence's media type.
 	ErrUnknownMediaType = errors.New("unknown media type")
 
+	// ErrUnknownPredicateType is returned when an assertion purpose is
+	// not a known predicate, or is not the predicate a decoder requires.
+	ErrUnknownPredicateType = errors.New("unknown predicate type")
+
 	// ErrUnknownAuthority is returned when tentative (scheme, authority)
 	// does not match an authenticated AuthorityConfig.
 	ErrUnknownAuthority = errors.New("unknown authority")

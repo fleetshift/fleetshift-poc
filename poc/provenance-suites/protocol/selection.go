@@ -6,39 +6,47 @@ import (
 )
 
 // SelectAndVerify runs the common delivery-policy selection algorithm and
-// returns the first AuthenticatedEvidence that fully verifies.
+// returns the first AuthenticatedEvidence that fully verifies, together with
+// the inner assertion extracted from the statement's evidence.
 //
 // The sequence is:
 //  1. Parse the untrusted provenance type, media type, and type-specific hints.
 //  2. Locate the authenticated AuthorityConfig by tentative (scheme, authority).
-//  3. Locate one unambiguous delivery policy from delivery context.
+//  3. Locate one unambiguous delivery policy from delivery context. Predicate
+//     type comes from evidence hints, not from a couriered assertion.
 //  4. Filter that policy's ordered profile list to the evidence's type.
 //  5. Try matching profiles in authenticated policy order.
 //  6. Derive the canonical principal and tenant mapping, then re-evaluate.
-func SelectAndVerify(ctx context.Context, evidence TypedEvidence, support SupportMaterial, delivery DeliveryContext, trust TrustConfiguration, lookup TargetLookup) (AuthenticatedEvidence, error) {
+func SelectAndVerify(ctx context.Context, statement SignedStatement, delivery DeliveryContext, trust TrustConfiguration, lookup TargetLookup) (AuthenticatedEvidence, TypedAssertion, error) {
+	evidence := statement.Evidence
 	if evidence.ProvenanceType == "" || evidence.MediaType == "" {
-		return AuthenticatedEvidence{}, fmt.Errorf("%w: provenance type and media type are required", ErrMalformedEvidence)
+		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: provenance type and media type are required", ErrMalformedEvidence)
 	}
 	verifier, ok := lookup(evidence.ProvenanceType)
 	if !ok || verifier.ProvenanceType() != evidence.ProvenanceType {
-		return AuthenticatedEvidence{}, fmt.Errorf("%w: %s", ErrUnknownProvenanceType, evidence.ProvenanceType)
+		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: %s", ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
 
 	hints, err := verifier.ParseHints(evidence)
 	if err != nil {
-		return AuthenticatedEvidence{}, err
+		return AuthenticatedEvidence{}, TypedAssertion{}, err
 	}
+	if hints.PredicateType == "" {
+		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: predicate type hint is required", ErrMalformedEvidence)
+	}
+	delivery.PredicateType = hints.PredicateType
+
 	authority, err := trust.Authority(PrincipalAuthority{Scheme: hints.Scheme, Authority: hints.Authority})
 	if err != nil {
-		return AuthenticatedEvidence{}, err
+		return AuthenticatedEvidence{}, TypedAssertion{}, err
 	}
 
 	policy, err := matchPolicy(authority, delivery)
 	if err != nil {
-		return AuthenticatedEvidence{}, err
+		return AuthenticatedEvidence{}, TypedAssertion{}, err
 	}
 	if err := checkProvenanceRequirement(policy); err != nil {
-		return AuthenticatedEvidence{}, err
+		return AuthenticatedEvidence{}, TypedAssertion{}, err
 	}
 
 	var last error
@@ -50,9 +58,8 @@ func SelectAndVerify(ctx context.Context, evidence TypedEvidence, support Suppor
 			last = fmt.Errorf("%w: policy profile is not in the authority's installed set", ErrUnknownProvenanceType)
 			continue
 		}
-		authenticated, err := verifier.Verify(ctx, VerifyRequest{
-			Evidence:        evidence,
-			Support:         support,
+		authenticated, assertion, err := verifier.Verify(ctx, VerifyRequest{
+			Statement:       statement,
 			ProfileConfig:   profile,
 			AuthorityConfig: authority,
 			DeliveryContext: delivery,
@@ -62,14 +69,14 @@ func SelectAndVerify(ctx context.Context, evidence TypedEvidence, support Suppor
 			continue
 		}
 		if err := reevaluate(policy, profile, delivery, hints, authority, authenticated); err != nil {
-			return AuthenticatedEvidence{}, err
+			return AuthenticatedEvidence{}, TypedAssertion{}, err
 		}
-		return authenticated, nil
+		return authenticated, assertion, nil
 	}
 	if last != nil {
-		return AuthenticatedEvidence{}, fmt.Errorf("%w: %w", ErrNoSuccessfulProfile, last)
+		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: %w", ErrNoSuccessfulProfile, last)
 	}
-	return AuthenticatedEvidence{}, fmt.Errorf("%w: no profile of type %s", ErrNoSuccessfulProfile, evidence.ProvenanceType)
+	return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: no profile of type %s", ErrNoSuccessfulProfile, evidence.ProvenanceType)
 }
 
 func matchPolicy(authority AuthorityConfig, delivery DeliveryContext) (DeliveryPolicy, error) {
@@ -81,11 +88,11 @@ func matchPolicy(authority AuthorityConfig, delivery DeliveryContext) (DeliveryP
 	}
 	switch len(matched) {
 	case 0:
-		return DeliveryPolicy{}, fmt.Errorf("%w: content type %s", ErrNoMatchingPolicy, delivery.ContentType)
+		return DeliveryPolicy{}, fmt.Errorf("%w: predicate type %s", ErrNoMatchingPolicy, delivery.PredicateType)
 	case 1:
 		return matched[0], nil
 	default:
-		return DeliveryPolicy{}, fmt.Errorf("%w: %d policies match content type %s", ErrAmbiguousPolicy, len(matched), delivery.ContentType)
+		return DeliveryPolicy{}, fmt.Errorf("%w: %d policies match predicate type %s", ErrAmbiguousPolicy, len(matched), delivery.PredicateType)
 	}
 }
 
@@ -124,11 +131,14 @@ func reevaluate(policy DeliveryPolicy, selected ProfileConfig, delivery Delivery
 	if authenticated.ProvenanceType != selected.ProvenanceType {
 		return fmt.Errorf("%w: authenticated provenance type %s, selected %s", ErrPolicyReevaluation, authenticated.ProvenanceType, selected.ProvenanceType)
 	}
+	if hints.PredicateType != authenticated.PredicateType {
+		return fmt.Errorf("%w: authenticated predicate type %s, hint %s", ErrPolicyReevaluation, authenticated.PredicateType, hints.PredicateType)
+	}
 	if !policy.Match.Matches(DeliveryContext{
-		ContentType:       authenticated.ContentType,
+		PredicateType:     authenticated.PredicateType,
 		RootAuthorization: delivery.RootAuthorization,
 	}) {
-		return fmt.Errorf("%w: authenticated content type %s", ErrPolicyReevaluation, authenticated.ContentType)
+		return fmt.Errorf("%w: authenticated predicate type %s", ErrPolicyReevaluation, authenticated.PredicateType)
 	}
 	if authenticated.Principal.Scheme != hints.Scheme || authenticated.Principal.Authority != hints.Authority {
 		return fmt.Errorf("%w: authenticated authority does not match tentative hints", ErrPolicyReevaluation)

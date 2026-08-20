@@ -60,10 +60,7 @@ func (m *Manager) AssembleSupportMaterial(_ context.Context, evidence protocol.T
 	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
 		return protocol.SupportMaterial{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
-	return protocol.SupportMaterial{
-		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
-		MediaType:      evidence.MediaType,
-	}, nil
+	return protocol.SupportMaterial{MediaType: evidence.MediaType}, nil
 }
 
 // CommitEnrollment is the typed lifecycle operation that records the
@@ -114,7 +111,6 @@ func (m *Manager) Evidence(identity protocol.Digest) (protocol.TypedEvidence, bo
 }
 
 func cloneEvidence(in protocol.TypedEvidence) protocol.TypedEvidence {
-	out := in
-	out.Bytes = append([]byte(nil), in.Bytes...)
-	return out
+	in.Encoded = in.Encoded.Clone()
+	return in
 }

@@ -17,8 +17,8 @@ func TestVerifyRejectsNonEmptyProfileParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	_, err = target.Verify(context.Background(), protocol.VerifyRequest{
-		Evidence:        evidence,
+	_, _, err = target.Verify(context.Background(), protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   protocol.ProfileConfig{ProvenanceType: protocol.ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"fulcio":"no"}`)},
 		AuthorityConfig: testAuthority(),
 		DeliveryContext: testDeliveryContext(),
@@ -38,8 +38,8 @@ func TestVerifyRejectsAuthorityConfigForADifferentPrincipalAuthority(t *testing.
 	}
 	authority := testAuthority()
 	authority.PrincipalAuthority.Authority = "https://other.example.test"
-	_, err = target.Verify(context.Background(), protocol.VerifyRequest{
-		Evidence:        evidence,
+	_, _, err = target.Verify(context.Background(), protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: authority,
 		DeliveryContext: testDeliveryContext(),
@@ -80,6 +80,9 @@ func TestCreateEvidenceCarriesUserReferenceNotPublicKey(t *testing.T) {
 	if len(body.Signature) == 0 {
 		t.Fatal("delivery evidence has no signature")
 	}
+	if body.Assertion.PredicateType != protocol.PredicateTypeDeploymentV1 || len(body.Assertion.Bytes) == 0 {
+		t.Fatal("delivery evidence did not embed the inner assertion")
+	}
 }
 
 func TestEnrollmentSharesPublicKeyAndVerifierStoresMapping(t *testing.T) {
@@ -116,13 +119,14 @@ func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
 
 	attacker := newTestClient(t)
 	support := protocol.SupportMaterial{
-		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
-		MediaType:      MediaTypeEnrollment,
-		Bytes:          attacker.PublicKey(),
+		MediaType: MediaTypeEnrollment,
+		Bytes:     attacker.PublicKey(),
 	}
-	authenticated, err := target.Verify(context.Background(), protocol.VerifyRequest{
-		Evidence:        evidence,
-		Support:         support,
+	authenticated, assertion, err := target.Verify(context.Background(), protocol.VerifyRequest{
+		Statement: protocol.SignedStatement{
+			Evidence: evidence,
+			Support:  support,
+		},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
 		DeliveryContext: testDeliveryContext(),
@@ -136,6 +140,9 @@ func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
 	if authenticated.MappedFleetShiftTenant != "tenant-acme" {
 		t.Fatalf("tenant = %q, want tenant-acme", authenticated.MappedFleetShiftTenant)
 	}
+	if assertion.PredicateType != protocol.PredicateTypeDeploymentV1 {
+		t.Fatalf("emitted predicate = %s, want %s", assertion.PredicateType, protocol.PredicateTypeDeploymentV1)
+	}
 }
 
 func TestVerifyFailsWithoutEnrollment(t *testing.T) {
@@ -144,8 +151,8 @@ func TestVerifyFailsWithoutEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	_, err = NewTarget().Verify(context.Background(), protocol.VerifyRequest{
-		Evidence:        evidence,
+	_, _, err = NewTarget().Verify(context.Background(), protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
 		DeliveryContext: testDeliveryContext(),
@@ -165,8 +172,8 @@ func TestVerifyFailsWhenSignatureDoesNotMatchRetainedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	_, err = target.Verify(context.Background(), protocol.VerifyRequest{
-		Evidence:        evidence,
+	_, _, err = target.Verify(context.Background(), protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
 		DeliveryContext: testDeliveryContext(),
@@ -233,8 +240,10 @@ func TestAcceptEnrollmentRejectsKeySubstitutionForEstablishedPrincipal(t *testin
 func TestParseHintsFailClosedOnUnknownMediaType(t *testing.T) {
 	_, err := NewTarget().ParseHints(protocol.TypedEvidence{
 		ProvenanceType: protocol.ProvenanceTypeDirectKeyV1,
-		MediaType:      "application/unknown",
-		Bytes:          []byte(`{}`),
+		Encoded: protocol.Encoded{
+			MediaType: "application/unknown",
+			Bytes:     []byte(`{}`),
+		},
 	})
 	if !errors.Is(err, protocol.ErrUnknownMediaType) {
 		t.Fatalf("error = %v, want ErrUnknownMediaType", err)
@@ -280,6 +289,69 @@ func TestManagerStoresImmutableEvidenceAndEmptySupport(t *testing.T) {
 	}
 }
 
+func TestDecodeAssertionThenDecodeDeliveryScope(t *testing.T) {
+	client := newTestClient(t)
+	want := testAssertion(t)
+	evidence, err := client.CreateEvidence(context.Background(), want)
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	got, err := NewManager().DecodeAssertion(evidence)
+	if err != nil {
+		t.Fatalf("DecodeAssertion: %v", err)
+	}
+	if got.PredicateType != want.PredicateType {
+		t.Fatalf("predicate = %s, want %s", got.PredicateType, want.PredicateType)
+	}
+	if string(got.Bytes) != string(want.Bytes) {
+		t.Fatalf("assertion bytes = %s, want %s", got.Bytes, want.Bytes)
+	}
+	scope, err := protocol.DecodeDeliveryScope(got)
+	if err != nil {
+		t.Fatalf("DecodeDeliveryScope: %v", err)
+	}
+	if scope.TenantID != "tenant-acme" || scope.TargetID != "target-east" {
+		t.Fatalf("scope = %+v", scope)
+	}
+}
+
+func TestDecodeAssertionDoesNotAuthenticate(t *testing.T) {
+	client := newTestClient(t)
+	manager := NewManager()
+	enrollment, err := client.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	if err := manager.CommitEnrollment(context.Background(), enrollment); err != nil {
+		t.Fatalf("CommitEnrollment: %v", err)
+	}
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	var body SignatureBody
+	if err := json.Unmarshal(evidence.Bytes, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	body.Assertion.Bytes = []byte(`{"tenant_id":"tenant-other"}`)
+	raw, err := encodeJSON(body)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	evidence.Bytes = raw
+
+	got, err := manager.DecodeAssertion(evidence)
+	if err != nil {
+		t.Fatalf("DecodeAssertion: %v", err)
+	}
+	if string(got.Bytes) != string(body.Assertion.Bytes) {
+		t.Fatal("DecodeAssertion did not return the untrusted inner statement")
+	}
+	if _, err := manager.CheckDelivery(evidence); !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("CheckDelivery error = %v, want ErrVerificationFailed", err)
+	}
+}
+
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
 	client, err := NewClient(protocol.Principal{
@@ -306,13 +378,18 @@ func mustEnroll(t *testing.T, target *Target, client *Client) {
 
 func testAssertion(t *testing.T) protocol.TypedAssertion {
 	t.Helper()
-	assertion, err := protocol.DeliveryAuthorization{
-		TenantID:      "tenant-acme",
-		TargetID:      "target-east",
-		FulfillmentID: "fulfillment-1",
-		Generation:    1,
-		Action:        protocol.ActionPut,
-		Payload:       []byte(`{"replicas":3}`),
+	assertion, err := protocol.DeploymentAuthorization{
+		DeliveryScope: protocol.DeliveryScope{
+			TenantID:      "tenant-acme",
+			TargetID:      "target-east",
+			FulfillmentID: "fulfillment-1",
+			Generation:    1,
+			Action:        protocol.ActionPut,
+		},
+		Manifests: []protocol.TypedManifest{{
+			MediaType: "application/vnd.example.replicas+json",
+			Bytes:     []byte(`{"replicas":3}`),
+		}},
 	}.Assertion()
 	if err != nil {
 		t.Fatalf("assertion: %v", err)
@@ -335,7 +412,7 @@ func testAuthority() protocol.AuthorityConfig {
 		ProvenanceProfiles: []protocol.ProfileConfig{profile},
 		DeliveryPolicies: []protocol.DeliveryPolicy{{
 			Match: protocol.PolicyMatch{
-				ContentType:       protocol.ContentTypeDeliveryAuthorizationV1,
+				PredicateType:     protocol.PredicateTypeDeploymentV1,
 				RootAuthorization: true,
 			},
 			LiveCredential: protocol.RequirementNone,
@@ -348,7 +425,7 @@ func testAuthority() protocol.AuthorityConfig {
 func testDeliveryContext() protocol.DeliveryContext {
 	return protocol.DeliveryContext{
 		ClaimedTenant:     "tenant-acme",
-		ContentType:       protocol.ContentTypeDeliveryAuthorizationV1,
+		PredicateType:     protocol.PredicateTypeDeploymentV1,
 		RootAuthorization: true,
 	}
 }

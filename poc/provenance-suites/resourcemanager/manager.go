@@ -6,7 +6,6 @@ package resourcemanager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -37,13 +36,15 @@ type AuthorizationRequest struct {
 // Authorizer is the platform permission hook.
 type Authorizer func(AuthorizationRequest) error
 
-// DeliveryPackage is the couriered mutation a target verifies. Support
-// material is replaceable and untrusted until the selected profile checks it.
+// DeliveryPackage is the couriered mutation a target verifies. Root and
+// supporting items are the same kind of object: one independently
+// authenticated assertion plus replaceable support for that evidence.
+// The inner assertion is extracted from each statement's evidence by the
+// selected profile.
 type DeliveryPackage struct {
 	Commitment protocol.DeliveryCommitment
-	Evidence   protocol.TypedEvidence
-	Support    protocol.SupportMaterial
-	Assertion  protocol.TypedAssertion
+	Root       protocol.SignedStatement
+	Supporting []protocol.SignedStatement
 }
 
 // DeliveryAgent is the manager-side view of a target. A nil error is the
@@ -71,7 +72,6 @@ type Manager struct {
 	authorizer Authorizer
 	profile    *directkey.Manager
 	log        []protocol.DeliveryCommitment
-	assertions map[uint64]protocol.TypedAssertion
 	agents     map[string]*agentRoute
 	enrollers  []DirectKeyEnroller
 }
@@ -85,7 +85,6 @@ func New(tenantID protocol.TenantID, authorizer Authorizer) *Manager {
 		tenantID:   tenantID,
 		authorizer: authorizer,
 		profile:    directkey.NewManager(),
-		assertions: make(map[uint64]protocol.TypedAssertion),
 		agents:     make(map[string]*agentRoute),
 	}
 }
@@ -135,42 +134,63 @@ func (m *Manager) SubmitDirectKeyEnrollment(ctx context.Context, caller protocol
 }
 
 // SubmitDelivery authorizes the caller, stores evidence, appends a log
-// commitment, and pushes the package to the named target.
-func (m *Manager) SubmitDelivery(ctx context.Context, caller protocol.Principal, evidence protocol.TypedEvidence, assertion protocol.TypedAssertion) (protocol.DeliveryCommitment, error) {
-	authorization, err := decodeAuthorization(assertion)
+// commitment, and pushes the package to the named target. Optional
+// supporting evidence is couriered with the root and is independently
+// authenticated. Routing identity comes from DecodeAssertion then
+// DecodeDeliveryScope; the RM does not parse evidence bytes itself.
+func (m *Manager) SubmitDelivery(ctx context.Context, caller protocol.Principal, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (protocol.DeliveryCommitment, error) {
+	courier, err := m.courier(evidence.ProvenanceType)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	if authorization.TenantID != m.tenantID {
+	assertion, err := courier.DecodeAssertion(evidence)
+	if err != nil {
+		return protocol.DeliveryCommitment{}, err
+	}
+	scope, err := protocol.DecodeDeliveryScope(assertion)
+	if err != nil {
+		return protocol.DeliveryCommitment{}, err
+	}
+	if scope.TenantID != m.tenantID {
 		return protocol.DeliveryCommitment{}, fmt.Errorf("%w: delivery tenant mismatch", ErrUnauthorized)
 	}
-	if err := m.authorize(caller, ActionDeliver, authorization.TargetID); err != nil {
+	if err := m.authorize(caller, ActionDeliver, scope.TargetID); err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	hints, err := directkey.ParseHints(evidence)
+	hints, err := courier.CheckDelivery(evidence)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	if caller.Scheme != hints.Scheme || caller.Authority != hints.Authority || caller.Subject != hints.Subject {
+	if !callerMatches(caller, hints) {
 		return protocol.DeliveryCommitment{}, fmt.Errorf("%w: delivery principal does not match caller", ErrUnauthorized)
 	}
-	if err := m.profile.CheckDelivery(evidence, assertion); err != nil {
-		return protocol.DeliveryCommitment{}, err
+	for _, item := range supporting {
+		itemCourier, err := m.courier(item.ProvenanceType)
+		if err != nil {
+			return protocol.DeliveryCommitment{}, err
+		}
+		if _, err := itemCourier.CheckDelivery(item); err != nil {
+			return protocol.DeliveryCommitment{}, err
+		}
 	}
 	if err := m.store(ctx, evidence); err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	support, err := m.assemble(ctx, evidence)
+	for _, item := range supporting {
+		if err := m.store(ctx, item); err != nil {
+			return protocol.DeliveryCommitment{}, err
+		}
+	}
+	commitment, err := m.appendCommitment(scope, assertion.PredicateType, evidence, supporting)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	commitment, err := m.appendCommitment(authorization, evidence, assertion)
+	pkg, err := m.deliveryPackage(ctx, commitment, evidence, supporting)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	pkg := DeliveryPackage{Commitment: commitment, Evidence: evidence, Support: support, Assertion: assertion}
 	if err := m.pushDelivery(pkg); err != nil {
-		return commitment, fmt.Errorf("push delivery to target %q: %w", authorization.TargetID, err)
+		return commitment, fmt.Errorf("push delivery to target %q: %w", scope.TargetID, err)
 	}
 	return commitment, nil
 }
@@ -187,26 +207,19 @@ func (m *Manager) RetryDelivery(ctx context.Context, index uint64) error {
 	commitment := m.log[index]
 	m.mu.Unlock()
 
-	evidence, ok := m.profile.Evidence(mustEvidenceIdentity(commitment))
-	if !ok {
+	if len(commitment.Evidence) == 0 {
 		return fmt.Errorf("committed evidence for index %d is missing", index)
 	}
-	m.mu.Lock()
-	assertion, ok := m.assertions[index]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("committed assertion for index %d is missing", index)
+	evidence := cloneEvidence(commitment.Evidence[0])
+	var supporting []protocol.TypedEvidence
+	for i := 1; i < len(commitment.Evidence); i++ {
+		supporting = append(supporting, cloneEvidence(commitment.Evidence[i]))
 	}
-	support, err := m.assemble(ctx, evidence)
+	pkg, err := m.deliveryPackage(ctx, commitment, evidence, supporting)
 	if err != nil {
 		return err
 	}
-	return m.pushDelivery(DeliveryPackage{
-		Commitment: commitment,
-		Evidence:   evidence,
-		Support:    support,
-		Assertion:  assertion,
-	})
+	return m.pushDelivery(pkg)
 }
 
 func (m *Manager) authorize(caller protocol.Principal, action, targetID string) error {
@@ -221,23 +234,43 @@ func (m *Manager) authorize(caller protocol.Principal, action, targetID string) 
 	return nil
 }
 
-func (m *Manager) appendCommitment(authorization protocol.DeliveryAuthorization, evidence protocol.TypedEvidence, assertion protocol.TypedAssertion) (protocol.DeliveryCommitment, error) {
+func (m *Manager) appendCommitment(scope protocol.DeliveryScope, predicateType protocol.PredicateType, evidence protocol.TypedEvidence, supporting []protocol.TypedEvidence) (protocol.DeliveryCommitment, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	items := []protocol.TypedEvidence{cloneEvidence(evidence)}
+	for _, item := range supporting {
+		items = append(items, cloneEvidence(item))
+	}
 	commitment := protocol.DeliveryCommitment{
 		Index:         uint64(len(m.log)),
-		TargetID:      authorization.TargetID,
-		FulfillmentID: authorization.FulfillmentID,
-		Generation:    authorization.Generation,
-		ContentType:   protocol.ContentTypeDeliveryAuthorizationV1,
-		Evidence:      []protocol.TypedEvidence{cloneEvidence(evidence)},
+		TargetID:      scope.TargetID,
+		FulfillmentID: scope.FulfillmentID,
+		Generation:    scope.Generation,
+		PredicateType: predicateType,
+		Evidence:      items,
 	}
 	m.log = append(m.log, commitment)
-	m.assertions[commitment.Index] = protocol.TypedAssertion{
-		ContentType: assertion.ContentType,
-		Bytes:       append([]byte(nil), assertion.Bytes...),
-	}
 	return commitment, nil
+}
+
+func (m *Manager) deliveryPackage(ctx context.Context, commitment protocol.DeliveryCommitment, evidence protocol.TypedEvidence, supporting []protocol.TypedEvidence) (DeliveryPackage, error) {
+	root, err := m.assembleStatement(ctx, evidence)
+	if err != nil {
+		return DeliveryPackage{}, err
+	}
+	out := make([]protocol.SignedStatement, 0, len(supporting))
+	for _, item := range supporting {
+		stmt, err := m.assembleStatement(ctx, item)
+		if err != nil {
+			return DeliveryPackage{}, err
+		}
+		out = append(out, stmt)
+	}
+	return DeliveryPackage{
+		Commitment: commitment,
+		Root:       root,
+		Supporting: out,
+	}, nil
 }
 
 func (m *Manager) pushEnrollment(evidence protocol.TypedEvidence) error {
@@ -293,23 +326,35 @@ func (c *CompromisedManager) CommitEnrollment(ctx context.Context, evidence prot
 
 // PushDelivery stores and routes a delivery without authorization or the
 // RM's own provenance check.
-func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol.TypedEvidence, assertion protocol.TypedAssertion) (protocol.DeliveryCommitment, error) {
-	authorization, err := decodeAuthorization(assertion)
+func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (protocol.DeliveryCommitment, error) {
+	courier, err := c.manager.courier(evidence.ProvenanceType)
+	if err != nil {
+		return protocol.DeliveryCommitment{}, err
+	}
+	assertion, err := courier.DecodeAssertion(evidence)
+	if err != nil {
+		return protocol.DeliveryCommitment{}, err
+	}
+	scope, err := protocol.DecodeDeliveryScope(assertion)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
 	if err := c.manager.store(ctx, evidence); err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	support, err := c.manager.assemble(ctx, evidence)
+	for _, item := range supporting {
+		if err := c.manager.store(ctx, item); err != nil {
+			return protocol.DeliveryCommitment{}, err
+		}
+	}
+	commitment, err := c.manager.appendCommitment(scope, assertion.PredicateType, evidence, supporting)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	commitment, err := c.manager.appendCommitment(authorization, evidence, assertion)
+	pkg, err := c.manager.deliveryPackage(ctx, commitment, evidence, supporting)
 	if err != nil {
 		return protocol.DeliveryCommitment{}, err
 	}
-	pkg := DeliveryPackage{Commitment: commitment, Evidence: evidence, Support: support, Assertion: assertion}
 	if err := c.manager.pushDelivery(pkg); err != nil {
 		return commitment, err
 	}
@@ -340,30 +385,26 @@ func (m *Manager) assemble(ctx context.Context, evidence protocol.TypedEvidence)
 	return courier.AssembleSupportMaterial(ctx, evidence)
 }
 
-func decodeAuthorization(assertion protocol.TypedAssertion) (protocol.DeliveryAuthorization, error) {
-	if assertion.ContentType != protocol.ContentTypeDeliveryAuthorizationV1 {
-		return protocol.DeliveryAuthorization{}, fmt.Errorf("unsupported assertion content type %s", assertion.ContentType)
+func (m *Manager) assembleStatement(ctx context.Context, evidence protocol.TypedEvidence) (protocol.SignedStatement, error) {
+	support, err := m.assemble(ctx, evidence)
+	if err != nil {
+		return protocol.SignedStatement{}, err
 	}
-	var authorization protocol.DeliveryAuthorization
-	if err := json.Unmarshal(assertion.Bytes, &authorization); err != nil {
-		return protocol.DeliveryAuthorization{}, fmt.Errorf("decode delivery authorization: %w", err)
-	}
-	return authorization, nil
+	return protocol.SignedStatement{
+		Evidence: cloneEvidence(evidence),
+		Support:  cloneSupport(support),
+	}, nil
 }
 
 func cloneEvidence(in protocol.TypedEvidence) protocol.TypedEvidence {
-	out := in
-	out.Bytes = append([]byte(nil), in.Bytes...)
-	return out
+	in.Encoded = in.Encoded.Clone()
+	return in
 }
 
-func mustEvidenceIdentity(commitment protocol.DeliveryCommitment) protocol.Digest {
-	if len(commitment.Evidence) == 0 {
-		return ""
-	}
-	identity, err := commitment.Evidence[0].Identity()
-	if err != nil {
-		return ""
-	}
-	return identity
+func cloneSupport(in protocol.SupportMaterial) protocol.SupportMaterial {
+	return protocol.SupportMaterial(protocol.Encoded(in).Clone())
+}
+
+func callerMatches(caller protocol.Principal, hints protocol.TentativeHints) bool {
+	return caller.Scheme == hints.Scheme && caller.Authority == hints.Authority && caller.Subject == hints.Subject
 }

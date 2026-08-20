@@ -30,11 +30,12 @@ type EnrollmentBody struct {
 
 // SignatureBody is the type-specific encoding of delivery evidence. The
 // public key is intentionally absent; the verifier uses its retained mapping.
+// Assertion is the inner statement, carried in the evidence the way a
+// Sigstore Bundle carries an in-toto statement.
 type SignatureBody struct {
-	Principal     protocol.Principal   `json:"principal"`
-	ContentType   protocol.ContentType `json:"content_type"`
-	ContentDigest protocol.Digest      `json:"content_digest"`
-	Signature     []byte               `json:"signature"`
+	Principal protocol.Principal       `json:"principal"`
+	Assertion protocol.TypedAssertion  `json:"assertion"`
+	Signature []byte                   `json:"signature"`
 }
 
 func encodeJSON(value any) ([]byte, error) {

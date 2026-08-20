@@ -37,69 +37,94 @@ func (t *Target) ParseHints(evidence protocol.TypedEvidence) (protocol.Tentative
 	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
 		return protocol.TentativeHints{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
-	principal, err := parsePrincipalHint(evidence)
-	if err != nil {
-		return protocol.TentativeHints{}, err
+	switch evidence.MediaType {
+	case MediaTypeEnrollment:
+		body, err := parseEnrollment(evidence)
+		if err != nil {
+			return protocol.TentativeHints{}, err
+		}
+		return principalHints(body.Principal, ""), nil
+	case MediaTypeSignature:
+		body, err := parseSignature(evidence)
+		if err != nil {
+			return protocol.TentativeHints{}, err
+		}
+		return principalHints(body.Principal, body.Assertion.PredicateType), nil
+	default:
+		return protocol.TentativeHints{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
 	}
+}
+
+func principalHints(principal protocol.Principal, predicate protocol.PredicateType) protocol.TentativeHints {
 	return protocol.TentativeHints{
 		Scheme:          principal.Scheme,
 		Authority:       principal.Authority,
 		TenantPartition: principal.TenantPartition,
 		Subject:         principal.Subject,
-	}, nil
+		PredicateType:   predicate,
+	}
 }
 
 // Verify implements protocol.TargetAPI. The verifying key is taken from
 // retained enrollment state, never from the delivery or from support material.
-func (t *Target) Verify(_ context.Context, req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, error) {
+func (t *Target) Verify(_ context.Context, req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
 	if req.ProfileConfig.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
-		return protocol.AuthenticatedEvidence{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, req.ProfileConfig.ProvenanceType)
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, req.ProfileConfig.ProvenanceType)
 	}
 	if len(req.ProfileConfig.Parameters) != 0 {
-		return protocol.AuthenticatedEvidence{}, fmt.Errorf("%w: direct-key/v1 has no profile parameters", protocol.ErrUnknownProvenanceType)
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: direct-key/v1 has no profile parameters", protocol.ErrUnknownProvenanceType)
 	}
-	if req.Evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
-		return protocol.AuthenticatedEvidence{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, req.Evidence.ProvenanceType)
+	evidence := req.Statement.Evidence
+	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
-	if req.Evidence.MediaType != MediaTypeSignature {
-		return protocol.AuthenticatedEvidence{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, req.Evidence.MediaType)
+	if evidence.MediaType != MediaTypeSignature {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
 	}
-	body, err := parseSignature(req.Evidence)
+	body, err := parseSignature(evidence)
 	if err != nil {
-		return protocol.AuthenticatedEvidence{}, err
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
 	}
 	if req.AuthorityConfig.PrincipalAuthority != body.Principal.PrincipalAuthority() {
-		return protocol.AuthenticatedEvidence{}, fmt.Errorf("%w: authority config does not match authenticated principal", protocol.ErrUnknownAuthority)
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: authority config does not match authenticated principal", protocol.ErrUnknownAuthority)
 	}
 	publicKey, ok := t.lookup(body.Principal)
 	if !ok {
-		return protocol.AuthenticatedEvidence{}, fmt.Errorf("%w: no retained public key for subject %q", protocol.ErrVerificationFailed, body.Principal.Subject)
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: no retained public key for subject %q", protocol.ErrVerificationFailed, body.Principal.Subject)
 	}
-	if err := verify(publicKey, purposeAssertion, signatureMaterial(body.Principal, body.ContentType, body.ContentDigest), body.Signature); err != nil {
-		return protocol.AuthenticatedEvidence{}, err
+	contentDigest, err := body.Assertion.Digest()
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	if err := verify(publicKey, purposeAssertion, signatureMaterial(body.Principal, body.Assertion.PredicateType, contentDigest), body.Signature); err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
 	}
 
 	mapped, err := req.AuthorityConfig.TenantMapping.Map(body.Principal.TenantPartition)
 	if err != nil {
-		return protocol.AuthenticatedEvidence{}, err
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
 	}
 	authorityDigest, err := req.AuthorityConfig.Digest()
 	if err != nil {
-		return protocol.AuthenticatedEvidence{}, err
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
 	}
 	profileDigest, err := req.ProfileConfig.Digest()
 	if err != nil {
-		return protocol.AuthenticatedEvidence{}, err
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	assertion := protocol.TypedAssertion{
+		PredicateType: body.Assertion.PredicateType,
+		Bytes:         append([]byte(nil), body.Assertion.Bytes...),
 	}
 	return protocol.AuthenticatedEvidence{
 		Principal:              body.Principal,
 		MappedFleetShiftTenant: mapped,
-		ContentType:            body.ContentType,
-		ContentDigest:          body.ContentDigest,
+		PredicateType:          assertion.PredicateType,
+		ContentDigest:          contentDigest,
 		ProvenanceType:         protocol.ProvenanceTypeDirectKeyV1,
 		AuthorityConfigDigest:  authorityDigest,
 		ProfileConfigDigest:    profileDigest,
-	}, nil
+	}, assertion, nil
 }
 
 // AcceptEnrollment is the typed lifecycle operation that stores the public
@@ -158,25 +183,6 @@ func (t *Target) lookup(principal protocol.Principal) ([]byte, bool) {
 	return append([]byte(nil), key...), true
 }
 
-func parsePrincipalHint(evidence protocol.TypedEvidence) (protocol.Principal, error) {
-	switch evidence.MediaType {
-	case MediaTypeEnrollment:
-		body, err := parseEnrollment(evidence)
-		if err != nil {
-			return protocol.Principal{}, err
-		}
-		return body.Principal, nil
-	case MediaTypeSignature:
-		body, err := parseSignature(evidence)
-		if err != nil {
-			return protocol.Principal{}, err
-		}
-		return body.Principal, nil
-	default:
-		return protocol.Principal{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
-	}
-}
-
 func parseEnrollment(evidence protocol.TypedEvidence) (EnrollmentBody, error) {
 	if evidence.MediaType != MediaTypeEnrollment {
 		return EnrollmentBody{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
@@ -209,11 +215,8 @@ func parseSignature(evidence protocol.TypedEvidence) (SignatureBody, error) {
 		return SignatureBody{}, err
 	}
 	body.Principal = principal
-	if body.ContentType == "" || body.ContentDigest == "" || len(body.Signature) == 0 {
+	if body.Assertion.PredicateType == "" || len(body.Assertion.Bytes) == 0 || len(body.Signature) == 0 {
 		return SignatureBody{}, fmt.Errorf("%w: signature body is missing required fields", protocol.ErrMalformedEvidence)
-	}
-	if _, err := protocol.DecodeDigest(body.ContentDigest); err != nil {
-		return SignatureBody{}, fmt.Errorf("%w: content digest: %v", protocol.ErrMalformedEvidence, err)
 	}
 	return body, nil
 }

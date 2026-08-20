@@ -5,8 +5,8 @@
 package deliveryagent
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -24,12 +24,28 @@ var (
 	// successful, locally retained delivery.
 	ErrAcknowledgementLost = errors.New("delivery acknowledgement was lost")
 	ErrDeliveryUnavailable = errors.New("delivery did not reach the agent")
+
+	// ErrFulfillmentRelationRequired is returned when a managed-resource
+	// authorization has no verified fulfillment relation.
+	ErrFulfillmentRelationRequired = errors.New("managed resource requires a verified fulfillment relation")
 )
 
 // Config provisions one delivery agent.
 type Config struct {
 	TenantID protocol.TenantID
 	TargetID string
+}
+
+// AppliedDelivery is the agent's retained view of an accepted delivery.
+type AppliedDelivery struct {
+	Scope         protocol.DeliveryScope
+	PredicateType protocol.PredicateType
+	Manifests     []protocol.TypedManifest
+}
+
+type appliedState struct {
+	view   AppliedDelivery
+	signed []byte
 }
 
 // Agent is the target role.
@@ -42,7 +58,7 @@ type Agent struct {
 	profile     *directkey.Target
 	checkpoint  protocol.Checkpoint
 
-	applied     map[string]protocol.DeliveryAuthorization
+	applied     map[string]appliedState
 	generations map[string]uint64
 
 	failBeforeAccepting     uint64
@@ -58,7 +74,7 @@ func New(config Config) (*Agent, error) {
 		config:      config,
 		profile:     directkey.NewTarget(),
 		checkpoint:  protocol.EmptyCheckpoint(),
-		applied:     make(map[string]protocol.DeliveryAuthorization),
+		applied:     make(map[string]appliedState),
 		generations: make(map[string]uint64),
 	}, nil
 }
@@ -80,7 +96,7 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 }
 
 // AcceptEnrollment is the typed direct-key lifecycle courier path. It is
-// not ordinary delivery-authorization content.
+// not ordinary delivery content.
 func (a *Agent) AcceptEnrollment(evidence protocol.TypedEvidence) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -99,7 +115,7 @@ func (a *Agent) AcceptEnrollment(evidence protocol.TypedEvidence) error {
 }
 
 // Deliver verifies provenance under matched policy and applies the
-// authenticated delivery authorization.
+// authenticated root authorization.
 func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -115,13 +131,11 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		return err
 	}
 
-	authenticated, err := protocol.SelectAndVerify(
+	authenticated, assertion, err := protocol.SelectAndVerify(
 		context.Background(),
-		pkg.Evidence,
-		pkg.Support,
+		pkg.Root,
 		protocol.DeliveryContext{
 			ClaimedTenant:     a.config.TenantID,
-			ContentType:       pkg.Assertion.ContentType,
 			RootAuthorization: true,
 		},
 		a.trust,
@@ -130,20 +144,18 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	if err != nil {
 		return err
 	}
-	if err := bindAssertion(pkg.Assertion, authenticated); err != nil {
-		return err
-	}
-	authorization, err := decodeAuthorization(pkg.Assertion)
+
+	view, err := a.decodeAndDeriveLocked(pkg, authenticated, assertion)
 	if err != nil {
 		return err
 	}
-	if authorization.TenantID != a.config.TenantID || authorization.TargetID != a.config.TargetID {
+	if view.Scope.TenantID != a.config.TenantID || view.Scope.TargetID != a.config.TargetID {
 		return fmt.Errorf("%w: tenant or target mismatch", protocol.ErrPolicyReevaluation)
 	}
 	if authenticated.MappedFleetShiftTenant != a.config.TenantID {
 		return fmt.Errorf("%w: mapped tenant %q, agent tenant %q", protocol.ErrTenantMismatch, authenticated.MappedFleetShiftTenant, a.config.TenantID)
 	}
-	if err := a.applyLocked(authorization); err != nil {
+	if err := a.applyLocked(view, append([]byte(nil), assertion.Bytes...)); err != nil {
 		return err
 	}
 	a.checkpoint.Size = pkg.Commitment.Index + 1
@@ -154,12 +166,15 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	return nil
 }
 
-// Applied returns the last accepted authorization for a fulfillment.
-func (a *Agent) Applied(fulfillmentID string) (protocol.DeliveryAuthorization, bool) {
+// Applied returns the last accepted delivery for a fulfillment.
+func (a *Agent) Applied(fulfillmentID string) (AppliedDelivery, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	authorization, ok := a.applied[fulfillmentID]
-	return authorization, ok
+	state, ok := a.applied[fulfillmentID]
+	if !ok {
+		return AppliedDelivery{}, false
+	}
+	return cloneApplied(state.view), true
 }
 
 // Checkpoint is the retained append-only log position.
@@ -208,65 +223,136 @@ func (a *Agent) acceptLogLocked(commitment protocol.DeliveryCommitment) error {
 	}
 }
 
-func (a *Agent) applyLocked(authorization protocol.DeliveryAuthorization) error {
-	if authorization.Action != protocol.ActionPut && authorization.Action != protocol.ActionRemove {
-		return fmt.Errorf("unsupported action %q", authorization.Action)
-	}
-	previous, exists := a.generations[authorization.FulfillmentID]
-	if exists {
-		if authorization.Generation < previous {
-			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, authorization.Generation, previous)
+func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) (AppliedDelivery, error) {
+	switch authenticated.PredicateType {
+	case protocol.PredicateTypeDeploymentV1:
+		authorization, err := protocol.DecodeDeploymentAuthorization(assertion)
+		if err != nil {
+			return AppliedDelivery{}, err
 		}
-		if authorization.Generation == previous {
-			applied := a.applied[authorization.FulfillmentID]
-			if sameAuthorization(applied, authorization) {
+		for i, manifest := range authorization.Manifests {
+			if manifest.MediaType == "" {
+				return AppliedDelivery{}, fmt.Errorf("%w: manifest %d media type is required", protocol.ErrMalformedEvidence, i)
+			}
+		}
+		return AppliedDelivery{
+			Scope:         authorization.DeliveryScope,
+			PredicateType: protocol.PredicateTypeDeploymentV1,
+			Manifests:     cloneManifests(authorization.Manifests),
+		}, nil
+	case protocol.PredicateTypeManagedResourceV1:
+		authorization, err := protocol.DecodeManagedResourceAuthorization(assertion)
+		if err != nil {
+			return AppliedDelivery{}, err
+		}
+		relation, err := a.verifyFulfillmentRelationLocked(pkg, authorization)
+		if err != nil {
+			return AppliedDelivery{}, err
+		}
+		// RegisteredSelfTarget: the named delivery target is the addon
+		// itself. The caller already required DeliveryScope.TargetID to
+		// equal this agent's ID before apply.
+		return AppliedDelivery{
+			Scope:         authorization.DeliveryScope,
+			PredicateType: protocol.PredicateTypeManagedResourceV1,
+			Manifests: []protocol.TypedManifest{{
+				MediaType: relation.MediaType,
+				Bytes:     append([]byte(nil), authorization.Spec...),
+			}},
+		}, nil
+	default:
+		return AppliedDelivery{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, authenticated.PredicateType)
+	}
+}
+
+func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPackage, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
+	var found *protocol.SignedStatement
+	for i := range pkg.Supporting {
+		item := &pkg.Supporting[i]
+		hints, err := a.profile.ParseHints(item.Evidence)
+		if err != nil {
+			return protocol.FulfillmentRelation{}, err
+		}
+		if hints.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
+			continue
+		}
+		if found != nil {
+			return protocol.FulfillmentRelation{}, fmt.Errorf("%w: multiple fulfillment relations", protocol.ErrAmbiguousPolicy)
+		}
+		found = item
+	}
+	if found == nil {
+		return protocol.FulfillmentRelation{}, ErrFulfillmentRelationRequired
+	}
+
+	authenticated, assertion, err := protocol.SelectAndVerify(
+		context.Background(),
+		*found,
+		protocol.DeliveryContext{
+			ClaimedTenant:     a.config.TenantID,
+			RootAuthorization: false,
+		},
+		a.trust,
+		a.lookupLocked,
+	)
+	if err != nil {
+		return protocol.FulfillmentRelation{}, err
+	}
+	if authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
+		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, authenticated.PredicateType)
+	}
+	relation, err := protocol.DecodeFulfillmentRelation(assertion)
+	if err != nil {
+		return protocol.FulfillmentRelation{}, err
+	}
+	if relation.MediaType == "" {
+		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: fulfillment relation media type is required", protocol.ErrMalformedEvidence)
+	}
+	if relation.ResourceType != authorization.ResourceType {
+		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: fulfillment relation resource type %q, authorization %q", protocol.ErrPolicyReevaluation, relation.ResourceType, authorization.ResourceType)
+	}
+	return relation, nil
+}
+
+func (a *Agent) applyLocked(view AppliedDelivery, signed []byte) error {
+	if view.Scope.Action != protocol.ActionPut && view.Scope.Action != protocol.ActionRemove {
+		return fmt.Errorf("unsupported action %q", view.Scope.Action)
+	}
+	previous, exists := a.generations[view.Scope.FulfillmentID]
+	if exists {
+		if view.Scope.Generation < previous {
+			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, view.Scope.Generation, previous)
+		}
+		if view.Scope.Generation == previous {
+			applied := a.applied[view.Scope.FulfillmentID]
+			if bytes.Equal(applied.signed, signed) {
 				return nil
 			}
-			return fmt.Errorf("%w: generation %d has different signed content", ErrGeneration, authorization.Generation)
+			return fmt.Errorf("%w: generation %d has different signed content", ErrGeneration, view.Scope.Generation)
 		}
 	}
-	a.generations[authorization.FulfillmentID] = authorization.Generation
-	if authorization.Action == protocol.ActionRemove {
-		delete(a.applied, authorization.FulfillmentID)
+	a.generations[view.Scope.FulfillmentID] = view.Scope.Generation
+	if view.Scope.Action == protocol.ActionRemove {
+		delete(a.applied, view.Scope.FulfillmentID)
 		return nil
 	}
-	a.applied[authorization.FulfillmentID] = authorization
+	a.applied[view.Scope.FulfillmentID] = appliedState{view: cloneApplied(view), signed: signed}
 	return nil
 }
 
-func bindAssertion(assertion protocol.TypedAssertion, authenticated protocol.AuthenticatedEvidence) error {
-	if assertion.ContentType != authenticated.ContentType {
-		return fmt.Errorf("%w: assertion content type %s, authenticated %s", protocol.ErrPolicyReevaluation, assertion.ContentType, authenticated.ContentType)
-	}
-	digest, err := assertion.Digest()
-	if err != nil {
-		return err
-	}
-	if digest != authenticated.ContentDigest {
-		return fmt.Errorf("%w: supplied assertion does not match authenticated content digest", protocol.ErrVerificationFailed)
-	}
-	return nil
+func cloneApplied(in AppliedDelivery) AppliedDelivery {
+	out := in
+	out.Manifests = cloneManifests(in.Manifests)
+	return out
 }
 
-func decodeAuthorization(assertion protocol.TypedAssertion) (protocol.DeliveryAuthorization, error) {
-	if assertion.ContentType != protocol.ContentTypeDeliveryAuthorizationV1 {
-		return protocol.DeliveryAuthorization{}, fmt.Errorf("unsupported assertion content type %s", assertion.ContentType)
+func cloneManifests(in []protocol.TypedManifest) []protocol.TypedManifest {
+	if len(in) == 0 {
+		return nil
 	}
-	var authorization protocol.DeliveryAuthorization
-	if err := json.Unmarshal(assertion.Bytes, &authorization); err != nil {
-		return protocol.DeliveryAuthorization{}, fmt.Errorf("decode delivery authorization: %w", err)
+	out := make([]protocol.TypedManifest, len(in))
+	for i, item := range in {
+		out[i] = protocol.TypedManifest(protocol.Encoded(item).Clone())
 	}
-	return authorization, nil
-}
-
-func sameAuthorization(a, b protocol.DeliveryAuthorization) bool {
-	left, err := protocol.MarshalCanonical(a)
-	if err != nil {
-		return false
-	}
-	right, err := protocol.MarshalCanonical(b)
-	if err != nil {
-		return false
-	}
-	return string(left) == string(right)
+	return out
 }

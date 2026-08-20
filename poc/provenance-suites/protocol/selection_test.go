@@ -26,7 +26,7 @@ func TestSelectAndVerifyAcceptsFirstMatchingProfile(t *testing.T) {
 		}, true
 	}
 
-	got, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	got, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -35,6 +35,35 @@ func TestSelectAndVerifyAcceptsFirstMatchingProfile(t *testing.T) {
 	}
 	if len(tried) != 1 || tried[0] != ProvenanceTypeDirectKeyV1 {
 		t.Fatalf("tried profiles = %v, want [%s]", tried, ProvenanceTypeDirectKeyV1)
+	}
+}
+
+func TestSelectAndVerifyPassesTheWholeStatementToVerify(t *testing.T) {
+	trust, evidence, delivery := selectionFixture(t)
+	support := SupportMaterial{
+		MediaType: "application/test+json",
+		Bytes:     []byte("helpers"),
+	}
+	var got SignedStatement
+	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
+		return &stubTarget{
+			pt: pt,
+			verify: func(req VerifyRequest) (AuthenticatedEvidence, error) {
+				got = req.Statement
+				return successfulEvidence(t, trust, evidence, delivery), nil
+			},
+		}, true
+	}
+
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence, Support: support}, delivery, trust, lookup)
+	if err != nil {
+		t.Fatalf("SelectAndVerify: %v", err)
+	}
+	if string(got.Evidence.Bytes) != string(evidence.Bytes) {
+		t.Fatal("Verify did not receive the statement evidence")
+	}
+	if string(got.Support.Bytes) != "helpers" {
+		t.Fatalf("Verify support = %q, want helpers", got.Support.Bytes)
 	}
 }
 
@@ -47,7 +76,7 @@ func TestSelectAndVerifyRejectsPolicyProfileThatIsNotInstalled(t *testing.T) {
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{pt: pt}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrUnknownProvenanceType) && !errors.Is(err, ErrNoSuccessfulProfile) {
 		t.Fatalf("error = %v, want uninstalled profile to fail closed", err)
 	}
@@ -56,7 +85,7 @@ func TestSelectAndVerifyRejectsPolicyProfileThatIsNotInstalled(t *testing.T) {
 func TestSelectAndVerifyRejectsUnknownProvenanceType(t *testing.T) {
 	trust, evidence, delivery := selectionFixture(t)
 	evidence.ProvenanceType = "unknown/v1"
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, func(ProvenanceType) (TargetAPI, bool) {
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, func(ProvenanceType) (TargetAPI, bool) {
 		return nil, false
 	})
 	if !errors.Is(err, ErrUnknownProvenanceType) {
@@ -70,25 +99,33 @@ func TestSelectAndVerifyRejectsUnknownAuthority(t *testing.T) {
 		return &stubTarget{
 			pt: evidence.ProvenanceType,
 			hints: TentativeHints{
-				Scheme:    IdentitySchemeOIDCSubV1,
-				Authority: "https://unknown.example.test",
-				Subject:   "alice",
+				Scheme:        IdentitySchemeOIDCSubV1,
+				Authority:     "https://unknown.example.test",
+				Subject:       "alice",
+				PredicateType: PredicateTypeDeploymentV1,
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrUnknownAuthority) {
 		t.Fatalf("error = %v, want ErrUnknownAuthority", err)
 	}
 }
 
-func TestSelectAndVerifyRejectsContentTypeOutsideMatchedPolicy(t *testing.T) {
+func TestSelectAndVerifyRejectsPredicateTypeOutsideMatchedPolicy(t *testing.T) {
 	trust, evidence, delivery := selectionFixture(t)
-	delivery.ContentType = ContentTypeTrustConfigUpdateV1
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
-		return &stubTarget{pt: pt}, true
+		return &stubTarget{
+			pt: pt,
+			hints: TentativeHints{
+				Scheme:        IdentitySchemeOIDCSubV1,
+				Authority:     "https://issuer.example.test",
+				Subject:       "alice",
+				PredicateType: PredicateTypeManagedResourceV1,
+			},
+		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrNoMatchingPolicy) {
 		t.Fatalf("error = %v, want ErrNoMatchingPolicy", err)
 	}
@@ -100,7 +137,7 @@ func TestSelectAndVerifyRejectsAmbiguousPolicies(t *testing.T) {
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{pt: pt}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrAmbiguousPolicy) {
 		t.Fatalf("error = %v, want ErrAmbiguousPolicy", err)
 	}
@@ -125,7 +162,7 @@ func TestSelectAndVerifyDoesNotFallBackAcrossProvenanceTypes(t *testing.T) {
 			},
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	got, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -157,7 +194,7 @@ func TestSelectAndVerifyBindsProfileDigestToTheProfileThatVerified(t *testing.T)
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrPolicyReevaluation) {
 		t.Fatalf("error = %v, want ErrPolicyReevaluation", err)
 	}
@@ -189,7 +226,7 @@ func TestSelectAndVerifyTriesNextProfileOfSameTypeAfterFailure(t *testing.T) {
 			},
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	got, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -216,7 +253,7 @@ func TestSelectAndVerifyRejectsClaimedTenantMismatch(t *testing.T) {
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrTenantMismatch) {
 		t.Fatalf("error = %v, want ErrTenantMismatch", err)
 	}
@@ -228,16 +265,17 @@ func TestSelectAndVerifyRejectsHintSubjectMismatch(t *testing.T) {
 		return &stubTarget{
 			pt: pt,
 			hints: TentativeHints{
-				Scheme:    IdentitySchemeOIDCSubV1,
-				Authority: "https://issuer.example.test",
-				Subject:   "mallory",
+				Scheme:        IdentitySchemeOIDCSubV1,
+				Authority:     "https://issuer.example.test",
+				Subject:       "mallory",
+				PredicateType: PredicateTypeDeploymentV1,
 			},
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
 				return successfulEvidence(t, trust, evidence, delivery), nil
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), evidence, SupportMaterial{}, delivery, trust, lookup)
+	_, _, err := SelectAndVerify(context.Background(), SignedStatement{Evidence: evidence}, delivery, trust, lookup)
 	if !errors.Is(err, ErrPolicyReevaluation) {
 		t.Fatalf("error = %v, want ErrPolicyReevaluation", err)
 	}
@@ -256,17 +294,22 @@ func (s *stubTarget) ParseHints(TypedEvidence) (TentativeHints, error) {
 		return s.hints, nil
 	}
 	return TentativeHints{
-		Scheme:    IdentitySchemeOIDCSubV1,
-		Authority: "https://issuer.example.test",
-		Subject:   "alice",
+		Scheme:        IdentitySchemeOIDCSubV1,
+		Authority:     "https://issuer.example.test",
+		Subject:       "alice",
+		PredicateType: PredicateTypeDeploymentV1,
 	}, nil
 }
 
-func (s *stubTarget) Verify(_ context.Context, req VerifyRequest) (AuthenticatedEvidence, error) {
+func (s *stubTarget) Verify(_ context.Context, req VerifyRequest) (AuthenticatedEvidence, TypedAssertion, error) {
 	if s.verify != nil {
-		return s.verify(req)
+		auth, err := s.verify(req)
+		if err != nil {
+			return AuthenticatedEvidence{}, TypedAssertion{}, err
+		}
+		return auth, TypedAssertion{PredicateType: auth.PredicateType, Bytes: []byte(`{"ok":true}`)}, nil
 	}
-	return AuthenticatedEvidence{}, ErrVerificationFailed
+	return AuthenticatedEvidence{}, TypedAssertion{}, ErrVerificationFailed
 }
 
 func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, DeliveryContext) {
@@ -281,7 +324,7 @@ func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, Delivery
 		ProvenanceProfiles: []ProfileConfig{profile},
 		DeliveryPolicies: []DeliveryPolicy{{
 			Match: PolicyMatch{
-				ContentType:       ContentTypeDeliveryAuthorizationV1,
+				PredicateType:     PredicateTypeDeploymentV1,
 				RootAuthorization: true,
 			},
 			LiveCredential: RequirementNone,
@@ -292,12 +335,14 @@ func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, Delivery
 	trust := TrustConfiguration{AuthorityRegistry: []AuthorityConfig{authority}}
 	evidence := TypedEvidence{
 		ProvenanceType: ProvenanceTypeDirectKeyV1,
-		MediaType:      "application/test+json",
-		Bytes:          []byte(`{"hint":"alice"}`),
+		Encoded: Encoded{
+			MediaType: "application/test+json",
+			Bytes:     []byte(`{"hint":"alice"}`),
+		},
 	}
 	delivery := DeliveryContext{
 		ClaimedTenant:     "tenant-acme",
-		ContentType:       ContentTypeDeliveryAuthorizationV1,
+		PredicateType:     PredicateTypeDeploymentV1,
 		RootAuthorization: true,
 	}
 	return trust, evidence, delivery
@@ -327,7 +372,7 @@ func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEv
 	if !foundProfile {
 		t.Fatalf("fixture policy has no profile of type %s", evidence.ProvenanceType)
 	}
-	assertion := TypedAssertion{ContentType: delivery.ContentType, Bytes: []byte(`{"ok":true}`)}
+	assertion := TypedAssertion{PredicateType: delivery.PredicateType, Bytes: []byte(`{"ok":true}`)}
 	contentDigest, err := assertion.Digest()
 	if err != nil {
 		t.Fatalf("content digest: %v", err)
@@ -339,7 +384,7 @@ func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEv
 			Subject:   "alice",
 		},
 		MappedFleetShiftTenant: "tenant-acme",
-		ContentType:            delivery.ContentType,
+		PredicateType:          delivery.PredicateType,
 		ContentDigest:          contentDigest,
 		ProvenanceType:         evidence.ProvenanceType,
 		AuthorityConfigDigest:  authorityDigest,
