@@ -120,35 +120,6 @@ func (c TrustConfiguration) Authority(key PrincipalAuthority) (AuthorityConfig, 
 	return *found, nil
 }
 
-// DeliveryCommitment is the immutable log record for one durable mutation.
-// Appending it orders the mutation; it does not authorize content.
-type DeliveryCommitment struct {
-	Index                 uint64          `json:"index"`
-	TargetID              string          `json:"target_id"`
-	FulfillmentID         string          `json:"fulfillment_id"`
-	Generation            uint64          `json:"generation"`
-	PredicateType         PredicateType   `json:"predicate_type"`
-	Evidence              []TypedEvidence `json:"evidence"`
-	AuthorityConfigDigest Digest          `json:"authority_config_digest"`
-}
-
-// Digest returns the commitment digest bound into the append-only log.
-func (c DeliveryCommitment) Digest() (Digest, error) {
-	return DigestObject(purposeDeliveryCommitment, c)
-}
-
-// Checkpoint is a retained append-only log position. Size is the number of
-// accepted commitments. This POC uses the size as a local ordering fence;
-// Merkle inclusion and consistency proofs are left to later profiles.
-type Checkpoint struct {
-	Size uint64 `json:"size"`
-}
-
-// EmptyCheckpoint is the uninitialized log position.
-func EmptyCheckpoint() Checkpoint {
-	return Checkpoint{}
-}
-
 // Equal reports whether two authority configs are byte-identical after
 // canonical encoding.
 func (c AuthorityConfig) Equal(other AuthorityConfig) bool {

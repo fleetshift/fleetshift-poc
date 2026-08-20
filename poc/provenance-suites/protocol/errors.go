@@ -53,4 +53,8 @@ var (
 	// ErrVerificationFailed is returned when cryptographic verification of
 	// evidence fails.
 	ErrVerificationFailed = errors.New("provenance verification failed")
+
+	// ErrInvalidLogUpdate is returned when a delivery-log update does not
+	// prove append-only consistency or inclusion of the claimed leaf.
+	ErrInvalidLogUpdate = errors.New("invalid delivery-log update")
 )

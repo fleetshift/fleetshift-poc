@@ -23,12 +23,32 @@ var (
 	// ErrAcknowledgementLost is a test fault injected after an otherwise
 	// successful, locally retained delivery.
 	ErrAcknowledgementLost = errors.New("delivery acknowledgement was lost")
+	ErrCheckpointStale     = errors.New("manager used a stale agent checkpoint")
 	ErrDeliveryUnavailable = errors.New("delivery did not reach the agent")
 
 	// ErrFulfillmentRelationRequired is returned when a managed-resource
 	// authorization has no verified fulfillment relation.
 	ErrFulfillmentRelationRequired = errors.New("managed resource requires a verified fulfillment relation")
 )
+
+// CheckpointStaleError tells the manager that proof construction started from
+// an older checkpoint than this agent currently retains.
+type CheckpointStaleError struct {
+	checkpoint protocol.Checkpoint
+	cause      error
+}
+
+func (e *CheckpointStaleError) Error() string {
+	return fmt.Sprintf("%v: agent is at checkpoint size %d: %v", ErrCheckpointStale, e.checkpoint.Size, e.cause)
+}
+
+func (e *CheckpointStaleError) Unwrap() error {
+	return ErrCheckpointStale
+}
+
+func (e *CheckpointStaleError) LatestCheckpoint() protocol.Checkpoint {
+	return e.checkpoint
+}
 
 // Config provisions one delivery agent.
 type Config struct {
@@ -61,8 +81,9 @@ type Agent struct {
 	applied     map[string]appliedState
 	generations map[string]uint64
 
-	failBeforeAccepting     uint64
-	loseNextAcknowledgement bool
+	failBeforeAccepting      uint64
+	loseNextAcknowledgement  bool
+	staleCheckpointResponses uint64
 }
 
 // New constructs an uninitialized verifier.
@@ -114,8 +135,11 @@ func (a *Agent) AcceptEnrollment(evidence protocol.TypedEvidence) error {
 	return a.profile.AcceptEnrollment(evidence, authority)
 }
 
-// Deliver verifies provenance under matched policy and applies the
-// authenticated root authorization.
+// Deliver verifies the log update, then provenance under matched policy, and
+// applies the authenticated root authorization. A verified log checkpoint is
+// retained even when the included delivery is later rejected. When the manager
+// constructed proofs from an obsolete checkpoint, Deliver returns the newer
+// retained checkpoint so the manager can retry without applying again.
 func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -127,9 +151,25 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		return ErrDeliveryUnavailable
 	}
 
-	if err := a.acceptLogLocked(pkg.Commitment); err != nil {
+	retained := a.checkpoint
+	if err := a.acceptLogLocked(pkg); err != nil {
 		return err
 	}
+	if isStaleLogProof(pkg.Log, retained) {
+		// RFC 6962 consistency from the empty tree is empty. A proof built from
+		// that older cache can therefore verify as an equal-size no-op against
+		// the retained head. Report the retained checkpoint so the manager can
+		// reconstruct without applying the included delivery again.
+		a.staleCheckpointResponses++
+		return &CheckpointStaleError{
+			checkpoint: retained,
+			cause:      fmt.Errorf("constructed from checkpoint size %d", pkg.Log.From.Size),
+		}
+	}
+
+	// The log observation is independent of apply. Pinning it here keeps an
+	// inert rejected leaf in the accepted prefix so a later fork cannot omit it.
+	a.checkpoint = pkg.Log.Checkpoint
 
 	authenticated, assertion, err := protocol.SelectAndVerify(
 		context.Background(),
@@ -158,7 +198,6 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	if err := a.applyLocked(view, append([]byte(nil), assertion.Bytes...)); err != nil {
 		return err
 	}
-	a.checkpoint.Size = pkg.Commitment.Index + 1
 	if a.loseNextAcknowledgement {
 		a.loseNextAcknowledgement = false
 		return ErrAcknowledgementLost
@@ -182,6 +221,14 @@ func (a *Agent) Checkpoint() protocol.Checkpoint {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.checkpoint
+}
+
+// StaleCheckpointResponses is the number of times Deliver returned
+// CheckpointStaleError. It is test-observable transport metadata.
+func (a *Agent) StaleCheckpointResponses() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.staleCheckpointResponses
 }
 
 // PublicKey returns the retained direct-key mapping for tests.
@@ -210,17 +257,24 @@ func (a *Agent) lookupLocked(pt protocol.ProvenanceType) (protocol.TargetAPI, bo
 	return nil, false
 }
 
-func (a *Agent) acceptLogLocked(commitment protocol.DeliveryCommitment) error {
-	switch {
-	case commitment.Index == a.checkpoint.Size:
-		return nil
-	case commitment.Index+1 == a.checkpoint.Size:
-		return nil
-	case commitment.Index < a.checkpoint.Size:
-		return fmt.Errorf("%w: commitment index %d is before retained size %d", ErrLogFork, commitment.Index, a.checkpoint.Size)
-	default:
-		return fmt.Errorf("%w: commitment index %d is beyond retained size %d", ErrLogFork, commitment.Index, a.checkpoint.Size)
+func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) error {
+	if err := protocol.VerifyLogUpdate(a.checkpoint, pkg.Log, pkg.Root.Evidence); err != nil {
+		if isStaleLogProof(pkg.Log, a.checkpoint) {
+			a.staleCheckpointResponses++
+			return &CheckpointStaleError{checkpoint: a.checkpoint, cause: err}
+		}
+		return fmt.Errorf("%w: %v", ErrLogFork, err)
 	}
+	return nil
+}
+
+func isStaleLogProof(update protocol.LogUpdate, retained protocol.Checkpoint) bool {
+	if update.From.Size >= retained.Size {
+		return false
+	}
+	// A proof constructed from an older manager cache of the same branch either
+	// already matches the retained head (lost acknowledgement) or extends past it.
+	return update.Checkpoint == retained || update.Checkpoint.Size > retained.Size
 }
 
 func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) (AppliedDelivery, error) {

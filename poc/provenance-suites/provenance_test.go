@@ -1,6 +1,7 @@
 package provenancesuites
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -197,15 +198,74 @@ func TestRetryAfterLostAcknowledgementIsIdempotent(t *testing.T) {
 	s := newEnrolledScenario(t)
 	s.agent.LoseNextAcknowledgement()
 	evidence := mustSignDeployment(t, s.user, "lost-ack", 1, []byte(`{"ok":true}`))
-	commitment, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence)
+	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence)
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
 	}
 	if _, ok := s.agent.Applied("lost-ack"); !ok {
 		t.Fatal("agent did not apply before losing the acknowledgement")
 	}
-	if err := s.manager.RetryDelivery(context.Background(), commitment.Index); err != nil {
+	cached, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok || cached != protocol.EmptyCheckpoint() {
+		t.Fatalf("manager cache after lost ack = %+v, want empty checkpoint", cached)
+	}
+	if err := s.manager.RetryDelivery(context.Background(), update.Index); err != nil {
 		t.Fatalf("retry: %v", err)
+	}
+	cached, ok = s.manager.AgentCheckpoint(testTarget)
+	if !ok || cached != s.agent.Checkpoint() {
+		t.Fatalf("manager cache after retry = %+v, agent checkpoint = %+v", cached, s.agent.Checkpoint())
+	}
+	if got, want := s.agent.StaleCheckpointResponses(), uint64(1); got != want {
+		t.Fatalf("agent stale-checkpoint responses = %d, want %d", got, want)
+	}
+}
+
+func TestRejectedDeliveryAdvancesCheckpointAndRetryRecoversWithoutApplying(t *testing.T) {
+	s := newEnrolledScenario(t)
+	managerBefore, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok {
+		t.Fatal("resource manager did not retain the registered-agent checkpoint")
+	}
+
+	attacker := mustClient(t, "mallory")
+	forged := mustSignDeployment(t, attacker, "rejected-after-log", 1, []byte(`{"owner":"attacker"}`))
+	update, err := s.manager.Compromised().PushDelivery(context.Background(), forged)
+	if !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("push forged delivery error = %v, want ErrVerificationFailed", err)
+	}
+	if _, applied := s.agent.Applied("rejected-after-log"); applied {
+		t.Fatal("agent applied a delivery it rejected after advancing the log")
+	}
+	if got := s.agent.Checkpoint(); got.Size != update.Index+1 {
+		t.Fatalf("agent checkpoint size = %d, want %d after rejecting the included delivery", got.Size, update.Index+1)
+	}
+	if got, _ := s.manager.AgentCheckpoint(testTarget); got != managerBefore {
+		t.Fatalf("manager advanced checkpoint on a rejected delivery: got %+v, want %+v", got, managerBefore)
+	}
+	if got := s.agent.StaleCheckpointResponses(); got != 0 {
+		t.Fatalf("agent stale-checkpoint responses after first rejection = %d, want 0", got)
+	}
+
+	if err := s.manager.RetryDelivery(context.Background(), update.Index); !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("retry forged delivery error = %v, want ErrVerificationFailed", err)
+	}
+	if _, applied := s.agent.Applied("rejected-after-log"); applied {
+		t.Fatal("retry applied a delivery that remains semantically invalid")
+	}
+	if got, want := s.manager.AgentCheckpoint(testTarget); !want || got != s.agent.Checkpoint() {
+		t.Fatalf("manager checkpoint after retry = %+v, %t; want agent checkpoint %+v", got, want, s.agent.Checkpoint())
+	}
+	if got, want := s.agent.StaleCheckpointResponses(), uint64(1); got != want {
+		t.Fatalf("agent stale-checkpoint responses = %d, want %d", got, want)
+	}
+
+	signed := mustSignDeployment(t, s.user, "after-rejected-log", 1, []byte(`{"owner":"alice"}`))
+	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), signed); err != nil {
+		t.Fatalf("submit valid delivery after checkpoint recovery: %v", err)
+	}
+	if _, ok := s.agent.Applied("after-rejected-log"); !ok {
+		t.Fatal("agent did not apply the valid delivery after recovering the rejected-log checkpoint")
 	}
 }
 
@@ -215,11 +275,11 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 	spec := json.RawMessage(`{"region":"us-east-1"}`)
 	evidence := mustSignManagedResource(t, s.user, "cluster-retry", 1, spec)
 	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
-	commitment, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
+	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
 	}
-	if err := s.manager.RetryDelivery(context.Background(), commitment.Index); err != nil {
+	if err := s.manager.RetryDelivery(context.Background(), update.Index); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	applied, ok := s.agent.Applied("cluster-retry")
@@ -422,11 +482,176 @@ func TestSignManagedResourceRequiresCompleteDeliveryScope(t *testing.T) {
 	}
 }
 
+func TestLostAckRetryRebuildsProofsFromAgentCheckpoint(t *testing.T) {
+	const westTarget = "target-west"
+	s := newTwoTargetScenario(t, westTarget)
+	s.agent.LoseNextAcknowledgement()
+
+	evidenceA := mustSignDeploymentFor(t, s.user, testTarget, "east-lost", 1, []byte(`{"ok":true}`))
+	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceA)
+	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
+		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
+	}
+	cached, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok || cached != protocol.EmptyCheckpoint() {
+		t.Fatalf("manager cache after lost ack = %+v, want empty checkpoint", cached)
+	}
+
+	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, "west-advance", 1, []byte(`{"ok":true}`))
+	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceB); err != nil {
+		t.Fatalf("submit west delivery: %v", err)
+	}
+
+	if err := s.manager.RetryDelivery(context.Background(), update.Index); err != nil {
+		t.Fatalf("retry east delivery: %v", err)
+	}
+	if s.agent.StaleCheckpointResponses() == 0 {
+		t.Fatal("retry did not take the stale-checkpoint loop")
+	}
+	cached, ok = s.manager.AgentCheckpoint(testTarget)
+	if !ok || cached != s.agent.Checkpoint() {
+		t.Fatalf("manager cache after stale retry = %+v, agent checkpoint = %+v", cached, s.agent.Checkpoint())
+	}
+	if s.agent.Checkpoint().Size != 2 {
+		t.Fatalf("east agent checkpoint size = %d, want 2", s.agent.Checkpoint().Size)
+	}
+}
+
+func TestTwoTargetDeliverySkipsUnrelatedLeaf(t *testing.T) {
+	const westTarget = "target-west"
+	s := newTwoTargetScenario(t, westTarget)
+
+	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, "west-only", 1, []byte(`{"replicas":1}`))
+	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceB); err != nil {
+		t.Fatalf("submit west delivery: %v", err)
+	}
+
+	evidenceA := mustSignDeploymentFor(t, s.user, testTarget, "east-after-west", 1, []byte(`{"replicas":3}`))
+	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceA); err != nil {
+		t.Fatalf("submit east delivery: %v", err)
+	}
+
+	got := s.recorder.last.Log
+	if got.Index != 1 {
+		t.Fatalf("east log index = %d, want 1", got.Index)
+	}
+	if got.Checkpoint.Size != 2 {
+		t.Fatalf("east checkpoint size = %d, want 2", got.Checkpoint.Size)
+	}
+	wantLeaf, err := evidenceA.Identity()
+	if err != nil {
+		t.Fatalf("east identity: %v", err)
+	}
+	if got.Leaf != wantLeaf {
+		t.Fatalf("east leaf = %q, want %q", got.Leaf, wantLeaf)
+	}
+	otherLeaf, err := evidenceB.Identity()
+	if err != nil {
+		t.Fatalf("west identity: %v", err)
+	}
+	if got.Leaf == otherLeaf {
+		t.Fatal("east package disclosed the unrelated west evidence identity")
+	}
+	if _, ok := s.agent.Applied("west-only"); ok {
+		t.Fatal("east agent applied the west fulfillment")
+	}
+	if _, ok := s.west.Applied("west-only"); !ok {
+		t.Fatal("west agent did not apply its delivery")
+	}
+}
+
+func TestAgentRejectsLogLeafThatDoesNotMatchRootEvidence(t *testing.T) {
+	s := newEnrolledScenario(t)
+	evidence := mustSignDeployment(t, s.user, "mismatch", 1, []byte(`{"ok":true}`))
+	other := mustSignDeployment(t, s.user, "other", 1, []byte(`{"ok":false}`))
+	leaf, err := other.Identity()
+	if err != nil {
+		t.Fatalf("other identity: %v", err)
+	}
+	err = s.agent.Deliver(resourcemanager.DeliveryPackage{
+		Log: protocol.LogUpdate{
+			From:       protocol.EmptyCheckpoint(),
+			Checkpoint: protocol.EmptyCheckpoint(),
+			Leaf:       leaf,
+		},
+		Root: protocol.SignedStatement{Evidence: evidence},
+	})
+	if !errors.Is(err, deliveryagent.ErrLogFork) {
+		t.Fatalf("error = %v, want ErrLogFork", err)
+	}
+	assertNotStale(t, err)
+	if _, ok := s.agent.Applied("mismatch"); ok {
+		t.Fatal("agent applied a delivery whose log leaf did not match the root evidence")
+	}
+}
+
+func TestAgentRejectsForkedAndSkipAheadLogProofs(t *testing.T) {
+	s := newEnrolledScenario(t)
+	evidence := mustSignDeployment(t, s.user, "pin-log", 1, []byte(`{"ok":true}`))
+	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence); err != nil {
+		t.Fatalf("submit pinning delivery: %v", err)
+	}
+	retained := s.agent.Checkpoint()
+
+	next := mustSignDeployment(t, s.user, "forked", 1, []byte(`{"ok":false}`))
+	leaf, err := next.Identity()
+	if err != nil {
+		t.Fatalf("forked identity: %v", err)
+	}
+	forkRoot, err := protocol.EncodeDigest(bytes.Repeat([]byte{0xff}, 32))
+	if err != nil {
+		t.Fatalf("encode fork root: %v", err)
+	}
+
+	err = s.agent.Deliver(resourcemanager.DeliveryPackage{
+		Log: protocol.LogUpdate{
+			From:       retained,
+			Checkpoint: protocol.Checkpoint{Size: retained.Size + 1, Root: forkRoot},
+			Index:      retained.Size,
+			Leaf:       leaf,
+		},
+		Root: protocol.SignedStatement{Evidence: next},
+	})
+	if !errors.Is(err, deliveryagent.ErrLogFork) {
+		t.Fatalf("forked root error = %v, want ErrLogFork", err)
+	}
+	assertNotStale(t, err)
+
+	err = s.agent.Deliver(resourcemanager.DeliveryPackage{
+		Log: protocol.LogUpdate{
+			From:       retained,
+			Checkpoint: protocol.Checkpoint{Size: 99, Root: forkRoot},
+			Index:      98,
+			Leaf:       leaf,
+		},
+		Root: protocol.SignedStatement{Evidence: next},
+	})
+	if !errors.Is(err, deliveryagent.ErrLogFork) {
+		t.Fatalf("skip-ahead error = %v, want ErrLogFork", err)
+	}
+	assertNotStale(t, err)
+	if _, ok := s.agent.Applied("forked"); ok {
+		t.Fatal("agent applied a forked or skip-ahead delivery")
+	}
+}
+
+type recordingAgent struct {
+	inner *deliveryagent.Agent
+	last  resourcemanager.DeliveryPackage
+}
+
+func (r *recordingAgent) Deliver(pkg resourcemanager.DeliveryPackage) error {
+	r.last = pkg
+	return r.inner.Deliver(pkg)
+}
+
 type scenario struct {
-	user    *client.Client
-	addon   *client.Client
-	manager *resourcemanager.Manager
-	agent   *deliveryagent.Agent
+	user     *client.Client
+	addon    *client.Client
+	manager  *resourcemanager.Manager
+	agent    *deliveryagent.Agent
+	west     *deliveryagent.Agent
+	recorder *recordingAgent
 }
 
 func newScenario(t *testing.T) *scenario {
@@ -464,6 +689,45 @@ func newEnrolledManagedResourceScenario(t *testing.T) *scenario {
 	return s
 }
 
+func newTwoTargetScenario(t *testing.T, westTarget string) *scenario {
+	t.Helper()
+	user := mustClient(t, "alice")
+	east, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
+	if err != nil {
+		t.Fatalf("new east agent: %v", err)
+	}
+	west, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: westTarget})
+	if err != nil {
+		t.Fatalf("new west agent: %v", err)
+	}
+	if err := east.Bootstrap(testTrust()); err != nil {
+		t.Fatalf("bootstrap east: %v", err)
+	}
+	if err := west.Bootstrap(testTrust()); err != nil {
+		t.Fatalf("bootstrap west: %v", err)
+	}
+	recorder := &recordingAgent{inner: east}
+	manager := resourcemanager.New(testTenant, nil)
+	if err := manager.RegisterAgent(testTarget, recorder); err != nil {
+		t.Fatalf("register east agent: %v", err)
+	}
+	if err := manager.RegisterAgent(westTarget, west); err != nil {
+		t.Fatalf("register west agent: %v", err)
+	}
+	if err := manager.RegisterDirectKeyEnroller(east); err != nil {
+		t.Fatalf("register east enroller: %v", err)
+	}
+	if err := manager.RegisterDirectKeyEnroller(west); err != nil {
+		t.Fatalf("register west enroller: %v", err)
+	}
+	s := &scenario{user: user, manager: manager, agent: east, west: west, recorder: recorder}
+	enrollClient(t, s, s.user)
+	if _, ok := west.PublicKey(s.user.Principal()); !ok {
+		t.Fatal("west agent did not retain the enrollment mapping")
+	}
+	return s
+}
+
 func enrollClient(t *testing.T, s *scenario, c *client.Client) {
 	t.Helper()
 	enrollment, err := c.DirectKey().CreateEnrollment()
@@ -496,9 +760,14 @@ func mustClient(t *testing.T, subject protocol.Subject) *client.Client {
 
 func mustSignDeployment(t *testing.T, c *client.Client, fulfillment string, generation uint64, payload []byte) protocol.TypedEvidence {
 	t.Helper()
+	return mustSignDeploymentFor(t, c, testTarget, fulfillment, generation, payload)
+}
+
+func mustSignDeploymentFor(t *testing.T, c *client.Client, target, fulfillment string, generation uint64, payload []byte) protocol.TypedEvidence {
+	t.Helper()
 	evidence, err := c.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TargetID:      testTarget,
+			TargetID:      target,
 			FulfillmentID: fulfillment,
 			Generation:    generation,
 			Action:        protocol.ActionPut,
@@ -543,6 +812,14 @@ func mustSignRelation(t *testing.T, c *client.Client, resourceType string, media
 		t.Fatalf("sign fulfillment relation: %v", err)
 	}
 	return evidence
+}
+
+func assertNotStale(t *testing.T, err error) {
+	t.Helper()
+	var stale *deliveryagent.CheckpointStaleError
+	if errors.As(err, &stale) {
+		t.Fatalf("error reported as stale checkpoint: %v", err)
+	}
 }
 
 func tamperEmbeddedAssertion(t *testing.T, evidence protocol.TypedEvidence, mutate func(*protocol.TypedAssertion)) protocol.TypedEvidence {

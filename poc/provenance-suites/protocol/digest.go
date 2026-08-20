@@ -20,7 +20,6 @@ const (
 	purposeAuthorityConfig       Purpose = "fleetshift.dev/provenance/authority-config/v1"
 	purposeProfileConfig         Purpose = "fleetshift.dev/provenance/profile-config/v1"
 	purposeTrustConfiguration    Purpose = "fleetshift.dev/provenance/trust-configuration/v1"
-	purposeDeliveryCommitment    Purpose = "fleetshift.dev/provenance/delivery-commitment/v1"
 )
 
 // DigestBytes returns the canonical digest of raw bytes with no extra wrapping.
@@ -73,4 +72,21 @@ func decodeDigest(encoded Digest) ([]byte, error) {
 
 func encodeDigest(hash []byte) Digest {
 	return Digest("sha256:" + hex.EncodeToString(hash))
+}
+
+// EncodeDigest returns the canonical wire encoding for a SHA-256 hash.
+func EncodeDigest(hash []byte) (Digest, error) {
+	if len(hash) != sha256.Size {
+		return "", fmt.Errorf("SHA-256 digest has length %d, want %d", len(hash), sha256.Size)
+	}
+	return encodeDigest(hash), nil
+}
+
+// EncodeProof returns the canonical wire encoding for Merkle proof hashes.
+func EncodeProof(hashes [][]byte) []Digest {
+	out := make([]Digest, len(hashes))
+	for i, hash := range hashes {
+		out[i] = encodeDigest(hash)
+	}
+	return out
 }

@@ -850,30 +850,39 @@ preserve the invariants above.
 ### Common append-only delivery log
 
 Every durable mutation is committed to a common append-only log before
-dispatch. A delivery commitment binds the exact typed delivery, fulfillment,
-target, generation, attestation graph, immutable `TypedEvidence` set, and
-applicable authenticated configuration context. Trust updates and
-profile-specific ordering records use purpose-separated commitment types in
-the same ordering infrastructure.
+dispatch. A log leaf binds the root `TypedEvidence` identity to an assigned
+position. The couriered object is a log update: the checkpoint the proofs were
+built from, the new size and root, an append-only consistency proof, and an
+inclusion proof of this leaf. Those proofs are reconstructable and are not
+part of the leaf.
 
 The log supports:
 
-- inclusion of the exact durable mutation;
+- inclusion of this exact root evidence at its assigned position;
 - append-only consistency from a target's retained checkpoint;
-- catch-up without replaying unrelated delivery bodies;
+- skipping unrelated content leaves without disclosing them;
 - idempotent retry and recovery from lost acknowledgements;
 - local rollback protection for established targets; and
 - ordering-sensitive profile rules such as v3 rotation cutoffs.
 
-Refreshable Merkle proofs, profile proof paths, and other reconstructable
-support material need not be part of the immutable delivery commitment. The
-profile cross-checks that refreshed material against the committed
-`TypedEvidence`, accepted configuration, and retained checkpoints.
-
-Appending a record does not authorize its content. The log orders commitments;
+Appending a record does not authorize its content. The log orders identities;
 the applicable credential, provenance profile, graph, constraints, and target
-checks establish authority. An inert or invalid profile-control marker remains
-inert.
+checks establish authority. Predicate type selects apply. Trust updates and
+rotations are ordinary logged assertions this agent must verify and apply if
+it will rely on them; unrelated content leaves are skipped via consistency.
+An inert or invalid profile-control marker remains inert. A verifier that has
+checked consistency and inclusion pins that checkpoint even when the included
+delivery is later rejected, so a later fork cannot omit the leaf. A manager
+whose last-ack cache is behind that pin reconstructs from the agent's retained
+checkpoint rather than treating a same-head retry as a fresh apply.
+
+Scope still comes from the signed assertion. Configuration digests are
+verification results, not log fields.
+
+Refreshable Merkle proofs, profile proof paths, and other reconstructable
+support material need not be part of the leaf. The profile cross-checks
+refreshed material against the committed `TypedEvidence`, accepted
+configuration, and retained checkpoints.
 
 The log provides protocol order, not trusted wall-clock time, public
 transparency, or global fork detection. A timestamp authority, witnesses, or
