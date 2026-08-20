@@ -28,12 +28,14 @@ type tokenMeta struct {
 	TokenType string    `json:"token_type"`
 }
 
-// KeyringTokenStore persists tokens in the OS secure keychain.
+// KeyringStore persists OAuth tokens and the signing key in the OS keychain.
 // Each token field is stored as a separate keyring entry so that
 // large JWTs don't exceed per-entry size limits.
-type KeyringTokenStore struct{}
+type KeyringStore struct{}
 
-func (KeyringTokenStore) Save(_ context.Context, tokens Tokens) error {
+// Save writes token fields as separate keyring entries. Empty optional
+// tokens are deleted.
+func (KeyringStore) Save(_ context.Context, tokens Tokens) error {
 	sets := []struct {
 		key   string
 		value string
@@ -65,7 +67,9 @@ func (KeyringTokenStore) Save(_ context.Context, tokens Tokens) error {
 	return nil
 }
 
-func (KeyringTokenStore) Load(_ context.Context) (Tokens, error) {
+// Load reads tokens from the keyring. A missing refresh or id token is
+// omitted rather than an error.
+func (KeyringStore) Load(_ context.Context) (Tokens, error) {
 	access, err := keyring.Get(keyringService, keyAccess)
 	if err != nil {
 		return Tokens{}, fmt.Errorf("load access_token from keyring: %w", err)
@@ -101,23 +105,27 @@ func (KeyringTokenStore) Load(_ context.Context) (Tokens, error) {
 	return tokens, nil
 }
 
-func (KeyringTokenStore) Clear(_ context.Context) error {
-	if err := keyring.DeleteAll(keyringService); err != nil {
-		return fmt.Errorf("clear keyring: %w", err)
+// Clear deletes OAuth token entries. Missing keys are not an error.
+// The signing key is left in place.
+func (KeyringStore) Clear(_ context.Context) error {
+	for _, key := range []string{keyAccess, keyRefresh, keyID, keyMeta} {
+		if err := keyring.Delete(keyringService, key); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return fmt.Errorf("clear %s from keyring: %w", key, err)
+		}
 	}
 	return nil
 }
 
-// SaveSigningKey stores a PEM-encoded ECDSA private key in the keyring.
-func SaveSigningKey(pemData string) error {
+// SaveSigningKey stores pemData in the keyring. It does not parse or validate PEM.
+func (KeyringStore) SaveSigningKey(pemData string) error {
 	if err := keyring.Set(keyringService, keySigningKey, pemData); err != nil {
 		return fmt.Errorf("save signing key to keyring: %w", err)
 	}
 	return nil
 }
 
-// LoadSigningKey loads the PEM-encoded ECDSA private key from the keyring.
-func LoadSigningKey() (string, error) {
+// LoadSigningKey returns the stored PEM bytes. It does not parse or validate PEM.
+func (KeyringStore) LoadSigningKey() (string, error) {
 	pem, err := keyring.Get(keyringService, keySigningKey)
 	if err != nil {
 		return "", fmt.Errorf("load signing key from keyring: %w", err)

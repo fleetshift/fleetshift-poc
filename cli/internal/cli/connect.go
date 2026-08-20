@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -15,6 +14,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
 )
 
+// dial opens a gRPC client to flags.server using the token store for per-RPC credentials.
 func dial(flags globalFlags) (*grpc.ClientConn, error) {
 	if err := validateTransportFlags(flags); err != nil {
 		return nil, err
@@ -25,7 +25,7 @@ func dial(flags globalFlags) (*grpc.ClientConn, error) {
 		return nil, err
 	}
 
-	creds := &tokenCredentials{store: auth.KeyringTokenStore{}}
+	creds := &tokenCredentials{store: flags.store(), configDir: flags.configDir}
 	conn, err := grpc.NewClient(flags.server,
 		grpc.WithTransportCredentials(transportCreds),
 		grpc.WithPerRPCCredentials(creds),
@@ -36,6 +36,7 @@ func dial(flags globalFlags) (*grpc.ClientConn, error) {
 	return conn, nil
 }
 
+// validateTransportFlags requires CA and insecure flags to be used with --server-tls.
 func validateTransportFlags(flags globalFlags) error {
 	if !flags.serverTLS && flags.serverCAFile != "" {
 		return fmt.Errorf("--server-ca-file requires --server-tls")
@@ -46,6 +47,7 @@ func validateTransportFlags(flags globalFlags) error {
 	return nil
 }
 
+// buildTransportCredentials returns TLS credentials when --server-tls is set, otherwise insecure.
 func buildTransportCredentials(flags globalFlags) (credentials.TransportCredentials, error) {
 	if !flags.serverTLS {
 		return insecure.NewCredentials(), nil
@@ -76,26 +78,24 @@ func buildTransportCredentials(flags globalFlags) (credentials.TransportCredenti
 // tokenCredentials implements [credentials.PerRPCCredentials] by loading
 // tokens from the token store and refreshing them if needed.
 type tokenCredentials struct {
-	store auth.TokenStore
+	store     auth.TokenStore
+	configDir string
 }
 
+// GetRequestMetadata returns a Bearer token after a refresh if needed.
+// Missing config or tokens yield no metadata rather than an error.
 func (t *tokenCredentials) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
-	cfg, err := auth.LoadConfig()
+	cfg, err := auth.LoadConfigFrom(t.configDir)
 	if err != nil {
 		return nil, nil
 	}
 
-	oauthCfg := &oauth2.Config{
-		ClientID: cfg.ClientID,
-		Endpoint: oauth2.Endpoint{
-			AuthURL:   cfg.AuthorizationEndpoint,
-			TokenURL:  cfg.TokenEndpoint,
-			AuthStyle: oauth2.AuthStyleInParams,
-		},
-		Scopes: cfg.Scopes,
+	ctx, err = withOIDCHTTPClient(ctx, cfg)
+	if err != nil {
+		return nil, err
 	}
 
-	tokens, _, err := auth.RefreshIfNeeded(ctx, t.store, oauthCfg)
+	tokens, _, err := auth.RefreshIfNeeded(ctx, t.store, oauthConfig(cfg))
 	if err != nil {
 		return nil, nil
 	}
@@ -109,6 +109,7 @@ func (t *tokenCredentials) GetRequestMetadata(ctx context.Context, _ ...string) 
 	}, nil
 }
 
+// RequireTransportSecurity reports false so plaintext gRPC still attaches tokens.
 func (t *tokenCredentials) RequireTransportSecurity() bool {
 	return false
 }

@@ -34,7 +34,7 @@ tasks:
 
   build:all:
     desc: Build all binaries
-    deps: [build:server, build:cli]
+    deps: [build:server, build:cli, build:aio]
 
   build:server:
     desc: Build the server binary
@@ -47,6 +47,14 @@ tasks:
     dir: cli
     cmds:
       - go build -o ../bin/fleetctl ./cmd/fleetctl
+
+  build:aio:
+    desc: Build AIO packaging binaries (aio-init, aio-proxy, kind-loopback-forward)
+    dir: deploy/aio
+    cmds:
+      - go build -o ../../bin/aio-init ./cmd/aio-init
+      - go build -o ../../bin/aio-proxy ./cmd/aio-proxy
+      - go build -o ../../bin/kind-loopback-forward ./cmd/kind-loopback-forward
 
   test:all:
     desc: Run unit tests for all modules

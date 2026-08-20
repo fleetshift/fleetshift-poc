@@ -27,7 +27,7 @@ func seedTestAuth(t *testing.T) {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	store := auth.KeyringTokenStore{}
+	store := auth.KeyringStore{}
 	if err := store.Save(context.Background(), auth.Tokens{
 		AccessToken: "test-access-token",
 		TokenType:   "Bearer",

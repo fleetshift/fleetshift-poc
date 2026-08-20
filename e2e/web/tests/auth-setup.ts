@@ -3,6 +3,7 @@ import { expect, type Page, test as setup } from "@playwright/test";
 import fs from "fs";
 import path from "path";
 
+import { fillDexLogin } from "./helpers/dex-login";
 import { type Persona, PERSONAS } from "./helpers/personas";
 
 const authDir = path.join(__dirname, "..", ".auth");
@@ -13,19 +14,7 @@ const authDir = path.join(__dirname, "..", ".auth");
 // re-injects (keyed off the storageState path).
 async function authenticate(page: Page, persona: Persona) {
   await page.goto("/app/");
-
-  // Dex login page.
-  expect(await page.locator("h2").innerText()).toContain(
-    "Log in to Your Account",
-  );
-
-  await page
-    .getByRole("textbox", { name: "Email Address" })
-    .fill(persona.email);
-  await page.getByRole("textbox", { name: "Password" }).fill(persona.password);
-
-  // Dex renders a single submit button on the password screen.
-  await page.getByRole("button").click();
+  await fillDexLogin(page, persona);
 
   // Console is ready once the masthead identifies the signed-in persona.
   await expect(

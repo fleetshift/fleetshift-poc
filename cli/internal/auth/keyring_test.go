@@ -10,11 +10,11 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
 )
 
-func TestKeyringTokenStore_SaveAndLoad(t *testing.T) {
+func TestKeyringStore_SaveAndLoad(t *testing.T) {
 	keyring.MockInit()
 
 	ctx := context.Background()
-	store := auth.KeyringTokenStore{}
+	store := auth.KeyringStore{}
 
 	tokens := auth.Tokens{
 		AccessToken:  "access-123",
@@ -50,11 +50,11 @@ func TestKeyringTokenStore_SaveAndLoad(t *testing.T) {
 	}
 }
 
-func TestKeyringTokenStore_OptionalFieldsOmitted(t *testing.T) {
+func TestKeyringStore_OptionalFieldsOmitted(t *testing.T) {
 	keyring.MockInit()
 
 	ctx := context.Background()
-	store := auth.KeyringTokenStore{}
+	store := auth.KeyringStore{}
 
 	tokens := auth.Tokens{
 		AccessToken: "access-only",
@@ -82,11 +82,11 @@ func TestKeyringTokenStore_OptionalFieldsOmitted(t *testing.T) {
 	}
 }
 
-func TestKeyringTokenStore_LoadEmpty(t *testing.T) {
+func TestKeyringStore_LoadEmpty(t *testing.T) {
 	keyring.MockInit()
 
 	ctx := context.Background()
-	store := auth.KeyringTokenStore{}
+	store := auth.KeyringStore{}
 
 	_, err := store.Load(ctx)
 	if err == nil {
@@ -94,11 +94,11 @@ func TestKeyringTokenStore_LoadEmpty(t *testing.T) {
 	}
 }
 
-func TestKeyringTokenStore_Clear(t *testing.T) {
+func TestKeyringStore_Clear(t *testing.T) {
 	keyring.MockInit()
 
 	ctx := context.Background()
-	store := auth.KeyringTokenStore{}
+	store := auth.KeyringStore{}
 
 	tokens := auth.Tokens{
 		AccessToken: "access-123",
@@ -118,13 +118,16 @@ func TestKeyringTokenStore_Clear(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load after Clear: expected error, got nil")
 	}
+	if err := store.Clear(ctx); err != nil {
+		t.Fatalf("Clear missing keys: %v", err)
+	}
 }
 
-func TestKeyringTokenStore_Overwrite(t *testing.T) {
+func TestKeyringStore_Overwrite(t *testing.T) {
 	keyring.MockInit()
 
 	ctx := context.Background()
-	store := auth.KeyringTokenStore{}
+	store := auth.KeyringStore{}
 
 	first := auth.Tokens{
 		AccessToken:  "first-access",
@@ -162,5 +165,54 @@ func TestKeyringTokenStore_Overwrite(t *testing.T) {
 	}
 	if !loaded.Expiry.Equal(second.Expiry) {
 		t.Errorf("Expiry: got %v, want %v", loaded.Expiry, second.Expiry)
+	}
+}
+
+func TestKeyringStore_SigningKeyRoundTrip(t *testing.T) {
+	keyring.MockInit()
+	store := auth.KeyringStore{}
+	const pem = "-----BEGIN EC PRIVATE KEY-----\ntest\n-----END EC PRIVATE KEY-----\n"
+	if err := store.SaveSigningKey(pem); err != nil {
+		t.Fatalf("SaveSigningKey: %v", err)
+	}
+	got, err := store.LoadSigningKey()
+	if err != nil {
+		t.Fatalf("LoadSigningKey: %v", err)
+	}
+	if got != pem {
+		t.Errorf("LoadSigningKey = %q, want %q", got, pem)
+	}
+}
+
+func TestKeyringStore_LoadSigningKeyEmpty(t *testing.T) {
+	keyring.MockInit()
+	if _, err := (auth.KeyringStore{}).LoadSigningKey(); err == nil {
+		t.Fatal("LoadSigningKey: expected error for empty store")
+	}
+}
+
+func TestKeyringStore_ClearLeavesSigningKey(t *testing.T) {
+	keyring.MockInit()
+	ctx := context.Background()
+	store := auth.KeyringStore{}
+	const pem = "-----BEGIN EC PRIVATE KEY-----\ntest\n-----END EC PRIVATE KEY-----\n"
+	if err := store.Save(ctx, auth.Tokens{AccessToken: "access-123", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.SaveSigningKey(pem); err != nil {
+		t.Fatalf("SaveSigningKey: %v", err)
+	}
+	if err := store.Clear(ctx); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if _, err := store.Load(ctx); err == nil {
+		t.Fatal("Load after Clear: expected error")
+	}
+	got, err := store.LoadSigningKey()
+	if err != nil {
+		t.Fatalf("LoadSigningKey after Clear: %v", err)
+	}
+	if got != pem {
+		t.Fatalf("signing key after Clear = %q, want preserved PEM", got)
 	}
 }

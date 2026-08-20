@@ -1,18 +1,40 @@
 {
   "name": "deploy-aio",
   "root": "deploy/aio",
-  "projectType": "library",
+  "projectType": "application",
   "tags": ["lang:go", "scope:deploy"],
   "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "go build -o ../../bin/aio-init ./cmd/aio-init",
+          "go build -o ../../bin/aio-proxy ./cmd/aio-proxy",
+          "go build -o ../../bin/kind-loopback-forward ./cmd/kind-loopback-forward"
+        ],
+        "parallel": false,
+        "cwd": "deploy/aio"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ],
+      "outputs": [
+        "{workspaceRoot}/bin/aio-init",
+        "{workspaceRoot}/bin/aio-proxy",
+        "{workspaceRoot}/bin/kind-loopback-forward"
+      ]
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {
         "command": "go test -count=1 ./...",
         "cwd": "deploy/aio"
       },
-      "cache": true,
+      "cache": false,
       "inputs": [
-        "{projectRoot}/**/*",
+        "{projectRoot}/**/*.go",
         "{projectRoot}/go.mod",
         "{projectRoot}/go.sum"
       ]

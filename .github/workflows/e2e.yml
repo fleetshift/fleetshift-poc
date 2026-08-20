@@ -7,9 +7,12 @@ on:
     branches: [main]
 
 jobs:
-  e2e:
-    name: E2E (Playwright)
+  # Single cache writer. Test jobs restore the same multi-image tar and do
+  # not race this key. Kind host setup stays in the UI job until the end of Stage 2.
+  aio-image:
+    name: AIO image
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: read
 
@@ -17,22 +20,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up E2E
+        uses: ./.github/actions/setup-e2e
         with:
-          node-version: 24
-          cache: npm
-      # Needed for `task image:aio` on a cache miss.
-      - name: Install Task
-        uses: arduino/setup-task@v3
+          aio-mode: build
+
+  e2e-ui:
+    name: E2E (UI)
+    needs: [aio-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up E2E
+        uses: ./.github/actions/setup-e2e
         with:
-          version: 3.x
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build common library
-        run: npx nx run common:build
+          aio-mode: load
 
       # Start the rootless podman API service so the in-container server can
       # drive Kind through the mounted socket (docker-out-of-docker). The kind
@@ -61,27 +69,6 @@ jobs:
           sudo chmod 0666 "$sock"
           echo "PODMAN_SOCKET=${sock}" >> "$GITHUB_ENV"
           echo "podman API service listening at ${sock}"
-
-      # Cache the built AIO image tar keyed on every build input. On a hit we
-      # podman-load it and skip the whole build (Go compile + web bundle + apt +
-      # kind/kubectl download). Any source change to those paths busts the key.
-      - name: Cache AIO image
-        id: aio-image-cache
-        uses: actions/cache@v6
-        with:
-          path: /tmp/aio-image.tar
-          key: aio-image-${{ hashFiles('server/**', 'cli/**', 'sdk/**', 'client/web/**', 'extensions/**', 'tools/**', 'proto/**', 'Dockerfile*', 'deploy/aio/**', 'go.*', 'package-lock.json', 'nx.json', 'tsconfig*.json', 'Taskfile.yml') }}
-
-      - name: Build or load all-in-one image
-        run: |
-          if [ -f /tmp/aio-image.tar ]; then
-            echo "cache hit: loading AIO image"
-            podman load -i /tmp/aio-image.tar
-          else
-            echo "cache miss: building AIO image"
-            task image:aio
-            podman save -o /tmp/aio-image.tar quay.io/stolostron/fleetshift:latest
-          fi
 
       - name: Prepare container environment
         run: |
@@ -125,27 +112,6 @@ jobs:
           fi
           echo "BASE_URL=https://fleetshift-sandbox.localhost:8085" >> "$GITHUB_ENV"
 
-      # Cache the browser binaries keyed on the installed Playwright version, so
-      # a browser download only happens when @playwright/test actually changes.
-      - name: Resolve Playwright version
-        id: pw
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Playwright browsers
-        id: pw-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-
-      - name: Install Playwright browsers
-        run: |
-          if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
-
       # Prove the in-container kind engine path works before the slow lifecycle
       # test spends 5 minutes polling. This is the exact command the kind addon
       # shells out to; if it errors here we see podman's real stderr in seconds
@@ -186,3 +152,39 @@ jobs:
       - name: Cleanup FleetShift
         if: always()
         run: podman rm -f fleetshift || true
+
+  e2e-backend:
+    name: E2E (backend)
+    needs: [aio-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up E2E
+        uses: ./.github/actions/setup-e2e
+        with:
+          aio-mode: warm
+
+      - name: Run backend e2e tests
+        working-directory: e2e/backend
+        run: go test -tags e2e -count=1 -p 1 -timeout 30m ./...
+
+      - name: Dump leftover containers
+        if: failure()
+        run: |
+          echo "===== podman ps -a ====="
+          podman ps -a
+          echo "===== labeled AIO logs ====="
+          podman ps -a --filter label=fleetshift.e2e=backend --format '{{.ID}}' | while read -r id; do
+            echo "----- $id -----"
+            podman logs "$id" || true
+          done
+
+      - name: Cleanup leftover AIO containers
+        if: always()
+        run: podman ps -a --filter label=fleetshift.e2e=backend --format '{{.ID}}' | xargs -r podman rm -f

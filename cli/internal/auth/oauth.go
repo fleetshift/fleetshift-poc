@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 )
 
 // PKCEChallenge holds the code verifier and challenge for the
@@ -30,4 +31,13 @@ func GeneratePKCE() (PKCEChallenge, error) {
 		Challenge:       challenge,
 		ChallengeMethod: "S256",
 	}, nil
+}
+
+// GenerateOAuthState returns a cryptographically random OAuth state value.
+func GenerateOAuthState() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate OAuth state: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }

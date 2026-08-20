@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [server, cli, deploy/aio]
+        module: [server, cli, deploy/aio, e2e/backend]
 
     steps:
       - name: Checkout

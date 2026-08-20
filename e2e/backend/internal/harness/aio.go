@@ -1,0 +1,504 @@
+// Package harness starts a Dex-on AIO container and a host fleetctl for backend E2E tests.
+package harness
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+)
+
+// Fixture is the running AIO + host fleetctl for one go test process.
+type Fixture struct {
+	// repoRoot is the fleetshift-poc checkout (Nx, cli, e2e/web).
+	repoRoot string
+	// containerName is the podman name of the AIO container.
+	containerName string
+	// caFile is the sandbox CA copied out of the container for TLS.
+	caFile string
+	// configDir is fleetctl --config-dir (auth.json, and credentials.json with --insecure-storage).
+	configDir string
+	// fleetctl is the host fleetctl binary path.
+	fleetctl string
+	// workDir is the temp directory owned by this fixture (configDir, caFile). Stop removes it.
+	workDir string
+	// publishUIIPv4 maps container UIPort to 127.0.0.1. Mutually exclusive with publishUIIPv6.
+	publishUIIPv4 bool
+	// publishUIIPv6 maps container UIPort to [::1] when the host has no IPv4 loopback.
+	publishUIIPv6 bool
+}
+
+// Start builds the AIO image from this checkout, starts one container, copies
+// the sandbox CA, waits for /readyz, and builds fleetctl once. It does not log in.
+func Start() (*Fixture, error) {
+	f := &Fixture{}
+	if err := f.start(); err != nil {
+		f.Stop(true)
+		return nil, err
+	}
+	return f, nil
+}
+
+// start allocates temp state, builds fleetctl, runs the AIO container, and waits
+// until /readyz and unauthenticated gRPC are up.
+func (f *Fixture) start() error {
+	root, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	f.repoRoot = root
+
+	addrs, err := preflight(root)
+	if err != nil {
+		return err
+	}
+	f.publishUIIPv4, f.publishUIIPv6 = uiPublish(addrs)
+
+	workDir, err := os.MkdirTemp("", "fleetshift-e2e-backend-")
+	if err != nil {
+		return fmt.Errorf("temp dir: %w", err)
+	}
+	f.workDir = workDir
+	f.configDir = filepath.Join(workDir, "fleetctl")
+	if err := os.MkdirAll(f.configDir, 0o700); err != nil {
+		return fmt.Errorf("config dir: %w", err)
+	}
+	f.caFile = filepath.Join(workDir, "ca.crt")
+
+	if err := f.ensureFleetctl(); err != nil {
+		return err
+	}
+	if err := f.ensurePlaywrightChromium(); err != nil {
+		return err
+	}
+	if err := f.buildAIOImage(); err != nil {
+		return err
+	}
+
+	name, err := uniqueContainerName()
+	if err != nil {
+		return err
+	}
+	f.containerName = name
+	if err := f.podmanRun(); err != nil {
+		return err
+	}
+	if err := f.copyCA(); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), readyTimeout)
+	defer cancel()
+	if err := waitReadyz(ctx, UIOrigin+"/readyz", f.caFile); err != nil {
+		return fmt.Errorf("wait /readyz: %w", err)
+	}
+	return f.requireUnauthenticatedRPC()
+}
+
+// findRepoRoot walks from the working directory (then this source file) until
+// it finds the fleetshift-poc checkout that owns Nx, fleetctl, and e2e/web.
+func findRepoRoot() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("working directory: %w", err)
+	}
+	if root, ok := walkRepoRoot(wd); ok {
+		return root, nil
+	}
+	_, file, _, ok := runtime.Caller(0)
+	if ok {
+		if root, found := walkRepoRoot(filepath.Dir(file)); found {
+			return root, nil
+		}
+	}
+	return "", fmt.Errorf("fleetshift-poc repo root not found from %s", wd)
+}
+
+// walkRepoRoot walks start and its parents for isRepoRoot.
+func walkRepoRoot(start string) (string, bool) {
+	for dir := start; ; dir = filepath.Dir(dir) {
+		if isRepoRoot(dir) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+	}
+}
+
+// isRepoRoot reports whether dir is the fleetshift-poc checkout used by this harness.
+func isRepoRoot(dir string) bool {
+	for _, p := range []string{
+		filepath.Join(dir, "nx.json"),
+		filepath.Join(dir, "cli", "cmd", "fleetctl"),
+		filepath.Join(dir, "e2e", "web", "playwright.cli-login.mts"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// Stop dumps podman logs when failed is true, then removes the container and
+// the test-owned temp directory (including --config-dir).
+func (f *Fixture) Stop(failed bool) {
+	if f == nil {
+		return
+	}
+	if failed && f.containerName != "" {
+		dumpLogs(f.containerName)
+	}
+	if f.containerName != "" {
+		cmd := exec.Command("podman", "rm", "-f", f.containerName)
+		_ = cmd.Run()
+	}
+	if f.workDir != "" {
+		_ = os.RemoveAll(f.workDir)
+	}
+}
+
+// CredentialsPath is the insecure-storage tokens file under --config-dir.
+func (f *Fixture) CredentialsPath() string {
+	return filepath.Join(f.configDir, credentialsName)
+}
+
+// preflight checks PATH tools, Nx, PublicHost loopback DNS, and that UI/gRPC ports are free.
+func preflight(repoRoot string) ([]string, error) {
+	for _, bin := range []string{"podman", "npx", "go"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			return nil, fmt.Errorf("%s is required on PATH: %w", bin, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, "node_modules", "nx")); err != nil {
+		return nil, fmt.Errorf("nx is not installed under %s; run npm ci once", repoRoot)
+	}
+	cmd := exec.Command("npx", "nx", "--version")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("npx nx cannot run: %w\n%s", err, out)
+	}
+
+	addrs, err := net.LookupHost(PublicHost)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w (this .localhost name must map to loopback; do not edit /etc/hosts)", PublicHost, err)
+	}
+	if err := requireLoopbackNames(addrs); err != nil {
+		return nil, err
+	}
+
+	pub4, pub6 := uiPublish(addrs)
+	if pub4 {
+		if err := requireLoopbackFree("127.0.0.1", UIPort); err != nil {
+			return nil, fmt.Errorf("%w; stop the other AIO", err)
+		}
+	}
+	if pub6 {
+		if err := requireLoopbackFree("::1", UIPort); err != nil {
+			return nil, fmt.Errorf("%w; stop the other AIO", err)
+		}
+	}
+	if err := requireLoopbackFree("127.0.0.1", GRPCPort); err != nil {
+		return nil, fmt.Errorf("%w; stop the other AIO", err)
+	}
+	return addrs, nil
+}
+
+// requireLoopbackNames reports an error unless every addr is a loopback IP.
+func requireLoopbackNames(addrs []string) error {
+	if len(addrs) == 0 {
+		return fmt.Errorf("%s resolved to no addresses", PublicHost)
+	}
+	for _, a := range addrs {
+		ip := net.ParseIP(a)
+		if ip == nil || !ip.IsLoopback() {
+			return fmt.Errorf("%s resolved to %q, want loopback", PublicHost, a)
+		}
+	}
+	return nil
+}
+
+// hasIPv4Loopback reports whether addrs includes an IPv4 loopback address.
+func hasIPv4Loopback(addrs []string) bool {
+	for _, a := range addrs {
+		ip := net.ParseIP(a)
+		if ip != nil && ip.To4() != nil && ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
+// hasIPv6Loopback reports whether addrs includes an IPv6 loopback address.
+func hasIPv6Loopback(addrs []string) bool {
+	for _, a := range addrs {
+		ip := net.ParseIP(a)
+		if ip != nil && ip.To4() == nil && ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
+// uiPublish chooses a single host mapping for container UIPort. Publishing both
+// 127.0.0.1 and [::1] for the same container port trips Podman rootlessport
+// ("conflict with ID 1") on macOS. Dual-stack lookup still reaches IPv4 via
+// Happy Eyeballs; v6-only hosts get [::1] instead.
+func uiPublish(addrs []string) (ipv4, ipv6 bool) {
+	if hasIPv4Loopback(addrs) {
+		return true, false
+	}
+	if hasIPv6Loopback(addrs) {
+		return false, true
+	}
+	return true, false
+}
+
+// requireLoopbackFree binds ip:port to confirm it is free, then closes the listener.
+func requireLoopbackFree(ip, port string) error {
+	ln, err := net.Listen("tcp", net.JoinHostPort(ip, port))
+	if err != nil {
+		return fmt.Errorf("host port %s is occupied", net.JoinHostPort(ip, port))
+	}
+	return ln.Close()
+}
+
+// uniqueContainerName returns a podman name with a random suffix.
+func uniqueContainerName() (string, error) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("container name: %w", err)
+	}
+	return fmt.Sprintf("fleetshift-e2e-backend-%x", b), nil
+}
+
+// buildAIOImage runs nx image:aio from RepoRoot.
+func (f *Fixture) buildAIOImage() error {
+	envPath := filepath.Join(f.repoRoot, ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		if err := os.WriteFile(envPath, nil, 0o600); err != nil {
+			return fmt.Errorf("create .env: %w", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), imageBuildTimeout)
+	defer cancel()
+	f.logf("building AIO image (npx nx run %s)", nxImageAIO)
+	cmd := exec.CommandContext(ctx, "npx", "nx", "run", nxImageAIO)
+	cmd.Dir = f.repoRoot
+	cmd.Env = append(os.Environ(), "NX_DAEMON=false")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("npx nx run %s: %w", nxImageAIO, err)
+	}
+	return nil
+}
+
+// podmanRun starts the AIO container with UI and gRPC published to loopback.
+func (f *Fixture) podmanRun() error {
+	args := []string{
+		"run", "-d", "--pull=never",
+		"--name", f.containerName,
+		"--label", labelKey + "=" + labelValue,
+	}
+	if f.publishUIIPv4 {
+		args = append(args, "-p", "127.0.0.1:"+UIPort+":"+UIPort)
+	}
+	if f.publishUIIPv6 {
+		args = append(args, "-p", "[::1]:"+UIPort+":"+UIPort)
+	}
+	args = append(args, "-p", "127.0.0.1:"+GRPCPort+":"+GRPCPort, ImageRef)
+	f.logf("podman %s", strings.Join(args, " "))
+	cmd := exec.Command("podman", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman run: %w\n%s", err, trimOutput(out))
+	}
+	return nil
+}
+
+// trimOutput returns a trimmed string copy of command combined output.
+func trimOutput(b []byte) string {
+	return strings.TrimSpace(string(b))
+}
+
+// copyCA polls until the sandbox CA can be copied from the container to CAFile.
+func (f *Fixture) copyCA() error {
+	ctx, cancel := context.WithTimeout(context.Background(), copyCATimeout)
+	defer cancel()
+	f.logf("copying sandbox CA from %s:%s", f.containerName, containerCAPath)
+	return poll(ctx, pollInterval, func() error {
+		cmd := exec.CommandContext(ctx, "podman", "cp", f.containerName+":"+containerCAPath, f.caFile)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("podman cp CA: %s", trimOutput(out))
+		}
+		data, err := os.ReadFile(f.caFile)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(data), "BEGIN CERTIFICATE") {
+			return fmt.Errorf("copied CA is not a PEM certificate")
+		}
+		return nil
+	})
+}
+
+// requireUnauthenticatedRPC waits until deployment list fails with unauthenticated.
+func (f *Fixture) requireUnauthenticatedRPC() error {
+	ctx, cancel := context.WithTimeout(context.Background(), grpcAuthTimeout)
+	defer cancel()
+
+	var insecureAdmin bool
+	err := poll(ctx, time.Second, func() error {
+		runCtx, runCancel := context.WithTimeout(ctx, commandTimeout)
+		defer runCancel()
+		res := f.Run(runCtx, "deployment", "list")
+		if res.Err == nil {
+			// Stop polling immediately; success is a hard refusal, not a retry.
+			insecureAdmin = true
+			return nil
+		}
+		combined := strings.ToLower(res.Stderr + " " + res.Err.Error())
+		if strings.Contains(combined, "unauthenticated") {
+			return nil
+		}
+		return fmt.Errorf("gRPC not ready: %s", res.Stderr)
+	})
+	if insecureAdmin {
+		return fmt.Errorf("unauthenticated deployment list succeeded; refusing to continue (insecure admin?)")
+	}
+	return err
+}
+
+// ensureFleetctl builds ./cmd/fleetctl into RepoRoot/bin.
+func (f *Fixture) ensureFleetctl() error {
+	out := filepath.Join(f.repoRoot, "bin", "fleetctl")
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), fleetctlBuildTimeout)
+	defer cancel()
+	f.logf("building %s", out)
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", out, "./cmd/fleetctl")
+	cmd.Dir = filepath.Join(f.repoRoot, "cli")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go build fleetctl: %w", err)
+	}
+	f.fleetctl = out
+	return nil
+}
+
+// ensurePlaywrightChromium installs Playwright's Chromium browser for CLI login.
+func (f *Fixture) ensurePlaywrightChromium() error {
+	ctx, cancel := context.WithTimeout(context.Background(), playwrightInstallTimeout)
+	defer cancel()
+	f.logf("ensuring Playwright Chromium")
+	cmd := exec.CommandContext(ctx, "npx", "playwright", "install", "chromium")
+	cmd.Dir = filepath.Join(f.repoRoot, "e2e", "web")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("npx playwright install chromium: %w", err)
+	}
+	return nil
+}
+
+// waitReadyz GETs readyURL until it returns 200, using caFile for TLS.
+func waitReadyz(ctx context.Context, readyURL, caFile string) error {
+	client, err := tlsClient(caFile)
+	if err != nil {
+		return err
+	}
+	return poll(ctx, pollInterval, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, readyURL, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("/readyz returned %d", resp.StatusCode)
+		}
+		return nil
+	})
+}
+
+// tlsClient returns an HTTP client that trusts only the PEM CA at caFile.
+func tlsClient(caFile string) (*http.Client, error) {
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read CA file: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("parse CA file %s: no certificates found", caFile)
+	}
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+				RootCAs:    pool,
+			},
+		},
+	}, nil
+}
+
+// poll calls fn until it succeeds or ctx is done.
+func poll(ctx context.Context, interval time.Duration, fn func() error) error {
+	if interval <= 0 {
+		interval = pollInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	last := fn()
+	if last == nil {
+		return nil
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			if last != nil {
+				return fmt.Errorf("%w: %v", ctx.Err(), last)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+			last = fn()
+			if last == nil {
+				return nil
+			}
+		}
+	}
+}
+
+// dumpLogs writes podman logs for name to stderr.
+func dumpLogs(name string) {
+	fmt.Fprintf(os.Stderr, "===== podman logs %s =====\n", name)
+	cmd := exec.Command("podman", "logs", name)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
+
+// logf writes an e2e/backend progress line to stderr.
+func (f *Fixture) logf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "e2e/backend: "+format+"\n", args...)
+}
