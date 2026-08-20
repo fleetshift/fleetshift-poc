@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
+	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/internal/merklelog"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 )
 
@@ -40,9 +41,10 @@ type Authorizer func(AuthorizationRequest) error
 // supporting items are the same kind of object: one independently
 // authenticated assertion plus replaceable support for that evidence.
 // The inner assertion is extracted from each statement's evidence by the
-// selected profile.
+// selected profile. Log binds Root.Evidence's identity to a Merkle-log
+// position; it does not authorize content.
 type DeliveryPackage struct {
-	Commitment protocol.DeliveryCommitment
+	Log        protocol.LogUpdate
 	Root       protocol.SignedStatement
 	Supporting []protocol.SignedStatement
 }
@@ -60,8 +62,27 @@ type DirectKeyEnroller interface {
 	AcceptEnrollment(evidence protocol.TypedEvidence) error
 }
 
+// staleCheckpointError is returned by an agent when a request was constructed
+// from an older manager-side checkpoint than the agent has already retained.
+// Keeping this as a behavioral interface avoids coupling the manager to one
+// in-process delivery-agent implementation.
+type staleCheckpointError interface {
+	error
+	LatestCheckpoint() protocol.Checkpoint
+}
+
+type storedDelivery struct {
+	TargetID   string
+	Leaf       protocol.Digest
+	Evidence   protocol.TypedEvidence
+	Supporting []protocol.TypedEvidence
+}
+
 type agentRoute struct {
-	agent DeliveryAgent
+	mu sync.Mutex
+
+	agent      DeliveryAgent
+	checkpoint protocol.Checkpoint
 }
 
 // Manager is the resource-manager role.
@@ -71,7 +92,8 @@ type Manager struct {
 	tenantID   protocol.TenantID
 	authorizer Authorizer
 	profile    *directkey.Manager
-	log        []protocol.DeliveryCommitment
+	tree       *merklelog.Tree
+	deliveries []storedDelivery
 	agents     map[string]*agentRoute
 	enrollers  []DirectKeyEnroller
 }
@@ -85,11 +107,14 @@ func New(tenantID protocol.TenantID, authorizer Authorizer) *Manager {
 		tenantID:   tenantID,
 		authorizer: authorizer,
 		profile:    directkey.NewManager(),
+		tree:       merklelog.New(),
 		agents:     make(map[string]*agentRoute),
 	}
 }
 
-// RegisterAgent installs the delivery route for one target.
+// RegisterAgent installs the delivery route for one target. The manager starts
+// with an empty acknowledged checkpoint; an already-running agent can correct
+// that view on the first push.
 func (m *Manager) RegisterAgent(targetID string, agent DeliveryAgent) error {
 	if targetID == "" || agent == nil {
 		return errors.New("target ID and delivery agent are required")
@@ -99,7 +124,10 @@ func (m *Manager) RegisterAgent(targetID string, agent DeliveryAgent) error {
 	if _, exists := m.agents[targetID]; exists {
 		return fmt.Errorf("delivery agent for target %q is already registered", targetID)
 	}
-	m.agents[targetID] = &agentRoute{agent: agent}
+	m.agents[targetID] = &agentRoute{
+		agent:      agent,
+		checkpoint: protocol.EmptyCheckpoint(),
+	}
 	return nil
 }
 
@@ -133,93 +161,72 @@ func (m *Manager) SubmitDirectKeyEnrollment(ctx context.Context, caller protocol
 	return m.pushEnrollment(evidence)
 }
 
-// SubmitDelivery authorizes the caller, stores evidence, appends a log
-// commitment, and pushes the package to the named target. Optional
-// supporting evidence is couriered with the root and is independently
-// authenticated. Routing identity comes from DecodeAssertion then
-// DecodeDeliveryScope; the RM does not parse evidence bytes itself.
-func (m *Manager) SubmitDelivery(ctx context.Context, caller protocol.Principal, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (protocol.DeliveryCommitment, error) {
+// SubmitDelivery authorizes the caller, stores evidence, appends a log leaf,
+// and pushes the package to the named target. Optional supporting evidence is
+// couriered with the root and is independently authenticated. Routing identity
+// comes from DecodeAssertion then DecodeDeliveryScope; the RM does not parse
+// evidence bytes itself.
+func (m *Manager) SubmitDelivery(ctx context.Context, caller protocol.Principal, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (protocol.LogUpdate, error) {
 	courier, err := m.courier(evidence.ProvenanceType)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	assertion, err := courier.DecodeAssertion(evidence)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	scope, err := protocol.DecodeDeliveryScope(assertion)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	if scope.TenantID != m.tenantID {
-		return protocol.DeliveryCommitment{}, fmt.Errorf("%w: delivery tenant mismatch", ErrUnauthorized)
+		return protocol.LogUpdate{}, fmt.Errorf("%w: delivery tenant mismatch", ErrUnauthorized)
 	}
 	if err := m.authorize(caller, ActionDeliver, scope.TargetID); err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	hints, err := courier.CheckDelivery(evidence)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	if !callerMatches(caller, hints) {
-		return protocol.DeliveryCommitment{}, fmt.Errorf("%w: delivery principal does not match caller", ErrUnauthorized)
+		return protocol.LogUpdate{}, fmt.Errorf("%w: delivery principal does not match caller", ErrUnauthorized)
 	}
 	for _, item := range supporting {
 		itemCourier, err := m.courier(item.ProvenanceType)
 		if err != nil {
-			return protocol.DeliveryCommitment{}, err
+			return protocol.LogUpdate{}, err
 		}
 		if _, err := itemCourier.CheckDelivery(item); err != nil {
-			return protocol.DeliveryCommitment{}, err
+			return protocol.LogUpdate{}, err
 		}
 	}
 	if err := m.store(ctx, evidence); err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	for _, item := range supporting {
 		if err := m.store(ctx, item); err != nil {
-			return protocol.DeliveryCommitment{}, err
+			return protocol.LogUpdate{}, err
 		}
 	}
-	commitment, err := m.appendCommitment(scope, assertion.PredicateType, evidence, supporting)
+	index, err := m.appendDelivery(scope.TargetID, evidence, supporting)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
-	pkg, err := m.deliveryPackage(ctx, commitment, evidence, supporting)
+	update, err := m.pushDelivery(ctx, index)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return update, fmt.Errorf("push delivery to target %q: %w", scope.TargetID, err)
 	}
-	if err := m.pushDelivery(pkg); err != nil {
-		return commitment, fmt.Errorf("push delivery to target %q: %w", scope.TargetID, err)
-	}
-	return commitment, nil
+	return update, nil
 }
 
 // RetryDelivery pushes an already committed delivery without appending or
 // repeating the original caller authorization decision.
 func (m *Manager) RetryDelivery(ctx context.Context, index uint64) error {
-	m.mu.Lock()
-	if index >= uint64(len(m.log)) {
-		size := len(m.log)
-		m.mu.Unlock()
-		return fmt.Errorf("delivery-log index %d is beyond size %d", index, size)
+	if _, err := m.pushDelivery(ctx, index); err != nil {
+		return fmt.Errorf("retry delivery-log index %d: %w", index, err)
 	}
-	commitment := m.log[index]
-	m.mu.Unlock()
-
-	if len(commitment.Evidence) == 0 {
-		return fmt.Errorf("committed evidence for index %d is missing", index)
-	}
-	evidence := cloneEvidence(commitment.Evidence[0])
-	var supporting []protocol.TypedEvidence
-	for i := 1; i < len(commitment.Evidence); i++ {
-		supporting = append(supporting, cloneEvidence(commitment.Evidence[i]))
-	}
-	pkg, err := m.deliveryPackage(ctx, commitment, evidence, supporting)
-	if err != nil {
-		return err
-	}
-	return m.pushDelivery(pkg)
+	return nil
 }
 
 func (m *Manager) authorize(caller protocol.Principal, action, targetID string) error {
@@ -234,32 +241,42 @@ func (m *Manager) authorize(caller protocol.Principal, action, targetID string) 
 	return nil
 }
 
-func (m *Manager) appendCommitment(scope protocol.DeliveryScope, predicateType protocol.PredicateType, evidence protocol.TypedEvidence, supporting []protocol.TypedEvidence) (protocol.DeliveryCommitment, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	items := []protocol.TypedEvidence{cloneEvidence(evidence)}
+func (m *Manager) appendDelivery(targetID string, evidence protocol.TypedEvidence, supporting []protocol.TypedEvidence) (uint64, error) {
+	identity, err := evidence.Identity()
+	if err != nil {
+		return 0, err
+	}
+	leafHash, err := protocol.LeafHash(identity)
+	if err != nil {
+		return 0, err
+	}
+	items := make([]protocol.TypedEvidence, 0, len(supporting))
 	for _, item := range supporting {
 		items = append(items, cloneEvidence(item))
 	}
-	commitment := protocol.DeliveryCommitment{
-		Index:         uint64(len(m.log)),
-		TargetID:      scope.TargetID,
-		FulfillmentID: scope.FulfillmentID,
-		Generation:    scope.Generation,
-		PredicateType: predicateType,
-		Evidence:      items,
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index, _, err := m.tree.AppendHash(leafHash)
+	if err != nil {
+		return 0, err
 	}
-	m.log = append(m.log, commitment)
-	return commitment, nil
+	m.deliveries = append(m.deliveries, storedDelivery{
+		TargetID:   targetID,
+		Leaf:       identity,
+		Evidence:   cloneEvidence(evidence),
+		Supporting: items,
+	})
+	return index, nil
 }
 
-func (m *Manager) deliveryPackage(ctx context.Context, commitment protocol.DeliveryCommitment, evidence protocol.TypedEvidence, supporting []protocol.TypedEvidence) (DeliveryPackage, error) {
-	root, err := m.assembleStatement(ctx, evidence)
+func (m *Manager) deliveryPackage(ctx context.Context, update protocol.LogUpdate, stored storedDelivery) (DeliveryPackage, error) {
+	root, err := m.assembleStatement(ctx, stored.Evidence)
 	if err != nil {
 		return DeliveryPackage{}, err
 	}
-	out := make([]protocol.SignedStatement, 0, len(supporting))
-	for _, item := range supporting {
+	out := make([]protocol.SignedStatement, 0, len(stored.Supporting))
+	for _, item := range stored.Supporting {
 		stmt, err := m.assembleStatement(ctx, item)
 		if err != nil {
 			return DeliveryPackage{}, err
@@ -267,7 +284,7 @@ func (m *Manager) deliveryPackage(ctx context.Context, commitment protocol.Deliv
 		out = append(out, stmt)
 	}
 	return DeliveryPackage{
-		Commitment: commitment,
+		Log:        update,
 		Root:       root,
 		Supporting: out,
 	}, nil
@@ -288,21 +305,137 @@ func (m *Manager) pushEnrollment(evidence protocol.TypedEvidence) error {
 	return nil
 }
 
-func (m *Manager) pushDelivery(pkg DeliveryPackage) error {
+func (m *Manager) pushDelivery(ctx context.Context, index uint64) (protocol.LogUpdate, error) {
 	m.mu.Lock()
-	route, ok := m.agents[pkg.Commitment.TargetID]
+	if index >= uint64(len(m.deliveries)) {
+		size := len(m.deliveries)
+		m.mu.Unlock()
+		return protocol.LogUpdate{}, fmt.Errorf("delivery-log index %d is beyond size %d", index, size)
+	}
+	stored := cloneStored(m.deliveries[index])
+	route, ok := m.agents[stored.TargetID]
 	m.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("%w for target %q", ErrAgentUnavailable, pkg.Commitment.TargetID)
+		return protocol.LogUpdate{}, fmt.Errorf("%w for target %q", ErrAgentUnavailable, stored.TargetID)
 	}
-	return route.agent.Deliver(pkg)
+
+	// The target delivery contract permits only one in-flight delivery per
+	// fulfillment. Serializing this POC's target route also ensures checkpoint
+	// construction and acknowledgement recording cannot race one another.
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	var last protocol.LogUpdate
+	for {
+		m.mu.Lock()
+		update, err := m.logUpdateLocked(route.checkpoint, index)
+		m.mu.Unlock()
+		if err != nil {
+			return last, fmt.Errorf("construct proof from acknowledged agent checkpoint: %w", err)
+		}
+		last = update
+		pkg, err := m.deliveryPackage(ctx, update, stored)
+		if err != nil {
+			return update, err
+		}
+		if err := route.agent.Deliver(pkg); err != nil {
+			var stale staleCheckpointError
+			if !errors.As(err, &stale) {
+				return update, err
+			}
+			latest := stale.LatestCheckpoint()
+			if latest.Size <= route.checkpoint.Size {
+				return update, err
+			}
+			if err := m.validateAgentCheckpoint(latest); err != nil {
+				return update, fmt.Errorf("agent reported an invalid newer checkpoint: %w", err)
+			}
+			route.checkpoint = latest
+			continue
+		}
+
+		// A successful call is the acknowledgement. The manager records exactly
+		// the checkpoint whose consistency and inclusion proofs were delivered.
+		route.checkpoint = update.Checkpoint
+		return update, nil
+	}
 }
 
-// DeliveryLogSize is the number of appended commitments.
+func (m *Manager) logUpdateLocked(from protocol.Checkpoint, index uint64) (protocol.LogUpdate, error) {
+	if from.Size > m.tree.Size() {
+		return protocol.LogUpdate{}, fmt.Errorf("checkpoint size %d is beyond log size %d", from.Size, m.tree.Size())
+	}
+	wantPrevious, err := m.checkpointAtLocked(from.Size)
+	if err != nil {
+		return protocol.LogUpdate{}, err
+	}
+	if from != wantPrevious {
+		return protocol.LogUpdate{}, errors.New("checkpoint is not on the retained delivery-log branch")
+	}
+	current, err := m.checkpointAtLocked(m.tree.Size())
+	if err != nil {
+		return protocol.LogUpdate{}, err
+	}
+	consistency, err := m.tree.ConsistencyProof(from.Size, current.Size)
+	if err != nil {
+		return protocol.LogUpdate{}, fmt.Errorf("construct delivery-log consistency proof: %w", err)
+	}
+	if index >= uint64(len(m.deliveries)) || index >= current.Size {
+		return protocol.LogUpdate{}, fmt.Errorf("delivery-log index %d is beyond size %d", index, current.Size)
+	}
+	inclusion, err := m.tree.InclusionProof(index, current.Size)
+	if err != nil {
+		return protocol.LogUpdate{}, fmt.Errorf("construct inclusion proof for index %d: %w", index, err)
+	}
+	return protocol.LogUpdate{
+		From:             from,
+		Checkpoint:       current,
+		ConsistencyProof: protocol.EncodeProof(consistency),
+		Index:            index,
+		Leaf:             m.deliveries[index].Leaf,
+		InclusionProof:   protocol.EncodeProof(inclusion),
+	}, nil
+}
+
+func (m *Manager) validateAgentCheckpoint(checkpoint protocol.Checkpoint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want, err := m.checkpointAtLocked(checkpoint.Size)
+	if err != nil {
+		return err
+	}
+	if checkpoint != want {
+		return errors.New("checkpoint is not on the retained delivery-log branch")
+	}
+	return nil
+}
+
+func (m *Manager) checkpointAtLocked(size uint64) (protocol.Checkpoint, error) {
+	root, err := m.tree.RootAt(size)
+	if err != nil {
+		return protocol.Checkpoint{}, err
+	}
+	return protocol.NewCheckpoint(size, root)
+}
+
+// DeliveryLogSize is the number of appended leaves.
 func (m *Manager) DeliveryLogSize() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return uint64(len(m.log))
+	return m.tree.Size()
+}
+
+// AgentCheckpoint is the last acknowledged log checkpoint cached for a target.
+// The cache is not authoritative: loss or corruption only affects availability.
+func (m *Manager) AgentCheckpoint(targetID string) (protocol.Checkpoint, bool) {
+	m.mu.Lock()
+	route, ok := m.agents[targetID]
+	m.mu.Unlock()
+	if !ok {
+		return protocol.Checkpoint{}, false
+	}
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	return route.checkpoint, true
 }
 
 // Compromised returns an explicit attack harness.
@@ -326,39 +459,36 @@ func (c *CompromisedManager) CommitEnrollment(ctx context.Context, evidence prot
 
 // PushDelivery stores and routes a delivery without authorization or the
 // RM's own provenance check.
-func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (protocol.DeliveryCommitment, error) {
+func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (protocol.LogUpdate, error) {
 	courier, err := c.manager.courier(evidence.ProvenanceType)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	assertion, err := courier.DecodeAssertion(evidence)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	scope, err := protocol.DecodeDeliveryScope(assertion)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	if err := c.manager.store(ctx, evidence); err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
 	for _, item := range supporting {
 		if err := c.manager.store(ctx, item); err != nil {
-			return protocol.DeliveryCommitment{}, err
+			return protocol.LogUpdate{}, err
 		}
 	}
-	commitment, err := c.manager.appendCommitment(scope, assertion.PredicateType, evidence, supporting)
+	index, err := c.manager.appendDelivery(scope.TargetID, evidence, supporting)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return protocol.LogUpdate{}, err
 	}
-	pkg, err := c.manager.deliveryPackage(ctx, commitment, evidence, supporting)
+	update, err := c.manager.pushDelivery(ctx, index)
 	if err != nil {
-		return protocol.DeliveryCommitment{}, err
+		return update, err
 	}
-	if err := c.manager.pushDelivery(pkg); err != nil {
-		return commitment, err
-	}
-	return commitment, nil
+	return update, nil
 }
 
 func (m *Manager) courier(pt protocol.ProvenanceType) (protocol.ResourceManagerAPI, error) {
@@ -394,6 +524,20 @@ func (m *Manager) assembleStatement(ctx context.Context, evidence protocol.Typed
 		Evidence: cloneEvidence(evidence),
 		Support:  cloneSupport(support),
 	}, nil
+}
+
+func cloneStored(in storedDelivery) storedDelivery {
+	out := in
+	out.Evidence = cloneEvidence(in.Evidence)
+	if len(in.Supporting) == 0 {
+		out.Supporting = nil
+		return out
+	}
+	out.Supporting = make([]protocol.TypedEvidence, len(in.Supporting))
+	for i, item := range in.Supporting {
+		out.Supporting[i] = cloneEvidence(item)
+	}
+	return out
 }
 
 func cloneEvidence(in protocol.TypedEvidence) protocol.TypedEvidence {

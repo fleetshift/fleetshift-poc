@@ -120,24 +120,31 @@ controlled client
 resource manager
   - performs ordinary API authorization through an Authorizer hook
   - stores immutable TypedEvidence
-  - appends an in-memory delivery commitment before dispatch
-  - couriers each independently authenticated assertion as a SignedStatement
-    (root plus optional supporting statements such as fulfillment relations)
+  - appends the root evidence identity to an RFC 6962 Merkle log
+  - couriers a log update (consistency from the agent's last ack plus
+    inclusion of this leaf) with each independently authenticated
+    SignedStatement (root plus optional supporting statements such as
+    fulfillment relations)
   - assembles empty support material for this profile
   - has an explicit CompromisedManager attack harness
                |
                | untrusted package
-               |   Root         SignedStatement
+               |   Log         LogUpdate
+               |   Root        SignedStatement
                |   Supporting []SignedStatement
                v
 delivery agent
   - is bootstrapped with authenticated AuthorityConfig
   - never returns to TOFU after initialization
+  - verifies log consistency and inclusion before profile selection
   - selects a profile from policy and verifies independently
   - dispatches on authenticated predicate type
 ```
 
-Storage is in memory. The delivery log is size-ordered without Merkle proofs.
+Storage is in memory. The delivery log is an RFC 6962 Merkle tree. Each
+couriered package discloses one leaf — this root `TypedEvidence` identity —
+and proves append-only growth from the agent's retained `(size, root)`
+checkpoint. Unrelated leaves are skipped via consistency, not listed.
 There is no attestation graph, credential presentation, rotation, or
 historical cutoff yet. Those belong to the hybrid attestation POC and the
 mature profiles. This suite implements only `RegisteredSelfTarget` for
@@ -160,7 +167,12 @@ fulfillment relations.
 | Resource manager bypasses RBAC but forwards genuine evidence | Accepted by the agent |
 | Unknown provenance type | Fail closed |
 | Second bootstrap of an initialized verifier | Rejected |
-| Lost acknowledgement then retry | Idempotent apply |
+| Lost acknowledgement then retry | Idempotent apply; manager cache catches up via stale-checkpoint recovery |
+| Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs |
+| Rejected delivery after a verified log update | Log checkpoint advances; retry recovers the manager cache without applying |
+| Delivery to B while A is idle, then delivery to A | A's consistency proof covers B's leaf without disclosing B's evidence |
+| Log leaf does not match root evidence identity | Rejected |
+| Forked or skip-ahead log proofs | Rejected as a log fork, not reported as stale |
 
 ## Run it
 
@@ -176,18 +188,18 @@ No external identity provider, database, or transparency service is required.
 
 | Path | Purpose |
 | --- | --- |
-| `protocol/` | TypedEvidence, Principal, AuthorityConfig, selection, and the three APIs |
+| `protocol/` | TypedEvidence, Principal, AuthorityConfig, selection, log update, and the three APIs |
+| `internal/merklelog/` | In-memory RFC 6962 compact-range store copied from the v3 POC |
 | `directkey/` | Naive profile: enrollment, signature encoding, retained mapping |
 | `client/` | Controlled-client role |
-| `resourcemanager/` | Authorization, storage, log, routing, typed direct-key enrollment courier, compromise harness |
-| `deliveryagent/` | Bootstrap, selection, verification, apply |
+| `resourcemanager/` | Authorization, storage, Merkle log, last-ack cache, typed direct-key enrollment courier, compromise harness |
+| `deliveryagent/` | Bootstrap, log verification, selection, verification, apply |
 | `provenance_test.go` | End-to-end guarantees and accepted TOFU limitation |
 
 ## Recommended next experiments
 
 1. Implement continuity/v3, Sigstore, and TUF behind the same three APIs.
-2. Add Merkle inclusion and consistency proofs to the common delivery log.
-3. Stop at `AuthenticatedEvidence` and hand the result to the hybrid
+2. Stop at `AuthenticatedEvidence` and hand the result to the hybrid
    attestation graph instead of applying a delivery authorization here.
-4. Add `trust-config-update/v1` through the same profile-selection path.
-5. Add claim-derived tenant mapping and a second authority in one package.
+3. Add `trust-config-update/v1` through the same profile-selection path.
+4. Add claim-derived tenant mapping and a second authority in one package.
