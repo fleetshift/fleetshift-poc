@@ -1,12 +1,15 @@
 // Package controllers contains the Delivery reconciler. It is written as a
 // normal controller-runtime reconciler; the only multi-cluster awareness is
 // resolving the target cluster from the request via the multicluster manager.
+//
+// Controllers interact only with the Kubernetes-shaped client API. Delivery
+// outcomes are written to Delivery status; the provider's status mirror
+// translates those writes into FleetShift DeliveryReporter calls.
 package controllers
 
 import (
 	"context"
 	"fmt"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -22,13 +25,12 @@ import (
 // DeliveryReconciler reconciles Delivery objects projected into each
 // target's fsruntime cluster.
 type DeliveryReconciler struct {
-	Manager  mcmanager.Manager
-	Reporter contract.DeliveryReporter
+	Manager mcmanager.Manager
 }
 
-// Reconcile applies a delivery and reports progress/result through the
-// FleetShift DeliveryReporter — the same mental model as a kube
-// controller writing status, but the sink is the delivery contract.
+// Reconcile applies a delivery and writes progress/result to Delivery
+// status — the same mental model as any kube controller. The provider
+// status mirror reports status to the platform.
 func (r *DeliveryReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName, "delivery", req.Name)
 
@@ -45,22 +47,14 @@ func (r *DeliveryReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 		return ctrl.Result{}, err
 	}
 
-	if delivery.Status.Reported && delivery.Status.ObservedGeneration == delivery.Spec.Generation {
+	if delivery.Status.ObservedGeneration == delivery.Spec.Generation &&
+		contract.DeliveryState(delivery.Status.Phase).IsTerminal() {
 		return ctrl.Result{}, nil
 	}
 
-	deliveryID := contract.DeliveryID(delivery.Spec.DeliveryID)
-	generation := contract.Generation(delivery.Spec.Generation)
-
-	// First progress event transitions the platform delivery to progressing.
-	_ = r.Reporter.ReportEvent(ctx, deliveryID, generation, contract.DeliveryEvent{
-		Timestamp: time.Now().UTC(),
-		Kind:      contract.DeliveryEventProgress,
-		Message:   fmt.Sprintf("reconciling %s on target %s", delivery.Spec.Operation, delivery.Spec.TargetID),
-	})
-
+	// First progress status write transitions the platform delivery to progressing.
 	delivery.Status.Phase = string(contract.DeliveryStateProgressing)
-	delivery.Status.Message = "applying"
+	delivery.Status.Message = fmt.Sprintf("reconciling %s on target %s", delivery.Spec.Operation, delivery.Spec.TargetID)
 	delivery.Status.ObservedGeneration = delivery.Spec.Generation
 	if err := cl.GetClient().Status().Update(ctx, &delivery); err != nil {
 		return ctrl.Result{}, err
@@ -68,27 +62,18 @@ func (r *DeliveryReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 
 	// Simulate target-side work. A real addon (e.g. gcphcp) would call
 	// cloud APIs here. The POC "applies" by accepting the manifest.
-	result := contract.DeliveryResult{
-		State:   contract.DeliveryStateDelivered,
-		Message: fmt.Sprintf("applied %s (%s)", delivery.Spec.ManifestType, delivery.Spec.Operation),
-	}
+	phase := string(contract.DeliveryStateDelivered)
+	message := fmt.Sprintf("applied %s (%s)", delivery.Spec.ManifestType, delivery.Spec.Operation)
 	if delivery.Spec.Operation == string(contract.DeliveryOperationRemove) {
-		result.Message = fmt.Sprintf("removed %s", delivery.Spec.ManifestType)
+		message = fmt.Sprintf("removed %s", delivery.Spec.ManifestType)
 	}
 	if delivery.Spec.AuthToken == "" {
-		result = contract.DeliveryResult{
-			State:   contract.DeliveryStateAuthFailed,
-			Message: "missing auth token",
-		}
+		phase = string(contract.DeliveryStateAuthFailed)
+		message = "missing auth token"
 	}
 
-	if err := r.Reporter.ReportResult(ctx, deliveryID, generation, result); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	delivery.Status.Phase = string(result.State)
-	delivery.Status.Message = result.Message
-	delivery.Status.Reported = true
+	delivery.Status.Phase = phase
+	delivery.Status.Message = message
 	if err := cl.GetClient().Status().Update(ctx, &delivery); err != nil {
 		return ctrl.Result{}, err
 	}
