@@ -66,8 +66,10 @@ type AddonDeps struct {
 	InventoryReporter domain.InventoryReporter
 	// Indexing is non-nil when the kubernetes add-on is being assembled for production.
 	Indexing *kubernetesInProcessIndexing
-	// IndexCtx is the app-owned context for indexer work; cancelled on Close.
-	IndexCtx context.Context
+	// AppCtx is the application-owned context for addon work; cancelled on
+	// server Close. Add-ons should use this for background work that must
+	// be cancellable during shutdown.
+	AppCtx context.Context
 }
 
 // AddonSpec is one Enable/Connect unit. Connect still uses the production
@@ -81,4 +83,8 @@ type AddonSpec struct {
 	// AfterConnectBestEffort runs after Connect; errors are logged and ignored
 	// (GCP recovery compatibility).
 	AfterConnectBestEffort func(ctx context.Context) error
+	// Close is called during shutdown in reverse registration order. It
+	// should cancel in-flight work and join before returning. A nil Close
+	// is valid and means the addon has no background work to join.
+	Close func(ctx context.Context) error
 }
