@@ -27,10 +27,20 @@ func (f *Fixture) Run(ctx context.Context, args ...string) FleetctlResult {
 
 // RunUnauthenticated runs fleetctl with an empty temp --config-dir so the suite
 // credentials.json cannot be used. Isolation checks use this, not a second
-// --config-dir invented in steps.
+// --config-dir invented in steps. The Unauthenticated stderr this produces is
+// expected; begin/end log lines mark it so a later failure dump is not mistaken
+// for a real auth outage.
 func (f *Fixture) RunUnauthenticated(t *testing.T, ctx context.Context, args ...string) FleetctlResult {
 	t.Helper()
-	return f.runWithConfigDir(ctx, t.TempDir(), args...)
+	const reason = "empty --config-dir (credential isolation; suite tokens must not apply)"
+	f.logf("begin expected Unauthenticated: %s", reason)
+	res := f.runWithConfigDir(ctx, t.TempDir(), args...)
+	if unauthenticatedRPC(res) {
+		f.logf("end expected Unauthenticated: %s", reason)
+	} else {
+		f.logf("did not get expected Unauthenticated: %s (exit=%d)", reason, res.ExitCode)
+	}
+	return res
 }
 
 // runWithConfigDir is Run using an explicit --config-dir.
@@ -69,4 +79,13 @@ func fleetctlArgs(configDir string) []string {
 		"--server", GRPCTarget,
 		"--output", "json",
 	}
+}
+
+// unauthenticatedRPC reports whether fleetctl failed with an Unauthenticated RPC.
+func unauthenticatedRPC(res FleetctlResult) bool {
+	if res.Err == nil {
+		return false
+	}
+	combined := strings.ToLower(res.Stderr + " " + res.Err.Error())
+	return strings.Contains(combined, "unauthenticated")
 }

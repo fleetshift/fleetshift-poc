@@ -411,8 +411,14 @@ func (f *Fixture) copyCA() error {
 	})
 }
 
-// requireUnauthenticatedRPC waits until deployment list fails with unauthenticated.
+// requireUnauthenticatedRPC waits until deployment list fails with Unauthenticated.
+// That error is the readiness signal (gRPC is up and requires credentials).
+// begin/end log lines mark the probe so a later failure dump is not mistaken
+// for a real auth outage.
 func (f *Fixture) requireUnauthenticatedRPC() error {
+	const reason = "deployment list before login (gRPC up, no credentials yet)"
+	f.logf("begin expected Unauthenticated: %s", reason)
+
 	ctx, cancel := context.WithTimeout(context.Background(), grpcAuthTimeout)
 	defer cancel()
 
@@ -426,16 +432,21 @@ func (f *Fixture) requireUnauthenticatedRPC() error {
 			insecureAdmin = true
 			return nil
 		}
-		combined := strings.ToLower(res.Stderr + " " + res.Err.Error())
-		if strings.Contains(combined, "unauthenticated") {
+		if unauthenticatedRPC(res) {
 			return nil
 		}
 		return fmt.Errorf("gRPC not ready: %s", res.Stderr)
 	})
 	if insecureAdmin {
+		f.logf("did not get expected Unauthenticated: %s (command succeeded)", reason)
 		return fmt.Errorf("unauthenticated deployment list succeeded; refusing to continue (insecure admin?)")
 	}
-	return err
+	if err != nil {
+		f.logf("did not get expected Unauthenticated: %s: %v", reason, err)
+		return err
+	}
+	f.logf("end expected Unauthenticated: %s", reason)
+	return nil
 }
 
 // ensureFleetctl builds ./cmd/fleetctl into this checkout's bin directory.
