@@ -16,6 +16,9 @@ description: |
   Go (from `server/go.mod`), Node 24, and Playwright Chromium follow from
   `aio-mode`. Do not install those in the workflow.
 
+  `load` and `warm` also start the user `podman.socket` and ensure the `kind` 
+  network exists. The two test jobs still use separate AIO containers.
+
 inputs:
   aio-mode:
     description: |
@@ -28,15 +31,15 @@ inputs:
       stop (no Node, Go, or Playwright). Never podman-runs FleetShift.
 
       load — `e2e-ui` job, UI consumer. Restore (or download) the tar, podman
-      load, install Node and Playwright. Do not run nx image:aio; the UI tests
-      use the baked-in image. The workflow starts the Kind-capable sandbox
-      after this action.
+      load, install Node and Playwright, start user podman.socket and ensure
+      the kind network. Do not run nx image:aio; the UI tests use the baked-in
+      image. The workflow starts the Kind-capable sandbox after this action.
 
       warm — `e2e-backend` job, backend consumer. Same load as UI, then run
       nx image:aio once so TestMain's mandatory from-source build is a Podman
       layer-cache hit in this VM. Installs Go, Node, and Playwright (Dex
-      form-fill). Tests still start their own AIO; they do not reuse the UI
-      sandbox.
+      form-fill) and starts user podman.socket and the kind network. Tests
+      still start their own AIO; they do not reuse the UI sandbox.
     required: true
 
 runs:
@@ -209,3 +212,10 @@ runs:
         touch .env
         echo "warming AIO image (npx nx run fleetshift-poc:image:aio)"
         npx nx run fleetshift-poc:image:aio
+
+    # User podman.socket plus kind network. Shared by UI and backend so
+    # Kind docker-out-of-docker uses the same host recipe as local Linux.
+    - name: Prepare Kind host
+      if: ${{ inputs.aio-mode == 'load' || inputs.aio-mode == 'warm' }}
+      shell: bash
+      run: bash "${{ github.action_path }}/kind-host.sh"

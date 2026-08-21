@@ -8,7 +8,8 @@ on:
 
 jobs:
   # Single cache writer. Test jobs restore the same multi-image tar and do
-  # not race this key. Kind host setup stays in the UI job until the end of Stage 2.
+  # not race this key. Kind host setup (user podman.socket, RFC 6761 DNS) lives
+  # in setup-e2e for e2e-ui and e2e-backend. They do not share a container.
   aio-image:
     name: AIO image
     runs-on: ubuntu-latest
@@ -42,49 +43,16 @@ jobs:
         with:
           aio-mode: load
 
-      # Start the rootless podman API service so the in-container server can
-      # drive Kind through the mounted socket (docker-out-of-docker). The kind
-      # provider inside the container is podman-remote (CONTAINER_HOST points at
-      # the mounted socket), so this host-side API service is what it dials.
-      #
-      # Bind an explicit path (do not trust RemoteSocket.Path / XDG_RUNTIME_DIR),
-      # detach with setsid so it survives past this step, and verify it actually
-      # answers before continuing — a dead/unbound service surfaces later as an
-      # opaque `podman ps ... exit status 125` from inside the container.
-      - name: Start podman API service
-        run: |
-          sock=/tmp/podman-fleetshift.sock
-          setsid podman system service --time=0 "unix://${sock}" >/tmp/podman-service.log 2>&1 &
-          for i in $(seq 1 15); do
-            if [ -S "$sock" ] && podman --url "unix://${sock}" info >/dev/null 2>&1; then
-              break
-            fi
-            sleep 1
-          done
-          podman --url "unix://${sock}" version
-          # The service binds the socket 0600 root:root. The in-container server
-          # runs as uid 1000 (s6 drops privileges), so without this it gets
-          # permission denied → the kind addon's `podman ps` fails with exit 125.
-          # 0666 is fine on an ephemeral CI runner.
-          sudo chmod 0666 "$sock"
-          echo "PODMAN_SOCKET=${sock}" >> "$GITHUB_ENV"
-          echo "podman API service listening at ${sock}"
-
-      - name: Prepare container environment
-        run: |
-          podman network exists kind || podman network create kind
-          touch .env
-
       # Run the single AIO container (API + baked-in UI + peer Dex sandbox).
-      # Empty .env => built-in Dex with the ops@/dev@ personas the tests use.
+      # Dex-on (ops@/dev@) is the image default when OIDC_ISSUER_URL is unset.
       # Only 8085 is published: the browser reaches Dex under /idp through the
       # HTTPS edge. Dex 5556 and FleetShift HTTP 8086 stay unpublished.
+      # PODMAN_SOCKET comes from setup-e2e (user podman.socket).
       - name: Run sandbox
         run: |
-          echo '127.0.0.1 fleetshift-sandbox.localhost' | sudo tee -a /etc/hosts
+          : "${PODMAN_SOCKET:?PODMAN_SOCKET is not set; setup-e2e should have started user podman.socket}"
           podman run -d --name fleetshift \
-            --privileged --user 0:0 \
-            --env-file .env \
+            --privileged \
             --network kind:alias=fleetshift \
             -p 127.0.0.1:8085:8085 \
             -v "${PODMAN_SOCKET}:/var/run/docker.sock" \
@@ -97,14 +65,12 @@ jobs:
           # aio-proxy Host-allowlists fleetshift-sandbox.localhost (421 otherwise).
           # -k is readiness-only; Playwright uses ignoreHTTPSErrors for the private CA.
           for i in $(seq 1 60); do
-            if curl -skf --resolve fleetshift-sandbox.localhost:8085:127.0.0.1 \
-              https://fleetshift-sandbox.localhost:8085/readyz >/dev/null; then
+            if curl -skf https://fleetshift-sandbox.localhost:8085/readyz >/dev/null; then
               break
             fi
             sleep 2
           done
-          curl -skf --resolve fleetshift-sandbox.localhost:8085:127.0.0.1 \
-            https://fleetshift-sandbox.localhost:8085/readyz
+          curl -skf https://fleetshift-sandbox.localhost:8085/readyz
           if podman port fleetshift | grep -q 5556; then
             echo "Dex port 5556 must not be published" >&2
             podman port fleetshift
@@ -144,8 +110,8 @@ jobs:
       - name: Dump server logs on failure
         if: failure()
         run: |
-          echo "===== host podman API service log ====="
-          cat /tmp/podman-service.log || true
+          echo "===== user podman.socket ====="
+          systemctl --user status podman.socket || true
           echo "===== fleetshift container log ====="
           podman logs fleetshift || true
 
@@ -157,9 +123,16 @@ jobs:
     name: E2E (backend)
     needs: [aio-image]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
+
+    # Unlike e2e-ui, this job does not start, smoke, dump, or tear down an AIO.
+    # TestMain / harness.Start runs the container, uid-1000 kind-engine smoke,
+    # and Stop(true) dumps logs then removes the AIO and leftover suite Kind
+    # nodes. Do not add those as workflow steps: a second AIO fights over
+    # 8085/50051 and alias=fleetshift, a dump after Stop sees an empty host,
+    # and prefix-wide Kind cleanup can delete another suite's nodes.
 
     steps:
       - name: Checkout
@@ -172,19 +145,4 @@ jobs:
 
       - name: Run backend e2e tests
         working-directory: e2e/backend
-        run: go test -tags e2e -count=1 -p 1 -timeout 30m ./...
-
-      - name: Dump leftover containers
-        if: failure()
-        run: |
-          echo "===== podman ps -a ====="
-          podman ps -a
-          echo "===== labeled AIO logs ====="
-          podman ps -a --filter label=fleetshift.e2e=backend --format '{{.ID}}' | while read -r id; do
-            echo "----- $id -----"
-            podman logs "$id" || true
-          done
-
-      - name: Cleanup leftover AIO containers
-        if: always()
-        run: podman ps -a --filter label=fleetshift.e2e=backend --format '{{.ID}}' | xargs -r podman rm -f
+        run: go test -tags e2e -count=1 -p 1 -timeout 40m ./...

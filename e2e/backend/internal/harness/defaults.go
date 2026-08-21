@@ -2,8 +2,8 @@ package harness
 
 import "time"
 
-// Fixed harness facts for the Dex-on AIO: product endpoints (no environment-file
-// ABI), image/login identity, and start/login deadlines.
+// Fixed harness facts for the Kind-capable Dex-on AIO: product endpoints (no
+// environment-file ABI), image/login identity, and start/login deadlines.
 const (
 	// PublicHost is the AIO TLS-edge DNS name. It is a .localhost name and
 	// must resolve to loopback without /etc/hosts.
@@ -33,6 +33,24 @@ const (
 	// labelKey/labelValue mark the suite's podman container.
 	labelKey   = "fleetshift.e2e"
 	labelValue = "backend"
+	// kindNetwork is the shared Kind/AIO podman network (alias fleetshift).
+	kindNetwork = "kind"
+	// kindNetworkAlias is the AIO's name on kindNetwork for loopback-forward.
+	kindNetworkAlias = "fleetshift"
+	// engineSocketEnv is the optional absolute host engine socket path.
+	engineSocketEnv = "PODMAN_SOCKET"
+	// kindClusterLabel is the Kind node container label for cluster name.
+	kindClusterLabel = "io.x-k8s.kind.cluster"
+	// kindRoleLabel is the Kind node container label for node role.
+	kindRoleLabel = "io.x-k8s.kind.role"
+	// kindControlPlaneRole is the Kind control-plane node role.
+	kindControlPlaneRole = "control-plane"
+	// KindClusterIDPrefix is the fleetctl Kind cluster id prefix for this suite.
+	KindClusterIDPrefix = "kind-e2e-"
+	// kindClusterNamePrefix is the Kind addon's host Kind/podman name prefix.
+	kindClusterNamePrefix = "fs--"
+	// suiteHostKindPrefix is the host Kind name prefix for leftover nodes this suite may create.
+	suiteHostKindPrefix = kindClusterNamePrefix + KindClusterIDPrefix
 	// nxImageAIO is the Nx target that builds ImageRef.
 	nxImageAIO = "fleetshift-poc:image:aio"
 	// credentialsName is the insecure-storage tokens filename under --config-dir.
@@ -40,6 +58,7 @@ const (
 
 	readyTimeout             = 30 * time.Second
 	copyCATimeout            = 20 * time.Second
+	smokeKindTimeout         = 30 * time.Second
 	imageBuildTimeout        = 25 * time.Minute
 	fleetctlBuildTimeout     = 1 * time.Minute
 	playwrightInstallTimeout = 5 * time.Minute
@@ -47,4 +66,5 @@ const (
 	loginTimeout             = 1 * time.Minute
 	grpcAuthTimeout          = 10 * time.Second
 	pollInterval             = 200 * time.Millisecond
+	engineSocketDialTimeout  = 2 * time.Second
 )

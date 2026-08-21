@@ -1,4 +1,4 @@
-// Package harness starts a Dex-on AIO container and a host fleetctl for backend E2E tests.
+// Package harness starts a Kind-capable Dex-on AIO container and a host fleetctl for backend E2E tests.
 package harness
 
 import (
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// Fixture is the running AIO + host fleetctl for one go test process.
+// Fixture is the running Kind-capable AIO + host fleetctl for one go test process.
 type Fixture struct {
 	// repoRoot is the fleetshift-poc checkout (Nx, cli, e2e/web).
 	repoRoot string
@@ -32,14 +32,17 @@ type Fixture struct {
 	fleetctl string
 	// workDir is the temp directory owned by this fixture (configDir, caFile). Stop removes it.
 	workDir string
+	// engineSocket is the host unix socket mounted at /var/run/docker.sock.
+	engineSocket string
 	// publishUIIPv4 maps container UIPort to 127.0.0.1. Mutually exclusive with publishUIIPv6.
 	publishUIIPv4 bool
 	// publishUIIPv6 maps container UIPort to [::1] when the host has no IPv4 loopback.
 	publishUIIPv6 bool
 }
 
-// Start builds the AIO image from this checkout, starts one container, copies
-// the sandbox CA, waits for /readyz, and builds fleetctl once. It does not log in.
+// Start builds the AIO image from this checkout, starts one Kind-capable
+// container, smokes the in-container kind engine as uid 1000, copies the
+// sandbox CA, waits for /readyz, and builds fleetctl once. It does not log in.
 func Start() (*Fixture, error) {
 	f := &Fixture{}
 	if err := f.start(); err != nil {
@@ -49,8 +52,9 @@ func Start() (*Fixture, error) {
 	return f, nil
 }
 
-// start allocates temp state, builds fleetctl, runs the AIO container, and waits
-// until /readyz and unauthenticated gRPC are up.
+// start allocates temp state, builds fleetctl, runs a Kind-capable AIO
+// container, smokes the kind engine as uid 1000, and waits until /readyz
+// and unauthenticated gRPC are up.
 func (f *Fixture) start() error {
 	root, err := findRepoRoot()
 	if err != nil {
@@ -63,6 +67,12 @@ func (f *Fixture) start() error {
 		return err
 	}
 	f.publishUIIPv4, f.publishUIIPv6 = uiPublish(addrs)
+
+	socket, err := resolveEngineSocket()
+	if err != nil {
+		return err
+	}
+	f.engineSocket = socket
 
 	workDir, err := os.MkdirTemp("", "fleetshift-e2e-backend-")
 	if err != nil {
@@ -84,6 +94,9 @@ func (f *Fixture) start() error {
 	if err := f.buildAIOImage(); err != nil {
 		return err
 	}
+	if err := ensureKindNetwork(); err != nil {
+		return err
+	}
 
 	name, err := uniqueContainerName()
 	if err != nil {
@@ -91,6 +104,9 @@ func (f *Fixture) start() error {
 	}
 	f.containerName = name
 	if err := f.podmanRun(); err != nil {
+		return err
+	}
+	if err := f.smokeKindEngine(); err != nil {
 		return err
 	}
 	if err := f.copyCA(); err != nil {
@@ -151,19 +167,24 @@ func isRepoRoot(dir string) bool {
 	return true
 }
 
-// Stop dumps podman logs when failed is true, then removes the container and
-// the test-owned temp directory (including --config-dir).
+// Stop dumps podman/Kind evidence when failed is true, removes the AIO
+// container, then best-effort leftover Kind node containers this suite
+// created. It never deletes the engine socket or the kind network.
 func (f *Fixture) Stop(failed bool) {
 	if f == nil {
 		return
 	}
-	if failed && f.containerName != "" {
-		dumpLogs(f.containerName)
+	if failed {
+		if f.containerName != "" {
+			dumpLogs(f.containerName)
+		}
+		dumpKindEvidence(f.containerName, f.engineSocket)
 	}
 	if f.containerName != "" {
 		cmd := exec.Command("podman", "rm", "-f", f.containerName)
 		_ = cmd.Run()
 	}
+	removeLeftoverKindNodes()
 	if f.workDir != "" {
 		_ = os.RemoveAll(f.workDir)
 	}
@@ -283,7 +304,7 @@ func uniqueContainerName() (string, error) {
 	return fmt.Sprintf("fleetshift-e2e-backend-%x", b), nil
 }
 
-// buildAIOImage runs nx image:aio from RepoRoot.
+// buildAIOImage runs nx image:aio from this checkout.
 func (f *Fixture) buildAIOImage() error {
 	envPath := filepath.Join(f.repoRoot, ".env")
 	if _, err := os.Stat(envPath); os.IsNotExist(err) {
@@ -305,12 +326,15 @@ func (f *Fixture) buildAIOImage() error {
 	return nil
 }
 
-// podmanRun starts the AIO container with UI and gRPC published to loopback.
+// podmanRun starts the Kind-capable AIO with UI and gRPC published to loopback.
+// It does not pass --user 0:0; the image drops privileges itself.
 func (f *Fixture) podmanRun() error {
 	args := []string{
 		"run", "-d", "--pull=never",
+		"--privileged",
 		"--name", f.containerName,
 		"--label", labelKey + "=" + labelValue,
+		"--network", kindNetwork + ":alias=" + kindNetworkAlias,
 	}
 	if f.publishUIIPv4 {
 		args = append(args, "-p", "127.0.0.1:"+UIPort+":"+UIPort)
@@ -318,7 +342,12 @@ func (f *Fixture) podmanRun() error {
 	if f.publishUIIPv6 {
 		args = append(args, "-p", "[::1]:"+UIPort+":"+UIPort)
 	}
-	args = append(args, "-p", "127.0.0.1:"+GRPCPort+":"+GRPCPort, ImageRef)
+	args = append(args,
+		"-p", "127.0.0.1:"+GRPCPort+":"+GRPCPort,
+		"-v", f.engineSocket+":/var/run/docker.sock",
+		"-v", "/tmp:/tmp",
+		ImageRef,
+	)
 	f.logf("podman %s", strings.Join(args, " "))
 	cmd := exec.Command("podman", args...)
 	out, err := cmd.CombinedOutput()
@@ -328,12 +357,39 @@ func (f *Fixture) podmanRun() error {
 	return nil
 }
 
+// smokeKindEngine execs into the suite AIO as uid 1000 and runs `podman ps`
+// with Kind's cluster label — the same engine list Kind's provider uses.
+// Fail here instead of waiting for TestKindClusterLifecycle to poll. Root
+// would hide socket-permission errors.
+func (f *Fixture) smokeKindEngine() error {
+	ctx, cancel := context.WithTimeout(context.Background(), smokeKindTimeout)
+	defer cancel()
+	f.logf("smoke-testing kind engine in %s as uid 1000 (host socket %s)", f.containerName, f.engineSocket)
+	if err := poll(ctx, pollInterval, func() error {
+		cmd := exec.CommandContext(ctx, "podman", "exec", "-u", "1000", f.containerName, "true")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("podman exec: %w\n%s", err, trimOutput(out))
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("smoke kind engine: wait for exec: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "podman", "exec", "-u", "1000", f.containerName,
+		"podman", "ps", "-a", "--filter", "label="+kindClusterLabel)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("smoke kind engine: %w\n%s", err, trimOutput(out))
+	}
+	return nil
+}
+
 // trimOutput returns a trimmed string copy of command combined output.
 func trimOutput(b []byte) string {
 	return strings.TrimSpace(string(b))
 }
 
-// copyCA polls until the sandbox CA can be copied from the container to CAFile.
+// copyCA polls until the sandbox CA can be copied from the container to the fixture CA file.
 func (f *Fixture) copyCA() error {
 	ctx, cancel := context.WithTimeout(context.Background(), copyCATimeout)
 	defer cancel()
@@ -382,7 +438,7 @@ func (f *Fixture) requireUnauthenticatedRPC() error {
 	return err
 }
 
-// ensureFleetctl builds ./cmd/fleetctl into RepoRoot/bin.
+// ensureFleetctl builds ./cmd/fleetctl into this checkout's bin directory.
 func (f *Fixture) ensureFleetctl() error {
 	out := filepath.Join(f.repoRoot, "bin", "fleetctl")
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
@@ -492,7 +548,12 @@ func poll(ctx context.Context, interval time.Duration, fn func() error) error {
 // dumpLogs writes podman logs for name to stderr.
 func dumpLogs(name string) {
 	fmt.Fprintf(os.Stderr, "===== podman logs %s =====\n", name)
-	cmd := exec.Command("podman", "logs", name)
+	runToStderr("podman", "logs", name)
+}
+
+// runToStderr runs name with args and copies both streams to stderr.
+func runToStderr(name string, args ...string) {
+	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()

@@ -16,7 +16,7 @@ import (
 const (
 	deploymentCommandTimeout = 10 * time.Second
 	deploymentWaitTimeout    = 30 * time.Second
-	deploymentPollInterval   = 200 * time.Millisecond
+	deploymentPollInterval   = 500 * time.Millisecond
 )
 
 // deploymentView is the JSON subset parsed from fleetctl deployment list/get.
@@ -45,7 +45,7 @@ func WaitForListedDeployment(t *testing.T, f *harness.Fixture, wantName string) 
 	}).WithTimeout(deploymentWaitTimeout).WithPolling(deploymentPollInterval).Should(gomega.Succeed())
 }
 
-// WaitForDeploymentActive polls `deployment get` until the named deployment is Active.
+// WaitForDeploymentActive polls `deployment get` until the named deployment is STATE_ACTIVE.
 func WaitForDeploymentActive(t *testing.T, f *harness.Fixture, id string) {
 	t.Helper()
 	g := gomega.NewWithT(t)
