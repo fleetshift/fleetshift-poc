@@ -84,6 +84,7 @@ type Agent struct {
 	failBeforeAccepting      uint64
 	loseNextAcknowledgement  bool
 	staleCheckpointResponses uint64
+	suiteApplyCount          uint64
 }
 
 // New constructs an uninitialized verifier.
@@ -116,30 +117,14 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 	return nil
 }
 
-// AcceptEnrollment is the typed direct-key lifecycle courier path. It is
-// not ordinary delivery content.
-func (a *Agent) AcceptEnrollment(evidence protocol.TypedEvidence) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !a.initialized {
-		return protocol.ErrUninitializedVerifier
-	}
-	hints, err := a.profile.ParseHints(evidence)
-	if err != nil {
-		return err
-	}
-	authority, err := a.trust.Authority(protocol.PrincipalAuthority{Scheme: hints.Scheme, Authority: hints.Authority})
-	if err != nil {
-		return err
-	}
-	return a.profile.AcceptEnrollment(evidence, authority)
-}
-
-// Deliver verifies the log update, then provenance under matched policy, and
-// applies the authenticated root authorization. A verified log checkpoint is
-// retained even when the included delivery is later rejected. When the manager
-// constructed proofs from an obsolete checkpoint, Deliver returns the newer
-// retained checkpoint so the manager can retry without applying again.
+// Deliver verifies the log update, then provenance under matched policy.
+// Authenticated predicate type selects apply: intent predicates use
+// fulfillment apply, trust-config-update is reserved on the agent, and
+// predicates the selected profile Owns call TargetAPI.Apply. Unknown
+// predicates fail closed. A verified log checkpoint is retained even when
+// the included delivery is later rejected. When the manager constructed
+// proofs from an obsolete checkpoint, Deliver returns the newer retained
+// checkpoint so the manager can retry without applying again.
 func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -185,17 +170,7 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		return err
 	}
 
-	view, err := a.decodeAndDeriveLocked(pkg, authenticated, assertion)
-	if err != nil {
-		return err
-	}
-	if view.Scope.TenantID != a.config.TenantID || view.Scope.TargetID != a.config.TargetID {
-		return fmt.Errorf("%w: tenant or target mismatch", protocol.ErrPolicyReevaluation)
-	}
-	if authenticated.MappedFleetShiftTenant != a.config.TenantID {
-		return fmt.Errorf("%w: mapped tenant %q, agent tenant %q", protocol.ErrTenantMismatch, authenticated.MappedFleetShiftTenant, a.config.TenantID)
-	}
-	if err := a.applyLocked(view, append([]byte(nil), assertion.Bytes...)); err != nil {
+	if err := a.dispatchApplyLocked(pkg, authenticated, assertion); err != nil {
 		return err
 	}
 	if a.loseNextAcknowledgement {
@@ -231,6 +206,14 @@ func (a *Agent) StaleCheckpointResponses() uint64 {
 	return a.staleCheckpointResponses
 }
 
+// SuiteApplyCount is the number of times Deliver dispatched to TargetAPI.Apply.
+// Intent, trust-config-update, and unowned predicates do not increment it.
+func (a *Agent) SuiteApplyCount() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.suiteApplyCount
+}
+
 // PublicKey returns the retained direct-key mapping for tests.
 func (a *Agent) PublicKey(principal protocol.Principal) ([]byte, bool) {
 	return a.profile.PublicKey(principal)
@@ -255,6 +238,40 @@ func (a *Agent) lookupLocked(pt protocol.ProvenanceType) (protocol.TargetAPI, bo
 		return a.profile, true
 	}
 	return nil, false
+}
+
+func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) error {
+	switch authenticated.PredicateType {
+	case protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1:
+		view, err := a.decodeAndDeriveLocked(pkg, authenticated, assertion)
+		if err != nil {
+			return err
+		}
+		if view.Scope.TenantID != a.config.TenantID || view.Scope.TargetID != a.config.TargetID {
+			return fmt.Errorf("%w: tenant or target mismatch", protocol.ErrPolicyReevaluation)
+		}
+		if authenticated.MappedFleetShiftTenant != a.config.TenantID {
+			return fmt.Errorf("%w: mapped tenant %q, agent tenant %q", protocol.ErrTenantMismatch, authenticated.MappedFleetShiftTenant, a.config.TenantID)
+		}
+		return a.applyLocked(view, append([]byte(nil), assertion.Bytes...))
+	case protocol.PredicateTypeTrustConfigUpdateV1:
+		return fmt.Errorf("%w: trust-config-update/v1 is not implemented", protocol.ErrUnknownPredicateType)
+	default:
+		target, ok := a.lookupLocked(authenticated.ProvenanceType)
+		if !ok {
+			return fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, authenticated.ProvenanceType)
+		}
+		if !target.Owns(authenticated.PredicateType) {
+			return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, authenticated.PredicateType)
+		}
+		a.suiteApplyCount++
+		return target.Apply(context.Background(), protocol.ApplyRequest{
+			Authenticated: authenticated,
+			Assertion:     assertion,
+			Statement:     pkg.Root,
+			Index:         pkg.Log.Index,
+		})
+	}
 }
 
 func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) error {

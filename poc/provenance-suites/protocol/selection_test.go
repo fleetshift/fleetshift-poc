@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -259,6 +260,24 @@ func TestSelectAndVerifyRejectsClaimedTenantMismatch(t *testing.T) {
 	}
 }
 
+func TestTargetAPIApplyUnknownPredicateFailsClosed(t *testing.T) {
+	target := &stubTarget{pt: ProvenanceTypeDirectKeyV1}
+	if target.Owns("not-a-suite-predicate/v1") {
+		t.Fatal("stub owned an undeclared predicate")
+	}
+	err := target.Apply(context.Background(), ApplyRequest{
+		Authenticated: AuthenticatedEvidence{PredicateType: "not-a-suite-predicate/v1"},
+		Assertion: TypedAssertion{
+			PredicateType: "not-a-suite-predicate/v1",
+			Bytes:         []byte(`{}`),
+		},
+		Index: 7,
+	})
+	if !errors.Is(err, ErrUnknownPredicateType) {
+		t.Fatalf("error = %v, want ErrUnknownPredicateType", err)
+	}
+}
+
 func TestSelectAndVerifyRejectsHintSubjectMismatch(t *testing.T) {
 	trust, evidence, delivery := selectionFixture(t)
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
@@ -285,6 +304,7 @@ type stubTarget struct {
 	pt     ProvenanceType
 	hints  TentativeHints
 	verify func(VerifyRequest) (AuthenticatedEvidence, error)
+	owns   map[PredicateType]bool
 }
 
 func (s *stubTarget) ProvenanceType() ProvenanceType { return s.pt }
@@ -310,6 +330,14 @@ func (s *stubTarget) Verify(_ context.Context, req VerifyRequest) (Authenticated
 		return auth, TypedAssertion{PredicateType: auth.PredicateType, Bytes: []byte(`{"ok":true}`)}, nil
 	}
 	return AuthenticatedEvidence{}, TypedAssertion{}, ErrVerificationFailed
+}
+
+func (s *stubTarget) Owns(predicate PredicateType) bool {
+	return s.owns != nil && s.owns[predicate]
+}
+
+func (s *stubTarget) Apply(_ context.Context, req ApplyRequest) error {
+	return fmt.Errorf("%w: %s", ErrUnknownPredicateType, req.Authenticated.PredicateType)
 }
 
 func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, DeliveryContext) {

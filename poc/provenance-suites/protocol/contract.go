@@ -37,10 +37,16 @@ type ResourceManagerAPI interface {
 // authenticated authority configuration and a candidate predicate type.
 // Verify produces AuthenticatedEvidence and the authenticated inner
 // assertion extracted from the statement's evidence.
+// Owns declares the suite-owned predicates this profile applies.
+// Apply updates retained profile state for those predicates. Intent and
+// trust-config-update predicates are handled by the agent and are never
+// owned by a suite. Unknown predicates fail closed.
 type TargetAPI interface {
 	ProvenanceType() ProvenanceType
 	ParseHints(evidence TypedEvidence) (TentativeHints, error)
 	Verify(ctx context.Context, req VerifyRequest) (AuthenticatedEvidence, TypedAssertion, error)
+	Owns(predicate PredicateType) bool
+	Apply(ctx context.Context, req ApplyRequest) error
 }
 
 // VerifyRequest is the authenticated policy and one couriered signed
@@ -52,6 +58,18 @@ type VerifyRequest struct {
 	ProfileConfig   ProfileConfig
 	AuthorityConfig AuthorityConfig
 	DeliveryContext DeliveryContext
+}
+
+// ApplyRequest is the authenticated result of Verify plus the log position of
+// this delivery. Suites use it to update retained proof material for
+// predicates they own. Intent predicates never reach Apply.
+type ApplyRequest struct {
+	Authenticated AuthenticatedEvidence
+	Assertion     TypedAssertion
+	Statement     SignedStatement
+	// Index is the delivery-log position of this leaf. Continuity/v3 cutoffs
+	// will need it; profiles that do not consult log position ignore it.
+	Index uint64
 }
 
 // TargetLookup returns the installed target implementation for a provenance

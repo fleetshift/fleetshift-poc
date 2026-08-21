@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
@@ -50,16 +51,10 @@ type DeliveryPackage struct {
 }
 
 // DeliveryAgent is the manager-side view of a target. A nil error is the
-// acknowledgement that the agent durably accepted the work. Enrollment is
-// not part of this interface; it is a typed direct-key lifecycle courier.
+// acknowledgement that the agent durably accepted the work. Suite-owned
+// events such as enrollment are ordinary Deliver packages.
 type DeliveryAgent interface {
 	Deliver(pkg DeliveryPackage) error
-}
-
-// DirectKeyEnroller is the typed direct-key/v1 enrollment courier. Profiles
-// that do not enroll through FleetShift do not implement it.
-type DirectKeyEnroller interface {
-	AcceptEnrollment(evidence protocol.TypedEvidence) error
 }
 
 // staleCheckpointError is returned by an agent when a request was constructed
@@ -95,7 +90,6 @@ type Manager struct {
 	tree       *merklelog.Tree
 	deliveries []storedDelivery
 	agents     map[string]*agentRoute
-	enrollers  []DirectKeyEnroller
 }
 
 // New constructs a manager for one FleetShift tenant.
@@ -131,19 +125,10 @@ func (m *Manager) RegisterAgent(targetID string, agent DeliveryAgent) error {
 	return nil
 }
 
-// RegisterDirectKeyEnroller installs the typed direct-key enrollment courier.
-func (m *Manager) RegisterDirectKeyEnroller(enroller DirectKeyEnroller) error {
-	if enroller == nil {
-		return errors.New("direct-key enroller is required")
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.enrollers = append(m.enrollers, enroller)
-	return nil
-}
-
 // SubmitDirectKeyEnrollment is the typed direct-key/v1 lifecycle API. It is
-// not a generic RegisterKey.
+// not a generic RegisterKey. After the RM's own enrollment check it appends
+// the evidence identity to the delivery log and delivers to every registered
+// agent.
 func (m *Manager) SubmitDirectKeyEnrollment(ctx context.Context, caller protocol.Principal, evidence protocol.TypedEvidence) error {
 	if err := m.authorize(caller, ActionEnroll, ""); err != nil {
 		return err
@@ -158,7 +143,18 @@ func (m *Manager) SubmitDirectKeyEnrollment(ctx context.Context, caller protocol
 	if err := m.profile.CommitEnrollment(ctx, evidence); err != nil {
 		return err
 	}
-	return m.pushEnrollment(evidence)
+	// NOTE: In reality, this would not route to _every_ agent.
+	// This should likely filter on tenant,
+	// and we'd need to know which targets are relevant to which tenants.
+	// Reduce those to the unique agents across those targets, and dispatch.
+	index, err := m.appendDelivery("", evidence, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := m.pushDelivery(ctx, index); err != nil {
+		return fmt.Errorf("push enrollment: %w", err)
+	}
+	return nil
 }
 
 // SubmitDelivery authorizes the caller, stores evidence, appends a log leaf,
@@ -241,6 +237,8 @@ func (m *Manager) authorize(caller protocol.Principal, action, targetID string) 
 	return nil
 }
 
+// appendDelivery records a log leaf. An empty targetID means the leaf is
+// relevant to every registered agent (suite events such as enrollment).
 func (m *Manager) appendDelivery(targetID string, evidence protocol.TypedEvidence, supporting []protocol.TypedEvidence) (uint64, error) {
 	identity, err := evidence.Identity()
 	if err != nil {
@@ -290,21 +288,6 @@ func (m *Manager) deliveryPackage(ctx context.Context, update protocol.LogUpdate
 	}, nil
 }
 
-func (m *Manager) pushEnrollment(evidence protocol.TypedEvidence) error {
-	m.mu.Lock()
-	enrollers := append([]DirectKeyEnroller(nil), m.enrollers...)
-	m.mu.Unlock()
-	if len(enrollers) == 0 {
-		return fmt.Errorf("%w: no registered direct-key enrollers", ErrAgentUnavailable)
-	}
-	for _, enroller := range enrollers {
-		if err := enroller.AcceptEnrollment(cloneEvidence(evidence)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (m *Manager) pushDelivery(ctx context.Context, index uint64) (protocol.LogUpdate, error) {
 	m.mu.Lock()
 	if index >= uint64(len(m.deliveries)) {
@@ -313,12 +296,47 @@ func (m *Manager) pushDelivery(ctx context.Context, index uint64) (protocol.LogU
 		return protocol.LogUpdate{}, fmt.Errorf("delivery-log index %d is beyond size %d", index, size)
 	}
 	stored := cloneStored(m.deliveries[index])
-	route, ok := m.agents[stored.TargetID]
+	routes, err := m.routesLocked(stored.TargetID)
 	m.mu.Unlock()
-	if !ok {
-		return protocol.LogUpdate{}, fmt.Errorf("%w for target %q", ErrAgentUnavailable, stored.TargetID)
+	if err != nil {
+		return protocol.LogUpdate{}, err
 	}
 
+	var last protocol.LogUpdate
+	for _, route := range routes {
+		update, err := m.pushToRoute(ctx, route, index, stored)
+		if err != nil {
+			return update, err
+		}
+		last = update
+	}
+	return last, nil
+}
+
+func (m *Manager) routesLocked(targetID string) ([]*agentRoute, error) {
+	if targetID != "" {
+		route, ok := m.agents[targetID]
+		if !ok {
+			return nil, fmt.Errorf("%w for target %q", ErrAgentUnavailable, targetID)
+		}
+		return []*agentRoute{route}, nil
+	}
+	if len(m.agents) == 0 {
+		return nil, fmt.Errorf("%w: no registered delivery agents", ErrAgentUnavailable)
+	}
+	ids := make([]string, 0, len(m.agents))
+	for id := range m.agents {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	routes := make([]*agentRoute, 0, len(ids))
+	for _, id := range ids {
+		routes = append(routes, m.agents[id])
+	}
+	return routes, nil
+}
+
+func (m *Manager) pushToRoute(ctx context.Context, route *agentRoute, index uint64, stored storedDelivery) (protocol.LogUpdate, error) {
 	// The target delivery contract permits only one in-flight delivery per
 	// fulfillment. Serializing this POC's target route also ensures checkpoint
 	// construction and acknowledgement recording cannot race one another.
@@ -449,12 +467,20 @@ type CompromisedManager struct {
 	manager *Manager
 }
 
-// CommitEnrollment stores and couriers enrollment without caller authorization.
+// CommitEnrollment stores and delivers enrollment without caller authorization.
+// It still appends a log leaf and pushes through Deliver.
 func (c *CompromisedManager) CommitEnrollment(ctx context.Context, evidence protocol.TypedEvidence) error {
 	if err := c.manager.profile.CommitEnrollment(ctx, evidence); err != nil {
 		return err
 	}
-	return c.manager.pushEnrollment(evidence)
+	index, err := c.manager.appendDelivery("", evidence, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := c.manager.pushDelivery(ctx, index); err != nil {
+		return err
+	}
+	return nil
 }
 
 // PushDelivery stores and routes a delivery without authorization or the
