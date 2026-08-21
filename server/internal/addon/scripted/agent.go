@@ -3,6 +3,7 @@ package scripted
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -21,6 +22,10 @@ type Agent struct {
 	planner   *Planner
 	appCtx    context.Context
 	log       *slog.Logger
+
+	// sleep is the cancellable sleep function used by the retry loop.
+	// Tests inject a fake; production uses sleepCancellable.
+	sleep func(ctx context.Context, d time.Duration) error
 
 	mu      sync.Mutex
 	slots   map[slotKey]*dispatchSlot
@@ -41,6 +46,14 @@ type dispatchSlot struct {
 	deliveryID domain.DeliveryID
 }
 
+// AgentOption is a functional option for NewAgent.
+type AgentOption func(*Agent)
+
+// WithSleep injects a custom sleep function for testing. The default is sleepCancellable.
+func WithSleep(fn func(context.Context, time.Duration) error) AgentOption {
+	return func(a *Agent) { a.sleep = fn }
+}
+
 // NewAgent creates a scripted delivery agent. The codec must be
 // pre-compiled (NewCodec). The appCtx is the application-owned context
 // used to cancel in-flight work during shutdown.
@@ -51,8 +64,9 @@ func NewAgent(
 	planner *Planner,
 	appCtx context.Context,
 	log *slog.Logger,
+	opts ...AgentOption,
 ) *Agent {
-	return &Agent{
+	a := &Agent{
 		reporter:  reporter,
 		inventory: inventory,
 		codec:     codec,
@@ -61,6 +75,12 @@ func NewAgent(
 		log:       log,
 		slots:     make(map[slotKey]*dispatchSlot),
 	}
+	// Set default sleep function (must be done before applying options).
+	a.sleep = a.sleepCancellable
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Deliver implements domain.DeliveryAgent.
@@ -91,15 +111,28 @@ func (a *Agent) Remove(
 
 // Close marks the agent as closing and waits for in-flight work to
 // finish. Cancellation of in-flight work is driven by appCtx, which is
-// owned by the caller (bootstrap shutdown).
-func (a *Agent) Close(_ context.Context) error {
+// owned by the caller (bootstrap shutdown). Close respects the provided
+// context's deadline (bootstrap's shutdownGrace timeout) and returns a
+// wrapped ctx.Err() if the deadline is exceeded before all work joins.
+func (a *Agent) Close(ctx context.Context) error {
 	a.mu.Lock()
 	a.closing = true
 	a.mu.Unlock()
-	// appCtx cancellation is owned by the caller (bootstrap shutdown);
-	// we just wait for all in-flight work to join.
-	a.wg.Wait()
-	return nil
+
+	// Wait for all in-flight work to join, but respect the caller's
+	// context deadline (bootstrap's shutdownGrace timeout).
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("scripted: close: %w", ctx.Err())
+	}
 }
 
 func (a *Agent) dispatch(
@@ -263,9 +296,11 @@ func (a *Agent) runCompletion(
 	}
 
 	// On successful delivery, project inventory before reporting
-	// delivered state.
+	// delivered state (with retries on transient errors).
 	if operation == OperationDeliver {
-		a.projectInventory(ctx, name, inv)
+		if err := a.projectInventoryWithRetry(ctx, name, inv); err != nil {
+			a.log.Warn("scripted: inventory projection failed after retries", "name", name, "error", err)
+		}
 	}
 
 	// On successful removal, clear planner cursor state for this
@@ -281,13 +316,14 @@ func (a *Agent) runCompletion(
 	}
 }
 
-// projectInventory idempotently replaces the managed resource's labels
-// and observation. Empty projection values clear any prior inventory.
-func (a *Agent) projectInventory(
+// projectInventoryWithRetry idempotently replaces the managed resource's labels
+// and observation, retrying transient errors with a deterministic backoff schedule.
+// Empty projection values clear any prior inventory.
+func (a *Agent) projectInventoryWithRetry(
 	ctx context.Context,
 	name domain.ResourceName,
 	inv InventoryProjection,
-) {
+) error {
 	report := domain.InventoryDeltaReport{
 		ResourceType:  ResourceType,
 		Name:          name,
@@ -297,10 +333,28 @@ func (a *Agent) projectInventory(
 		obs := json.RawMessage(inv.Observation)
 		report.Observation = &obs
 	}
-	if err := a.inventory.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
-		Reports: []domain.InventoryDeltaReport{report},
-	}); err != nil {
-		a.log.Warn("scripted: inventory projection failed", "name", name, "error", err)
+
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		err := a.inventory.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{
+			Reports: []domain.InventoryDeltaReport{report},
+		})
+		if err == nil {
+			return nil
+		}
+
+		// Check for permanent errors.
+		if isPermanentInventoryError(err) {
+			return err
+		}
+
+		lastErr = err
+
+		// Wait before retry.
+		delay := inventoryRetryDelay(attempt)
+		if err := a.sleep(ctx, delay); err != nil {
+			return lastErr // context cancelled during wait
+		}
 	}
 }
 
@@ -328,4 +382,44 @@ func (a *Agent) sleepCancellable(ctx context.Context, d time.Duration) error {
 
 func managedResourceInstanceKey(uid domain.ExtensionResourceUID) string {
 	return "managed-resource:" + uid.String()
+}
+
+// inventoryRetrySchedule is the fixed backoff schedule: 100ms, 200ms, 400ms, 800ms, 1.6s.
+// After exhaustion, every subsequent attempt uses inventoryRetryMaxDelay (2s).
+var inventoryRetrySchedule = []time.Duration{
+	100 * time.Millisecond,
+	200 * time.Millisecond,
+	400 * time.Millisecond,
+	800 * time.Millisecond,
+	1600 * time.Millisecond,
+}
+
+const inventoryRetryMaxDelay = 2 * time.Second
+
+// inventoryRetryDelay returns the backoff duration for the given attempt number.
+func inventoryRetryDelay(attempt int) time.Duration {
+	if attempt < len(inventoryRetrySchedule) {
+		return inventoryRetrySchedule[attempt]
+	}
+	return inventoryRetryMaxDelay
+}
+
+// isPermanentInventoryError classifies whether an error should stop retries.
+// Terminal errors (domain.IsTerminal), semantic errors (domain.ErrInvalidArgument,
+// domain.ErrUnimplemented, domain.ErrNotFound) are permanent.
+// All other errors are transient/retryable.
+func isPermanentInventoryError(err error) bool {
+	if domain.IsTerminal(err) {
+		return true
+	}
+	if errors.Is(err, domain.ErrInvalidArgument) {
+		return true
+	}
+	if errors.Is(err, domain.ErrUnimplemented) {
+		return true
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		return true
+	}
+	return false
 }

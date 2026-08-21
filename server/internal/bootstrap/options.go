@@ -83,8 +83,10 @@ type AddonSpec struct {
 	// AfterConnectBestEffort runs after Connect; errors are logged and ignored
 	// (GCP recovery compatibility).
 	AfterConnectBestEffort func(ctx context.Context) error
-	// Close is called during shutdown in reverse registration order. It
-	// should cancel in-flight work and join before returning. A nil Close
-	// is valid and means the addon has no background work to join.
+	// Close is called during shutdown in reverse registration order, after
+	// appCtx has been cancelled. It should observe the cancellation and join
+	// any in-flight work started with appCtx, ensuring they terminate before
+	// returning. A nil Close is valid and means the addon has no background
+	// work to join.
 	Close func(ctx context.Context) error
 }

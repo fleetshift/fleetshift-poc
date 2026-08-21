@@ -386,6 +386,18 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 		return fail(err)
 	}
 	addonCloseHooks, err := enableAndConnectAddons(ctx, addonMgr, specs, logger)
+	// Register addon close hooks for cleanup immediately — even on error,
+	// enableAndConnectAddons returns hooks for already-connected addons that
+	// must be unwound before returning through fail().
+	cleanups = append(cleanups, func() {
+		for _, hook := range addonCloseHooks {
+			closeCtx, cancel := context.WithTimeout(context.Background(), o.shutdownGrace)
+			if hookErr := hook(closeCtx); hookErr != nil {
+				logger.Error("addon close hook error during startup unwind", "error", hookErr)
+			}
+			cancel()
+		}
+	})
 	if err != nil {
 		return fail(err)
 	}
