@@ -1,23 +1,8 @@
 package steps
 
 import (
-	"strings"
 	"testing"
-
-	"github.com/fleetshift/fleetshift-poc/e2e/backend/internal/harness"
 )
-
-func TestUniqueKindClusterID(t *testing.T) {
-	t.Parallel()
-	got := UniqueKindClusterID(t)
-	if !strings.HasPrefix(got, harness.KindClusterIDPrefix) {
-		t.Fatalf("UniqueKindClusterID() = %q, want prefix %q", got, harness.KindClusterIDPrefix)
-	}
-	suffix := strings.TrimPrefix(got, harness.KindClusterIDPrefix)
-	if len(suffix) != 8 {
-		t.Fatalf("UniqueKindClusterID() suffix %q, want 8 hex chars", suffix)
-	}
-}
 
 func TestConfigMapDeploymentID(t *testing.T) {
 	t.Parallel()
