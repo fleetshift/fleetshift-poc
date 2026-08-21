@@ -815,6 +815,32 @@ idempotency keys where needed, and integrate with durable workflows and the
 delivery log where ordering has security meaning. The provenance type or
 credential method owns its operation schema, validation, and state transition.
 
+Those typed submit APIs still become ordinary logged deliveries. After the
+resource manager accepts the request, it appends the evidence identity to the
+delivery log and couriers it to the agents that must apply it. Enrollment is
+relevant to every agent that will later verify that principal; there is no
+fulfillment target. Rotation, revocation, and similar suite events follow the
+same path.
+
+After log verification and profile selection, the authenticated predicate type
+selects apply:
+
+- user-intent predicates (`deployment/v1`, `managed-resource/v1`) go through
+  the common fulfillment apply path;
+- predicates the selected profile declares it owns (for example
+  `direct-key/enrollment/v1`, later v3 rotation or revocation) update that
+  suite's retained proof material through the profile's apply path; and
+- `trust-config-update/v1` is owned by the agent that hosts many suites, not
+  by a single profile's apply path.
+
+An unknown predicate fails closed even when a delivery policy matched it.
+A profile's declaration of ownership is the source of which control
+predicates it applies; common code does not treat leftover predicates as
+suite events.
+
+An agent treats a suite event as just another delivery. The owned predicate
+type is what routes apply to the suite implementation at the target.
+
 ## Retained State And Delivery Ordering
 
 ### Profile-owned verifier state
@@ -867,9 +893,11 @@ The log supports:
 
 Appending a record does not authorize its content. The log orders identities;
 the applicable credential, provenance profile, graph, constraints, and target
-checks establish authority. Predicate type selects apply. Trust updates and
-rotations are ordinary logged assertions this agent must verify and apply if
-it will rely on them; unrelated content leaves are skipped via consistency.
+checks establish authority. Predicate type selects apply: intent, predicates
+the selected profile owns, or the agent-owned trust-configuration handler.
+Trust updates and rotations are ordinary logged assertions this agent must
+verify and apply if it will rely on them; unrelated content leaves are skipped
+via consistency.
 An inert or invalid profile-control marker remains inert. A verifier that has
 checked consistency and inclusion pins that checkpoint even when the included
 delivery is later rejected, so a later fork cannot omit the leaf. A manager

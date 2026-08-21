@@ -17,9 +17,20 @@ const (
 	// user reference, not a public key.
 	MediaTypeSignature protocol.MediaType = "application/vnd.fleetshift.direct-key.signature.v1+json"
 
+	// PredicateTypeEnrollmentV1 is the suite-owned enrollment predicate.
+	// It is not a common intent type.
+	PredicateTypeEnrollmentV1 protocol.PredicateType = "direct-key/enrollment/v1"
+
 	purposeEnrollmentProof protocol.Purpose = "fleetshift.dev/provenance/direct-key/v1/enrollment-proof"
 	purposeAssertion       protocol.Purpose = "fleetshift.dev/provenance/direct-key/v1/assertion"
 )
+
+// EnrollmentAssertion is the authenticated inner statement for
+// direct-key/enrollment/v1: a principal bound to a public key.
+type EnrollmentAssertion struct {
+	Principal protocol.Principal `json:"principal"`
+	PublicKey []byte             `json:"public_key"`
+}
 
 // EnrollmentBody is the type-specific encoding of enrollment evidence.
 type EnrollmentBody struct {
@@ -33,9 +44,9 @@ type EnrollmentBody struct {
 // Assertion is the inner statement, carried in the evidence the way a
 // Sigstore Bundle carries an in-toto statement.
 type SignatureBody struct {
-	Principal protocol.Principal       `json:"principal"`
-	Assertion protocol.TypedAssertion  `json:"assertion"`
-	Signature []byte                   `json:"signature"`
+	Principal protocol.Principal      `json:"principal"`
+	Assertion protocol.TypedAssertion `json:"assertion"`
+	Signature []byte                  `json:"signature"`
 }
 
 func encodeJSON(value any) ([]byte, error) {

@@ -10,8 +10,8 @@ import (
 )
 
 // Target is the direct-key/v1 target API. It retains a public-key and user
-// mapping established by enrollment and verifies delivery signatures against
-// that mapping only.
+// mapping established by applying enrollment and verifies delivery signatures
+// against that mapping only.
 type Target struct {
 	mu       sync.Mutex
 	bindings map[protocol.Principal][]byte
@@ -25,6 +25,12 @@ func NewTarget() *Target {
 // ProvenanceType implements protocol.TargetAPI.
 func (t *Target) ProvenanceType() protocol.ProvenanceType {
 	return protocol.ProvenanceTypeDirectKeyV1
+}
+
+// Owns implements protocol.TargetAPI. Direct-key/v1 applies only
+// enrollment; intent predicates are handled by the delivery agent.
+func (t *Target) Owns(predicate protocol.PredicateType) bool {
+	return predicate == PredicateTypeEnrollmentV1
 }
 
 // ParseHints extracts tentative principal fields from untrusted evidence.
@@ -43,7 +49,7 @@ func (t *Target) ParseHints(evidence protocol.TypedEvidence) (protocol.Tentative
 		if err != nil {
 			return protocol.TentativeHints{}, err
 		}
-		return principalHints(body.Principal, ""), nil
+		return principalHints(body.Principal, PredicateTypeEnrollmentV1), nil
 	case MediaTypeSignature:
 		body, err := parseSignature(evidence)
 		if err != nil {
@@ -65,8 +71,10 @@ func principalHints(principal protocol.Principal, predicate protocol.PredicateTy
 	}
 }
 
-// Verify implements protocol.TargetAPI. The verifying key is taken from
-// retained enrollment state, never from the delivery or from support material.
+// Verify implements protocol.TargetAPI. Signature verification uses the
+// retained enrollment mapping, never a key from the delivery or from support
+// material. Enrollment verification authenticates proof of possession and
+// does not require a retained key.
 func (t *Target) Verify(_ context.Context, req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
 	if req.ProfileConfig.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, req.ProfileConfig.ProvenanceType)
@@ -78,10 +86,40 @@ func (t *Target) Verify(_ context.Context, req protocol.VerifyRequest) (protocol
 	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
-	if evidence.MediaType != MediaTypeSignature {
+	switch evidence.MediaType {
+	case MediaTypeEnrollment:
+		return t.verifyEnrollment(req)
+	case MediaTypeSignature:
+		return t.verifySignature(req)
+	default:
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
 	}
-	body, err := parseSignature(evidence)
+}
+
+func (t *Target) verifyEnrollment(req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+	body, err := parseEnrollment(req.Statement.Evidence)
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	if req.AuthorityConfig.PrincipalAuthority != body.Principal.PrincipalAuthority() {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: authority config does not match authenticated principal", protocol.ErrUnknownAuthority)
+	}
+	if err := verify(body.PublicKey, purposeEnrollmentProof, enrollmentProofMaterial(body.Principal, body.PublicKey), body.ProofOfPossession); err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: enrollment proof of possession: %v", protocol.ErrVerificationFailed, err)
+	}
+	assertion, err := enrollmentAssertion(body)
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	authenticated, err := authenticatedResult(req, body.Principal, assertion)
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	return authenticated, assertion, nil
+}
+
+func (t *Target) verifySignature(req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+	body, err := parseSignature(req.Statement.Evidence)
 	if err != nil {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
 	}
@@ -99,61 +137,68 @@ func (t *Target) Verify(_ context.Context, req protocol.VerifyRequest) (protocol
 	if err := verify(publicKey, purposeAssertion, signatureMaterial(body.Principal, body.Assertion.PredicateType, contentDigest), body.Signature); err != nil {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
 	}
-
-	mapped, err := req.AuthorityConfig.TenantMapping.Map(body.Principal.TenantPartition)
-	if err != nil {
-		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
-	}
-	authorityDigest, err := req.AuthorityConfig.Digest()
-	if err != nil {
-		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
-	}
-	profileDigest, err := req.ProfileConfig.Digest()
-	if err != nil {
-		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
-	}
 	assertion := protocol.TypedAssertion{
 		PredicateType: body.Assertion.PredicateType,
 		Bytes:         append([]byte(nil), body.Assertion.Bytes...),
 	}
+	authenticated, err := authenticatedResult(req, body.Principal, assertion)
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	return authenticated, assertion, nil
+}
+
+func authenticatedResult(req protocol.VerifyRequest, principal protocol.Principal, assertion protocol.TypedAssertion) (protocol.AuthenticatedEvidence, error) {
+	mapped, err := req.AuthorityConfig.TenantMapping.Map(principal.TenantPartition)
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, err
+	}
+	authorityDigest, err := req.AuthorityConfig.Digest()
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, err
+	}
+	profileDigest, err := req.ProfileConfig.Digest()
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, err
+	}
+	contentDigest, err := assertion.Digest()
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, err
+	}
 	return protocol.AuthenticatedEvidence{
-		Principal:              body.Principal,
+		Principal:              principal,
 		MappedFleetShiftTenant: mapped,
 		PredicateType:          assertion.PredicateType,
 		ContentDigest:          contentDigest,
 		ProvenanceType:         protocol.ProvenanceTypeDirectKeyV1,
 		AuthorityConfigDigest:  authorityDigest,
 		ProfileConfigDigest:    profileDigest,
-	}, assertion, nil
+	}, nil
 }
 
-// AcceptEnrollment is the typed lifecycle operation that stores the public
-// key and user mapping. The public key is taken from enrollment evidence, not
-// from an RM-supplied profile ID.
-//
-// First acceptance for a principal is trust-on-first-use: this profile does
-// not verify an issuer assertion that the claimant is that subject. A
-// compromised resource manager can win the first bind. Later substitution of
-// an established mapping is rejected.
-func (t *Target) AcceptEnrollment(evidence protocol.TypedEvidence, authority protocol.AuthorityConfig) error {
-	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
-		return fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, evidence.ProvenanceType)
+// Apply implements protocol.TargetAPI. Enrollment is the mapping transition:
+// first bind wins; later substitution of an established mapping is rejected.
+// Unknown predicates fail closed. Intent predicates never reach Apply from
+// the delivery agent.
+func (t *Target) Apply(_ context.Context, req protocol.ApplyRequest) error {
+	switch req.Authenticated.PredicateType {
+	case PredicateTypeEnrollmentV1:
+		return t.applyEnrollment(req)
+	default:
+		return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, req.Authenticated.PredicateType)
 	}
-	if evidence.MediaType != MediaTypeEnrollment {
-		return fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
+}
+
+func (t *Target) applyEnrollment(req protocol.ApplyRequest) error {
+	if req.Statement.Evidence.MediaType != MediaTypeEnrollment {
+		return fmt.Errorf("%w: enrollment apply requires %s", protocol.ErrUnknownMediaType, req.Statement.Evidence.MediaType)
 	}
-	if !authorityHasProfile(authority, protocol.ProvenanceTypeDirectKeyV1) {
-		return fmt.Errorf("%w: authority does not install %s", protocol.ErrUnknownProvenanceType, protocol.ProvenanceTypeDirectKeyV1)
-	}
-	body, err := parseEnrollment(evidence)
+	body, err := DecodeEnrollmentAssertion(req.Assertion)
 	if err != nil {
 		return err
 	}
-	if body.Principal.PrincipalAuthority() != authority.PrincipalAuthority {
-		return fmt.Errorf("%w: enrollment principal is not under this authority", protocol.ErrUnknownAuthority)
-	}
-	if err := verify(body.PublicKey, purposeEnrollmentProof, enrollmentProofMaterial(body.Principal, body.PublicKey), body.ProofOfPossession); err != nil {
-		return fmt.Errorf("%w: enrollment proof of possession: %v", protocol.ErrVerificationFailed, err)
+	if !body.Principal.Equal(req.Authenticated.Principal) {
+		return fmt.Errorf("%w: enrollment assertion principal does not match authenticated principal", protocol.ErrPolicyReevaluation)
 	}
 
 	t.mu.Lock()
@@ -166,6 +211,40 @@ func (t *Target) AcceptEnrollment(evidence protocol.TypedEvidence, authority pro
 	}
 	t.bindings[body.Principal] = append([]byte(nil), body.PublicKey...)
 	return nil
+}
+
+func enrollmentAssertion(body EnrollmentBody) (protocol.TypedAssertion, error) {
+	encoded, err := encodeJSON(EnrollmentAssertion{
+		Principal: body.Principal,
+		PublicKey: append([]byte(nil), body.PublicKey...),
+	})
+	if err != nil {
+		return protocol.TypedAssertion{}, err
+	}
+	return protocol.TypedAssertion{
+		PredicateType: PredicateTypeEnrollmentV1,
+		Bytes:         encoded,
+	}, nil
+}
+
+// DecodeEnrollmentAssertion decodes a direct-key/enrollment/v1 assertion body.
+func DecodeEnrollmentAssertion(assertion protocol.TypedAssertion) (EnrollmentAssertion, error) {
+	if assertion.PredicateType != PredicateTypeEnrollmentV1 {
+		return EnrollmentAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, assertion.PredicateType)
+	}
+	var body EnrollmentAssertion
+	if err := decodeJSON(assertion.Bytes, &body); err != nil {
+		return EnrollmentAssertion{}, err
+	}
+	principal, err := canonicalPrincipal(body.Principal)
+	if err != nil {
+		return EnrollmentAssertion{}, err
+	}
+	body.Principal = principal
+	if len(body.PublicKey) == 0 {
+		return EnrollmentAssertion{}, fmt.Errorf("%w: enrollment public key is required", protocol.ErrMalformedEvidence)
+	}
+	return body, nil
 }
 
 // PublicKey returns the retained public key for principal, if present.
@@ -219,13 +298,4 @@ func parseSignature(evidence protocol.TypedEvidence) (SignatureBody, error) {
 		return SignatureBody{}, fmt.Errorf("%w: signature body is missing required fields", protocol.ErrMalformedEvidence)
 	}
 	return body, nil
-}
-
-func authorityHasProfile(authority protocol.AuthorityConfig, pt protocol.ProvenanceType) bool {
-	for _, profile := range authority.ProvenanceProfiles {
-		if profile.ProvenanceType == pt && len(profile.Parameters) == 0 {
-			return true
-		}
-	}
-	return false
 }

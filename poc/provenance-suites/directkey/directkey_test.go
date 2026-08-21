@@ -85,7 +85,25 @@ func TestCreateEvidenceCarriesUserReferenceNotPublicKey(t *testing.T) {
 	}
 }
 
-func TestEnrollmentSharesPublicKeyAndVerifierStoresMapping(t *testing.T) {
+func TestParseHintsEnrollmentReturnsEnrollmentPredicate(t *testing.T) {
+	client := newTestClient(t)
+	enrollment, err := client.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	hints, err := NewTarget().ParseHints(enrollment)
+	if err != nil {
+		t.Fatalf("ParseHints: %v", err)
+	}
+	if hints.PredicateType != PredicateTypeEnrollmentV1 {
+		t.Fatalf("predicate hint = %s, want %s", hints.PredicateType, PredicateTypeEnrollmentV1)
+	}
+	if hints.Subject != "alice" {
+		t.Fatalf("subject hint = %q, want alice", hints.Subject)
+	}
+}
+
+func TestVerifyAndApplyEnrollmentRetainsMapping(t *testing.T) {
 	client := newTestClient(t)
 	enrollment, err := client.CreateEnrollment()
 	if err != nil {
@@ -96,8 +114,22 @@ func TestEnrollmentSharesPublicKeyAndVerifierStoresMapping(t *testing.T) {
 	}
 
 	target := NewTarget()
-	if err := target.AcceptEnrollment(enrollment, testAuthority()); err != nil {
-		t.Fatalf("AcceptEnrollment: %v", err)
+	authenticated, assertion, err := verifyEnrollment(t, target, enrollment)
+	if err != nil {
+		t.Fatalf("Verify enrollment: %v", err)
+	}
+	if authenticated.PredicateType != PredicateTypeEnrollmentV1 {
+		t.Fatalf("authenticated predicate = %s, want %s", authenticated.PredicateType, PredicateTypeEnrollmentV1)
+	}
+	if assertion.PredicateType != PredicateTypeEnrollmentV1 {
+		t.Fatalf("assertion predicate = %s, want %s", assertion.PredicateType, PredicateTypeEnrollmentV1)
+	}
+	if _, ok := target.PublicKey(client.Principal()); ok {
+		t.Fatal("Verify retained the mapping; Apply should be the mapping transition")
+	}
+
+	if err := applyEnrollment(t, target, enrollment, authenticated, assertion); err != nil {
+		t.Fatalf("Apply enrollment: %v", err)
 	}
 	got, ok := target.PublicKey(client.Principal())
 	if !ok {
@@ -105,6 +137,18 @@ func TestEnrollmentSharesPublicKeyAndVerifierStoresMapping(t *testing.T) {
 	}
 	if string(got) != string(client.PublicKey()) {
 		t.Fatal("retained public key does not match enrolled key")
+	}
+}
+
+func TestVerifyEnrollmentDoesNotRequireRetainedKey(t *testing.T) {
+	client := newTestClient(t)
+	enrollment, err := client.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	_, _, err = verifyEnrollment(t, NewTarget(), enrollment)
+	if err != nil {
+		t.Fatalf("TOFU Verify of enrollment: %v", err)
 	}
 }
 
@@ -197,8 +241,12 @@ func TestFirstEnrollmentIsUnauthenticatedTOFU(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
-	if err := target.AcceptEnrollment(enrollment, testAuthority()); err != nil {
-		t.Fatalf("first enrollment of claimed alice: %v", err)
+	authenticated, assertion, err := verifyEnrollment(t, target, enrollment)
+	if err != nil {
+		t.Fatalf("first enrollment Verify of claimed alice: %v", err)
+	}
+	if err := applyEnrollment(t, target, enrollment, authenticated, assertion); err != nil {
+		t.Fatalf("first enrollment Apply of claimed alice: %v", err)
 	}
 	got, ok := target.PublicKey(attacker.Principal())
 	if !ok || string(got) != string(attacker.PublicKey()) {
@@ -206,12 +254,16 @@ func TestFirstEnrollmentIsUnauthenticatedTOFU(t *testing.T) {
 	}
 }
 
-func TestAcceptEnrollmentRejectsKeySubstitutionForEstablishedPrincipal(t *testing.T) {
+func TestVerifyEnrollmentRejectsTamperedPrincipal(t *testing.T) {
 	alice := newTestClient(t)
-	target := NewTarget()
-	mustEnroll(t, target, alice)
-
-	attacker := newTestClient(t)
+	attacker, err := NewClient(protocol.Principal{
+		Scheme:    protocol.IdentitySchemeOIDCSubV1,
+		Authority: "https://issuer.example.test",
+		Subject:   "mallory",
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	enrollment, err := attacker.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
@@ -227,13 +279,80 @@ func TestAcceptEnrollmentRejectsKeySubstitutionForEstablishedPrincipal(t *testin
 	}
 	enrollment.Bytes = raw
 
-	err = target.AcceptEnrollment(enrollment, testAuthority())
+	_, _, err = verifyEnrollment(t, NewTarget(), enrollment)
+	if !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("error = %v, want ErrVerificationFailed", err)
+	}
+}
+
+func TestApplyRejectsKeySubstitutionForEstablishedPrincipal(t *testing.T) {
+	alice := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, alice)
+
+	attacker, err := NewClient(alice.Principal())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	enrollment, err := attacker.CreateEnrollment()
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	authenticated, assertion, err := verifyEnrollment(t, target, enrollment)
+	if err != nil {
+		t.Fatalf("substitution Verify: %v", err)
+	}
+	err = applyEnrollment(t, target, enrollment, authenticated, assertion)
 	if !errors.Is(err, protocol.ErrVerificationFailed) {
 		t.Fatalf("error = %v, want ErrVerificationFailed", err)
 	}
 	got, _ := target.PublicKey(alice.Principal())
 	if string(got) != string(alice.PublicKey()) {
 		t.Fatal("retained mapping was replaced")
+	}
+}
+
+func TestOwnsEnrollmentNotIntent(t *testing.T) {
+	target := NewTarget()
+	if !target.Owns(PredicateTypeEnrollmentV1) {
+		t.Fatal("direct-key/v1 must own enrollment")
+	}
+	if target.Owns(protocol.PredicateTypeDeploymentV1) {
+		t.Fatal("direct-key/v1 must not own deployment/v1")
+	}
+	if target.Owns(protocol.PredicateTypeTrustConfigUpdateV1) {
+		t.Fatal("direct-key/v1 must not own trust-config-update/v1")
+	}
+	if target.Owns("not-owned/v1") {
+		t.Fatal("direct-key/v1 must not own an unknown predicate")
+	}
+}
+
+func TestApplyOfDeploymentPredicateFailsClosed(t *testing.T) {
+	client := newTestClient(t)
+	target := NewTarget()
+	mustEnroll(t, target, client)
+	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	authenticated, assertion, err := target.Verify(context.Background(), protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	})
+	if err != nil {
+		t.Fatalf("Verify deployment: %v", err)
+	}
+	err = target.Apply(context.Background(), protocol.ApplyRequest{
+		Authenticated: authenticated,
+		Assertion:     assertion,
+		Statement:     protocol.SignedStatement{Evidence: evidence},
+		Index:         1,
+	})
+	if !errors.Is(err, protocol.ErrUnknownPredicateType) {
+		t.Fatalf("error = %v, want ErrUnknownPredicateType", err)
 	}
 }
 
@@ -371,9 +490,36 @@ func mustEnroll(t *testing.T, target *Target, client *Client) {
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
-	if err := target.AcceptEnrollment(enrollment, testAuthority()); err != nil {
-		t.Fatalf("AcceptEnrollment: %v", err)
+	authenticated, assertion, err := verifyEnrollment(t, target, enrollment)
+	if err != nil {
+		t.Fatalf("Verify enrollment: %v", err)
 	}
+	if err := applyEnrollment(t, target, enrollment, authenticated, assertion); err != nil {
+		t.Fatalf("Apply enrollment: %v", err)
+	}
+}
+
+func verifyEnrollment(t *testing.T, target *Target, enrollment protocol.TypedEvidence) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+	t.Helper()
+	return target.Verify(context.Background(), protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: enrollment},
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: protocol.DeliveryContext{
+			ClaimedTenant:     "tenant-acme",
+			RootAuthorization: true,
+		},
+	})
+}
+
+func applyEnrollment(t *testing.T, target *Target, enrollment protocol.TypedEvidence, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) error {
+	t.Helper()
+	return target.Apply(context.Background(), protocol.ApplyRequest{
+		Authenticated: authenticated,
+		Assertion:     assertion,
+		Statement:     protocol.SignedStatement{Evidence: enrollment},
+		Index:         0,
+	})
 }
 
 func testAssertion(t *testing.T) protocol.TypedAssertion {
@@ -410,15 +556,26 @@ func testAuthority() protocol.AuthorityConfig {
 		},
 		TenantMapping:      protocol.TenantMapping{StaticTenant: "tenant-acme"},
 		ProvenanceProfiles: []protocol.ProfileConfig{profile},
-		DeliveryPolicies: []protocol.DeliveryPolicy{{
-			Match: protocol.PolicyMatch{
-				PredicateType:     protocol.PredicateTypeDeploymentV1,
-				RootAuthorization: true,
+		DeliveryPolicies: []protocol.DeliveryPolicy{
+			{
+				Match: protocol.PolicyMatch{
+					PredicateType:     protocol.PredicateTypeDeploymentV1,
+					RootAuthorization: true,
+				},
+				LiveCredential: protocol.RequirementNone,
+				Provenance:     protocol.RequirementRequired,
+				Profiles:       []protocol.ProfileConfig{profile},
 			},
-			LiveCredential: protocol.RequirementNone,
-			Provenance:     protocol.RequirementRequired,
-			Profiles:       []protocol.ProfileConfig{profile},
-		}},
+			{
+				Match: protocol.PolicyMatch{
+					PredicateType:     PredicateTypeEnrollmentV1,
+					RootAuthorization: true,
+				},
+				LiveCredential: protocol.RequirementNone,
+				Provenance:     protocol.RequirementRequired,
+				Profiles:       []protocol.ProfileConfig{profile},
+			},
+		},
 	}
 }
 

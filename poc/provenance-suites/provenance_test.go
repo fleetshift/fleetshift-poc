@@ -49,6 +49,138 @@ func TestEnrollmentAndSignedDelivery(t *testing.T) {
 	}
 }
 
+func TestLoggedEnrollmentIsOrdinaryDeliveryAndLaterContentSkipsTheLeaf(t *testing.T) {
+	const westTarget = "target-west"
+	s := newTwoTargetScenario(t, westTarget)
+	if got := s.manager.DeliveryLogSize(); got != 1 {
+		t.Fatalf("log size after enrollment = %d, want 1", got)
+	}
+	if s.agent.Checkpoint().Size != 1 || s.west.Checkpoint().Size != 1 {
+		t.Fatalf("agent checkpoints after enrollment: east=%d west=%d, want 1", s.agent.Checkpoint().Size, s.west.Checkpoint().Size)
+	}
+	if s.agent.SuiteApplyCount() != 1 {
+		t.Fatalf("east suite Apply count = %d, want 1", s.agent.SuiteApplyCount())
+	}
+	if s.west.SuiteApplyCount() != 1 {
+		t.Fatalf("west suite Apply count = %d, want 1", s.west.SuiteApplyCount())
+	}
+	if _, ok := s.west.PublicKey(s.user.Principal()); !ok {
+		t.Fatal("west agent did not apply enrollment through Deliver")
+	}
+
+	evidence := mustSignDeploymentFor(t, s.user, testTarget, "after-enroll", 1, []byte(`{"replicas":3}`))
+	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence)
+	if err != nil {
+		t.Fatalf("submit delivery after enrollment: %v", err)
+	}
+	if update.Index != 1 {
+		t.Fatalf("content log index = %d, want 1 (enrollment occupied 0)", update.Index)
+	}
+	if update.Checkpoint.Size != 2 {
+		t.Fatalf("content checkpoint size = %d, want 2", update.Checkpoint.Size)
+	}
+	wantLeaf, err := evidence.Identity()
+	if err != nil {
+		t.Fatalf("content identity: %v", err)
+	}
+	if update.Leaf != wantLeaf {
+		t.Fatalf("content leaf = %q, want this delivery's identity %q", update.Leaf, wantLeaf)
+	}
+	if _, ok := s.agent.Applied("after-enroll"); !ok {
+		t.Fatal("east agent did not apply the content delivery")
+	}
+	if s.agent.SuiteApplyCount() != 1 {
+		t.Fatal("later content delivery called suite Apply")
+	}
+}
+
+func TestIntentAndTrustConfigUpdateDoNotCallSuiteApply(t *testing.T) {
+	s := newEnrolledScenario(t)
+	afterEnroll := s.agent.SuiteApplyCount()
+	if afterEnroll != 1 {
+		t.Fatalf("enrollment suite Apply count = %d, want 1", afterEnroll)
+	}
+
+	evidence := mustSignDeployment(t, s.user, "intent-dispatch", 1, []byte(`{"replicas":1}`))
+	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence); err != nil {
+		t.Fatalf("submit deployment: %v", err)
+	}
+	if s.agent.SuiteApplyCount() != afterEnroll {
+		t.Fatal("deployment/v1 called suite Apply")
+	}
+
+	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
+		TenantID:      testTenant,
+		TargetID:      testTarget,
+		FulfillmentID: "trust-config",
+		Generation:    1,
+		Action:        protocol.ActionPut,
+	})
+	if err != nil {
+		t.Fatalf("marshal trust-config assertion: %v", err)
+	}
+	updateEvidence, err := s.user.DirectKey().CreateEvidence(context.Background(), protocol.TypedAssertion{
+		PredicateType: protocol.PredicateTypeTrustConfigUpdateV1,
+		Bytes:         encoded,
+	})
+	if err != nil {
+		t.Fatalf("create trust-config evidence: %v", err)
+	}
+	_, err = s.manager.Compromised().PushDelivery(context.Background(), updateEvidence)
+	if !errors.Is(err, protocol.ErrUnknownPredicateType) {
+		t.Fatalf("trust-config-update error = %v, want ErrUnknownPredicateType", err)
+	}
+	if s.agent.SuiteApplyCount() != afterEnroll {
+		t.Fatal("trust-config-update/v1 called suite Apply")
+	}
+}
+
+func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
+	const unowned protocol.PredicateType = "not-owned/v1"
+	trust := testTrust()
+	profile := trust.AuthorityRegistry[0].ProvenanceProfiles[0]
+	trust.AuthorityRegistry[0].DeliveryPolicies = append(trust.AuthorityRegistry[0].DeliveryPolicies, protocol.DeliveryPolicy{
+		Match: protocol.PolicyMatch{
+			PredicateType:     unowned,
+			RootAuthorization: true,
+		},
+		LiveCredential: protocol.RequirementNone,
+		Provenance:     protocol.RequirementRequired,
+		Profiles:       []protocol.ProfileConfig{profile},
+	})
+	s := newScenarioWithTrust(t, trust)
+	enrollClient(t, s, s.user)
+	afterEnroll := s.agent.SuiteApplyCount()
+
+	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
+		TenantID:      testTenant,
+		TargetID:      testTarget,
+		FulfillmentID: "unowned",
+		Generation:    1,
+		Action:        protocol.ActionPut,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	evidence, err := s.user.DirectKey().CreateEvidence(context.Background(), protocol.TypedAssertion{
+		PredicateType: unowned,
+		Bytes:         encoded,
+	})
+	if err != nil {
+		t.Fatalf("create evidence: %v", err)
+	}
+	_, err = s.manager.Compromised().PushDelivery(context.Background(), evidence)
+	if !errors.Is(err, protocol.ErrUnknownPredicateType) {
+		t.Fatalf("error = %v, want ErrUnknownPredicateType", err)
+	}
+	if s.agent.SuiteApplyCount() != afterEnroll {
+		t.Fatal("unowned predicate called suite Apply")
+	}
+	if _, ok := s.agent.Applied("unowned"); ok {
+		t.Fatal("agent applied an unowned root predicate")
+	}
+}
+
 func TestResourceManagerCannotForgeDeliverySignature(t *testing.T) {
 	s := newEnrolledScenario(t)
 	attacker := mustClient(t, "mallory")
@@ -117,9 +249,6 @@ func TestAuthorizerBypassStillRequiresAuthenticProvenance(t *testing.T) {
 	})
 	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
 		t.Fatalf("register agent: %v", err)
-	}
-	if err := s.manager.RegisterDirectKeyEnroller(s.agent); err != nil {
-		t.Fatalf("register direct-key enroller: %v", err)
 	}
 	enrollment, err := s.user.DirectKey().CreateEnrollment()
 	if err != nil {
@@ -206,8 +335,8 @@ func TestRetryAfterLostAcknowledgementIsIdempotent(t *testing.T) {
 		t.Fatal("agent did not apply before losing the acknowledgement")
 	}
 	cached, ok := s.manager.AgentCheckpoint(testTarget)
-	if !ok || cached != protocol.EmptyCheckpoint() {
-		t.Fatalf("manager cache after lost ack = %+v, want empty checkpoint", cached)
+	if !ok || cached.Size != 1 {
+		t.Fatalf("manager cache after lost ack = %+v, want enrollment checkpoint size 1", cached)
 	}
 	if err := s.manager.RetryDelivery(context.Background(), update.Index); err != nil {
 		t.Fatalf("retry: %v", err)
@@ -493,8 +622,8 @@ func TestLostAckRetryRebuildsProofsFromAgentCheckpoint(t *testing.T) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
 	}
 	cached, ok := s.manager.AgentCheckpoint(testTarget)
-	if !ok || cached != protocol.EmptyCheckpoint() {
-		t.Fatalf("manager cache after lost ack = %+v, want empty checkpoint", cached)
+	if !ok || cached.Size != 1 {
+		t.Fatalf("manager cache after lost ack = %+v, want enrollment checkpoint size 1", cached)
 	}
 
 	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, "west-advance", 1, []byte(`{"ok":true}`))
@@ -512,8 +641,8 @@ func TestLostAckRetryRebuildsProofsFromAgentCheckpoint(t *testing.T) {
 	if !ok || cached != s.agent.Checkpoint() {
 		t.Fatalf("manager cache after stale retry = %+v, agent checkpoint = %+v", cached, s.agent.Checkpoint())
 	}
-	if s.agent.Checkpoint().Size != 2 {
-		t.Fatalf("east agent checkpoint size = %d, want 2", s.agent.Checkpoint().Size)
+	if s.agent.Checkpoint().Size != 3 {
+		t.Fatalf("east agent checkpoint size = %d, want 3", s.agent.Checkpoint().Size)
 	}
 }
 
@@ -532,11 +661,11 @@ func TestTwoTargetDeliverySkipsUnrelatedLeaf(t *testing.T) {
 	}
 
 	got := s.recorder.last.Log
-	if got.Index != 1 {
-		t.Fatalf("east log index = %d, want 1", got.Index)
+	if got.Index != 2 {
+		t.Fatalf("east log index = %d, want 2", got.Index)
 	}
-	if got.Checkpoint.Size != 2 {
-		t.Fatalf("east checkpoint size = %d, want 2", got.Checkpoint.Size)
+	if got.Checkpoint.Size != 3 {
+		t.Fatalf("east checkpoint size = %d, want 3", got.Checkpoint.Size)
 	}
 	wantLeaf, err := evidenceA.Identity()
 	if err != nil {
@@ -656,20 +785,22 @@ type scenario struct {
 
 func newScenario(t *testing.T) *scenario {
 	t.Helper()
+	return newScenarioWithTrust(t, testTrust())
+}
+
+func newScenarioWithTrust(t *testing.T, trust protocol.TrustConfiguration) *scenario {
+	t.Helper()
 	user := mustClient(t, "alice")
 	agent, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
 	}
-	if err := agent.Bootstrap(testTrust()); err != nil {
+	if err := agent.Bootstrap(trust); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	manager := resourcemanager.New(testTenant, nil)
 	if err := manager.RegisterAgent(testTarget, agent); err != nil {
 		t.Fatalf("register agent: %v", err)
-	}
-	if err := manager.RegisterDirectKeyEnroller(agent); err != nil {
-		t.Fatalf("register direct-key enroller: %v", err)
 	}
 	return &scenario{user: user, manager: manager, agent: agent}
 }
@@ -713,12 +844,6 @@ func newTwoTargetScenario(t *testing.T, westTarget string) *scenario {
 	}
 	if err := manager.RegisterAgent(westTarget, west); err != nil {
 		t.Fatalf("register west agent: %v", err)
-	}
-	if err := manager.RegisterDirectKeyEnroller(east); err != nil {
-		t.Fatalf("register east enroller: %v", err)
-	}
-	if err := manager.RegisterDirectKeyEnroller(west); err != nil {
-		t.Fatalf("register west enroller: %v", err)
 	}
 	s := &scenario{user: user, manager: manager, agent: east, west: west, recorder: recorder}
 	enrollClient(t, s, s.user)
@@ -870,6 +995,24 @@ func testTrust() protocol.TrustConfiguration {
 					Match: protocol.PolicyMatch{
 						PredicateType:     protocol.PredicateTypeFulfillmentRelationV1,
 						RootAuthorization: false,
+					},
+					LiveCredential: protocol.RequirementNone,
+					Provenance:     protocol.RequirementRequired,
+					Profiles:       []protocol.ProfileConfig{profile},
+				},
+				{
+					Match: protocol.PolicyMatch{
+						PredicateType:     directkey.PredicateTypeEnrollmentV1,
+						RootAuthorization: true,
+					},
+					LiveCredential: protocol.RequirementNone,
+					Provenance:     protocol.RequirementRequired,
+					Profiles:       []protocol.ProfileConfig{profile},
+				},
+				{
+					Match: protocol.PolicyMatch{
+						PredicateType:     protocol.PredicateTypeTrustConfigUpdateV1,
+						RootAuthorization: true,
 					},
 					LiveCredential: protocol.RequirementNone,
 					Provenance:     protocol.RequirementRequired,
