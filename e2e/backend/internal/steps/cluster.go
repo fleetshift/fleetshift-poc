@@ -28,6 +28,11 @@ const (
 	clusterWaitTimeout     = 1 * time.Minute
 	clusterPollInterval    = 500 * time.Millisecond
 	configMapAssertTimeout = 30 * time.Second
+	kindOIDCWaitTimeout    = 30 * time.Second
+
+	clusterStateActive = "ACTIVE"
+	clusterStateFailed = "FAILED"
+	clusterReadyTrue   = "True"
 )
 
 // clusterCondition is the JSON subset of a fleetctl cluster condition.
@@ -81,15 +86,16 @@ func CreateKindCluster(t *testing.T, f *harness.Fixture, name string) {
 	defer cancel()
 	res := f.Run(ctx, "resource", "create", kindClusterType,
 		"--id", name, "--spec-file", specPath)
-	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), res.Stderr)
+	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 	cl, err := parseCluster(res.Stdout)
-	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 	g.Expect(cl.Name).To(gomega.Equal(jsonClusterName(name)))
 }
 
-// WaitForClusterReady polls resource get until the Kind cluster is ACTIVE
-// and not paused. fleetctl emits CREATING/ACTIVE/DELETING/FAILED; RUNNING is
-// a UI display label, not this JSON field.
+// WaitForClusterReady polls resource get until the Kind cluster is ACTIVE,
+// unpaused, and conditions.Ready is True. fleetctl emits CREATING/ACTIVE/
+// DELETING/FAILED; RUNNING is a UI display label, not this JSON field.
+// FAILED and PausedAuth fail the test immediately.
 func WaitForClusterReady(t *testing.T, f *harness.Fixture, name string) {
 	t.Helper()
 	g := gomega.NewWithT(t)
@@ -98,11 +104,16 @@ func WaitForClusterReady(t *testing.T, f *harness.Fixture, name string) {
 		ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 		defer cancel()
 		res := f.Run(ctx, "resource", "get", kindClusterType, name)
-		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), res.Stderr)
+		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		cl, err := parseCluster(res.Stdout)
-		gm.Expect(err).NotTo(gomega.HaveOccurred())
-		gm.Expect(cl.Name).To(gomega.Equal(jsonClusterName(name)))
-		gm.Expect(clusterReady(cl)).To(gomega.BeTrue(), "state=%s pauseReason=%s", cl.State, cl.PauseReason)
+		gm.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
+		gm.Expect(cl.Name).To(gomega.Equal(jsonClusterName(name)), fleetctlDetail(res))
+		if msg := clusterTerminalFailure(cl); msg != "" {
+			t.Fatalf("%s\n%s", msg, fleetctlDetail(res))
+		}
+		gm.Expect(clusterReady(cl)).To(gomega.BeTrue(),
+			"state=%s pauseReason=%s ready=%s\n%s",
+			cl.State, cl.PauseReason, cl.Conditions["Ready"].Status, fleetctlDetail(res))
 	}).WithTimeout(clusterWaitTimeout).WithPolling(clusterPollInterval).Should(gomega.Succeed())
 }
 
@@ -137,7 +148,7 @@ func CreateConfigMapDeployment(t *testing.T, f *harness.Fixture, clusterName str
 		"--placement-type", "static",
 		"--target-ids", kubernetesTargetID(clusterName),
 	)
-	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), res.Stderr)
+	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 }
 
 // AssertConfigMapOnCluster checks that default/test-config exists on the Kind cluster
@@ -172,7 +183,7 @@ func DeleteKindCluster(t *testing.T, f *harness.Fixture, name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 	defer cancel()
 	res := f.Run(ctx, "resource", "delete", kindClusterType, name)
-	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), res.Stderr)
+	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 }
 
 // CleanupKindCluster best-effort deletes the Kind cluster. For t.Cleanup;
@@ -199,7 +210,7 @@ func WaitForClusterGone(t *testing.T, f *harness.Fixture, name string) {
 		get := f.Run(ctx, "resource", "get", kindClusterType, name)
 		gm.Expect(get.Err).To(gomega.HaveOccurred())
 		list := f.Run(ctx, "resource", "list", kindClusterType)
-		gm.Expect(list.Err).NotTo(gomega.HaveOccurred(), list.Stderr)
+		gm.Expect(list.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(list))
 		clusters, err := parseClusterList(list.Stdout)
 		gm.Expect(err).NotTo(gomega.HaveOccurred())
 		names := make([]string, len(clusters))
@@ -223,12 +234,31 @@ func AssertHostKindClusterGone(t *testing.T, f *harness.Fixture, clusterName str
 	}).WithTimeout(clusterWaitTimeout).WithPolling(clusterPollInterval).Should(gomega.Succeed())
 }
 
-// clusterReady reports whether fleetctl JSON shows an unpaused ACTIVE Kind cluster.
+// clusterReady reports whether fleetctl JSON shows an unpaused ACTIVE Kind
+// cluster whose Ready condition is True (API reachable via inventory).
 func clusterReady(c clusterView) bool {
 	if strings.TrimSpace(c.PauseReason) != "" {
 		return false
 	}
-	return c.State == "ACTIVE"
+	if c.State != clusterStateActive {
+		return false
+	}
+	ready, ok := c.Conditions["Ready"]
+	return ok && ready.Status == clusterReadyTrue
+}
+
+// clusterTerminalFailure is a non-empty reason when polling for ready should stop.
+func clusterTerminalFailure(c clusterView) string {
+	if c.State == clusterStateFailed {
+		if p := strings.TrimSpace(c.PauseReason); p != "" {
+			return "cluster " + c.Name + " FAILED: " + p
+		}
+		return "cluster " + c.Name + " FAILED"
+	}
+	if p := strings.TrimSpace(c.PauseReason); p != "" {
+		return "cluster " + c.Name + " paused (" + c.State + "): " + p
+	}
+	return ""
 }
 
 // parseCluster unmarshals fleetctl resource get JSON.

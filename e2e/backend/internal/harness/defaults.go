@@ -39,6 +39,10 @@ const (
 	kindNetworkAlias = "fleetshift"
 	// engineSocketEnv is the optional absolute host engine socket path.
 	engineSocketEnv = "PODMAN_SOCKET"
+	// dockerCompatSocket is the Docker / podman-mac-helper well-known socket.
+	dockerCompatSocket = "/var/run/docker.sock"
+	// containerEngineSocket is the in-AIO mount of the host engine socket.
+	containerEngineSocket = "/var/run/docker.sock"
 	// kindClusterLabel is the Kind node container label for cluster name.
 	kindClusterLabel = "io.x-k8s.kind.cluster"
 	// kindRoleLabel is the Kind node container label for node role.

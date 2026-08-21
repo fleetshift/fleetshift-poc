@@ -113,7 +113,7 @@ func TestClusterReady(t *testing.T) {
 		cl   clusterView
 		want bool
 	}{
-		{name: "active", cl: clusterView{State: "ACTIVE"}, want: true},
+		{name: "active without ready", cl: clusterView{State: "ACTIVE"}, want: false},
 		{name: "creating", cl: clusterView{State: "CREATING"}, want: false},
 		{name: "running is ui-only", cl: clusterView{State: "RUNNING"}, want: false},
 		{name: "state prefix is deployments json", cl: clusterView{State: "STATE_ACTIVE"}, want: false},
@@ -132,7 +132,23 @@ func TestClusterReady(t *testing.T) {
 				State:      "ACTIVE",
 				Conditions: map[string]clusterCondition{"Ready": {Status: "False"}},
 			},
+			want: false,
+		},
+		{
+			name: "active with ready true",
+			cl: clusterView{
+				State:      "ACTIVE",
+				Conditions: map[string]clusterCondition{"Ready": {Status: "True"}},
+			},
 			want: true,
+		},
+		{
+			name: "failed with ready true",
+			cl: clusterView{
+				State:      "FAILED",
+				Conditions: map[string]clusterCondition{"Ready": {Status: "True"}},
+			},
+			want: false,
 		},
 	}
 	for _, tt := range tests {
@@ -160,5 +176,40 @@ func TestParseConfigMapData_Invalid(t *testing.T) {
 	t.Parallel()
 	if _, err := parseConfigMapData([]byte("{")); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestClusterTerminalFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		cl   clusterView
+		want string
+	}{
+		{name: "creating", cl: clusterView{Name: "clusters/a", State: "CREATING"}},
+		{name: "active", cl: clusterView{Name: "clusters/a", State: "ACTIVE"}},
+		{
+			name: "paused creating",
+			cl:   clusterView{Name: "clusters/a", State: "CREATING", PauseReason: "token expired"},
+			want: "cluster clusters/a paused (CREATING): token expired",
+		},
+		{
+			name: "failed",
+			cl:   clusterView{Name: "clusters/a", State: "FAILED"},
+			want: "cluster clusters/a FAILED",
+		},
+		{
+			name: "failed with reason",
+			cl:   clusterView{Name: "clusters/a", State: "FAILED", PauseReason: "kind create"},
+			want: "cluster clusters/a FAILED: kind create",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := clusterTerminalFailure(tt.cl); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
 	}
 }

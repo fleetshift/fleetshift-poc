@@ -344,7 +344,7 @@ func (f *Fixture) podmanRun() error {
 	}
 	args = append(args,
 		"-p", "127.0.0.1:"+GRPCPort+":"+GRPCPort,
-		"-v", f.engineSocket+":/var/run/docker.sock",
+		"-v", f.engineSocket+":"+containerEngineSocket,
 		"-v", "/tmp:/tmp",
 		ImageRef,
 	)
@@ -357,16 +357,16 @@ func (f *Fixture) podmanRun() error {
 	return nil
 }
 
-// smokeKindEngine execs into the suite AIO as uid 1000 and runs `podman ps`
-// with Kind's cluster label — the same engine list Kind's provider uses.
-// Fail here instead of waiting for TestKindClusterLifecycle to poll. Root
-// would hide socket-permission errors.
+// smokeKindEngine execs into the suite AIO and runs `podman ps` with Kind's
+// cluster label through the mounted engine socket. Fail here instead of
+// waiting for TestKindClusterLifecycle to poll. Socket access as uid 1000 is
+// packaging (s6-applyuidgid -G); this only checks the mount speaks the API.
 func (f *Fixture) smokeKindEngine() error {
 	ctx, cancel := context.WithTimeout(context.Background(), smokeKindTimeout)
 	defer cancel()
-	f.logf("smoke-testing kind engine in %s as uid 1000 (host socket %s)", f.containerName, f.engineSocket)
+	f.logf("smoke-testing kind engine in %s (host socket %s)", f.containerName, f.engineSocket)
 	if err := poll(ctx, pollInterval, func() error {
-		cmd := exec.CommandContext(ctx, "podman", "exec", "-u", "1000", f.containerName, "true")
+		cmd := exec.CommandContext(ctx, "podman", "exec", f.containerName, "true")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("podman exec: %w\n%s", err, trimOutput(out))
@@ -375,7 +375,7 @@ func (f *Fixture) smokeKindEngine() error {
 	}); err != nil {
 		return fmt.Errorf("smoke kind engine: wait for exec: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "podman", "exec", "-u", "1000", f.containerName,
+	cmd := exec.CommandContext(ctx, "podman", "exec", f.containerName,
 		"podman", "ps", "-a", "--filter", "label="+kindClusterLabel)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

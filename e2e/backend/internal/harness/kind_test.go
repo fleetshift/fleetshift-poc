@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,49 @@ func TestHostKindClusterName(t *testing.T) {
 	t.Parallel()
 	if got := HostKindClusterName("kind-e2e-abcd"); got != "fs--kind-e2e-abcd" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParsePodmanPort(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr string
+	}{
+		{name: "arrow loopback", in: "6443/tcp -> 127.0.0.1:41187", want: "https://127.0.0.1:41187"},
+		{name: "unspecified ipv4", in: "6443/tcp -> 0.0.0.0:1980", want: "https://127.0.0.1:1980"},
+		{name: "bare hostport", in: "0.0.0.0:1980", want: "https://127.0.0.1:1980"},
+		{name: "ipv6 unspecified", in: "6443/tcp -> [::]:6443", want: "https://127.0.0.1:6443"},
+		{
+			name: "prefer ipv4 loopback",
+			in:   "6443/tcp -> [::1]:6443\n6443/tcp -> 127.0.0.1:41187",
+			want: "https://127.0.0.1:41187",
+		},
+		{name: "empty", in: "  \n", wantErr: "parse podman port"},
+		{name: "garbage", in: "not a port", wantErr: "parse podman port"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parsePodmanPort(tt.in)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want %s", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -38,7 +82,7 @@ func TestIsSuiteKindCluster(t *testing.T) {
 }
 
 func TestResolveEngineSocket_PODMAN_SOCKET(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "podman.sock")
+	sock := filepath.Join(shortUnixDir(t), "podman.sock")
 	mustListenUnix(t, sock)
 
 	t.Setenv(engineSocketEnv, sock)
@@ -53,7 +97,7 @@ func TestResolveEngineSocket_PODMAN_SOCKET(t *testing.T) {
 }
 
 func TestResolveEngineSocket_XDG(t *testing.T) {
-	xdg := t.TempDir()
+	xdg := shortUnixDir(t)
 	if err := os.Mkdir(filepath.Join(xdg, "podman"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +116,100 @@ func TestResolveEngineSocket_XDG(t *testing.T) {
 }
 
 func TestResolveEngineSocket_Missing(t *testing.T) {
+	setLinuxEngineHost(t, true)
+	t.Setenv(engineSocketEnv, "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	_, err := resolveEngineSocket()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "systemctl --user") {
+		t.Fatalf("error = %v, want systemctl hint", err)
+	}
+}
+
+func TestResolveEngineSocket_DarwinMissing(t *testing.T) {
+	setLinuxEngineHost(t, false)
+	skipDockerCompatSocket(t)
+	setLookupRemoteEngineSocket(t, func() (string, error) {
+		return "", fmt.Errorf("machine stopped")
+	})
+	t.Setenv(engineSocketEnv, "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	_, err := resolveEngineSocket()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "podman machine start") {
+		t.Fatalf("error = %v, want podman machine start", err)
+	}
+}
+
+func TestResolveEngineSocket_DarwinRemote(t *testing.T) {
+	setLinuxEngineHost(t, false)
+	skipDockerCompatSocket(t)
+	sock := filepath.Join(shortUnixDir(t), "podman.sock")
+	mustListenUnix(t, sock)
+	setLookupRemoteEngineSocket(t, func() (string, error) {
+		return sock, nil
+	})
+	t.Setenv(engineSocketEnv, "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	got, err := resolveEngineSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != sock {
+		t.Fatalf("got %q want %q", got, sock)
+	}
+}
+
+func TestResolveEngineSocket_DarwinRemoteMissing(t *testing.T) {
+	setLinuxEngineHost(t, false)
+	skipDockerCompatSocket(t)
+	want := filepath.Join(t.TempDir(), "gone.sock")
+	setLookupRemoteEngineSocket(t, func() (string, error) {
+		return want, nil
+	})
+	t.Setenv(engineSocketEnv, "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	_, err := resolveEngineSocket()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want path %s", err, want)
+	}
+	if !strings.Contains(err.Error(), "podman machine start") {
+		t.Fatalf("error = %v, want podman machine start", err)
+	}
+}
+
+func TestResolveEngineSocket_DarwinDockerSock(t *testing.T) {
+	setLinuxEngineHost(t, false)
+	sock := filepath.Join(shortUnixDir(t), "docker.sock")
+	mustListenUnix(t, sock)
+	setDockerCompatSocketPath(t, sock)
+	setLookupRemoteEngineSocket(t, func() (string, error) {
+		t.Fatal("podman info should not run when docker.sock is live")
+		return "", nil
+	})
+	t.Setenv(engineSocketEnv, "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	got, err := resolveEngineSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != sock {
+		t.Fatalf("got %q want %q", got, sock)
+	}
+}
+
+func TestResolveEngineSocket_LinuxIgnoresDockerSock(t *testing.T) {
+	setLinuxEngineHost(t, true)
+	sock := filepath.Join(shortUnixDir(t), "docker.sock")
+	mustListenUnix(t, sock)
+	setDockerCompatSocketPath(t, sock)
 	t.Setenv(engineSocketEnv, "")
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	_, err := resolveEngineSocket()
@@ -106,7 +244,7 @@ func TestRequireLiveUnixSocket_Missing(t *testing.T) {
 }
 
 func TestRequireLiveUnixSocket_Stale(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "stale.sock")
+	sock := filepath.Join(shortUnixDir(t), "stale.sock")
 	mustStaleUnixSocket(t, sock)
 	err := requireLiveUnixSocket(sock)
 	if err == nil {
@@ -118,7 +256,7 @@ func TestRequireLiveUnixSocket_Stale(t *testing.T) {
 }
 
 func TestResolveEngineSocket_StalePODMAN_SOCKET(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "stale.sock")
+	sock := filepath.Join(shortUnixDir(t), "stale.sock")
 	mustStaleUnixSocket(t, sock)
 	t.Setenv(engineSocketEnv, sock)
 	_, err := resolveEngineSocket()
@@ -162,6 +300,43 @@ func TestResolveEngineSocket_XDGMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "systemctl --user") {
 		t.Fatalf("error = %v, want systemctl hint", err)
+	}
+}
+
+func TestParseRemoteSocketPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{name: "unix prefix", raw: "unix:///run/user/501/podman/podman.sock", want: "/run/user/501/podman/podman.sock"},
+		{name: "bare path", raw: "/run/podman/podman.sock", want: "/run/podman/podman.sock"},
+		{name: "whitespace", raw: "  unix:///tmp/p.sock\n", want: "/tmp/p.sock"},
+		{name: "empty", raw: "  \n", wantErr: "empty remote socket path"},
+		{name: "tcp", raw: "tcp://127.0.0.1:2375", wantErr: "not a unix path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseRemoteSocketPath(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want %s", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -224,4 +399,43 @@ func mustStaleUnixSocket(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Remove(path) })
+}
+
+// shortUnixDir returns a temp directory short enough for Darwin sun_path.
+// t.TempDir() under $TMPDIR (/var/folders/...) is often too long and listen
+// fails with "bind: invalid argument".
+func shortUnixDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "fs-e2e-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func setLinuxEngineHost(t *testing.T, v bool) {
+	t.Helper()
+	prev := linuxEngineHost
+	linuxEngineHost = v
+	t.Cleanup(func() { linuxEngineHost = prev })
+}
+
+func setLookupRemoteEngineSocket(t *testing.T, fn func() (string, error)) {
+	t.Helper()
+	prev := lookupRemoteEngineSocket
+	lookupRemoteEngineSocket = fn
+	t.Cleanup(func() { lookupRemoteEngineSocket = prev })
+}
+
+func setDockerCompatSocketPath(t *testing.T, path string) {
+	t.Helper()
+	prev := dockerCompatSocketPath
+	dockerCompatSocketPath = path
+	t.Cleanup(func() { dockerCompatSocketPath = prev })
+}
+
+func skipDockerCompatSocket(t *testing.T) {
+	t.Helper()
+	setDockerCompatSocketPath(t, filepath.Join(t.TempDir(), "gone.sock"))
 }

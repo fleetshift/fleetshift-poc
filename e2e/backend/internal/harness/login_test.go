@@ -77,3 +77,28 @@ func TestParseAuthURLLine(t *testing.T) {
 		t.Fatal("empty URL")
 	}
 }
+
+func TestParseAccessToken(t *testing.T) {
+	t.Parallel()
+	got, err := parseAccessToken([]byte(`{"access_token":"live-access","token_type":"Bearer"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "live-access" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParseAccessToken_Missing(t *testing.T) {
+	t.Parallel()
+	if _, err := parseAccessToken([]byte(`{"token_type":"Bearer"}`)); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestParseAccessToken_Invalid(t *testing.T) {
+	t.Parallel()
+	if _, err := parseAccessToken([]byte("{")); err == nil {
+		t.Fatal("expected error")
+	}
+}

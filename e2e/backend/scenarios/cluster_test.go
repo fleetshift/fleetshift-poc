@@ -18,6 +18,7 @@ func TestKindClusterLifecycle(t *testing.T) {
 	})
 	steps.CreateKindCluster(t, suite, name)
 	steps.WaitForClusterReady(t, suite, name)
+	steps.WaitForKindOIDC(t, suite, name)
 	steps.CreateConfigMapDeployment(t, suite, name)
 	steps.WaitForDeploymentActive(t, suite, steps.ConfigMapDeploymentID(name))
 	steps.AssertConfigMapOnCluster(t, suite, name)

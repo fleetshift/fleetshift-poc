@@ -17,12 +17,16 @@ const (
 	deploymentCommandTimeout = 10 * time.Second
 	deploymentWaitTimeout    = 30 * time.Second
 	deploymentPollInterval   = 500 * time.Millisecond
+
+	deploymentStateActive = "STATE_ACTIVE"
+	deploymentStateFailed = "STATE_FAILED"
 )
 
 // deploymentView is the JSON subset parsed from fleetctl deployment list/get.
 type deploymentView struct {
-	Name  string `json:"name"`
-	State string `json:"state"`
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	PauseReason string `json:"pauseReason"`
 }
 
 // WaitForListedDeployment polls `deployment list` until wantName appears.
@@ -34,18 +38,19 @@ func WaitForListedDeployment(t *testing.T, f *harness.Fixture, wantName string) 
 		ctx, cancel := context.WithTimeout(context.Background(), deploymentCommandTimeout)
 		defer cancel()
 		res := f.Run(ctx, "deployment", "list")
-		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), res.Stderr)
+		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		deps, err := parseDeploymentList(res.Stdout)
-		gm.Expect(err).NotTo(gomega.HaveOccurred())
+		gm.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		names := make([]string, len(deps))
 		for i, d := range deps {
 			names[i] = d.Name
 		}
-		gm.Expect(names).To(gomega.ContainElement(jsonDeploymentName(wantName)))
+		gm.Expect(names).To(gomega.ContainElement(jsonDeploymentName(wantName)), fleetctlDetail(res))
 	}).WithTimeout(deploymentWaitTimeout).WithPolling(deploymentPollInterval).Should(gomega.Succeed())
 }
 
 // WaitForDeploymentActive polls `deployment get` until the named deployment is STATE_ACTIVE.
+// PausedAuth (non-empty pauseReason) and STATE_FAILED fail the test immediately.
 func WaitForDeploymentActive(t *testing.T, f *harness.Fixture, id string) {
 	t.Helper()
 	g := gomega.NewWithT(t)
@@ -54,12 +59,29 @@ func WaitForDeploymentActive(t *testing.T, f *harness.Fixture, id string) {
 		ctx, cancel := context.WithTimeout(context.Background(), deploymentCommandTimeout)
 		defer cancel()
 		res := f.Run(ctx, "deployment", "get", id)
-		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), res.Stderr)
+		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		dep, err := parseDeployment(res.Stdout)
-		gm.Expect(err).NotTo(gomega.HaveOccurred())
-		gm.Expect(dep.Name).To(gomega.Equal(jsonDeploymentName(id)))
-		gm.Expect(dep.State).To(gomega.Equal("STATE_ACTIVE"))
+		gm.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
+		gm.Expect(dep.Name).To(gomega.Equal(jsonDeploymentName(id)), fleetctlDetail(res))
+		if msg := deploymentTerminalFailure(dep); msg != "" {
+			t.Fatalf("%s\n%s", msg, fleetctlDetail(res))
+		}
+		gm.Expect(dep.State).To(gomega.Equal(deploymentStateActive), fleetctlDetail(res))
 	}).WithTimeout(deploymentWaitTimeout).WithPolling(deploymentPollInterval).Should(gomega.Succeed())
+}
+
+// deploymentTerminalFailure is a non-empty reason when polling for Active should stop.
+func deploymentTerminalFailure(dep deploymentView) string {
+	if dep.State == deploymentStateFailed {
+		if p := strings.TrimSpace(dep.PauseReason); p != "" {
+			return "deployment " + dep.Name + " STATE_FAILED: " + p
+		}
+		return "deployment " + dep.Name + " STATE_FAILED"
+	}
+	if p := strings.TrimSpace(dep.PauseReason); p != "" {
+		return "deployment " + dep.Name + " paused (" + dep.State + "): " + p
+	}
+	return ""
 }
 
 // parseDeploymentList unmarshals fleetctl deployment list JSON.

@@ -3,6 +3,7 @@ package harness
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -67,6 +68,33 @@ func (f *Fixture) Login(persona string) error {
 	}
 	f.logf("logged in as %s", persona)
 	return nil
+}
+
+// AccessToken returns the suite fleetctl access token from insecure-storage
+// credentials.json. Do not log the return value.
+func (f *Fixture) AccessToken() (string, error) {
+	if f == nil {
+		return "", fmt.Errorf("nil fixture")
+	}
+	data, err := os.ReadFile(f.CredentialsPath())
+	if err != nil {
+		return "", fmt.Errorf("read credentials: %w", err)
+	}
+	return parseAccessToken(data)
+}
+
+// parseAccessToken reads access_token from fleetctl credentials.json bytes.
+func parseAccessToken(raw []byte) (string, error) {
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(raw, &tok); err != nil {
+		return "", fmt.Errorf("parse credentials: %w", err)
+	}
+	if strings.TrimSpace(tok.AccessToken) == "" {
+		return "", fmt.Errorf("credentials.json has no access_token")
+	}
+	return tok.AccessToken, nil
 }
 
 // killIfRunning kills cmd if it is still running. After Wait, ProcessState is
