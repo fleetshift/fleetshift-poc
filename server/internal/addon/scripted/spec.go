@@ -184,6 +184,39 @@ func normalizeLatency(msg protoreflect.Message, desc protoreflect.MessageDescrip
 		d := time.Duration(seconds)*time.Second + time.Duration(nanos)*time.Nanosecond
 		return ConstantLatency{Duration: d}, nil
 	}
+
+	boundedNormalField := desc.Fields().ByName("bounded_normal")
+	if boundedNormalField != nil && msg.Has(boundedNormalField) {
+		bnMsg := msg.Get(boundedNormalField).Message()
+		bnDesc := boundedNormalField.Message()
+
+		minField := bnDesc.Fields().ByName("min")
+		maxField := bnDesc.Fields().ByName("max")
+
+		var minDur, maxDur time.Duration
+
+		if minField != nil && bnMsg.Has(minField) {
+			minMsg := bnMsg.Get(minField).Message()
+			seconds := minMsg.Get(minMsg.Descriptor().Fields().ByName("seconds")).Int()
+			nanos := minMsg.Get(minMsg.Descriptor().Fields().ByName("nanos")).Int()
+			minDur = time.Duration(seconds)*time.Second + time.Duration(nanos)*time.Nanosecond
+		}
+
+		if maxField != nil && bnMsg.Has(maxField) {
+			maxMsg := bnMsg.Get(maxField).Message()
+			seconds := maxMsg.Get(maxMsg.Descriptor().Fields().ByName("seconds")).Int()
+			nanos := maxMsg.Get(maxMsg.Descriptor().Fields().ByName("nanos")).Int()
+			maxDur = time.Duration(seconds)*time.Second + time.Duration(nanos)*time.Nanosecond
+		}
+
+		// Enforce min <= max invariant
+		if minDur > maxDur {
+			return nil, fmt.Errorf("bounded_normal: min (%v) > max (%v)", minDur, maxDur)
+		}
+
+		return BoundedNormalLatency{Min: minDur, Max: maxDur}, nil
+	}
+
 	// Validation should have caught missing oneof; defensive default.
 	return ConstantLatency{Duration: 0}, nil
 }
@@ -216,6 +249,17 @@ func normalizeOutcome(msg protoreflect.Message, desc protoreflect.MessageDescrip
 			values[i] = ov
 		}
 		return SequenceOutcome{Values: values}, nil
+	}
+
+	probabilisticField := desc.Fields().ByName("probabilistic")
+	if probabilisticField != nil && msg.Has(probabilisticField) {
+		probMsg := msg.Get(probabilisticField).Message()
+		failureRateField := probMsg.Descriptor().Fields().ByName("failure_rate")
+		if failureRateField == nil {
+			return nil, fmt.Errorf("probabilistic missing failure_rate field")
+		}
+		failureRate := probMsg.Get(failureRateField).Float()
+		return ProbabilisticOutcome{FailureRate: failureRate}, nil
 	}
 
 	// Validation should have caught missing oneof; defensive default.

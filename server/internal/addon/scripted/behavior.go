@@ -2,7 +2,10 @@ package scripted
 
 import (
 	"encoding/json"
+	"math/rand"
 	"time"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // Operation distinguishes delivery from removal.
@@ -83,6 +86,31 @@ func (c ConstantLatency) ResolveLatency() time.Duration {
 	return c.Duration
 }
 
+// BoundedNormalLatency samples from a truncated Gaussian distribution
+// with mean = (Min+Max)/2 and sigma = (Max−Min)/6 (99.7% within bounds),
+// clamped to [Min, Max]. When Min == Max the delay is constant.
+type BoundedNormalLatency struct {
+	Min time.Duration
+	Max time.Duration
+}
+
+// ResolveLatency returns a duration sampled from the bounded normal distribution.
+func (b BoundedNormalLatency) ResolveLatency() time.Duration {
+	if b.Min >= b.Max {
+		return b.Min
+	}
+	mean := float64(b.Min+b.Max) / 2
+	sigma := float64(b.Max-b.Min) / 6
+	d := time.Duration(rand.NormFloat64()*sigma + mean)
+	if d < b.Min {
+		d = b.Min
+	}
+	if d > b.Max {
+		d = b.Max
+	}
+	return d
+}
+
 // OutcomeDecider resolves the outcome for one phase attempt given the
 // zero-based cursor position. It returns the outcome and the next
 // cursor value.
@@ -123,6 +151,21 @@ func (s SequenceOutcome) ResolveOutcome(cursor int) (OutcomeValue, int) {
 	return s.Values[idx], cursor + 1
 }
 
+// ProbabilisticOutcome returns FAILURE with the given probability,
+// SUCCESS otherwise. Stateless -- cursor advances but is not used.
+type ProbabilisticOutcome struct {
+	FailureRate float64
+}
+
+// ResolveOutcome returns FAILURE with the given probability,
+// SUCCESS otherwise. The cursor is advanced but not consulted.
+func (p ProbabilisticOutcome) ResolveOutcome(cursor int) (OutcomeValue, int) {
+	if p.FailureRate > 0 && rand.Float64() < p.FailureRate {
+		return OutcomeFailure, cursor + 1
+	}
+	return OutcomeSuccess, cursor + 1
+}
+
 // PhaseBehavior holds the configured latency and outcome deciders for
 // one phase of one operation.
 type PhaseBehavior struct {
@@ -155,3 +198,23 @@ type InventoryProjection struct {
 	Labels      map[string]string
 	Observation json.RawMessage
 }
+
+// DelayRecord holds the delays the agent resolved for a single
+// delivery, enabling overhead computation (observed − agent delay).
+type DelayRecord struct {
+	AckLatency        time.Duration
+	CompletionLatency time.Duration
+}
+
+// DelayRecorder captures the resolved (pre-sleep) delays per delivery.
+// The stress harness provides a real implementation; the production
+// bootstrap passes NopDelayRecorder.
+type DelayRecorder interface {
+	RecordDelay(deliveryID domain.DeliveryID, record DelayRecord)
+}
+
+// NopDelayRecorder discards all records.
+type NopDelayRecorder struct{}
+
+// RecordDelay discards the delay record.
+func (NopDelayRecorder) RecordDelay(domain.DeliveryID, DelayRecord) {}

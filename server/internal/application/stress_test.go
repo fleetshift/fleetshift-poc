@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/cschleiden/go-workflows/worker"
 	"github.com/cschleiden/go-workflows/workflow"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
@@ -269,7 +272,7 @@ workloop:
 		if !depStates[idx].created {
 			// --- Create ---
 			target := targetIDs[createdSoFar%stressNumTargets]
-			manifest := stressManifest(string(depName), 1)
+			manifest := stressScriptedManifest(string(depName), cfg)
 			view, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
 				Name: depName,
 				ManifestStrategy: domain.ManifestStrategySpec{
@@ -300,7 +303,7 @@ workloop:
 		} else {
 			// --- Update (direct store mutation) ---
 			depStates[idx].version++
-			manifest := stressManifest(string(depName), depStates[idx].version)
+			manifest := stressScriptedManifest(string(depName), cfg)
 			if err := updateDeploymentManifest(ctx, t, observer, h.store, h.orchWf, depName, manifest); err != nil {
 				updateErrors++
 				if updateErrors <= 5 {
@@ -443,16 +446,33 @@ func TestStress_OrchestrationLoop(t *testing.T) {
 	t.Cleanup(func() { _ = w.WaitForCompletion() })
 
 	// -----------------------------------------------------------------------
-	// Delivery agent + observer + harness
+	// Scripted delivery agent + delay recorder + observer + harness
 	// -----------------------------------------------------------------------
 
-	agent := &delayedDeliveryAgent{
-		ackDelayMin:        cfg.ackDelayMin,
-		ackDelayMax:        cfg.ackDelayMax,
-		completionDelayMin: cfg.completionDelayMin,
-		completionDelayMax: cfg.completionDelayMax,
-		failureRate:        cfg.failureRate,
+	// Create the scripted agent with a delay recorder for overhead measurement.
+	delayRecorder := newScriptedDelayRecorder()
+
+	appCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	codec, err := scripted.NewCodec(context.Background())
+	if err != nil {
+		t.Fatalf("scripted.NewCodec: %v", err)
 	}
+	planner := scripted.NewPlanner()
+
+	// Create the reporter before the agent so we can inject it during construction.
+	reporter := application.NewDeliveryReportService(store, reg)
+
+	// Create the scripted agent with the reporter fully injected.
+	tempAgent := scripted.NewAgent(
+		reporter,
+		nil, // inventory not used in stress test
+		codec, planner,
+		appCtx,
+		slog.Default(),
+		scripted.WithDelayRecorder(delayRecorder),
+	)
 
 	// We don't know the exact fulfillment count upfront (some creates
 	// may fail). We'll set a generous target and let the drain phase
@@ -460,8 +480,10 @@ func TestStress_OrchestrationLoop(t *testing.T) {
 	// at most that many fulfillments can be created.
 	observer := newStressObserver(cfg.totalDeployments)
 
-	h := setupStress(t, store, reg, agent, domain.WithFulfillmentObserver(observer))
-	agent.reporter = h.reporter
+	h := setupStress(t, store, reg, tempAgent, reporter, domain.WithFulfillmentObserver(observer))
+
+	// Note: tempAgent is registered with the delivery router in setupStress.
+	// We use it directly for the rest of the test.
 
 	// Worker must be started after all workflows/activities are registered.
 	startGoWorkflowsWorker(t, reg)
@@ -481,7 +503,16 @@ func TestStress_OrchestrationLoop(t *testing.T) {
 		targetNames[i] = name
 	}
 	t.Logf("registering %d targets...", stressNumTargets)
-	registerTargets(t, h.testHarness, targetNames...)
+	// Register targets with scripted.TargetType to match the scripted agent's expected type.
+	for _, name := range targetNames {
+		if err := h.targets.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:   domain.TargetID(name),
+			Type: scripted.TargetType,
+			Name: "cluster-" + name,
+		})); err != nil {
+			t.Fatalf("Register target %s: %v", name, err)
+		}
+	}
 	t.Log("targets registered")
 
 	// -----------------------------------------------------------------------
@@ -526,5 +557,5 @@ func TestStress_OrchestrationLoop(t *testing.T) {
 	}
 
 	drainFulfillments(ctx, t, observer)
-	reportStressResults(ctx, t, cfg, observer, agent, store, stats, poolStats)
+	reportStressResults(ctx, t, cfg, observer, delayRecorder, store, stats, poolStats)
 }
