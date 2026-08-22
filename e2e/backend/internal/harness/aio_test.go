@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -140,6 +141,47 @@ func TestFindRepoRoot(t *testing.T) {
 	if !isRepoRoot(root) {
 		t.Fatalf("not a repo root: %s", root)
 	}
+}
+
+func TestRunQuiet(t *testing.T) {
+	t.Parallel()
+	t.Run("success writes log", func(t *testing.T) {
+		t.Parallel()
+		f := &Fixture{workDir: t.TempDir()}
+		cmd := exec.Command("sh", "-c", "echo hello; echo err >&2")
+		if err := f.runQuiet(cmd, "out.log"); err != nil {
+			t.Fatalf("runQuiet: %v", err)
+		}
+		got, err := os.ReadFile(filepath.Join(f.workDir, "out.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(got)
+		if !strings.Contains(s, "hello") || !strings.Contains(s, "err") {
+			t.Fatalf("log = %q, want stdout and stderr", s)
+		}
+	})
+	t.Run("failure includes log", func(t *testing.T) {
+		t.Parallel()
+		f := &Fixture{workDir: t.TempDir()}
+		cmd := exec.Command("sh", "-c", "echo boom; echo fail-err >&2; exit 7")
+		err := f.runQuiet(cmd, "out.log")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "boom") || !strings.Contains(msg, "fail-err") {
+			t.Fatalf("error = %q, want log dump", msg)
+		}
+	})
+	t.Run("create fails", func(t *testing.T) {
+		t.Parallel()
+		f := &Fixture{workDir: filepath.Join(t.TempDir(), "missing")}
+		err := f.runQuiet(exec.Command("true"), "out.log")
+		if err == nil {
+			t.Fatal("expected create error")
+		}
+	})
 }
 
 // generateLoopbackCert returns a PEM CA and a leaf TLS certificate for 127.0.0.1.

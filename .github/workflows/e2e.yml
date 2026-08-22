@@ -144,5 +144,16 @@ jobs:
           aio-mode: warm
 
       - name: Run backend e2e tests
-        working-directory: e2e/backend
-        run: go test -tags e2e -count=1 -p 1 -timeout 40m ./...
+        env:
+          GOTESTSUM_FORMAT: github-actions
+          NX_DAEMON: "false"
+        run: npx nx test:e2e e2e-backend
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-backend-test-results
+          path: e2e/backend/tmp/
+          if-no-files-found: warn
+          retention-days: 7

@@ -50,6 +50,13 @@ func TokensFrom(tok *oauth2.Token) Tokens {
 	return tokens
 }
 
+// NeedsRefresh reports whether tokens should be refreshed before use.
+// A refresh is needed when fewer than 30 seconds remain until expiry and a
+// refresh token is present.
+func NeedsRefresh(tokens Tokens) bool {
+	return time.Until(tokens.Expiry) <= 30*time.Second && tokens.RefreshToken != ""
+}
+
 // RefreshIfNeeded refreshes the token using cfg when fewer than 30 seconds
 // remain until expiry and a refresh token is present. Tokens with more than
 // 30 seconds remaining, or with no refresh token, are returned unchanged.
@@ -60,11 +67,7 @@ func RefreshIfNeeded(ctx context.Context, store TokenStore, cfg *oauth2.Config) 
 		return Tokens{}, false, fmt.Errorf("load tokens: %w", err)
 	}
 
-	if time.Until(tokens.Expiry) > 30*time.Second {
-		return tokens, false, nil
-	}
-
-	if tokens.RefreshToken == "" {
+	if !NeedsRefresh(tokens) {
 		return tokens, false, nil
 	}
 

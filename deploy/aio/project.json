@@ -29,7 +29,7 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "go test -count=1 ./...",
+        "command": "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" ./...",
         "cwd": "deploy/aio"
       },
       "cache": false,

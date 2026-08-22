@@ -82,31 +82,45 @@ type tokenCredentials struct {
 	configDir string
 }
 
-// GetRequestMetadata returns a Bearer token after a refresh if needed.
-// Missing config or tokens yield no metadata rather than an error.
+// GetRequestMetadata implements [credentials.PerRPCCredentials].
+// It never returns an error: gRPC would then skip the RPC. Missing or
+// unusable credentials mean no auth headers, not a failed call.
 func (t *tokenCredentials) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
+	return t.bearerMetadata(ctx), nil
+}
+
+// bearerMetadata returns Authorization when a usable access token is
+// available. Failures (missing config, missing tokens, refresh, OIDC CA)
+// yield nil so the RPC still goes out.
+func (t *tokenCredentials) bearerMetadata(ctx context.Context) map[string]string {
 	cfg, err := auth.LoadConfigFrom(t.configDir)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 
-	ctx, err = withOIDCHTTPClient(ctx, cfg)
+	tokens, err := t.store.Load(ctx)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
-	tokens, _, err := auth.RefreshIfNeeded(ctx, t.store, oauthConfig(cfg))
-	if err != nil {
-		return nil, nil
+	if auth.NeedsRefresh(tokens) {
+		refreshCtx, httpErr := withOIDCHTTPClient(ctx, cfg)
+		if httpErr != nil {
+			return nil
+		}
+		tokens, _, err = auth.RefreshIfNeeded(refreshCtx, t.store, oauthConfig(cfg))
+		if err != nil {
+			return nil
+		}
 	}
 
 	if tokens.AccessToken == "" {
-		return nil, nil
+		return nil
 	}
 
 	return map[string]string{
 		"authorization": "Bearer " + tokens.AccessToken,
-	}, nil
+	}
 }
 
 // RequireTransportSecurity reports false so plaintext gRPC still attaches tokens.

@@ -167,9 +167,15 @@ npx nx run server:test      # Go server tests (cached)
 npx nx run deploy-aio:test  # AIO packaging unit tests
 npx nx run common:test      # shared UI lib tests
 
-# Or via Taskfile:
-task test:all
+npx nx test:e2e e2e-web      # Playwright UI journeys (needs AIO at :8085)
+npx nx test:e2e e2e-backend  # Go scenarios (starts its own AIO; needs podman)
 ```
+
+Frontend e2e expects the sandbox origin
+(`https://fleetshift-sandbox.localhost:8085`). Playwright flags after `--`,
+for example `npx nx test:e2e e2e-web -- --ui` — see
+[e2e/web/README.md](e2e/web/README.md). Backend e2e starts and stops the AIO
+itself.
 
 ### Generate and images
 

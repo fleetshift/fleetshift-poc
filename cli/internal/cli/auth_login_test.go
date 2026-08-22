@@ -42,6 +42,37 @@ func TestAuthSetup_ConfigDirWritesConfigThereNotHome(t *testing.T) {
 	}
 }
 
+func TestAuthSetup_RelativeOIDCCAFilePersistsAbsolutePath(t *testing.T) {
+	stateDir := t.TempDir()
+	caDir := t.TempDir()
+	caSrc := filepath.Join(caDir, "ca.crt")
+	if err := os.WriteFile(caSrc, []byte("sandbox-ca\n"), 0o600); err != nil {
+		t.Fatalf("write ca: %v", err)
+	}
+	t.Chdir(caDir)
+	issuer := startOIDCDiscovery(t)
+
+	_ = runCLI(t,
+		"--config-dir", stateDir,
+		"auth", "setup",
+		"--issuer-url", issuer,
+		"--client-id", "fleetshift-cli",
+		"--oidc-ca-file", "ca.crt",
+	)
+
+	cfg, err := auth.LoadConfigFrom(stateDir)
+	if err != nil {
+		t.Fatalf("LoadConfigFrom: %v", err)
+	}
+	want, err := filepath.Abs("ca.crt")
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	if cfg.OIDCCAFile != want {
+		t.Fatalf("OIDCCAFile = %q, want absolute path %q", cfg.OIDCCAFile, want)
+	}
+}
+
 func TestAuthSetup_ConfigDirRecordsOriginalCAPath(t *testing.T) {
 	stateDir := t.TempDir()
 	caSrc := filepath.Join(t.TempDir(), "ca.crt")

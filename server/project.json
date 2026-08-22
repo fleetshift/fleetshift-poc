@@ -21,7 +21,7 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "go test -count=1 ./...",
+        "command": "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" ./...",
         "cwd": "server"
       },
       "cache": false,
@@ -46,13 +46,13 @@
     "test-integration": {
       "executor": "nx:run-commands",
       "options": {
-        "commands": [
-          "go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/",
-          "go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/",
-          "go test -race -count=1 ./internal/addon/kubernetes/"
-        ],
+        "cwd": "server",
         "parallel": false,
-        "cwd": "server"
+        "commands": [
+          "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" -tags integration -timeout 15m ./internal/addon/kind/",
+          "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" -tags integration -timeout 15m ./internal/addon/kubernetes/",
+          "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" -race ./internal/addon/kubernetes/"
+        ]
       },
       "cache": false
     }

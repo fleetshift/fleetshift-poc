@@ -154,10 +154,8 @@ func (f *Fixture) runPlaywrightCLILogin(ctx context.Context, persona, authURL st
 	cmd := exec.CommandContext(ctx, "npx", "playwright", "test", "--config=playwright.cli-login.mts")
 	cmd.Dir = filepath.Join(f.repoRoot, "e2e", "web")
 	cmd.Env = append(os.Environ(), "PERSONA="+persona, "AUTH_URL="+authURL)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
 	f.logf("playwright CLI login persona=%s", persona)
-	if err := cmd.Run(); err != nil {
+	if err := f.runQuiet(cmd, "playwright-login.log"); err != nil {
 		return fmt.Errorf("playwright CLI login: %w", err)
 	}
 	return nil

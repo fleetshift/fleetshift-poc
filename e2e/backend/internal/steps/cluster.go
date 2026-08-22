@@ -94,14 +94,20 @@ func waitForClusterReady(t *testing.T, f *harness.Fixture, resourceType, name st
 	t.Helper()
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
+	log := newPollLog(t)
 	g.Eventually(func(gm gomega.Gomega) {
 		ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 		defer cancel()
 		res := f.Run(ctx, "resource", "get", resourceType, name)
+		if res.Err != nil {
+			log.logf("cluster %s get: %s", name, fleetctlDetail(res))
+		}
 		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		cl, err := parseCluster(res.Stdout)
 		gm.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		gm.Expect(cl.Name).To(gomega.Equal(jsonClusterName(name)), fleetctlDetail(res))
+		log.logf("cluster %s state=%s pauseReason=%s ready=%s",
+			cl.Name, cl.State, cl.PauseReason, cl.Conditions["Ready"].Status)
 		if msg := clusterTerminalFailure(cl); msg != "" {
 			t.Fatalf("%s\n%s", msg, fleetctlDetail(res))
 		}
@@ -140,19 +146,25 @@ func waitForClusterGone(t *testing.T, f *harness.Fixture, resourceType, name str
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
 	want := jsonClusterName(name)
+	log := newPollLog(t)
 	g.Eventually(func(gm gomega.Gomega) {
 		ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 		defer cancel()
 		get := f.Run(ctx, "resource", "get", resourceType, name)
-		gm.Expect(get.Err).To(gomega.HaveOccurred())
 		list := f.Run(ctx, "resource", "list", resourceType)
 		gm.Expect(list.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(list))
 		clusters, err := parseClusterList(list.Stdout)
 		gm.Expect(err).NotTo(gomega.HaveOccurred())
 		names := make([]string, len(clusters))
+		listed := false
 		for i, c := range clusters {
 			names[i] = c.Name
+			if c.Name == want {
+				listed = true
+			}
 		}
+		log.logf("cluster %s getOK=%t listed=%t", name, get.Err == nil, listed)
+		gm.Expect(get.Err).To(gomega.HaveOccurred())
 		gm.Expect(names).NotTo(gomega.ContainElement(want))
 	}).WithTimeout(timeout).WithPolling(clusterPollInterval).Should(gomega.Succeed())
 }

@@ -64,10 +64,6 @@ func (f *Fixture) runWithConfigDir(ctx context.Context, configDir string, args .
 	} else if err != nil {
 		res.ExitCode = -1
 	}
-	f.logf("fleetctl exit=%d dur=%s argv=%s", res.ExitCode, res.Duration.Truncate(time.Millisecond), strings.Join(full, " "))
-	if err != nil && strings.TrimSpace(res.Stderr) != "" {
-		f.logf("stderr=%s", res.Stderr)
-	}
 	return res
 }
 

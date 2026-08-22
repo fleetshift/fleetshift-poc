@@ -314,15 +314,14 @@ func (f *Fixture) buildAIOImage() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), imageBuildTimeout)
 	defer cancel()
-	f.logf("building AIO image (npx nx run %s)", nxImageAIO)
+	f.logf("building AIO image")
 	cmd := exec.CommandContext(ctx, "npx", "nx", "run", nxImageAIO)
 	cmd.Dir = f.repoRoot
 	cmd.Env = append(os.Environ(), "NX_DAEMON=false")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := f.runQuiet(cmd, "image-aio.log"); err != nil {
 		return fmt.Errorf("npx nx run %s: %w", nxImageAIO, err)
 	}
+	f.logf("AIO image ready")
 	return nil
 }
 
@@ -348,7 +347,7 @@ func (f *Fixture) podmanRun() error {
 		"-v", "/tmp:/tmp",
 		ImageRef,
 	)
-	f.logf("podman %s", strings.Join(args, " "))
+	f.logf("starting container %s", f.containerName)
 	cmd := exec.Command("podman", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -457,12 +456,10 @@ func (f *Fixture) ensureFleetctl() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), fleetctlBuildTimeout)
 	defer cancel()
-	f.logf("building %s", out)
+	f.logf("building fleetctl")
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", out, "./cmd/fleetctl")
 	cmd.Dir = filepath.Join(f.repoRoot, "cli")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := f.runQuiet(cmd, "fleetctl-build.log"); err != nil {
 		return fmt.Errorf("go build fleetctl: %w", err)
 	}
 	f.fleetctl = out
@@ -476,10 +473,26 @@ func (f *Fixture) ensurePlaywrightChromium() error {
 	f.logf("ensuring Playwright Chromium")
 	cmd := exec.CommandContext(ctx, "npx", "playwright", "install", "chromium")
 	cmd.Dir = filepath.Join(f.repoRoot, "e2e", "web")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := f.runQuiet(cmd, "playwright-install.log"); err != nil {
 		return fmt.Errorf("npx playwright install chromium: %w", err)
+	}
+	return nil
+}
+
+// runQuiet runs cmd, writing stdout and stderr to workDir/logName. On failure
+// the log contents are included in the returned error.
+func (f *Fixture) runQuiet(cmd *exec.Cmd, logName string) error {
+	logPath := filepath.Join(f.workDir, logName)
+	lf, err := os.Create(logPath)
+	if err != nil {
+		return err
+	}
+	defer lf.Close()
+	cmd.Stdout = lf
+	cmd.Stderr = lf
+	if err := cmd.Run(); err != nil {
+		dump, _ := os.ReadFile(logPath)
+		return fmt.Errorf("%w\n%s", err, trimOutput(dump))
 	}
 	return nil
 }

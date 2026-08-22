@@ -45,6 +45,35 @@ func TestTokensFrom_OmitsNonStringIDToken(t *testing.T) {
 	}
 }
 
+func TestNeedsRefresh(t *testing.T) {
+	tests := []struct {
+		name   string
+		tokens auth.Tokens
+		want   bool
+	}{
+		{
+			name:   "still valid with refresh token",
+			tokens: auth.Tokens{RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		},
+		{
+			name:   "expired with refresh token",
+			tokens: auth.Tokens{RefreshToken: "r", Expiry: time.Now().Add(-time.Minute)},
+			want:   true,
+		},
+		{
+			name:   "expired without refresh token",
+			tokens: auth.Tokens{Expiry: time.Now().Add(-time.Minute)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := auth.NeedsRefresh(tt.tokens); got != tt.want {
+				t.Fatalf("NeedsRefresh() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRefreshIfNeeded_LoadError(t *testing.T) {
 	_, _, err := auth.RefreshIfNeeded(context.Background(), &tokenStoreStub{loadErr: errors.New("missing")}, &oauth2.Config{})
 	if err == nil || !strings.Contains(err.Error(), "load tokens") {

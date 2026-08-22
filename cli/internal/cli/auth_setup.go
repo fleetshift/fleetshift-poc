@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -47,7 +48,7 @@ Initial AuthMethod install is via fleetshift serve OIDC config.`,
 	cmd.Flags().StringVar(&f.clientID, "client-id", "", "OAuth2 client ID for Fleetctl login (required; e.g. fleetshift-cli)")
 	cmd.Flags().StringVar(&f.scopes, "scopes", "openid,profile,email", "Comma-separated OAuth2 scopes for login")
 	cmd.Flags().StringVar(&f.keyEnrollmentClientID, "key-enrollment-client-id", "", "OAuth2 client ID for signing key enrollment (e.g. fleetshift-signing)")
-	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for the OIDC issuer (used for discovery TLS and saved to local config)")
+	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for the OIDC issuer (used for discovery TLS and saved to local config as an absolute path)")
 	_ = cmd.MarkFlagRequired("issuer-url")
 	_ = cmd.MarkFlagRequired("client-id")
 	return cmd
@@ -55,7 +56,7 @@ Initial AuthMethod install is via fleetshift serve OIDC config.`,
 
 // runAuthSetup validates flags, discovers OIDC endpoints, and writes local
 // auth config. When --config-dir is set, auth.json lives there. --oidc-ca-file
-// is recorded as the path the caller passed.
+// is stored as an absolute path so later commands do not depend on CWD.
 func runAuthSetup(cmd *cobra.Command, ctx *cmdContext, f *authSetupFlags) error {
 	f.issuerURL = strings.TrimSpace(f.issuerURL)
 	if f.issuerURL == "" {
@@ -66,9 +67,18 @@ func runAuthSetup(cmd *cobra.Command, ctx *cmdContext, f *authSetupFlags) error 
 		return fmt.Errorf("--client-id is required")
 	}
 	f.keyEnrollmentClientID = strings.TrimSpace(f.keyEnrollmentClientID)
+	f.oidcCAFile = strings.TrimSpace(f.oidcCAFile)
 	scopes := splitScopes(f.scopes)
 	if len(scopes) == 0 {
 		return fmt.Errorf("--scopes must include at least one scope")
+	}
+
+	if f.oidcCAFile != "" {
+		abs, err := filepath.Abs(f.oidcCAFile)
+		if err != nil {
+			return fmt.Errorf("resolve --oidc-ca-file: %w", err)
+		}
+		f.oidcCAFile = abs
 	}
 
 	cfg := auth.Config{

@@ -82,6 +82,27 @@ func TestDialPlaintext(t *testing.T) {
 	assertHealthServing(t, conn)
 }
 
+func TestDialPlaintext_HomeAuthJSONWithMissingOIDCCAFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := auth.SaveConfig(auth.Config{
+		ClientID:              "fleetshift-cli",
+		AuthorizationEndpoint: "https://issuer.example/auth",
+		TokenEndpoint:         "https://issuer.example/token",
+		OIDCCAFile:            "ca.crt",
+	}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	addr := startPlaintextTestServer(t)
+	conn, err := dial(globalFlags{server: addr})
+	if err != nil {
+		t.Fatalf("dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	assertHealthServing(t, conn)
+}
+
 func TestDialTLSWithCAFile(t *testing.T) {
 	addr, caFile := startTLSTestServer(t)
 
@@ -186,6 +207,65 @@ func TestTokenCredentials_GetRequestMetadata_ValidToken(t *testing.T) {
 	}
 	if got := md["authorization"]; got != "Bearer live-access" {
 		t.Fatalf("authorization = %q, want Bearer live-access", got)
+	}
+}
+
+func TestTokenCredentials_GetRequestMetadata_ValidToken_MissingOIDCCAFile(t *testing.T) {
+	configDir := t.TempDir()
+	if err := auth.SaveConfigTo(configDir, auth.Config{
+		ClientID:              "fleetshift-cli",
+		AuthorizationEndpoint: "https://issuer.example/auth",
+		TokenEndpoint:         "https://issuer.example/token",
+		OIDCCAFile:            "ca.crt",
+	}); err != nil {
+		t.Fatalf("SaveConfigTo: %v", err)
+	}
+	store := &auth.InMemoryTokenStore{}
+	if err := store.Save(context.Background(), auth.Tokens{
+		AccessToken: "live-access",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	creds := &tokenCredentials{store: store, configDir: configDir}
+	md, err := creds.GetRequestMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("GetRequestMetadata() error = %v, want nil when the token is still valid", err)
+	}
+	if got := md["authorization"]; got != "Bearer live-access" {
+		t.Fatalf("authorization = %q, want Bearer live-access", got)
+	}
+}
+
+func TestTokenCredentials_GetRequestMetadata_Refresh_MissingOIDCCAFile_Swallowed(t *testing.T) {
+	configDir := t.TempDir()
+	if err := auth.SaveConfigTo(configDir, auth.Config{
+		ClientID:              "fleetshift-cli",
+		AuthorizationEndpoint: "https://issuer.example/auth",
+		TokenEndpoint:         "https://issuer.example/token",
+		OIDCCAFile:            "ca.crt",
+	}); err != nil {
+		t.Fatalf("SaveConfigTo: %v", err)
+	}
+	store := &auth.InMemoryTokenStore{}
+	if err := store.Save(context.Background(), auth.Tokens{
+		AccessToken:  "expired-access",
+		RefreshToken: "refresh",
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	creds := &tokenCredentials{store: store, configDir: configDir}
+	md, err := creds.GetRequestMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("GetRequestMetadata() error = %v, want nil (missing OIDC CA is swallowed)", err)
+	}
+	if md != nil {
+		t.Fatalf("metadata = %v, want nil when refresh cannot build an OIDC HTTP client", md)
 	}
 }
 

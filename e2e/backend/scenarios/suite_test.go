@@ -1,6 +1,5 @@
 //go:build e2e
 
-// Package scenarios contains backend E2E tests that share one AIO fixture.
 package scenarios
 
 import (

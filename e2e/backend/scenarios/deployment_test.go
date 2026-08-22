@@ -11,12 +11,11 @@ import (
 // bootstrapDeploymentID is the AIO bootstrap IdP-trust deployment.
 const bootstrapDeploymentID = "idp-trust-default"
 
-// TestBootstrapDeploymentListed waits until the bootstrap deployment appears in list.
-func TestBootstrapDeploymentListed(t *testing.T) {
-	steps.WaitForListedDeployment(t, suite, bootstrapDeploymentID)
-}
-
-// TestBootstrapDeploymentActive waits until the bootstrap deployment is Active.
-func TestBootstrapDeploymentActive(t *testing.T) {
-	steps.WaitForDeploymentActive(t, suite, bootstrapDeploymentID)
+func TestBootstrapDeployment(t *testing.T) {
+	steps.RunStep(t, "is listed", func(t *testing.T) {
+		steps.WaitForListedDeployment(t, suite, bootstrapDeploymentID)
+	})
+	steps.RunStep(t, "is active", func(t *testing.T) {
+		steps.WaitForDeploymentActive(t, suite, bootstrapDeploymentID)
+	})
 }

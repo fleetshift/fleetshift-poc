@@ -83,18 +83,27 @@ func WaitForKindOIDC(t *testing.T, f *harness.Fixture, clusterName string) {
 	g.Expect(f).NotTo(gomega.BeNil())
 	hostName := harness.HostKindClusterName(clusterName)
 	t.Logf("kind OIDC check %s (%s)", clusterName, hostName)
+	log := newPollLog(t)
 	g.Eventually(func() error {
 		token, err := f.AccessToken()
 		if err != nil {
+			log.logf("kind OIDC %s: token: %v", clusterName, err)
 			return err
 		}
 		apiURL, caPEM, err := harness.KindHostAPI(hostName)
 		if err != nil {
+			log.logf("kind OIDC %s: api: %v", clusterName, err)
 			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 		defer cancel()
-		return probeKindOIDC(ctx, apiURL, caPEM, token)
+		err = probeKindOIDC(ctx, apiURL, caPEM, token)
+		if err != nil {
+			log.logf("kind OIDC %s: %s", clusterName, clip(err.Error(), 80))
+			return err
+		}
+		log.logf("kind OIDC %s: ok", clusterName)
+		return nil
 	}).WithTimeout(kindOIDCWaitTimeout).WithPolling(clusterPollInterval).Should(gomega.Succeed())
 }
 
@@ -140,8 +149,12 @@ func AssertConfigMapOnKindCluster(t *testing.T, f *harness.Fixture, clusterName 
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
 	hostName := harness.HostKindClusterName(clusterName)
+	log := newPollLog(t)
 	g.Eventually(func(gm gomega.Gomega) {
 		id, err := harness.KindControlPlaneID(hostName)
+		if err != nil {
+			log.logf("configmap %s: control plane: %v", hostName, err)
+		}
 		gm.Expect(err).NotTo(gomega.HaveOccurred())
 		ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 		defer cancel()
@@ -150,6 +163,9 @@ func AssertConfigMapOnKindCluster(t *testing.T, f *harness.Fixture, clusterName 
 			"get", "configmap", configMapName,
 			"-n", configMapNamespace, "-o", "json")
 		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.logf("configmap %s: %s", hostName, clip(strings.TrimSpace(string(out)), 120))
+		}
 		gm.Expect(err).NotTo(gomega.HaveOccurred(), strings.TrimSpace(string(out)))
 		data, err := parseConfigMapData(out)
 		gm.Expect(err).NotTo(gomega.HaveOccurred())
@@ -182,8 +198,13 @@ func AssertHostKindClusterGone(t *testing.T, f *harness.Fixture, clusterName str
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
 	hostName := harness.HostKindClusterName(clusterName)
+	log := newPollLog(t)
 	g.Eventually(func(gm gomega.Gomega) {
 		ids, err := harness.KindNodeIDs(hostName)
+		if err != nil {
+			log.logf("host kind %s: %v", hostName, err)
+		}
+		log.logf("host kind %s nodes=%v", hostName, ids)
 		gm.Expect(err).NotTo(gomega.HaveOccurred())
 		gm.Expect(ids).To(gomega.BeEmpty())
 	}).WithTimeout(kindClusterWaitTimeout).WithPolling(clusterPollInterval).Should(gomega.Succeed())

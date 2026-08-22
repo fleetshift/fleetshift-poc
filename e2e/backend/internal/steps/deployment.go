@@ -34,10 +34,15 @@ func WaitForListedDeployment(t *testing.T, f *harness.Fixture, wantName string) 
 	t.Helper()
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
+	want := jsonDeploymentName(wantName)
+	log := newPollLog(t)
 	g.Eventually(func(gm gomega.Gomega) {
 		ctx, cancel := context.WithTimeout(context.Background(), deploymentCommandTimeout)
 		defer cancel()
 		res := f.Run(ctx, "deployment", "list")
+		if res.Err != nil {
+			log.logf("deployment list: %s", fleetctlDetail(res))
+		}
 		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		deps, err := parseDeploymentList(res.Stdout)
 		gm.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
@@ -45,7 +50,8 @@ func WaitForListedDeployment(t *testing.T, f *harness.Fixture, wantName string) 
 		for i, d := range deps {
 			names[i] = d.Name
 		}
-		gm.Expect(names).To(gomega.ContainElement(jsonDeploymentName(wantName)), fleetctlDetail(res))
+		log.logf("deployment list: want %s have %s", want, strings.Join(names, ","))
+		gm.Expect(names).To(gomega.ContainElement(want), fleetctlDetail(res))
 	}).WithTimeout(deploymentWaitTimeout).WithPolling(deploymentPollInterval).Should(gomega.Succeed())
 }
 
@@ -55,14 +61,19 @@ func WaitForDeploymentActive(t *testing.T, f *harness.Fixture, id string) {
 	t.Helper()
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
+	log := newPollLog(t)
 	g.Eventually(func(gm gomega.Gomega) {
 		ctx, cancel := context.WithTimeout(context.Background(), deploymentCommandTimeout)
 		defer cancel()
 		res := f.Run(ctx, "deployment", "get", id)
+		if res.Err != nil {
+			log.logf("deployment %s get: %s", id, fleetctlDetail(res))
+		}
 		gm.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		dep, err := parseDeployment(res.Stdout)
 		gm.Expect(err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 		gm.Expect(dep.Name).To(gomega.Equal(jsonDeploymentName(id)), fleetctlDetail(res))
+		log.logf("deployment %s state=%s pauseReason=%s", dep.Name, dep.State, dep.PauseReason)
 		if msg := deploymentTerminalFailure(dep); msg != "" {
 			t.Fatalf("%s\n%s", msg, fleetctlDetail(res))
 		}
