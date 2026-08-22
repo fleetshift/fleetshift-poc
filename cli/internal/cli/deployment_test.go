@@ -142,27 +142,27 @@ func startFakeServer(t *testing.T) string {
 
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
-	var buf bytes.Buffer
-	cmd := cli.New()
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-	cmd.SetArgs(args)
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("fleetctl %s failed: %v\noutput: %s", strings.Join(args, " "), err, buf.String())
+	out, err := runCLIContext(t, context.Background(), args...)
+	if err != nil {
+		t.Fatalf("fleetctl %s failed: %v\noutput: %s", strings.Join(args, " "), err, out)
 	}
-	return buf.String()
+	return out
 }
 
-func runCLIErr(t *testing.T, args ...string) (string, error) {
+func runCLIContext(t *testing.T, ctx context.Context, args ...string) (string, error) {
 	t.Helper()
 	var buf bytes.Buffer
 	cmd := cli.New()
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 	cmd.SetArgs(args)
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(ctx)
 	return buf.String(), err
+}
+
+func runCLIErr(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	return runCLIContext(t, context.Background(), args...)
 }
 
 func writeManifestFile(t *testing.T, content string) string {

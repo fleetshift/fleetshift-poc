@@ -13,12 +13,12 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/canonical"
 	"github.com/spf13/cobra"
 )
 
+// createDeploymentFlags holds flag values for [newDeploymentCreateCmd].
 type createDeploymentFlags struct {
 	id             string
 	manifestFile   string
@@ -30,6 +30,7 @@ type createDeploymentFlags struct {
 	sign           bool
 }
 
+// newDeploymentCreateCmd builds the `fleetctl deployment create` command.
 func newDeploymentCreateCmd(ctx *cmdContext) *cobra.Command {
 	f := &createDeploymentFlags{}
 
@@ -44,7 +45,7 @@ func newDeploymentCreateCmd(ctx *cmdContext) *cobra.Command {
 			}
 
 			if f.sign {
-				if err := signCreateRequest(req); err != nil {
+				if err := signCreateRequest(ctx.flags, req); err != nil {
 					return fmt.Errorf("sign deployment: %w", err)
 				}
 			}
@@ -75,6 +76,7 @@ func newDeploymentCreateCmd(ctx *cmdContext) *cobra.Command {
 	return cmd
 }
 
+// buildCreateRequest maps flags into a CreateDeploymentRequest (unsigned).
 func buildCreateRequest(f *createDeploymentFlags) (*pb.CreateDeploymentRequest, error) {
 	manifest, err := readManifest(f.manifestFile)
 	if err != nil {
@@ -109,6 +111,7 @@ func buildCreateRequest(f *createDeploymentFlags) (*pb.CreateDeploymentRequest, 
 	}, nil
 }
 
+// readManifest reads the manifest JSON from path, or stdin when path is "-".
 func readManifest(path string) ([]byte, error) {
 	if path == "-" {
 		return io.ReadAll(os.Stdin)
@@ -116,6 +119,7 @@ func readManifest(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// buildPlacementStrategy maps --placement-type and related flags to proto.
 func buildPlacementStrategy(f *createDeploymentFlags) (*pb.PlacementStrategy, error) {
 	switch strings.ToLower(f.placementType) {
 	case "all":
@@ -141,6 +145,7 @@ func buildPlacementStrategy(f *createDeploymentFlags) (*pb.PlacementStrategy, er
 	}
 }
 
+// buildRolloutStrategy maps --rollout-type to proto.
 func buildRolloutStrategy(rolloutType string) (*pb.RolloutStrategy, error) {
 	switch strings.ToLower(rolloutType) {
 	case "immediate":
@@ -152,8 +157,8 @@ func buildRolloutStrategy(rolloutType string) (*pb.RolloutStrategy, error) {
 
 // signCreateRequest loads the signing key, builds the canonical envelope,
 // signs it, and populates the signing fields on the request.
-func signCreateRequest(req *pb.CreateDeploymentRequest) error {
-	privKey, err := loadSigningPrivateKey()
+func signCreateRequest(f globalFlags, req *pb.CreateDeploymentRequest) error {
+	privKey, err := loadSigningPrivateKey(f)
 	if err != nil {
 		return err
 	}
@@ -182,8 +187,10 @@ func signCreateRequest(req *pb.CreateDeploymentRequest) error {
 	return nil
 }
 
-func loadSigningPrivateKey() (*ecdsa.PrivateKey, error) {
-	pemStr, err := auth.LoadSigningKey()
+// loadSigningPrivateKey reads the enrolled PEM signing key from the configured
+// store and parses it as an ECDSA private key.
+func loadSigningPrivateKey(f globalFlags) (*ecdsa.PrivateKey, error) {
+	pemStr, err := f.store().LoadSigningKey()
 	if err != nil {
 		return nil, fmt.Errorf("load signing key: %w", err)
 	}
@@ -198,6 +205,8 @@ func loadSigningPrivateKey() (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
+// canonicalStrategiesFromProto copies manifest and placement fields into the
+// canonical signing types.
 func canonicalStrategiesFromProto(dep *pb.Deployment) (canonical.ManifestStrategy, canonical.PlacementStrategy) {
 	var ms canonical.ManifestStrategy
 	if p := dep.GetManifestStrategy(); p != nil {

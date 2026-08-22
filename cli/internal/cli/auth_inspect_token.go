@@ -15,10 +15,14 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/output"
 )
 
+// newAuthInspectTokenCmd builds the `fleetctl auth inspect-token` command.
 func newAuthInspectTokenCmd(ctx *cmdContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inspect-token",
 		Short: "Decode and display the stored authentication tokens",
+		Annotations: map[string]string{
+			annotationSkipServer: "true",
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runAuthInspectToken(cmd, ctx)
 		},
@@ -26,6 +30,7 @@ func newAuthInspectTokenCmd(ctx *cmdContext) *cobra.Command {
 	return cmd
 }
 
+// tokenInspection is the decoded view printed by auth inspect-token.
 type tokenInspection struct {
 	TokenType   string           `json:"token_type"`
 	Expiry      time.Time        `json:"expiry"`
@@ -35,9 +40,9 @@ type tokenInspection struct {
 	IDToken     *auth.DecodedJWT `json:"id_token,omitempty"`
 }
 
+// runAuthInspectToken loads stored tokens and prints type, expiry, and JWT claims.
 func runAuthInspectToken(cmd *cobra.Command, ctx *cmdContext) error {
-	store := auth.KeyringTokenStore{}
-	tokens, err := store.Load(cmd.Context())
+	tokens, err := ctx.flags.store().Load(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("load tokens (run 'fleetctl auth login' first): %w", err)
 	}
@@ -92,6 +97,7 @@ func runAuthInspectToken(cmd *cobra.Command, ctx *cmdContext) error {
 
 var knownClaimOrder = []string{"sub", "iss", "aud", "exp", "iat", "nbf", "email", "groups", "azp"}
 
+// printClaims writes claims in knownClaimOrder, then remaining keys alphabetically.
 func printClaims(w io.Writer, claims map[string]any) {
 	printed := make(map[string]bool, len(knownClaimOrder))
 	for _, k := range knownClaimOrder {
@@ -115,6 +121,7 @@ func printClaims(w io.Writer, claims map[string]any) {
 	}
 }
 
+// formatClaimValue renders v for display, converting numeric time claims to RFC3339.
 func formatClaimValue(key string, v any) string {
 	switch key {
 	case "exp", "iat", "nbf":
@@ -137,6 +144,7 @@ func formatClaimValue(key string, v any) string {
 	}
 }
 
+// formatDuration renders d as a compact hours/minutes/seconds string.
 func formatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	h := int(d.Hours())

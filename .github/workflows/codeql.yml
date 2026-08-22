@@ -34,7 +34,7 @@ jobs:
 
       - name: Build all modules
         run: |
-          for mod in server cli; do
+          for mod in server cli deploy/aio e2e/backend; do
             if [ -d "$mod" ]; then
               echo "Building $mod..."
               (cd "$mod" && go build ./...) # The parentheses run this in a subshell

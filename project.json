@@ -3,7 +3,7 @@
   "root": ".",
   "targets": {
     "build:all": {
-      "dependsOn": ["server:build", "cli:build"]
+      "dependsOn": ["server:build", "cli:build", "deploy-aio:build"]
     },
     "test:all": {
       "dependsOn": ["server:test", "cli:test", "deploy-aio:test"]

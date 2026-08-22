@@ -9,6 +9,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -114,8 +116,17 @@ func startCapturingServer(t *testing.T, fake *capturingDeploymentServer) string 
 
 func generateAndStoreTestKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
-
 	keyring.MockInit()
+	return storeSigningKey(t, auth.KeyringStore{})
+}
+
+func generateAndStoreFileKey(t *testing.T, dir string) *ecdsa.PrivateKey {
+	t.Helper()
+	return storeSigningKey(t, auth.FileStore{Dir: dir})
+}
+
+func storeSigningKey(t *testing.T, store auth.Store) *ecdsa.PrivateKey {
+	t.Helper()
 
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -127,7 +138,7 @@ func generateAndStoreTestKey(t *testing.T) *ecdsa.PrivateKey {
 		t.Fatalf("marshal key: %v", err)
 	}
 	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
-	if err := auth.SaveSigningKey(string(pemBlock)); err != nil {
+	if err := store.SaveSigningKey(string(pemBlock)); err != nil {
 		t.Fatalf("save signing key: %v", err)
 	}
 
@@ -279,7 +290,61 @@ func TestDeploymentCreate_Sign_NoKey_Fails(t *testing.T) {
 		"--sign",
 	)
 	if err == nil {
-		t.Error("expected error when signing key is not enrolled")
+		t.Fatal("expected error when signing key is not enrolled")
+	}
+	if !strings.Contains(err.Error(), "signing key") {
+		t.Fatalf("error = %v, want signing key", err)
+	}
+}
+
+func TestDeploymentCreate_Sign_InsecureStorage(t *testing.T) {
+	stateDir := t.TempDir()
+	privKey := generateAndStoreFileKey(t, stateDir)
+	fake := newCapturingDeploymentServer()
+	addr := startCapturingServer(t, fake)
+	manifestFile := writeManifestFile(t, `{"kind":"ConfigMap","name":"test"}`)
+
+	out := runCLI(t,
+		"--config-dir", stateDir,
+		"--insecure-storage",
+		"--server", addr,
+		"deployment", "create",
+		"--id", "file-signed-dep",
+		"--manifest-file", manifestFile,
+		"--resource-type", "test.resource",
+		"--placement-type", "all",
+		"--sign",
+	)
+
+	if !strings.Contains(out, "deployments/file-signed-dep") {
+		t.Fatalf("expected deployment name in output, got:\n%s", out)
+	}
+
+	fake.mu.Lock()
+	req := fake.lastCreateReq
+	fake.mu.Unlock()
+	if req == nil {
+		t.Fatal("no create request captured")
+	}
+
+	ms, ps := canonicalStrategiesFromReq(req)
+	envelopeBytes, err := canonical.BuildSignedInputEnvelope(
+		req.GetDeploymentId(),
+		ms, ps,
+		req.GetValidUntil().AsTime(),
+		nil,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("build envelope: %v", err)
+	}
+	hash := sha256.Sum256(envelopeBytes)
+	if !ecdsa.VerifyASN1(&privKey.PublicKey, hash[:], req.GetUserSignature()) {
+		t.Error("signature verification failed — file-store signature does not match envelope")
+	}
+
+	if _, err := os.Stat(filepath.Join(stateDir, "signing_key.pem")); err != nil {
+		t.Fatalf("signing_key.pem under config dir: %v", err)
 	}
 }
 

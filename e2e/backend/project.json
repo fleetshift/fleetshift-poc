@@ -1,0 +1,35 @@
+{
+  "name": "e2e-backend",
+  "root": "e2e/backend",
+  "sourceRoot": "e2e/backend",
+  "projectType": "library",
+  "tags": ["lang:go", "scope:e2e", "type:e2e"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "e2e/backend",
+        "command": "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" ./..."
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "e2e/backend",
+        "command": "bash \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.sh\" --jsonfile tmp/e2e-gotest.json --junitfile tmp/e2e-junit.xml --junit-name fleetshift-e2e-backend --slowest 10s --live ./cmd/gotestlive -- -tags e2e -p 1 -timeout 40m ./scenarios"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    }
+  }
+}

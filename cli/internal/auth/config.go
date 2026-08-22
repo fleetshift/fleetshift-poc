@@ -47,7 +47,11 @@ func (cfg Config) HTTPClient() (*http.Client, error) {
 	}, nil
 }
 
-func configDir() (string, error) {
+// configDir returns dir, or ~/.config/fleetshift when dir is empty.
+func configDir(dir string) (string, error) {
+	if dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)
@@ -55,8 +59,9 @@ func configDir() (string, error) {
 	return filepath.Join(home, ".config", "fleetshift"), nil
 }
 
-func configPath() (string, error) {
-	dir, err := configDir()
+// configPath returns the auth.json path under configDir(dir).
+func configPath(dir string) (string, error) {
+	dir, err := configDir(dir)
 	if err != nil {
 		return "", err
 	}
@@ -65,7 +70,18 @@ func configPath() (string, error) {
 
 // SaveConfig writes the auth config to ~/.config/fleetshift/auth.json.
 func SaveConfig(cfg Config) error {
-	p, err := configPath()
+	return SaveConfigTo("", cfg)
+}
+
+// LoadConfig reads the auth config from ~/.config/fleetshift/auth.json.
+func LoadConfig() (Config, error) {
+	return LoadConfigFrom("")
+}
+
+// SaveConfigTo writes the auth config under dir, or the default user
+// config path when dir is empty.
+func SaveConfigTo(dir string, cfg Config) error {
+	p, err := configPath(dir)
 	if err != nil {
 		return err
 	}
@@ -82,9 +98,10 @@ func SaveConfig(cfg Config) error {
 	return nil
 }
 
-// LoadConfig reads the auth config from ~/.config/fleetshift/auth.json.
-func LoadConfig() (Config, error) {
-	p, err := configPath()
+// LoadConfigFrom reads the auth config from dir, or the default user
+// config path when dir is empty.
+func LoadConfigFrom(dir string) (Config, error) {
+	p, err := configPath(dir)
 	if err != nil {
 		return Config{}, err
 	}
