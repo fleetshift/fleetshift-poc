@@ -67,7 +67,25 @@ message Latency {
       gte: {seconds: 0}
       lte: {seconds: 300}
     }];
+
+    // Gaussian-distributed delay sampled per attempt.
+    // Each sample is drawn from N(mean=(min+max)/2, sigma=(max-min)/6)
+    // and clamped to [min, max]. When min == max the delay is constant.
+    BoundedNormalLatency bounded_normal = 2;
   }
+}
+
+// BoundedNormalLatency configures a bounded normal (Gaussian) delay.
+message BoundedNormalLatency {
+  google.protobuf.Duration min = 1 [(buf.validate.field).duration = {
+    gte: {seconds: 0}
+    lte: {seconds: 3600}
+  }];
+  google.protobuf.Duration max = 2 [(buf.validate.field).duration = {
+    gte: {seconds: 0}
+    lte: {seconds: 3600}
+  }];
+  // Invariant enforced at normalization: min <= max.
 }
 
 // Outcome configures the result of a phase.
@@ -85,7 +103,20 @@ message Outcome {
     // final value after exhaustion (e.g. [FAILURE, FAILURE, SUCCESS]
     // means fail twice then succeed on every subsequent attempt).
     OutcomeSequence sequence = 2;
+
+    // Stochastic outcome: each attempt independently fails with the
+    // given probability. Stateless -- no cursor advancement needed.
+    ProbabilisticOutcome probabilistic = 3;
   }
+}
+
+// ProbabilisticOutcome configures a probabilistic failure outcome.
+message ProbabilisticOutcome {
+  // Probability of FAILURE on each attempt, in [0.0, 1.0].
+  double failure_rate = 1 [(buf.validate.field).double = {
+    gte: 0.0
+    lte: 1.0
+  }];
 }
 
 // OutcomeValue is the result of a single phase attempt.

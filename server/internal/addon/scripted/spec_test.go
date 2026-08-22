@@ -192,3 +192,187 @@ func TestCodec_RemovalDefaults(t *testing.T) {
 		t.Errorf("removal ack outcome = %v, want success (default)", got)
 	}
 }
+
+func TestCodec_BoundedNormalLatency(t *testing.T) {
+	c := mustCodec(t)
+	spec, err := c.Decode(json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"acknowledgement": {
+					"latency": {
+						"bounded_normal": {
+							"min": "1s",
+							"max": "5s"
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	// Check that latency decider is BoundedNormalLatency.
+	lat := spec.Delivery.Acknowledgement.Latency
+	bnl, ok := lat.(scripted.BoundedNormalLatency)
+	if !ok {
+		t.Fatalf("latency = %T, want BoundedNormalLatency", lat)
+	}
+
+	if bnl.Min != time.Second {
+		t.Errorf("min = %v, want 1s", bnl.Min)
+	}
+	if bnl.Max != 5*time.Second {
+		t.Errorf("max = %v, want 5s", bnl.Max)
+	}
+
+	// Sample a few latencies and verify they're within bounds.
+	for i := 0; i < 10; i++ {
+		resolved := bnl.ResolveLatency()
+		if resolved < bnl.Min || resolved > bnl.Max {
+			t.Errorf("sample %d: resolved = %v, want in [%v, %v]", i, resolved, bnl.Min, bnl.Max)
+		}
+	}
+}
+
+func TestCodec_BoundedNormalLatency_MinMaxEqual(t *testing.T) {
+	c := mustCodec(t)
+	spec, err := c.Decode(json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"acknowledgement": {
+					"latency": {
+						"bounded_normal": {
+							"min": "3s",
+							"max": "3s"
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	bnl := spec.Delivery.Acknowledgement.Latency.(scripted.BoundedNormalLatency)
+	// When min == max, should always return the constant value.
+	for i := 0; i < 10; i++ {
+		resolved := bnl.ResolveLatency()
+		if resolved != 3*time.Second {
+			t.Errorf("sample %d: resolved = %v, want 3s", i, resolved)
+		}
+	}
+}
+
+func TestCodec_ProbabilisticOutcome(t *testing.T) {
+	c := mustCodec(t)
+	spec, err := c.Decode(json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"completion": {
+					"outcome": {
+						"probabilistic": {
+							"failure_rate": 0.5
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	// Check that outcome decider is ProbabilisticOutcome.
+	outcome := spec.Delivery.Completion.Outcome
+	po, ok := outcome.(scripted.ProbabilisticOutcome)
+	if !ok {
+		t.Fatalf("outcome = %T, want ProbabilisticOutcome", outcome)
+	}
+
+	if po.FailureRate != 0.5 {
+		t.Errorf("failure_rate = %v, want 0.5", po.FailureRate)
+	}
+
+	// With failure_rate = 0.5, we should see both successes and failures
+	// over a large sample.
+	successes := 0
+	failures := 0
+	samples := 1000
+	for i := 0; i < samples; i++ {
+		outcome, _ := po.ResolveOutcome(0)
+		if outcome == scripted.OutcomeSuccess {
+			successes++
+		} else {
+			failures++
+		}
+	}
+
+	// Expect roughly 50% failures, but allow some variance.
+	failureRate := float64(failures) / float64(samples)
+	if failureRate < 0.4 || failureRate > 0.6 {
+		t.Logf("failure rate = %v, expected around 0.5 (this is a stochastic test and may flake)", failureRate)
+	}
+}
+
+func TestCodec_ProbabilisticOutcome_ZeroFailureRate(t *testing.T) {
+	c := mustCodec(t)
+	spec, err := c.Decode(json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"completion": {
+					"outcome": {
+						"probabilistic": {
+							"failure_rate": 0.0
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	po := spec.Delivery.Completion.Outcome.(scripted.ProbabilisticOutcome)
+
+	// With failure_rate = 0.0, should always succeed.
+	for i := 0; i < 10; i++ {
+		outcome, _ := po.ResolveOutcome(i)
+		if outcome != scripted.OutcomeSuccess {
+			t.Errorf("sample %d: outcome = %v, want success", i, outcome)
+		}
+	}
+}
+
+func TestCodec_ProbabilisticOutcome_FullFailureRate(t *testing.T) {
+	c := mustCodec(t)
+	spec, err := c.Decode(json.RawMessage(`{
+		"behavior": {
+			"delivery": {
+				"completion": {
+					"outcome": {
+						"probabilistic": {
+							"failure_rate": 1.0
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	po := spec.Delivery.Completion.Outcome.(scripted.ProbabilisticOutcome)
+
+	// With failure_rate = 1.0, should always fail.
+	for i := 0; i < 10; i++ {
+		outcome, _ := po.ResolveOutcome(i)
+		if outcome != scripted.OutcomeFailure {
+			t.Errorf("sample %d: outcome = %v, want failure", i, outcome)
+		}
+	}
+}

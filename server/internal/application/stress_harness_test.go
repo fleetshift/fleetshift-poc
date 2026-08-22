@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -108,98 +110,31 @@ func loadStressConfig() stressConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Mock delivery agent
+// Scripted delay recorder for stress testing
 // ---------------------------------------------------------------------------
 
-// agentDelayRecord holds the delays the agent chose for a single delivery,
-// so the test can compute orchestration overhead (observed - agent delay).
-type agentDelayRecord struct {
-	ackDelay        time.Duration
-	completionDelay time.Duration
+// scriptedDelayRecorder implements scripted.DelayRecorder using sync.Map
+// to capture the delays resolved by the scripted agent per delivery,
+// enabling overhead computation (observed − agent delay).
+type scriptedDelayRecorder struct {
+	delays sync.Map // domain.DeliveryID → scripted.DelayRecord
 }
 
-type delayedDeliveryAgent struct {
-	reporter domain.DeliveryReporter
-
-	ackDelayMin        time.Duration
-	ackDelayMax        time.Duration
-	completionDelayMin time.Duration
-	completionDelayMax time.Duration
-	failureRate        float64
-
-	// delays records the chosen delays per delivery for overhead measurement.
-	delays sync.Map // domain.DeliveryID → agentDelayRecord
+func newScriptedDelayRecorder() *scriptedDelayRecorder {
+	return &scriptedDelayRecorder{}
 }
 
-// gaussianDelay returns a duration sampled from a truncated Gaussian
-// distribution with mean = (min+max)/2 and sigma = (max-min)/6 (so
-// 99.7% of samples fall within [min, max]). Values are clamped to
-// [min, max]. If min == max the delay is fixed (no randomness).
-func gaussianDelay(min, max time.Duration) time.Duration {
-	if min >= max {
-		return min
-	}
-	mean := float64(min+max) / 2
-	sigma := float64(max-min) / 6
-	d := time.Duration(rand.NormFloat64()*sigma + mean)
-	if d < min {
-		d = min
-	}
-	if d > max {
-		d = max
-	}
-	return d
+func (r *scriptedDelayRecorder) RecordDelay(deliveryID domain.DeliveryID, record scripted.DelayRecord) {
+	r.delays.Store(deliveryID, record)
 }
 
-func (a *delayedDeliveryAgent) deliver(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation) {
-	ackDelay := gaussianDelay(a.ackDelayMin, a.ackDelayMax)
-	completionDelay := gaussianDelay(a.completionDelayMin, a.completionDelayMax)
-	// Completion delay is total time from dispatch to result; must be >= ack delay.
-	if completionDelay < ackDelay {
-		completionDelay = ackDelay
-	}
-	a.delays.Store(deliveryID, agentDelayRecord{
-		ackDelay:        ackDelay,
-		completionDelay: completionDelay,
+func (r *scriptedDelayRecorder) getDelays() map[domain.DeliveryID]scripted.DelayRecord {
+	delays := make(map[domain.DeliveryID]scripted.DelayRecord)
+	r.delays.Range(func(key, value interface{}) bool {
+		delays[key.(domain.DeliveryID)] = value.(scripted.DelayRecord)
+		return true
 	})
-
-	go func() {
-		timer := time.NewTimer(ackDelay)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		}
-		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{Message: "accepted"})
-
-		remaining := completionDelay - ackDelay
-		if remaining > 0 {
-			timer.Reset(remaining)
-			select {
-			case <-timer.C:
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			}
-		}
-
-		state := domain.DeliveryStateDelivered
-		if a.failureRate > 0 && rand.Float64() < a.failureRate {
-			state = domain.DeliveryStateFailed
-		}
-		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{State: state})
-	}()
-}
-
-func (a *delayedDeliveryAgent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
-	a.deliver(ctx, deliveryID, generation)
-	return nil
-}
-
-func (a *delayedDeliveryAgent) Remove(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
-	a.deliver(ctx, deliveryID, generation)
-	return nil
+	return delays
 }
 
 // ---------------------------------------------------------------------------
@@ -499,20 +434,20 @@ func (o *stressObserver) completionLatencies() []time.Duration {
 
 // overheads joins observer delivery metrics with agent delay records
 // to compute system overhead = observed latency - agent delay.
-func (o *stressObserver) overheads(agent *delayedDeliveryAgent) (ackOverheads, completionOverheads []time.Duration) {
+func (o *stressObserver) overheads(recorder *scriptedDelayRecorder) (ackOverheads, completionOverheads []time.Duration) {
 	o.deliveryMu.Lock()
 	defer o.deliveryMu.Unlock()
+	delays := recorder.getDelays()
 	for did, m := range o.deliveries {
-		v, ok := agent.delays.Load(did)
+		rec, ok := delays[did]
 		if !ok {
 			continue
 		}
-		rec := v.(agentDelayRecord)
 		if !m.dispatchedAt.IsZero() && !m.ackReceivedAt.IsZero() {
-			ackOverheads = append(ackOverheads, m.ackReceivedAt.Sub(m.dispatchedAt)-rec.ackDelay)
+			ackOverheads = append(ackOverheads, m.ackReceivedAt.Sub(m.dispatchedAt)-rec.AckLatency)
 		}
 		if !m.dispatchedAt.IsZero() && !m.completedAt.IsZero() {
-			completionOverheads = append(completionOverheads, m.completedAt.Sub(m.dispatchedAt)-rec.completionDelay)
+			completionOverheads = append(completionOverheads, m.completedAt.Sub(m.dispatchedAt)-rec.CompletionLatency)
 		}
 	}
 	return
@@ -555,13 +490,11 @@ type stressHarness struct {
 	orchWf domain.OrchestrationWorkflow
 }
 
-func setupStress(t *testing.T, store domain.Store, reg domain.Registry, agent domain.DeliveryAgent, orchOpts ...domain.OrchestrationWorkflowOption) stressHarness {
+func setupStress(t *testing.T, store domain.Store, reg domain.Registry, agent domain.DeliveryAgent, reporter *application.DeliveryReportService, orchOpts ...domain.OrchestrationWorkflowOption) stressHarness {
 	t.Helper()
 
 	router := delivery.NewRoutingDeliveryService()
-	router.Register(testTargetType, agent)
-
-	reporter := application.NewDeliveryReportService(store, reg)
+	router.Register(scripted.TargetType, agent)
 
 	opts := append([]domain.OrchestrationWorkflowOption{
 		domain.WithAckRetryInterval(5 * time.Second),
@@ -760,6 +693,66 @@ func startPoolStatsSampler(ctx context.Context, interval time.Duration, appDB, w
 // ---------------------------------------------------------------------------
 // Manifest factory
 // ---------------------------------------------------------------------------
+
+// scriptedResourceSpec creates a scripted resource spec with the given stress
+// configuration (bounded normal latency and probabilistic failure).
+func scriptedResourceSpec(cfg stressConfig) json.RawMessage {
+	// Convert delays to protobuf Duration format (seconds with 's' suffix, e.g., "0.05s")
+	formatDuration := func(d time.Duration) string {
+		if d == 0 {
+			return "0s"
+		}
+		seconds := float64(d) / float64(time.Second)
+		return fmt.Sprintf("%.9gs", seconds)
+	}
+
+	spec := map[string]any{
+		"behavior": map[string]any{
+			"delivery": map[string]any{
+				"acknowledgement": map[string]any{
+					"latency": map[string]any{
+						"bounded_normal": map[string]any{
+							"min": formatDuration(cfg.ackDelayMin),
+							"max": formatDuration(cfg.ackDelayMax),
+						},
+					},
+				},
+				"completion": map[string]any{
+					"latency": map[string]any{
+						"bounded_normal": map[string]any{
+							"min": formatDuration(cfg.completionDelayMin),
+							"max": formatDuration(cfg.completionDelayMax),
+						},
+					},
+					"outcome": map[string]any{
+						"probabilistic": map[string]any{
+							"failure_rate": cfg.failureRate,
+						},
+					},
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(spec)
+	return json.RawMessage(raw)
+}
+
+// stressScriptedManifest creates a manifest for the scripted delivery agent
+// with the given stress configuration.
+func stressScriptedManifest(deploymentName string, cfg stressConfig) domain.Manifest {
+	spec := scriptedResourceSpec(cfg)
+	// Use a unique UID
+	uid := domain.NewExtensionResourceUID()
+	raw, err := domain.WrapManagedResourceSpec(domain.ResourceName(deploymentName), uid, spec)
+	if err != nil {
+		// This should not happen in test, but defensive coding
+		return domain.Manifest{Raw: json.RawMessage("{}")}
+	}
+	return domain.Manifest{
+		ManifestType: scripted.ManagedManifestType,
+		Raw:          raw,
+	}
+}
 
 func stressManifest(deploymentName string, version int) domain.Manifest {
 	data := map[string]any{
