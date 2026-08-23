@@ -78,8 +78,8 @@ type Agent struct {
 	profile     *directkey.Target
 	checkpoint  protocol.Checkpoint
 
-	applied     map[string]appliedState
-	generations map[string]uint64
+	applied     map[protocol.FullResourceName]appliedState
+	generations map[protocol.FullResourceName]uint64
 
 	failBeforeAccepting      uint64
 	loseNextAcknowledgement  bool
@@ -96,8 +96,8 @@ func New(config Config) (*Agent, error) {
 		config:      config,
 		profile:     directkey.NewTarget(),
 		checkpoint:  protocol.EmptyCheckpoint(),
-		applied:     make(map[string]appliedState),
-		generations: make(map[string]uint64),
+		applied:     make(map[protocol.FullResourceName]appliedState),
+		generations: make(map[protocol.FullResourceName]uint64),
 	}, nil
 }
 
@@ -180,11 +180,11 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	return nil
 }
 
-// Applied returns the last accepted delivery for a fulfillment.
-func (a *Agent) Applied(fulfillmentID string) (AppliedDelivery, bool) {
+// Applied returns the last accepted delivery for the named resource.
+func (a *Agent) Applied(name protocol.FullResourceName) (AppliedDelivery, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	state, ok := a.applied[fulfillmentID]
+	state, ok := a.applied[name]
 	if !ok {
 		return AppliedDelivery{}, false
 	}
@@ -321,8 +321,8 @@ func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authe
 			return AppliedDelivery{}, err
 		}
 		// RegisteredSelfTarget: the named delivery target is the addon
-		// itself. The caller already required DeliveryScope.TargetID to
-		// equal this agent's ID before apply.
+		// itself. TargetID is this POC's static-placement stand-in; the
+		// caller already required it to equal this agent's ID before apply.
 		return AppliedDelivery{
 			Scope:         authorization.DeliveryScope,
 			PredicateType: protocol.PredicateTypeManagedResourceV1,
@@ -389,25 +389,25 @@ func (a *Agent) applyLocked(view AppliedDelivery, signed []byte) error {
 	if view.Scope.Action != protocol.ActionPut && view.Scope.Action != protocol.ActionRemove {
 		return fmt.Errorf("unsupported action %q", view.Scope.Action)
 	}
-	previous, exists := a.generations[view.Scope.FulfillmentID]
+	previous, exists := a.generations[view.Scope.FullResourceName]
 	if exists {
 		if view.Scope.Generation < previous {
 			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, view.Scope.Generation, previous)
 		}
 		if view.Scope.Generation == previous {
-			applied := a.applied[view.Scope.FulfillmentID]
+			applied := a.applied[view.Scope.FullResourceName]
 			if bytes.Equal(applied.signed, signed) {
 				return nil
 			}
 			return fmt.Errorf("%w: generation %d has different signed content", ErrGeneration, view.Scope.Generation)
 		}
 	}
-	a.generations[view.Scope.FulfillmentID] = view.Scope.Generation
+	a.generations[view.Scope.FullResourceName] = view.Scope.Generation
 	if view.Scope.Action == protocol.ActionRemove {
-		delete(a.applied, view.Scope.FulfillmentID)
+		delete(a.applied, view.Scope.FullResourceName)
 		return nil
 	}
-	a.applied[view.Scope.FulfillmentID] = appliedState{view: cloneApplied(view), signed: signed}
+	a.applied[view.Scope.FullResourceName] = appliedState{view: cloneApplied(view), signed: signed}
 	return nil
 }
 

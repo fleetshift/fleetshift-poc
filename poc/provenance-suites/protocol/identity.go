@@ -24,6 +24,15 @@ type TenantPartition string
 // TenantID is a FleetShift tenant identifier produced by tenant mapping.
 type TenantID string
 
+// FullResourceName is an AIP-122 full resource name of the form
+// "//{service}/{collection}/{id}", for example
+// "//fleetshift.io/deployments/web" or
+// "//kind.fleetshift.io/clusters/prod". It is the client-defined unique
+// identity of a Deployment or ManagedResource. That resource is 1-1 with
+// its underlying fulfillment; clients do not know an RM-assigned
+// fulfillment ID.
+type FullResourceName string
+
 // PrincipalAuthority is the (scheme, authority) key of an AuthorityConfig.
 type PrincipalAuthority struct {
 	Scheme    IdentityScheme `json:"scheme"`

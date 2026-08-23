@@ -92,10 +92,13 @@ These identifiers are not interchangeable:
 
 A deployment assertion carries typed manifests. A managed-resource assertion
 carries a resource spec and resource type (API identity, not a media type).
-The agent applies a managed resource only after verifying a couriered
-fulfillment relation that names the derived payload media type. Unused
-supporting evidence is not authority: a relation couriered with a deployment
-does not change apply.
+Both root authorizations sign a `DeliveryScope`: the AIP-122 full resource
+name of the Deployment or ManagedResource (1-1 with its fulfillment; not an
+RM-assigned fulfillment ID), a `TargetID` stand-in for static placement,
+generation, and action. The agent applies a managed resource only after
+verifying a couriered fulfillment relation that names the derived payload
+media type. Unused supporting evidence is not authority: a relation couriered
+with a deployment does not change apply.
 
 ## The naive profile
 

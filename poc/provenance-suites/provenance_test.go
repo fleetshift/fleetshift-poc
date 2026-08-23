@@ -21,17 +21,24 @@ const (
 	testReplicasMediaType    = protocol.MediaType("application/vnd.example.replicas+json")
 	testClusterSpecMediaType = protocol.MediaType("application/vnd.example.cluster-spec+json")
 	testResourceType         = "clusters"
-	testResourceName         = "prod"
 )
+
+func deploymentName(id string) protocol.FullResourceName {
+	return protocol.FullResourceName("//fleetshift.io/deployments/" + id)
+}
+
+func clusterName(id string) protocol.FullResourceName {
+	return protocol.FullResourceName("//kind.fleetshift.io/clusters/" + id)
+}
 
 func TestEnrollmentAndSignedDelivery(t *testing.T) {
 	s := newEnrolledScenario(t)
 
-	evidence := mustSignDeployment(t, s.user, "fulfillment-1", 1, []byte(`{"replicas":3}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("fulfillment-1"), 1, []byte(`{"replicas":3}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence); err != nil {
 		t.Fatalf("submit delivery: %v", err)
 	}
-	applied, ok := s.agent.Applied("fulfillment-1")
+	applied, ok := s.agent.Applied(deploymentName("fulfillment-1"))
 	if !ok {
 		t.Fatal("agent did not apply the delivery")
 	}
@@ -68,7 +75,7 @@ func TestLoggedEnrollmentIsOrdinaryDeliveryAndLaterContentSkipsTheLeaf(t *testin
 		t.Fatal("west agent did not apply enrollment through Deliver")
 	}
 
-	evidence := mustSignDeploymentFor(t, s.user, testTarget, "after-enroll", 1, []byte(`{"replicas":3}`))
+	evidence := mustSignDeploymentFor(t, s.user, testTarget, deploymentName("after-enroll"), 1, []byte(`{"replicas":3}`))
 	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence)
 	if err != nil {
 		t.Fatalf("submit delivery after enrollment: %v", err)
@@ -86,7 +93,7 @@ func TestLoggedEnrollmentIsOrdinaryDeliveryAndLaterContentSkipsTheLeaf(t *testin
 	if update.Leaf != wantLeaf {
 		t.Fatalf("content leaf = %q, want this delivery's identity %q", update.Leaf, wantLeaf)
 	}
-	if _, ok := s.agent.Applied("after-enroll"); !ok {
+	if _, ok := s.agent.Applied(deploymentName("after-enroll")); !ok {
 		t.Fatal("east agent did not apply the content delivery")
 	}
 	if s.agent.SuiteApplyCount() != 1 {
@@ -101,7 +108,7 @@ func TestIntentAndTrustConfigUpdateDoNotCallSuiteApply(t *testing.T) {
 		t.Fatalf("enrollment suite Apply count = %d, want 1", afterEnroll)
 	}
 
-	evidence := mustSignDeployment(t, s.user, "intent-dispatch", 1, []byte(`{"replicas":1}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("intent-dispatch"), 1, []byte(`{"replicas":1}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence); err != nil {
 		t.Fatalf("submit deployment: %v", err)
 	}
@@ -110,11 +117,11 @@ func TestIntentAndTrustConfigUpdateDoNotCallSuiteApply(t *testing.T) {
 	}
 
 	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
-		TenantID:      testTenant,
-		TargetID:      testTarget,
-		FulfillmentID: "trust-config",
-		Generation:    1,
-		Action:        protocol.ActionPut,
+		TenantID:         testTenant,
+		TargetID:         testTarget,
+		FullResourceName: deploymentName("trust-config"),
+		Generation:       1,
+		Action:           protocol.ActionPut,
 	})
 	if err != nil {
 		t.Fatalf("marshal trust-config assertion: %v", err)
@@ -153,11 +160,11 @@ func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
 	afterEnroll := s.agent.SuiteApplyCount()
 
 	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
-		TenantID:      testTenant,
-		TargetID:      testTarget,
-		FulfillmentID: "unowned",
-		Generation:    1,
-		Action:        protocol.ActionPut,
+		TenantID:         testTenant,
+		TargetID:         testTarget,
+		FullResourceName: deploymentName("unowned"),
+		Generation:       1,
+		Action:           protocol.ActionPut,
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -176,7 +183,7 @@ func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
 	if s.agent.SuiteApplyCount() != afterEnroll {
 		t.Fatal("unowned predicate called suite Apply")
 	}
-	if _, ok := s.agent.Applied("unowned"); ok {
+	if _, ok := s.agent.Applied(deploymentName("unowned")); ok {
 		t.Fatal("agent applied an unowned root predicate")
 	}
 }
@@ -184,20 +191,20 @@ func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
 func TestResourceManagerCannotForgeDeliverySignature(t *testing.T) {
 	s := newEnrolledScenario(t)
 	attacker := mustClient(t, "mallory")
-	evidence := mustSignDeployment(t, attacker, "forged", 1, []byte(`{"replicas":9}`))
+	evidence := mustSignDeployment(t, attacker, deploymentName("forged"), 1, []byte(`{"replicas":9}`))
 
 	_, err := s.manager.Compromised().PushDelivery(context.Background(), evidence)
 	if !errors.Is(err, protocol.ErrVerificationFailed) {
 		t.Fatalf("compromised push error = %v, want ErrVerificationFailed", err)
 	}
-	if _, ok := s.agent.Applied("forged"); ok {
+	if _, ok := s.agent.Applied(deploymentName("forged")); ok {
 		t.Fatal("agent applied a delivery signed by an unenrolled key")
 	}
 }
 
 func TestResourceManagerCannotAlterSignedContent(t *testing.T) {
 	s := newEnrolledScenario(t)
-	evidence := mustSignDeployment(t, s.user, "tamper", 1, []byte(`{"replicas":3}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("tamper"), 1, []byte(`{"replicas":3}`))
 	evidence = tamperEmbeddedAssertion(t, evidence, func(assertion *protocol.TypedAssertion) {
 		var authorization protocol.DeploymentAuthorization
 		if err := json.Unmarshal(assertion.Bytes, &authorization); err != nil {
@@ -260,21 +267,21 @@ func TestAuthorizerBypassStillRequiresAuthenticProvenance(t *testing.T) {
 	if err := s.manager.Compromised().CommitEnrollment(context.Background(), enrollment); err != nil {
 		t.Fatalf("compromised enrollment: %v", err)
 	}
-	evidence := mustSignDeployment(t, s.user, "rbac", 1, []byte(`{"ok":true}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("rbac"), 1, []byte(`{"ok":true}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence); !errors.Is(err, resourcemanager.ErrUnauthorized) {
 		t.Fatalf("authorized delivery error = %v, want ErrUnauthorized", err)
 	}
 	if _, err := s.manager.Compromised().PushDelivery(context.Background(), evidence); err != nil {
 		t.Fatalf("compromised genuine delivery: %v", err)
 	}
-	if _, ok := s.agent.Applied("rbac"); !ok {
+	if _, ok := s.agent.Applied(deploymentName("rbac")); !ok {
 		t.Fatal("agent rejected authentic provenance after RM authorization bypass")
 	}
 }
 
 func TestUnknownProvenanceTypeFailsClosed(t *testing.T) {
 	s := newEnrolledScenario(t)
-	evidence := mustSignDeployment(t, s.user, "unknown-type", 1, []byte(`{"ok":true}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("unknown-type"), 1, []byte(`{"ok":true}`))
 	evidence.ProvenanceType = "unknown/v1"
 	_, err := s.manager.Compromised().PushDelivery(context.Background(), evidence)
 	if !errors.Is(err, protocol.ErrUnknownProvenanceType) {
@@ -295,7 +302,7 @@ func TestUninitializedVerifierRejectsDelivery(t *testing.T) {
 		t.Fatalf("new agent: %v", err)
 	}
 	user := mustClient(t, "alice")
-	evidence := mustSignDeployment(t, user, "too-early", 1, []byte(`{}`))
+	evidence := mustSignDeployment(t, user, deploymentName("too-early"), 1, []byte(`{}`))
 	err = agent.Deliver(resourcemanager.DeliveryPackage{Root: protocol.SignedStatement{Evidence: evidence}})
 	if !errors.Is(err, protocol.ErrUninitializedVerifier) {
 		t.Fatalf("error = %v, want ErrUninitializedVerifier", err)
@@ -304,7 +311,7 @@ func TestUninitializedVerifierRejectsDelivery(t *testing.T) {
 
 func TestAlteredAssertionBytesFailContentBinding(t *testing.T) {
 	s := newEnrolledScenario(t)
-	evidence := mustSignDeployment(t, s.user, "other-tenant", 1, []byte(`{"ok":true}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("other-tenant"), 1, []byte(`{"ok":true}`))
 	evidence = tamperEmbeddedAssertion(t, evidence, func(assertion *protocol.TypedAssertion) {
 		var authorization protocol.DeploymentAuthorization
 		if err := json.Unmarshal(assertion.Bytes, &authorization); err != nil {
@@ -326,12 +333,12 @@ func TestAlteredAssertionBytesFailContentBinding(t *testing.T) {
 func TestRetryAfterLostAcknowledgementIsIdempotent(t *testing.T) {
 	s := newEnrolledScenario(t)
 	s.agent.LoseNextAcknowledgement()
-	evidence := mustSignDeployment(t, s.user, "lost-ack", 1, []byte(`{"ok":true}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("lost-ack"), 1, []byte(`{"ok":true}`))
 	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence)
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
 	}
-	if _, ok := s.agent.Applied("lost-ack"); !ok {
+	if _, ok := s.agent.Applied(deploymentName("lost-ack")); !ok {
 		t.Fatal("agent did not apply before losing the acknowledgement")
 	}
 	cached, ok := s.manager.AgentCheckpoint(testTarget)
@@ -358,12 +365,12 @@ func TestRejectedDeliveryAdvancesCheckpointAndRetryRecoversWithoutApplying(t *te
 	}
 
 	attacker := mustClient(t, "mallory")
-	forged := mustSignDeployment(t, attacker, "rejected-after-log", 1, []byte(`{"owner":"attacker"}`))
+	forged := mustSignDeployment(t, attacker, deploymentName("rejected-after-log"), 1, []byte(`{"owner":"attacker"}`))
 	update, err := s.manager.Compromised().PushDelivery(context.Background(), forged)
 	if !errors.Is(err, protocol.ErrVerificationFailed) {
 		t.Fatalf("push forged delivery error = %v, want ErrVerificationFailed", err)
 	}
-	if _, applied := s.agent.Applied("rejected-after-log"); applied {
+	if _, applied := s.agent.Applied(deploymentName("rejected-after-log")); applied {
 		t.Fatal("agent applied a delivery it rejected after advancing the log")
 	}
 	if got := s.agent.Checkpoint(); got.Size != update.Index+1 {
@@ -379,7 +386,7 @@ func TestRejectedDeliveryAdvancesCheckpointAndRetryRecoversWithoutApplying(t *te
 	if err := s.manager.RetryDelivery(context.Background(), update.Index); !errors.Is(err, protocol.ErrVerificationFailed) {
 		t.Fatalf("retry forged delivery error = %v, want ErrVerificationFailed", err)
 	}
-	if _, applied := s.agent.Applied("rejected-after-log"); applied {
+	if _, applied := s.agent.Applied(deploymentName("rejected-after-log")); applied {
 		t.Fatal("retry applied a delivery that remains semantically invalid")
 	}
 	if got, want := s.manager.AgentCheckpoint(testTarget); !want || got != s.agent.Checkpoint() {
@@ -389,11 +396,11 @@ func TestRejectedDeliveryAdvancesCheckpointAndRetryRecoversWithoutApplying(t *te
 		t.Fatalf("agent stale-checkpoint responses = %d, want %d", got, want)
 	}
 
-	signed := mustSignDeployment(t, s.user, "after-rejected-log", 1, []byte(`{"owner":"alice"}`))
+	signed := mustSignDeployment(t, s.user, deploymentName("after-rejected-log"), 1, []byte(`{"owner":"alice"}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), signed); err != nil {
 		t.Fatalf("submit valid delivery after checkpoint recovery: %v", err)
 	}
-	if _, ok := s.agent.Applied("after-rejected-log"); !ok {
+	if _, ok := s.agent.Applied(deploymentName("after-rejected-log")); !ok {
 		t.Fatal("agent did not apply the valid delivery after recovering the rejected-log checkpoint")
 	}
 }
@@ -402,7 +409,7 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 	s := newEnrolledManagedResourceScenario(t)
 	s.agent.LoseNextAcknowledgement()
 	spec := json.RawMessage(`{"region":"us-east-1"}`)
-	evidence := mustSignManagedResource(t, s.user, "cluster-retry", 1, spec)
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-retry"), 1, spec)
 	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
 	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
@@ -411,7 +418,7 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 	if err := s.manager.RetryDelivery(context.Background(), update.Index); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	applied, ok := s.agent.Applied("cluster-retry")
+	applied, ok := s.agent.Applied(clusterName("cluster-retry"))
 	if !ok {
 		t.Fatal("agent did not retain the managed resource after retry")
 	}
@@ -423,14 +430,14 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 func TestManagedResourceAppliesDerivedManifestFromFulfillmentRelation(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
 	spec := json.RawMessage(`{"region":"us-east-1"}`)
-	evidence := mustSignManagedResource(t, s.user, "cluster-1", 1, spec)
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-1"), 1, spec)
 	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
 
 	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
 	if err != nil {
 		t.Fatalf("submit managed resource: %v", err)
 	}
-	applied, ok := s.agent.Applied("cluster-1")
+	applied, ok := s.agent.Applied(clusterName("cluster-1"))
 	if !ok {
 		t.Fatal("agent did not apply the managed resource")
 	}
@@ -450,25 +457,25 @@ func TestManagedResourceAppliesDerivedManifestFromFulfillmentRelation(t *testing
 
 func TestManagedResourceWithoutFulfillmentRelationIsRejected(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
-	evidence := mustSignManagedResource(t, s.user, "cluster-missing", 1, json.RawMessage(`{"region":"us-east-1"}`))
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-missing"), 1, json.RawMessage(`{"region":"us-east-1"}`))
 	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence)
 	if !errors.Is(err, deliveryagent.ErrFulfillmentRelationRequired) {
 		t.Fatalf("error = %v, want ErrFulfillmentRelationRequired", err)
 	}
-	if _, ok := s.agent.Applied("cluster-missing"); ok {
+	if _, ok := s.agent.Applied(clusterName("cluster-missing")); ok {
 		t.Fatal("agent applied a managed resource with no fulfillment relation")
 	}
 }
 
 func TestManagedResourceRejectsFulfillmentRelationWithWrongResourceType(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
-	evidence := mustSignManagedResource(t, s.user, "cluster-wrong-type", 1, json.RawMessage(`{"region":"us-east-1"}`))
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-wrong-type"), 1, json.RawMessage(`{"region":"us-east-1"}`))
 	relEvidence := mustSignRelation(t, s.addon, "monitoring-stacks", testClusterSpecMediaType)
 	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
 	if err == nil {
 		t.Fatal("accepted a fulfillment relation for a different resource type")
 	}
-	if _, ok := s.agent.Applied("cluster-wrong-type"); ok {
+	if _, ok := s.agent.Applied(clusterName("cluster-wrong-type")); ok {
 		t.Fatal("agent applied a managed resource with a mismatched relation")
 	}
 }
@@ -476,25 +483,25 @@ func TestManagedResourceRejectsFulfillmentRelationWithWrongResourceType(t *testi
 func TestManagedResourceRejectsRelationSignedByUnenrolledKey(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
 	rogue := mustClient(t, "rogue-addon")
-	evidence := mustSignManagedResource(t, s.user, "cluster-rogue", 1, json.RawMessage(`{"region":"us-east-1"}`))
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-rogue"), 1, json.RawMessage(`{"region":"us-east-1"}`))
 	relEvidence := mustSignRelation(t, rogue, testResourceType, testClusterSpecMediaType)
 	_, err := s.manager.Compromised().PushDelivery(context.Background(), evidence, relEvidence)
 	if !errors.Is(err, protocol.ErrVerificationFailed) && !errors.Is(err, protocol.ErrNoSuccessfulProfile) {
 		t.Fatalf("error = %v, want verification failure", err)
 	}
-	if _, ok := s.agent.Applied("cluster-rogue"); ok {
+	if _, ok := s.agent.Applied(clusterName("cluster-rogue")); ok {
 		t.Fatal("agent applied a managed resource with an unenrolled relation signer")
 	}
 }
 
 func TestDeploymentIgnoresCourieredFulfillmentRelation(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
-	evidence := mustSignDeployment(t, s.user, "deploy-with-relation", 1, []byte(`{"replicas":3}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("deploy-with-relation"), 1, []byte(`{"replicas":3}`))
 	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence); err != nil {
 		t.Fatalf("submit deployment: %v", err)
 	}
-	applied, ok := s.agent.Applied("deploy-with-relation")
+	applied, ok := s.agent.Applied(deploymentName("deploy-with-relation"))
 	if !ok {
 		t.Fatal("agent did not apply the deployment")
 	}
@@ -512,11 +519,11 @@ func TestDeploymentIgnoresCourieredFulfillmentRelation(t *testing.T) {
 func TestUnknownRootPredicateFailsClosed(t *testing.T) {
 	s := newEnrolledScenario(t)
 	scope := protocol.DeliveryScope{
-		TenantID:      testTenant,
-		TargetID:      testTarget,
-		FulfillmentID: "unknown-pred",
-		Generation:    1,
-		Action:        protocol.ActionPut,
+		TenantID:         testTenant,
+		TargetID:         testTarget,
+		FullResourceName: deploymentName("unknown-pred"),
+		Generation:       1,
+		Action:           protocol.ActionPut,
 	}
 	encoded, err := protocol.MarshalCanonical(scope)
 	if err != nil {
@@ -534,7 +541,7 @@ func TestUnknownRootPredicateFailsClosed(t *testing.T) {
 	if !errors.Is(err, protocol.ErrNoMatchingPolicy) && !errors.Is(err, protocol.ErrUnknownPredicateType) {
 		t.Fatalf("error = %v, want fail-closed unknown predicate", err)
 	}
-	if _, ok := s.agent.Applied("unknown-pred"); ok {
+	if _, ok := s.agent.Applied(deploymentName("unknown-pred")); ok {
 		t.Fatal("agent applied an unknown root predicate")
 	}
 }
@@ -543,11 +550,11 @@ func TestDeploymentRejectsMissingManifestMediaType(t *testing.T) {
 	s := newEnrolledScenario(t)
 	authorization := protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TenantID:      testTenant,
-			TargetID:      testTarget,
-			FulfillmentID: "missing-media",
-			Generation:    1,
-			Action:        protocol.ActionPut,
+			TenantID:         testTenant,
+			TargetID:         testTarget,
+			FullResourceName: deploymentName("missing-media"),
+			Generation:       1,
+			Action:           protocol.ActionPut,
 		},
 		Manifests: []protocol.TypedManifest{{
 			Bytes: []byte(`{"replicas":3}`),
@@ -569,14 +576,14 @@ func TestDeploymentRejectsMissingManifestMediaType(t *testing.T) {
 	if !errors.Is(err, protocol.ErrMalformedEvidence) {
 		t.Fatalf("error = %v, want ErrMalformedEvidence", err)
 	}
-	if _, ok := s.agent.Applied("missing-media"); ok {
+	if _, ok := s.agent.Applied(deploymentName("missing-media")); ok {
 		t.Fatal("agent applied a deployment with an untyped manifest")
 	}
 }
 
 func TestPredicateTypeTamperFailsContentBinding(t *testing.T) {
 	s := newEnrolledScenario(t)
-	evidence := mustSignDeployment(t, s.user, "pred-tamper", 1, []byte(`{"replicas":3}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("pred-tamper"), 1, []byte(`{"replicas":3}`))
 	evidence = tamperEmbeddedAssertion(t, evidence, func(assertion *protocol.TypedAssertion) {
 		assertion.PredicateType = protocol.PredicateTypeManagedResourceV1
 	})
@@ -599,11 +606,27 @@ func TestSignDeploymentRequiresCompleteDeliveryScope(t *testing.T) {
 	}
 }
 
+func TestSignDeploymentRequiresResourceName(t *testing.T) {
+	c := mustClient(t, "alice")
+	_, err := c.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
+		DeliveryScope: protocol.DeliveryScope{
+			TargetID: testTarget,
+			Action:   protocol.ActionPut,
+		},
+		Manifests: []protocol.TypedManifest{{
+			MediaType: testReplicasMediaType,
+			Bytes:     []byte(`{}`),
+		}},
+	})
+	if err == nil {
+		t.Fatal("signed a deployment without an AIP-122 resource name")
+	}
+}
+
 func TestSignManagedResourceRequiresCompleteDeliveryScope(t *testing.T) {
 	c := mustClient(t, "alice")
 	_, err := c.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{
 		ResourceType: testResourceType,
-		ResourceName: testResourceName,
 		Spec:         json.RawMessage(`{}`),
 	})
 	if err == nil {
@@ -616,7 +639,7 @@ func TestLostAckRetryRebuildsProofsFromAgentCheckpoint(t *testing.T) {
 	s := newTwoTargetScenario(t, westTarget)
 	s.agent.LoseNextAcknowledgement()
 
-	evidenceA := mustSignDeploymentFor(t, s.user, testTarget, "east-lost", 1, []byte(`{"ok":true}`))
+	evidenceA := mustSignDeploymentFor(t, s.user, testTarget, deploymentName("east-lost"), 1, []byte(`{"ok":true}`))
 	update, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceA)
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
@@ -626,7 +649,7 @@ func TestLostAckRetryRebuildsProofsFromAgentCheckpoint(t *testing.T) {
 		t.Fatalf("manager cache after lost ack = %+v, want enrollment checkpoint size 1", cached)
 	}
 
-	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, "west-advance", 1, []byte(`{"ok":true}`))
+	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, deploymentName("west-advance"), 1, []byte(`{"ok":true}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceB); err != nil {
 		t.Fatalf("submit west delivery: %v", err)
 	}
@@ -650,12 +673,12 @@ func TestTwoTargetDeliverySkipsUnrelatedLeaf(t *testing.T) {
 	const westTarget = "target-west"
 	s := newTwoTargetScenario(t, westTarget)
 
-	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, "west-only", 1, []byte(`{"replicas":1}`))
+	evidenceB := mustSignDeploymentFor(t, s.user, westTarget, deploymentName("west-only"), 1, []byte(`{"replicas":1}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceB); err != nil {
 		t.Fatalf("submit west delivery: %v", err)
 	}
 
-	evidenceA := mustSignDeploymentFor(t, s.user, testTarget, "east-after-west", 1, []byte(`{"replicas":3}`))
+	evidenceA := mustSignDeploymentFor(t, s.user, testTarget, deploymentName("east-after-west"), 1, []byte(`{"replicas":3}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidenceA); err != nil {
 		t.Fatalf("submit east delivery: %v", err)
 	}
@@ -681,18 +704,18 @@ func TestTwoTargetDeliverySkipsUnrelatedLeaf(t *testing.T) {
 	if got.Leaf == otherLeaf {
 		t.Fatal("east package disclosed the unrelated west evidence identity")
 	}
-	if _, ok := s.agent.Applied("west-only"); ok {
-		t.Fatal("east agent applied the west fulfillment")
+	if _, ok := s.agent.Applied(deploymentName("west-only")); ok {
+		t.Fatal("east agent applied the west resource")
 	}
-	if _, ok := s.west.Applied("west-only"); !ok {
+	if _, ok := s.west.Applied(deploymentName("west-only")); !ok {
 		t.Fatal("west agent did not apply its delivery")
 	}
 }
 
 func TestAgentRejectsLogLeafThatDoesNotMatchRootEvidence(t *testing.T) {
 	s := newEnrolledScenario(t)
-	evidence := mustSignDeployment(t, s.user, "mismatch", 1, []byte(`{"ok":true}`))
-	other := mustSignDeployment(t, s.user, "other", 1, []byte(`{"ok":false}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("mismatch"), 1, []byte(`{"ok":true}`))
+	other := mustSignDeployment(t, s.user, deploymentName("other"), 1, []byte(`{"ok":false}`))
 	leaf, err := other.Identity()
 	if err != nil {
 		t.Fatalf("other identity: %v", err)
@@ -709,20 +732,20 @@ func TestAgentRejectsLogLeafThatDoesNotMatchRootEvidence(t *testing.T) {
 		t.Fatalf("error = %v, want ErrLogFork", err)
 	}
 	assertNotStale(t, err)
-	if _, ok := s.agent.Applied("mismatch"); ok {
+	if _, ok := s.agent.Applied(deploymentName("mismatch")); ok {
 		t.Fatal("agent applied a delivery whose log leaf did not match the root evidence")
 	}
 }
 
 func TestAgentRejectsForkedAndSkipAheadLogProofs(t *testing.T) {
 	s := newEnrolledScenario(t)
-	evidence := mustSignDeployment(t, s.user, "pin-log", 1, []byte(`{"ok":true}`))
+	evidence := mustSignDeployment(t, s.user, deploymentName("pin-log"), 1, []byte(`{"ok":true}`))
 	if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence); err != nil {
 		t.Fatalf("submit pinning delivery: %v", err)
 	}
 	retained := s.agent.Checkpoint()
 
-	next := mustSignDeployment(t, s.user, "forked", 1, []byte(`{"ok":false}`))
+	next := mustSignDeployment(t, s.user, deploymentName("forked"), 1, []byte(`{"ok":false}`))
 	leaf, err := next.Identity()
 	if err != nil {
 		t.Fatalf("forked identity: %v", err)
@@ -759,7 +782,7 @@ func TestAgentRejectsForkedAndSkipAheadLogProofs(t *testing.T) {
 		t.Fatalf("skip-ahead error = %v, want ErrLogFork", err)
 	}
 	assertNotStale(t, err)
-	if _, ok := s.agent.Applied("forked"); ok {
+	if _, ok := s.agent.Applied(deploymentName("forked")); ok {
 		t.Fatal("agent applied a forked or skip-ahead delivery")
 	}
 }
@@ -883,19 +906,19 @@ func mustClient(t *testing.T, subject protocol.Subject) *client.Client {
 	return c
 }
 
-func mustSignDeployment(t *testing.T, c *client.Client, fulfillment string, generation uint64, payload []byte) protocol.TypedEvidence {
+func mustSignDeployment(t *testing.T, c *client.Client, name protocol.FullResourceName, generation uint64, payload []byte) protocol.TypedEvidence {
 	t.Helper()
-	return mustSignDeploymentFor(t, c, testTarget, fulfillment, generation, payload)
+	return mustSignDeploymentFor(t, c, testTarget, name, generation, payload)
 }
 
-func mustSignDeploymentFor(t *testing.T, c *client.Client, target, fulfillment string, generation uint64, payload []byte) protocol.TypedEvidence {
+func mustSignDeploymentFor(t *testing.T, c *client.Client, target string, name protocol.FullResourceName, generation uint64, payload []byte) protocol.TypedEvidence {
 	t.Helper()
 	evidence, err := c.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TargetID:      target,
-			FulfillmentID: fulfillment,
-			Generation:    generation,
-			Action:        protocol.ActionPut,
+			TargetID:         target,
+			FullResourceName: name,
+			Generation:       generation,
+			Action:           protocol.ActionPut,
 		},
 		Manifests: []protocol.TypedManifest{{
 			MediaType: testReplicasMediaType,
@@ -908,17 +931,16 @@ func mustSignDeploymentFor(t *testing.T, c *client.Client, target, fulfillment s
 	return evidence
 }
 
-func mustSignManagedResource(t *testing.T, c *client.Client, fulfillment string, generation uint64, spec json.RawMessage) protocol.TypedEvidence {
+func mustSignManagedResource(t *testing.T, c *client.Client, name protocol.FullResourceName, generation uint64, spec json.RawMessage) protocol.TypedEvidence {
 	t.Helper()
 	evidence, err := c.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TargetID:      testTarget,
-			FulfillmentID: fulfillment,
-			Generation:    generation,
-			Action:        protocol.ActionPut,
+			TargetID:         testTarget,
+			FullResourceName: name,
+			Generation:       generation,
+			Action:           protocol.ActionPut,
 		},
 		ResourceType: testResourceType,
-		ResourceName: testResourceName,
 		Spec:         spec,
 	})
 	if err != nil {
