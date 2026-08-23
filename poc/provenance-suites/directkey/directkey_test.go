@@ -429,7 +429,7 @@ func TestDecodeAssertionThenDecodeDeliveryScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeDeliveryScope: %v", err)
 	}
-	if scope.TenantID != "tenant-acme" || scope.TargetID != "target-east" {
+	if scope.TenantID != "tenant-acme" || scope.TargetID != "target-east" || scope.FullResourceName != "//fleetshift.io/deployments/web" {
 		t.Fatalf("scope = %+v", scope)
 	}
 }
@@ -526,11 +526,11 @@ func testAssertion(t *testing.T) protocol.TypedAssertion {
 	t.Helper()
 	assertion, err := protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TenantID:      "tenant-acme",
-			TargetID:      "target-east",
-			FulfillmentID: "fulfillment-1",
-			Generation:    1,
-			Action:        protocol.ActionPut,
+			TenantID:         "tenant-acme",
+			TargetID:         "target-east",
+			FullResourceName: "//fleetshift.io/deployments/web",
+			Generation:       1,
+			Action:           protocol.ActionPut,
 		},
 		Manifests: []protocol.TypedManifest{{
 			MediaType: "application/vnd.example.replicas+json",

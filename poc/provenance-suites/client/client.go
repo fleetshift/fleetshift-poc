@@ -61,6 +61,8 @@ func (c *Client) DirectKey() *directkey.Client {
 }
 
 // SignDeployment creates TypedEvidence for an exact deployment/v1 authorization.
+// DeliveryScope.FullResourceName is the client-defined AIP-122 identity of
+// the Deployment. TargetID is this POC's static-placement stand-in.
 func (c *Client) SignDeployment(ctx context.Context, authorization protocol.DeploymentAuthorization) (protocol.TypedEvidence, error) {
 	if err := c.bindScope(&authorization.DeliveryScope); err != nil {
 		return protocol.TypedEvidence{}, err
@@ -78,8 +80,8 @@ func (c *Client) SignManagedResource(ctx context.Context, authorization protocol
 	if err := c.bindScope(&authorization.DeliveryScope); err != nil {
 		return protocol.TypedEvidence{}, err
 	}
-	if authorization.ResourceType == "" || authorization.ResourceName == "" {
-		return protocol.TypedEvidence{}, errors.New("resource type and name are required")
+	if authorization.ResourceType == "" {
+		return protocol.TypedEvidence{}, errors.New("resource type is required")
 	}
 	assertion, err := authorization.Assertion()
 	if err != nil {
@@ -109,8 +111,8 @@ func (c *Client) bindScope(scope *protocol.DeliveryScope) error {
 	if scope.TenantID != c.tenantID {
 		return fmt.Errorf("delivery tenant %q does not match client tenant %q", scope.TenantID, c.tenantID)
 	}
-	if scope.TargetID == "" || scope.FulfillmentID == "" || scope.Action == "" {
-		return errors.New("target, fulfillment, and action are required")
+	if scope.TargetID == "" || scope.FullResourceName == "" || scope.Action == "" {
+		return errors.New("target, resource name, and action are required")
 	}
 	return nil
 }

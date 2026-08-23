@@ -159,13 +159,19 @@ const (
 
 // DeliveryScope is signed delivery-protocol identity, not a predicate. It
 // is embedded in each root authorization so the resource manager cannot
-// retarget tenant, target, fulfillment, generation, or action.
+// retarget tenant, placement, resource, generation, or action.
+//
+// FullResourceName is the AIP-122 identity of the Deployment or
+// ManagedResource. TargetID is a stand-in for a placement strategy: this
+// POC uses one static target rather than a selector. A later placement
+// model replaces TargetID without changing the resource name, generation,
+// or action.
 type DeliveryScope struct {
-	TenantID      TenantID `json:"tenant_id"`
-	TargetID      string   `json:"target_id"`
-	FulfillmentID string   `json:"fulfillment_id"`
-	Generation    uint64   `json:"generation"`
-	Action        string   `json:"action"`
+	TenantID         TenantID         `json:"tenant_id"`
+	TargetID         string           `json:"target_id"`
+	FullResourceName FullResourceName `json:"name"`
+	Generation       uint64           `json:"generation"`
+	Action           string           `json:"action"`
 }
 
 // TypedManifest is one delivered payload item. It is Encoded: a payload
@@ -198,7 +204,6 @@ func (a DeploymentAuthorization) Assertion() (TypedAssertion, error) {
 type ManagedResourceAuthorization struct {
 	DeliveryScope
 	ResourceType string          `json:"resource_type"`
-	ResourceName string          `json:"resource_name"`
 	Spec         json.RawMessage `json:"spec"`
 }
 
@@ -239,8 +244,9 @@ func (a FulfillmentRelation) Assertion() (TypedAssertion, error) {
 
 // DecodeDeliveryScope extracts signed delivery-protocol identity from a
 // root authorization body. Extra JSON fields are ignored so both
-// deployment and managed-resource bodies decode. Evidence encodings are
-// profile-owned; callers first obtain the statement with
+// deployment and managed-resource bodies decode. The resource identity is
+// FullResourceName, not an RM-assigned fulfillment ID. Evidence encodings
+// are profile-owned; callers first obtain the statement with
 // ResourceManagerAPI.DecodeAssertion.
 func DecodeDeliveryScope(assertion TypedAssertion) (DeliveryScope, error) {
 	var scope DeliveryScope

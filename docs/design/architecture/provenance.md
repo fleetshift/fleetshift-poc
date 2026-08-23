@@ -520,7 +520,7 @@ content item, target, fulfillment, or generation.
 
 The concrete put or removal action comes from the target delivery contract; it
 is not duplicated as a second authoritative graph output. Outer tenant,
-target, fulfillment, generation, and routing values are compared with signed
+target, resource name, generation, and routing values are compared with signed
 or locally authenticated facts and are never authoritative alone.
 
 Unused evidence cannot satisfy a graph requirement, endorsement, or
@@ -743,10 +743,10 @@ The RM:
   the target's retained state; and
 - routes the resulting package to the target.
 
-When the RM needs routing identity from a delivery (tenant, target,
-fulfillment), it asks the selected profile to unwrap the inner statement from
-`TypedEvidence`. Common code then reads the common statement body. The RM
-does not parse profile-owned evidence encodings.
+When the RM needs routing identity from a delivery (tenant, target, and the
+client-defined resource name), it asks the selected profile to unwrap the
+inner statement from `TypedEvidence`. Common code then reads the common
+statement body. The RM does not parse profile-owned evidence encodings.
 
 RM verification is authoritative for whether the RM accepts an API request.
 It is not a substitute for target verification. The RM may repeat target-like

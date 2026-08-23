@@ -179,14 +179,45 @@ func TestTypedAssertionDigestBindsPredicateTypeAndBytes(t *testing.T) {
 	}
 }
 
+func TestDeliveryScopeSignsResourceNameAndStaticPlacement(t *testing.T) {
+	scope := DeliveryScope{
+		TenantID:         "tenant-acme",
+		TargetID:         "target-east",
+		FullResourceName: "//fleetshift.io/deployments/web",
+		Generation:       1,
+		Action:           ActionPut,
+	}
+	raw, err := MarshalCanonical(scope)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"name":"//fleetshift.io/deployments/web"`)) {
+		t.Fatalf("canonical JSON missing AIP-122 name: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte(`"target_id":"target-east"`)) {
+		t.Fatalf("canonical JSON missing static placement target: %s", raw)
+	}
+	if bytes.Contains(raw, []byte("fulfillment_id")) {
+		t.Fatalf("canonical JSON still carries an RM fulfillment ID: %s", raw)
+	}
+
+	got, err := DecodeDeliveryScope(TypedAssertion{Bytes: raw})
+	if err != nil {
+		t.Fatalf("DecodeDeliveryScope: %v", err)
+	}
+	if got != scope {
+		t.Fatalf("decoded scope = %+v, want %+v", got, scope)
+	}
+}
+
 func TestCanonicalJSONIsDeterministicForFixedStructs(t *testing.T) {
 	value := DeploymentAuthorization{
 		DeliveryScope: DeliveryScope{
-			TenantID:      "tenant-acme",
-			TargetID:      "target-east",
-			FulfillmentID: "fulfillment-1",
-			Generation:    1,
-			Action:        ActionPut,
+			TenantID:         "tenant-acme",
+			TargetID:         "target-east",
+			FullResourceName: "//fleetshift.io/deployments/web",
+			Generation:       1,
+			Action:           ActionPut,
 		},
 		Manifests: []TypedManifest{{
 			MediaType: "application/vnd.example.replicas+json",
@@ -209,11 +240,11 @@ func TestCanonicalJSONIsDeterministicForFixedStructs(t *testing.T) {
 func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 	deployment, err := DeploymentAuthorization{
 		DeliveryScope: DeliveryScope{
-			TenantID:      "tenant-acme",
-			TargetID:      "target-east",
-			FulfillmentID: "fulfillment-1",
-			Generation:    1,
-			Action:        ActionPut,
+			TenantID:         "tenant-acme",
+			TargetID:         "target-east",
+			FullResourceName: "//fleetshift.io/deployments/web",
+			Generation:       1,
+			Action:           ActionPut,
 		},
 		Manifests: []TypedManifest{{
 			MediaType: "application/vnd.example.replicas+json",
@@ -229,14 +260,13 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 
 	managed, err := ManagedResourceAuthorization{
 		DeliveryScope: DeliveryScope{
-			TenantID:      "tenant-acme",
-			TargetID:      "target-east",
-			FulfillmentID: "cluster-1",
-			Generation:    1,
-			Action:        ActionPut,
+			TenantID:         "tenant-acme",
+			TargetID:         "target-east",
+			FullResourceName: "//kind.fleetshift.io/clusters/prod",
+			Generation:       1,
+			Action:           ActionPut,
 		},
 		ResourceType: "clusters",
-		ResourceName: "prod",
 		Spec:         []byte(`{"region":"us-east-1"}`),
 	}.Assertion()
 	if err != nil {
