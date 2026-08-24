@@ -8,7 +8,7 @@ on:
 
 jobs:
   # Single cache writer. Test jobs restore the same multi-image tar and do
-  # not race this key. Kind host setup (user podman.socket, RFC 6761 DNS) lives
+  # not race this key. Kind host setup (user podman.socket, kind network) lives
   # in setup-e2e for e2e-ui and e2e-backend. They do not share a container.
   aio-image:
     name: AIO image
