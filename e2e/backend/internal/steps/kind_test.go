@@ -63,8 +63,16 @@ func TestProbeKindOIDC_Unauthorized(t *testing.T) {
 
 func TestProbeKindOIDC_EmptyToken(t *testing.T) {
 	t.Parallel()
-	if err := probeKindOIDC(context.Background(), "https://127.0.0.1:6443", []byte("x"), ""); err == nil {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("must not send a request with an empty token")
+	}))
+	t.Cleanup(srv.Close)
+	err := probeKindOIDC(context.Background(), srv.URL, tlsServerCA(t, srv), "")
+	if err == nil {
 		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty access token") {
+		t.Fatalf("error = %v, want empty access token", err)
 	}
 }
 

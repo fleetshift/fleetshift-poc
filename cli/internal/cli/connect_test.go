@@ -210,6 +210,61 @@ func TestTokenCredentials_GetRequestMetadata_ValidToken(t *testing.T) {
 	}
 }
 
+func TestTokenCredentials_GetRequestMetadata_ExpiredTokenWithoutRefresh_OmitsMetadata(t *testing.T) {
+	configDir := t.TempDir()
+	if err := auth.SaveConfigTo(configDir, auth.Config{
+		ClientID:              "fleetshift-cli",
+		AuthorizationEndpoint: "https://issuer.example/auth",
+		TokenEndpoint:         "https://issuer.example/token",
+	}); err != nil {
+		t.Fatalf("SaveConfigTo: %v", err)
+	}
+	store := &auth.InMemoryTokenStore{}
+	if err := store.Save(context.Background(), auth.Tokens{
+		AccessToken: "expired-access",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	creds := &tokenCredentials{store: store, configDir: configDir}
+	md, err := creds.GetRequestMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("GetRequestMetadata() error = %v, want nil", err)
+	}
+	if md != nil {
+		t.Fatalf("metadata = %v, want nil for an expired access token with no refresh token", md)
+	}
+}
+
+func TestTokenCredentials_GetRequestMetadata_ZeroExpiryStillAttaches(t *testing.T) {
+	configDir := t.TempDir()
+	if err := auth.SaveConfigTo(configDir, auth.Config{
+		ClientID:              "fleetshift-cli",
+		AuthorizationEndpoint: "https://issuer.example/auth",
+		TokenEndpoint:         "https://issuer.example/token",
+	}); err != nil {
+		t.Fatalf("SaveConfigTo: %v", err)
+	}
+	store := &auth.InMemoryTokenStore{}
+	if err := store.Save(context.Background(), auth.Tokens{
+		AccessToken: "unexpiring-access",
+		TokenType:   "Bearer",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	creds := &tokenCredentials{store: store, configDir: configDir}
+	md, err := creds.GetRequestMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("GetRequestMetadata() error = %v", err)
+	}
+	if got := md["authorization"]; got != "Bearer unexpiring-access" {
+		t.Fatalf("authorization = %q, want Bearer unexpiring-access", got)
+	}
+}
+
 func TestTokenCredentials_GetRequestMetadata_ValidToken_MissingOIDCCAFile(t *testing.T) {
 	configDir := t.TempDir()
 	if err := auth.SaveConfigTo(configDir, auth.Config{

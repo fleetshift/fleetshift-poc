@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -115,6 +116,9 @@ func (t *tokenCredentials) bearerMetadata(ctx context.Context) map[string]string
 	}
 
 	if tokens.AccessToken == "" {
+		return nil
+	}
+	if !tokens.Expiry.IsZero() && !time.Now().Before(tokens.Expiry) {
 		return nil
 	}
 

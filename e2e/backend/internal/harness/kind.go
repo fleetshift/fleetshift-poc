@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -52,8 +53,10 @@ func KindHostAPI(hostName string) (apiURL string, caPEM []byte, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	cmd := exec.Command("podman", "port", id, kindAPIContainerPort)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmd := exec.CommandContext(ctx, "podman", "port", id, kindAPIContainerPort)
 	out, err := cmd.CombinedOutput()
+	cancel()
 	if err != nil {
 		return "", nil, fmt.Errorf("podman port %s: %w\n%s", kindAPIContainerPort, err, trimOutput(out))
 	}
@@ -61,10 +64,14 @@ func KindHostAPI(hostName string) (apiURL string, caPEM []byte, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	cmd = exec.Command("podman", "exec", id, "cat", "/etc/kubernetes/pki/ca.crt")
-	caPEM, err = cmd.CombinedOutput()
+	ctx, cancel = context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd = exec.CommandContext(ctx, "podman", "exec", id, "cat", "/etc/kubernetes/pki/ca.crt")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	caPEM, err = cmd.Output()
 	if err != nil {
-		return "", nil, fmt.Errorf("read kind CA: %w\n%s", err, trimOutput(caPEM))
+		return "", nil, fmt.Errorf("read kind CA: %w\n%s", err, trimOutput(stderr.Bytes()))
 	}
 	if !strings.Contains(string(caPEM), "BEGIN CERTIFICATE") {
 		return "", nil, fmt.Errorf("kind CA is not a PEM certificate")
@@ -125,7 +132,9 @@ func kindContainerIDs(filters ...string) ([]string, error) {
 	args = append(args, "ps", "-a")
 	args = append(args, filters...)
 	args = append(args, "--format", "{{.ID}}")
-	cmd := exec.Command("podman", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("%w\n%s", err, trimOutput(out))
@@ -231,11 +240,15 @@ func requireLiveUnixSocket(path string) error {
 
 // ensureKindNetwork creates the kind network when it does not exist.
 func ensureKindNetwork() error {
-	exists := exec.Command("podman", "network", "exists", kindNetwork)
-	if err := exists.Run(); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	err := exec.CommandContext(ctx, "podman", "network", "exists", kindNetwork).Run()
+	cancel()
+	if err == nil {
 		return nil
 	}
-	cmd := exec.Command("podman", "network", "create", kindNetwork)
+	ctx, cancel = context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", "network", "create", kindNetwork)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("podman network create %s: %w\n%s", kindNetwork, err, trimOutput(out))
@@ -270,11 +283,13 @@ func dumpKindEvidence(containerName, engineSocket string) {
 // removeLeftoverKindNodes deletes Kind node containers whose cluster name
 // matches this suite's prefix. Best-effort; ignores errors.
 func removeLeftoverKindNodes() {
-	cmd := exec.Command("podman", "ps", "-a",
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmd := exec.CommandContext(ctx, "podman", "ps", "-a",
 		"--filter", "label="+kindClusterLabel,
 		"--format", "{{.ID}}\t{{.Label \""+kindClusterLabel+"\"}}",
 	)
 	out, err := cmd.CombinedOutput()
+	cancel()
 	if err != nil {
 		return
 	}
@@ -283,7 +298,9 @@ func removeLeftoverKindNodes() {
 		if !ok {
 			continue
 		}
-		_ = exec.Command("podman", "rm", "-f", id).Run()
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		_ = exec.CommandContext(ctx, "podman", "rm", "-f", id).Run()
+		cancel()
 	}
 }
 

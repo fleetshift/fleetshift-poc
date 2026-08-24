@@ -65,12 +65,17 @@ const (
 	readyTimeout             = 30 * time.Second
 	copyCATimeout            = 20 * time.Second
 	smokeKindTimeout         = 30 * time.Second
+	podmanRunTimeout         = 30 * time.Second
 	imageBuildTimeout        = 25 * time.Minute
 	fleetctlBuildTimeout     = 1 * time.Minute
 	playwrightInstallTimeout = 5 * time.Minute
 	commandTimeout           = 10 * time.Second
 	loginTimeout             = 1 * time.Minute
 	grpcAuthTimeout          = 10 * time.Second
-	pollInterval             = 200 * time.Millisecond
-	engineSocketDialTimeout  = 2 * time.Second
+	// grpcProbeTimeout is the per-attempt fleetctl deadline inside
+	// requireUnauthenticatedRPC. It must stay shorter than grpcAuthTimeout
+	// so a hung first RPC cannot consume the whole poll budget.
+	grpcProbeTimeout        = 2 * time.Second
+	pollInterval            = 200 * time.Millisecond
+	engineSocketDialTimeout = 2 * time.Second
 )

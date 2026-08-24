@@ -182,8 +182,9 @@ func (f *Fixture) Stop(failed bool) {
 		dumpKindEvidence(f.containerName, f.engineSocket)
 	}
 	if f.containerName != "" {
-		cmd := exec.Command("podman", "rm", "-f", f.containerName)
-		_ = cmd.Run()
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		_ = exec.CommandContext(ctx, "podman", "rm", "-f", f.containerName).Run()
+		cancel()
 	}
 	removeLeftoverKindNodes()
 	if f.workDir != "" {
@@ -206,7 +207,9 @@ func preflight(repoRoot string) ([]string, error) {
 	if _, err := os.Stat(filepath.Join(repoRoot, "node_modules", "nx")); err != nil {
 		return nil, fmt.Errorf("nx is not installed under %s; run npm ci once", repoRoot)
 	}
-	cmd := exec.Command("npx", "nx", "--version")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "npx", "nx", "--version")
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("npx nx cannot run: %w\n%s", err, out)
@@ -339,7 +342,9 @@ func prebuiltAIORequested() bool {
 // usePrebuiltAIO requires ImageRef in the local store. CI loads that tag from
 // the aio-image tar; unset FLEETSHIFT_E2E_AIO_PREBUILT to build from source.
 func (f *Fixture) usePrebuiltAIO() error {
-	cmd := exec.Command("podman", "image", "exists", ImageRef)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", "image", "exists", ImageRef)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s=1 but %s is not loaded (unset it to build from source): %w", prebuiltAIOEnv, ImageRef, err)
 	}
@@ -370,7 +375,9 @@ func (f *Fixture) podmanRun() error {
 		ImageRef,
 	)
 	f.logf("starting container %s", f.containerName)
-	cmd := exec.Command("podman", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), podmanRunTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("podman run: %w\n%s", err, trimOutput(out))
@@ -445,7 +452,7 @@ func (f *Fixture) requireUnauthenticatedRPC() error {
 
 	var insecureAdmin bool
 	err := poll(ctx, time.Second, func() error {
-		runCtx, runCancel := context.WithTimeout(ctx, commandTimeout)
+		runCtx, runCancel := context.WithTimeout(ctx, grpcProbeTimeout)
 		defer runCancel()
 		res := f.Run(runCtx, "deployment", "list")
 		if res.Err == nil {
@@ -509,12 +516,16 @@ func (f *Fixture) runQuiet(cmd *exec.Cmd, logName string) error {
 	if err != nil {
 		return err
 	}
-	defer lf.Close()
 	cmd.Stdout = lf
 	cmd.Stderr = lf
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	closeErr := lf.Close()
+	if runErr != nil {
 		dump, _ := os.ReadFile(logPath)
-		return fmt.Errorf("%w\n%s", err, trimOutput(dump))
+		return fmt.Errorf("%w\n%s", runErr, trimOutput(dump))
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close %s: %w", logName, closeErr)
 	}
 	return nil
 }
@@ -599,7 +610,9 @@ func dumpLogs(name string) {
 
 // runToStderr runs name with args and copies both streams to stderr.
 func runToStderr(name string, args ...string) {
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()

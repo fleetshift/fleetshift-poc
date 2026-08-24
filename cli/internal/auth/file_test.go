@@ -117,9 +117,18 @@ func TestFileStore_CreatesDirMode0700(t *testing.T) {
 	}
 }
 
-func TestFileStore_EmptyDirDoesNotWriteCWD(t *testing.T) {
+func TestFileStore_EmptyDirDoesNotTouchCWD(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
+	const creds = `{"access_token":"cwd"}`
+	const pem = "cwd-key"
+	if err := os.WriteFile("credentials.json", []byte(creds), 0o600); err != nil {
+		t.Fatalf("seed cwd credentials: %v", err)
+	}
+	if err := os.WriteFile("signing_key.pem", []byte(pem), 0o600); err != nil {
+		t.Fatalf("seed cwd signing key: %v", err)
+	}
+
 	store := auth.FileStore{}
 	ctx := context.Background()
 	if err := store.Save(ctx, auth.Tokens{AccessToken: "tok", TokenType: "Bearer"}); err == nil {
@@ -128,12 +137,105 @@ func TestFileStore_EmptyDirDoesNotWriteCWD(t *testing.T) {
 	if err := store.SaveSigningKey("pem"); err == nil {
 		t.Fatal("SaveSigningKey with empty Dir: expected error")
 	}
+	if _, err := store.Load(ctx); err == nil {
+		t.Fatal("Load with empty Dir: expected error")
+	}
+	if err := store.Clear(ctx); err == nil {
+		t.Fatal("Clear with empty Dir: expected error")
+	}
+	if _, err := store.LoadSigningKey(); err == nil {
+		t.Fatal("LoadSigningKey with empty Dir: expected error")
+	}
+
+	gotCreds, err := os.ReadFile("credentials.json")
+	if err != nil {
+		t.Fatalf("read cwd credentials: %v", err)
+	}
+	if string(gotCreds) != creds {
+		t.Fatalf("cwd credentials.json mutated: %q", gotCreds)
+	}
+	gotPEM, err := os.ReadFile("signing_key.pem")
+	if err != nil {
+		t.Fatalf("read cwd signing key: %v", err)
+	}
+	if string(gotPEM) != pem {
+		t.Fatalf("cwd signing_key.pem mutated: %q", gotPEM)
+	}
+}
+
+func TestFileStore_RelativeDirRejected(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	store := auth.FileStore{Dir: "relative"}
+	ctx := context.Background()
+	if err := store.Save(ctx, auth.Tokens{AccessToken: "tok", TokenType: "Bearer"}); err == nil {
+		t.Fatal("Save with relative Dir: expected error")
+	}
+	if err := store.SaveSigningKey("pem"); err == nil {
+		t.Fatal("SaveSigningKey with relative Dir: expected error")
+	}
+	if _, err := store.Load(ctx); err == nil {
+		t.Fatal("Load with relative Dir: expected error")
+	}
+	if err := store.Clear(ctx); err == nil {
+		t.Fatal("Clear with relative Dir: expected error")
+	}
+	if _, err := store.LoadSigningKey(); err == nil {
+		t.Fatal("LoadSigningKey with relative Dir: expected error")
+	}
 	entries, err := os.ReadDir(cwd)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
 	if len(entries) != 0 {
 		t.Fatalf("cwd was mutated: %v", names(entries))
+	}
+}
+
+func TestFileStore_SaveTightensExistingCredentialsMode(t *testing.T) {
+	ctx := context.Background()
+	store := auth.FileStore{Dir: t.TempDir()}
+	path := filepath.Join(store.Dir, "credentials.json")
+	if err := os.WriteFile(path, []byte(`{"access_token":"old"}`), 0o644); err != nil {
+		t.Fatalf("seed credentials: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod seed credentials: %v", err)
+	}
+
+	if err := store.Save(ctx, auth.Tokens{AccessToken: "tok", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat credentials: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("credentials mode = %o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestFileStore_SaveSigningKeyTightensExistingFileMode(t *testing.T) {
+	store := auth.FileStore{Dir: t.TempDir()}
+	path := filepath.Join(store.Dir, "signing_key.pem")
+	if err := os.WriteFile(path, []byte("old-key"), 0o644); err != nil {
+		t.Fatalf("seed signing key: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod seed signing key: %v", err)
+	}
+
+	if err := store.SaveSigningKey("new-key"); err != nil {
+		t.Fatalf("SaveSigningKey: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat signing key: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("signing_key.pem mode = %o, want 0600", info.Mode().Perm())
 	}
 }
 
