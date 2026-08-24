@@ -343,9 +343,6 @@ func (f *Fixture) podmanRun() error {
 	}
 	args = append(args,
 		"-p", "127.0.0.1:"+GRPCPort+":"+GRPCPort,
-		// Keep /data on tmpfs so the AIO SQLite files are not on the image overlay.
-		// WAL sidecars (-wal/-shm) still go through the file VFS; this is not :memory:.
-		"--tmpfs", "/data:rw,size=256m,mode=0755",
 		"-v", f.engineSocket+":"+containerEngineSocket,
 		"-v", "/tmp:/tmp",
 		ImageRef,

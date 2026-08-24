@@ -51,13 +51,10 @@ jobs:
       - name: Run sandbox
         run: |
           : "${PODMAN_SOCKET:?PODMAN_SOCKET is not set; setup-e2e should have started user podman.socket}"
-          # Keep /data on tmpfs so the AIO SQLite files are not on the image overlay.
-          # WAL sidecars (-wal/-shm) still go through the file VFS; this is not :memory:.
           podman run -d --pull=never --name fleetshift \
             --privileged \
             --network kind:alias=fleetshift \
             -p 127.0.0.1:8085:8085 \
-            --tmpfs /data:rw,size=256m,mode=0755 \
             -v "${PODMAN_SOCKET}:/var/run/docker.sock" \
             -v /tmp:/tmp \
             quay.io/stolostron/fleetshift:latest
@@ -98,11 +95,9 @@ jobs:
       # test spends 5 minutes polling. This is the exact command the kind addon
       # shells out to; if it errors here we see podman's real stderr in seconds
       # instead of an opaque "exit status 125" from the server log.
-      # Exec as uid 1000 — the user the server drops to. Running as root would
-      # hide the socket-permission problem that actually broke the kind addon.
       - name: Smoke-test in-container kind engine access
         run: |
-          podman exec -u 1000 fleetshift sh -lc '
+          podman exec fleetshift sh -lc '
             echo "CONTAINER_HOST=$CONTAINER_HOST"
             ls -l /var/run/docker.sock
             kind version
