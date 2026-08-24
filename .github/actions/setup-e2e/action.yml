@@ -2,45 +2,39 @@ name: Set up FleetShift E2E
 description: |
   Prepares a GitHub Actions job to use the AIO image built from this checkout.
 
-  Three jobs share this action and must not race the image cache. `aio-image`
-  is the only writer (`aio-mode: build`). `e2e-ui` and `e2e-backend` restore
-  the same multi-image tar (`load` / `warm`) after `needs: aio-image`. They
-  do not share a running container.
+  Two roles share one tree-keyed tar and must not race the cache. `aio-image`
+  is the only writer (`role: cache`). `e2e-ui` and `e2e-backend` both use
+  `role: e2e` after `needs: aio-image`. They do not share a running container.
 
   The tar is `localhost/fleetshift-server`, `localhost/fleetshift-server-local`,
   `localhost/fleetshift-web`, and `quay.io/stolostron/fleetshift:latest`. Save
   uses `podman save --multi-image-archive` so those names are four images, not
-  extra tags on the first. On a miss, `build` also
-  uploads a 1-day artifact so dependent jobs can download if same-run cache
-  restore does not see the new key yet.
+  extra tags on the first. On a miss, `cache` also uploads a 1-day artifact so
+  `e2e` jobs can download if same-run cache restore does not see the new key
+  yet.
 
   Go (from `server/go.mod`), Node 24, and Playwright Chromium follow from
-  `aio-mode`. Do not install those in the workflow.
+  `role`. Do not install those in the workflow.
 
-  `load` and `warm` also start the user `podman.socket` and ensure the `kind` 
-  network exists. The two test jobs still use separate AIO containers.
+  `e2e` also starts the user `podman.socket` and ensures the `kind` network
+  exists. The two test jobs still use separate AIO containers.
 
 inputs:
-  aio-mode:
+  role:
     description: |
       Which job is calling this action. Toolchain and image steps follow from
       the value; there are no separate go/playwright inputs.
 
-      build — `aio-image` job, cache writer. Restore the tar. On a miss: install
+      cache — `aio-image` job, cache writer. Restore the tar. On a miss: install
       Go and Node, run `npx nx run fleetshift-poc:image:aio`, save the four
       tags, write the cache, upload the artifact. On a hit: restore the tar and
       stop (no Node, Go, or Playwright). Never podman-runs FleetShift.
 
-      load — `e2e-ui` job, UI consumer. Restore (or download) the tar, podman
-      load, install Node and Playwright, start user podman.socket and ensure
-      the kind network. Do not run nx image:aio; the UI tests use the baked-in
-      image. The workflow starts the Kind-capable sandbox after this action.
-
-      warm — `e2e-backend` job, backend consumer. Same load as UI, then run
-      nx image:aio once so TestMain's mandatory from-source build is a Podman
-      layer-cache hit in this VM. Installs Go, Node, and Playwright (Dex
-      form-fill) and starts user podman.socket and the kind network. Tests
-      still start their own AIO; they do not reuse the UI sandbox.
+      e2e — `e2e-ui` and `e2e-backend`. Restore (or download) the tar, podman
+      load, install Go, Node, and Playwright, start user podman.socket and
+      ensure the kind network. Do not run nx image:aio. The UI workflow starts
+      the sandbox after this action; backend TestMain starts its own AIO and
+      skips the image build when FLEETSHIFT_E2E_AIO_PREBUILT=1.
     required: true
 
 runs:
@@ -64,34 +58,34 @@ runs:
     # server/go.mod is the repo toolchain pin (same file CodeQL uses).
     # image:aio dependsOn server:build; backend tests use the same 1.25.x.
     - name: Set up Go
-      if: ${{ inputs.aio-mode == 'warm' || (inputs.aio-mode == 'build' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
+      if: ${{ inputs.role == 'e2e' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
       uses: actions/setup-go@v6
       with:
         go-version-file: server/go.mod
         cache-dependency-path: "**/go.sum"
 
-    # Node is required for nx image:aio (build miss / warm) and for Playwright.
-    # The image job skips this entirely on a tar cache hit.
+    # Node is required for nx (image:aio on cache miss, test:e2e) and Playwright.
+    # The cache job skips this entirely on a tar cache hit.
     - name: Set up Node
-      if: ${{ inputs.aio-mode != 'build' || steps.aio-image-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.role == 'e2e' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
       uses: actions/setup-node@v7
       with:
         node-version: 24
         cache: npm
 
     - name: Install npm dependencies
-      if: ${{ inputs.aio-mode != 'build' || steps.aio-image-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.role == 'e2e' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
       shell: bash
       run: npm ci
 
     - name: Resolve Playwright version
-      if: ${{ inputs.aio-mode != 'build' }}
+      if: ${{ inputs.role == 'e2e' }}
       id: pw
       shell: bash
       run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
     - name: Cache Playwright browsers
-      if: ${{ inputs.aio-mode != 'build' }}
+      if: ${{ inputs.role == 'e2e' }}
       id: pw-cache
       uses: actions/cache@v6
       with:
@@ -99,7 +93,7 @@ runs:
         key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
     - name: Install Playwright browsers
-      if: ${{ inputs.aio-mode != 'build' }}
+      if: ${{ inputs.role == 'e2e' }}
       shell: bash
       run: |
         if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
@@ -109,7 +103,7 @@ runs:
         fi
 
     - name: Build all-in-one image
-      if: ${{ inputs.aio-mode == 'build' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
       shell: bash
       env:
         NX_DAEMON: "false"
@@ -140,16 +134,16 @@ runs:
         ls -lh "${RUNNER_TEMP}/aio-images.tar"
 
     - name: Save AIO images
-      if: ${{ inputs.aio-mode == 'build' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: ${{ runner.temp }}/aio-images.tar
         key: ${{ steps.aio-image-cache.outputs.cache-primary-key }}
 
     # Same-run fallback: a cache key saved in aio-image is not always visible to
-    # dependent jobs yet. Upload on miss so load/warm can download if restore missed.
+    # dependent jobs yet. Upload on miss so e2e can download if restore missed.
     - name: Upload AIO images
-      if: ${{ inputs.aio-mode == 'build' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
       uses: actions/upload-artifact@v7
       with:
         name: aio-images
@@ -159,14 +153,14 @@ runs:
         compression-level: 0
 
     - name: Download AIO images
-      if: ${{ inputs.aio-mode != 'build' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.role == 'e2e' && steps.aio-image-cache.outputs.cache-hit != 'true' }}
       uses: actions/download-artifact@v7
       with:
         name: aio-images
         path: ${{ runner.temp }}
 
     - name: Load AIO images
-      if: ${{ inputs.aio-mode == 'load' || inputs.aio-mode == 'warm' }}
+      if: ${{ inputs.role == 'e2e' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -197,22 +191,9 @@ runs:
           exit 1
         fi
 
-    # Backend TestMain always runs nx image:aio. This warm makes that second
-    # invocation a Podman layer-cache hit in the same VM.
-    - name: Warm all-in-one image
-      if: ${{ inputs.aio-mode == 'warm' }}
-      shell: bash
-      env:
-        NX_DAEMON: "false"
-      run: |
-        set -euo pipefail
-        touch .env
-        echo "warming AIO image (npx nx run fleetshift-poc:image:aio)"
-        npx nx run fleetshift-poc:image:aio
-
     # User podman.socket plus kind network. Shared by UI and backend so
     # Kind docker-out-of-docker uses the same host recipe as local Linux.
     - name: Prepare Kind host
-      if: ${{ inputs.aio-mode == 'load' || inputs.aio-mode == 'warm' }}
+      if: ${{ inputs.role == 'e2e' }}
       shell: bash
       run: bash "${{ github.action_path }}/kind-host.sh"

@@ -22,6 +22,23 @@ import (
 	"time"
 )
 
+func TestPrebuiltAIORequested(t *testing.T) {
+	t.Setenv(prebuiltAIOEnv, "")
+	if prebuiltAIORequested() {
+		t.Fatal("empty env should build from source")
+	}
+	for _, v := range []string{"0", "true", "yes", "TRUE"} {
+		t.Setenv(prebuiltAIOEnv, v)
+		if prebuiltAIORequested() {
+			t.Fatalf("%q should build from source", v)
+		}
+	}
+	t.Setenv(prebuiltAIOEnv, "1")
+	if !prebuiltAIORequested() {
+		t.Fatal("1 should use prebuilt AIO")
+	}
+}
+
 func TestRequireLoopbackFree_OK(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

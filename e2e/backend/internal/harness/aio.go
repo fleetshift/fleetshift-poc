@@ -40,9 +40,10 @@ type Fixture struct {
 	publishUIIPv6 bool
 }
 
-// Start builds the AIO image from this checkout, starts one Kind-capable
-// container, smokes the in-container kind engine as uid 1000, copies the
-// sandbox CA, waits for /readyz, and builds fleetctl once. It does not log in.
+// Start builds the AIO image from this checkout (or uses a loaded tag when
+// FLEETSHIFT_E2E_AIO_PREBUILT=1), starts one Kind-capable container,
+// smokes the in-container kind engine, copies the sandbox CA, waits for
+// /readyz, and builds fleetctl once. It does not log in.
 func Start() (*Fixture, error) {
 	f := &Fixture{}
 	if err := f.start(); err != nil {
@@ -304,8 +305,12 @@ func uniqueContainerName() (string, error) {
 	return fmt.Sprintf("fleetshift-e2e-backend-%x", b), nil
 }
 
-// buildAIOImage runs nx image:aio from this checkout.
+// buildAIOImage runs nx image:aio from this checkout unless
+// FLEETSHIFT_E2E_AIO_PREBUILT=1 and ImageRef is already loaded.
 func (f *Fixture) buildAIOImage() error {
+	if prebuiltAIORequested() {
+		return f.usePrebuiltAIO()
+	}
 	envPath := filepath.Join(f.repoRoot, ".env")
 	if _, err := os.Stat(envPath); os.IsNotExist(err) {
 		if err := os.WriteFile(envPath, nil, 0o600); err != nil {
@@ -322,6 +327,23 @@ func (f *Fixture) buildAIOImage() error {
 		return fmt.Errorf("npx nx run %s: %w", nxImageAIO, err)
 	}
 	f.logf("AIO image ready")
+	return nil
+}
+
+// prebuiltAIORequested reports whether FLEETSHIFT_E2E_AIO_PREBUILT=1.
+// Local runs leave it unset so TestMain still builds.
+func prebuiltAIORequested() bool {
+	return os.Getenv(prebuiltAIOEnv) == "1"
+}
+
+// usePrebuiltAIO requires ImageRef in the local store. CI loads that tag from
+// the aio-image tar; unset FLEETSHIFT_E2E_AIO_PREBUILT to build from source.
+func (f *Fixture) usePrebuiltAIO() error {
+	cmd := exec.Command("podman", "image", "exists", ImageRef)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s=1 but %s is not loaded (unset it to build from source): %w", prebuiltAIOEnv, ImageRef, err)
+	}
+	f.logf("using prebuilt AIO %s", ImageRef)
 	return nil
 }
 

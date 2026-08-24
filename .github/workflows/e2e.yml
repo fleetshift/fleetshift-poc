@@ -24,7 +24,7 @@ jobs:
       - name: Set up E2E
         uses: ./.github/actions/setup-e2e
         with:
-          aio-mode: build
+          role: cache
 
   e2e-ui:
     name: E2E (UI)
@@ -41,7 +41,7 @@ jobs:
       - name: Set up E2E
         uses: ./.github/actions/setup-e2e
         with:
-          aio-mode: load
+          role: e2e
 
       # Run the single AIO container (API + baked-in UI + peer Dex sandbox).
       # Dex-on (ops@/dev@) is the image default when OIDC_ISSUER_URL is unset.
@@ -154,12 +154,13 @@ jobs:
       - name: Set up E2E
         uses: ./.github/actions/setup-e2e
         with:
-          aio-mode: warm
+          role: e2e
 
       - name: Run backend e2e tests
         env:
           GOTESTSUM_FORMAT: github-actions
           NX_DAEMON: "false"
+          FLEETSHIFT_E2E_AIO_PREBUILT: "1"
         run: npx nx test:e2e e2e-backend
 
       - name: Upload test results

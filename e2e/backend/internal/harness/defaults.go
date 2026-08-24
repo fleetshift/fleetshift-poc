@@ -22,6 +22,8 @@ const (
 
 	// ImageRef is the AIO tag produced by `npx nx run fleetshift-poc:image:aio`.
 	ImageRef = "quay.io/stolostron/fleetshift:latest"
+	// prebuiltAIOEnv skips nx image:aio when set to 1 and the tag is loaded (CI).
+	prebuiltAIOEnv = "FLEETSHIFT_E2E_AIO_PREBUILT"
 
 	// cliClientID is Dex's public client for fleetctl login.
 	cliClientID = "fleetshift-cli"
