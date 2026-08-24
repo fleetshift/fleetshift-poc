@@ -8,10 +8,11 @@ description: |
   do not share a running container.
 
   The tar is `localhost/fleetshift-server`, `localhost/fleetshift-server-local`,
-  `localhost/fleetshift-web`, and `quay.io/stolostron/fleetshift:latest`. The
-  cache key is `aio-images-v2-<os>-<arch>-<git tree OID>`. On a miss, `build`
-  also uploads a 1-day artifact so dependent jobs can download if same-run
-  cache restore does not see the new key yet.
+  `localhost/fleetshift-web`, and `quay.io/stolostron/fleetshift:latest`. Save
+  uses `podman save --multi-image-archive` so those names are four images, not
+  extra tags on the first. On a miss, `build` also
+  uploads a 1-day artifact so dependent jobs can download if same-run cache
+  restore does not see the new key yet.
 
   Go (from `server/go.mod`), Node 24, and Playwright Chromium follow from
   `aio-mode`. Do not install those in the workflow.
@@ -51,7 +52,7 @@ runs:
       id: aio-key
       shell: bash
       run: |
-        echo "key=aio-images-v2-${{ runner.os }}-${{ runner.arch }}-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+        echo "key=aio-images-v3-${{ runner.os }}-${{ runner.arch }}-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
 
     - name: Restore AIO images
       id: aio-image-cache
@@ -132,20 +133,10 @@ runs:
           fi
         done
 
-        extra=(
-          quay.io/stolostron/fleetshift-server:latest
-          quay.io/stolostron/fleetshift-server-local:latest
-          quay.io/stolostron/fleetshift-web:latest
-        )
-        save=("${required[@]}")
-        for img in "${extra[@]}"; do
-          if podman image exists "$img"; then
-            save+=("$img")
-          fi
-        done
-
-        echo "saving ${#save[@]} image tags to ${RUNNER_TEMP}/aio-images.tar"
-        podman save -o "${RUNNER_TEMP}/aio-images.tar" "${save[@]}"
+        # Four distinct images. Extra quay.io/stolostron/*-server names are
+        # aliases of localhost/*; without -m they become tags on the first image.
+        echo "saving ${#required[@]} images to ${RUNNER_TEMP}/aio-images.tar"
+        podman save --multi-image-archive -o "${RUNNER_TEMP}/aio-images.tar" "${required[@]}"
         ls -lh "${RUNNER_TEMP}/aio-images.tar"
 
     - name: Save AIO images
@@ -199,6 +190,12 @@ runs:
             exit 1
           fi
         done
+        aio_id="$(podman image inspect -f '{{.Id}}' quay.io/stolostron/fleetshift:latest)"
+        server_id="$(podman image inspect -f '{{.Id}}' localhost/fleetshift-server:latest)"
+        if [ "$aio_id" = "$server_id" ]; then
+          echo "quay.io/stolostron/fleetshift:latest is the server image, not AIO (need podman save --multi-image-archive)" >&2
+          exit 1
+        fi
 
     # Backend TestMain always runs nx image:aio. This warm makes that second
     # invocation a Podman layer-cache hit in the same VM.
