@@ -51,32 +51,48 @@ jobs:
       - name: Run sandbox
         run: |
           : "${PODMAN_SOCKET:?PODMAN_SOCKET is not set; setup-e2e should have started user podman.socket}"
-          podman run -d --name fleetshift \
+          # Keep /data on tmpfs so the AIO SQLite files are not on the image overlay.
+          # WAL sidecars (-wal/-shm) still go through the file VFS; this is not :memory:.
+          podman run -d --pull=never --name fleetshift \
             --privileged \
             --network kind:alias=fleetshift \
             -p 127.0.0.1:8085:8085 \
+            --tmpfs /data:rw,size=256m,mode=0755 \
             -v "${PODMAN_SOCKET}:/var/run/docker.sock" \
             -v /tmp:/tmp \
             quay.io/stolostron/fleetshift:latest
 
       - name: Wait for sandbox to be ready
         run: |
+          set -euo pipefail
+          origin="https://fleetshift-sandbox.localhost:8085"
+          # Pin AAAA-capable .localhost names to the IPv4 publish.
+          resolve=(--resolve fleetshift-sandbox.localhost:8085:127.0.0.1)
           echo "Waiting for HTTPS origin to be ready..."
           # aio-proxy Host-allowlists fleetshift-sandbox.localhost (421 otherwise).
           # -k is readiness-only; Playwright uses ignoreHTTPSErrors for the private CA.
-          for i in $(seq 1 60); do
-            if curl -skf https://fleetshift-sandbox.localhost:8085/readyz >/dev/null; then
+          ready=0
+          for _ in $(seq 1 60); do
+            if ! podman inspect -f '{{.State.Running}}' fleetshift 2>/dev/null | grep -qx true; then
+              echo "fleetshift container is not running; see 'Dump server logs on failure'" >&2
+              exit 1
+            fi
+            if curl -skfS --connect-timeout 2 --max-time 5 "${resolve[@]}" "${origin}/readyz"; then
+              ready=1
               break
             fi
             sleep 2
           done
-          curl -skf https://fleetshift-sandbox.localhost:8085/readyz
+          if [ "$ready" -ne 1 ]; then
+            echo "sandbox did not become ready at ${origin}/readyz; see 'Dump server logs on failure'" >&2
+            exit 1
+          fi
           if podman port fleetshift | grep -q 5556; then
             echo "Dex port 5556 must not be published" >&2
             podman port fleetshift
             exit 1
           fi
-          echo "BASE_URL=https://fleetshift-sandbox.localhost:8085" >> "$GITHUB_ENV"
+          echo "BASE_URL=${origin}" >> "$GITHUB_ENV"
 
       # Prove the in-container kind engine path works before the slow lifecycle
       # test spends 5 minutes polling. This is the exact command the kind addon
@@ -112,6 +128,8 @@ jobs:
         run: |
           echo "===== user podman.socket ====="
           systemctl --user status podman.socket || true
+          echo "===== podman inspect ====="
+          podman inspect --format 'running={{.State.Running}} status={{.State.Status}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}} error={{.State.Error}}' fleetshift || true
           echo "===== fleetshift container log ====="
           podman logs fleetshift || true
 
