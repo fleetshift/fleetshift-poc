@@ -17,7 +17,7 @@ The trust machinery used to authenticate FleetShift delivery evidence:
 
 ## When to read this
 
-Read this when implementing or reviewing how a client creates provenance, how
+Read this when implementing or reviewing how a producer creates provenance, how
 the resource manager assembles evidence, how a target selects a verifier, or
 how trust configuration changes without making the resource manager a trust
 root.
@@ -65,8 +65,9 @@ durable cryptographic evidence answering three questions:
 That durable evidence is **provenance**. A user may authenticate a deployment
 intent, an addon may authenticate generated manifests, a placement service may
 authenticate a target decision, and an administrator may authenticate a trust
-update. The resource manager stores and couriers these independently
-authenticated assertions so the target can verify them itself.
+update. These signing actors are **producers**. The resource manager stores
+and couriers these independently authenticated assertions so the target can
+verify them itself.
 
 There is no single best cryptographic mechanism for every authority or
 environment. Sigstore can bind an OIDC identity to a short-lived certificate
@@ -82,7 +83,7 @@ use its repository-target representation.
 A **provenance profile** is a configured implementation of a common contract
 across those mechanisms. The contract covers:
 
-- client or publisher creation of evidence for exact typed content;
+- producer creation of evidence for exact typed content;
 - RM storage and assembly of the evidence and profile-specific support
   material; and
 - target verification against authenticated profile configuration and retained
@@ -171,7 +172,7 @@ stateful policy not reproduced at the target.
 
 Only constraints deliberately retained in authenticated target trust state or
 signed attestation content are expected to survive resource-manager
-compromise. The controlled client, provenance implementation, delivery agent,
+compromise. The controlled producer, provenance implementation, delivery agent,
 bootstrap path, configured external authorities, and target enforcement path
 remain trusted for their stated roles. A direct target mutation path that
 bypasses the delivery agent is outside this guarantee.
@@ -298,7 +299,7 @@ evaluation after authentication produces the same canonical principal.
 ### Well-known provenance types
 
 Every provenance profile selects a well-known, versioned provenance type.
-Implementations arrive through the client's, resource manager's, and
+Implementations arrive through the producer's, resource manager's, and
 verifier's trusted software supply chains. Authenticated configuration selects
 and constrains installed implementations; it never supplies executable code.
 An unknown provenance type fails closed.
@@ -339,7 +340,7 @@ If a format also carries an internal media type, as Sigstore Bundle does, the
 selected profile requires it to match the outer `media_type`.
 
 Profile configuration is an authenticated entry inside an `AuthorityConfig`.
-It is not named by an RM-maintained or client-visible profile ID. An
+It is not named by an RM-maintained or producer-visible profile ID. An
 implementation may derive local storage keys or configuration references for
 profile state, but package data cannot use such a key to grant authority or
 select code.
@@ -712,19 +713,18 @@ machinery is shared.
 
 ## Component Responsibilities
 
-### Client
+### Producer
 
-The client produces canonical typed assertions, presents live credentials, and
-uses the selected provenance implementation to create evidence. Common client
+The producer produces canonical typed assertions, presents live credentials, and
+uses the selected provenance implementation to create evidence. Common producer
 code identifies the allowed provenance type and principal authority; it does
 not obtain an RM-maintained profile or anchor ID.
 
 The profile-specific path owns its signing ceremony. Depending on the profile,
 that may include a device key, operating-system key handle, OIDC redirect,
 Fulcio issuance, repository publication, or collection of proof material. A
-client or addon receives purpose-specific signing operations over known
-content, not unrestricted access to private key bytes or a general signing
-oracle.
+producer receives purpose-specific signing operations over known content,
+not unrestricted access to private key bytes or a general signing oracle.
 
 ### Resource manager
 
@@ -744,7 +744,7 @@ The RM:
 - routes the resulting package to the target.
 
 When the RM needs routing identity from a delivery (tenant, target, and the
-client-defined resource name), it asks the selected profile to unwrap the
+producer-defined resource name), it asks the selected profile to unwrap the
 inner statement from `TypedEvidence`. Common code then reads the common
 statement body. The RM does not parse profile-owned evidence encodings.
 
@@ -1289,7 +1289,7 @@ different security and availability tradeoffs.
 
 ## Open Questions
 
-- Should clients sign claimed provenance type and authority attributes, or
+- Should producers sign claimed provenance type and authority attributes, or
   should verifiers derive all of them from authenticated evidence? A focused
   threat-model and POC comparison should decide this.
 - What are the concrete strongly typed lifecycle APIs for continuity/v3,

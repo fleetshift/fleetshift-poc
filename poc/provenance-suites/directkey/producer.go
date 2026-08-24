@@ -10,16 +10,18 @@ import (
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 )
 
-// Client is the direct-key/v1 client API. It holds one signing key pair and
+var _ protocol.ProducerAPI = (*Producer)(nil)
+
+// Producer is the direct-key/v1 producer API. It holds one signing key pair and
 // creates evidence for a single principal.
-type Client struct {
+type Producer struct {
 	principal  protocol.Principal
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
 }
 
-// NewClient generates a signing key pair bound to principal.
-func NewClient(principal protocol.Principal) (*Client, error) {
+// NewProducer generates a signing key pair bound to principal.
+func NewProducer(principal protocol.Principal) (*Producer, error) {
 	canonical, err := principal.Canonicalize()
 	if err != nil {
 		return nil, err
@@ -28,26 +30,26 @@ func NewClient(principal protocol.Principal) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generate signing key: %w", err)
 	}
-	return &Client{
+	return &Producer{
 		principal:  canonical,
 		privateKey: privateKey,
 		publicKey:  publicKey,
 	}, nil
 }
 
-// Principal returns the client-bound canonical principal.
-func (c *Client) Principal() protocol.Principal {
-	return c.principal
+// Principal returns the producer-bound canonical principal.
+func (p *Producer) Principal() protocol.Principal {
+	return p.principal
 }
 
 // PublicKey returns a copy of the public key. Tests and enrollment use it;
 // delivery evidence does not carry it.
-func (c *Client) PublicKey() []byte {
-	return append([]byte(nil), c.publicKey...)
+func (p *Producer) PublicKey() []byte {
+	return append([]byte(nil), p.publicKey...)
 }
 
-// ProvenanceType implements protocol.ClientAPI.
-func (c *Client) ProvenanceType() protocol.ProvenanceType {
+// ProvenanceType implements protocol.ProducerAPI.
+func (p *Producer) ProvenanceType() protocol.ProvenanceType {
 	return protocol.ProvenanceTypeDirectKeyV1
 }
 
@@ -57,12 +59,12 @@ func (c *Client) ProvenanceType() protocol.ProvenanceType {
 // This is trust-on-first-use: the claimed principal is not authenticated by
 // an issuer. Whoever first enrolls a subject under this naive profile owns
 // the retained mapping until an explicit replacement protocol exists.
-func (c *Client) CreateEnrollment() (protocol.TypedEvidence, error) {
+func (p *Producer) CreateEnrollment() (protocol.TypedEvidence, error) {
 	body := EnrollmentBody{
-		Principal: c.principal,
-		PublicKey: append([]byte(nil), c.publicKey...),
+		Principal: p.principal,
+		PublicKey: append([]byte(nil), p.publicKey...),
 	}
-	proof, err := sign(c.privateKey, purposeEnrollmentProof, enrollmentProofMaterial(body.Principal, body.PublicKey))
+	proof, err := sign(p.privateKey, purposeEnrollmentProof, enrollmentProofMaterial(body.Principal, body.PublicKey))
 	if err != nil {
 		return protocol.TypedEvidence{}, fmt.Errorf("sign enrollment proof of possession: %w", err)
 	}
@@ -80,10 +82,10 @@ func (c *Client) CreateEnrollment() (protocol.TypedEvidence, error) {
 	}, nil
 }
 
-// CreateEvidence implements protocol.ClientAPI. The resulting evidence
+// CreateEvidence implements protocol.ProducerAPI. The resulting evidence
 // carries the inner statement, a signature, and a user reference, not the
 // public key.
-func (c *Client) CreateEvidence(_ context.Context, assertion protocol.TypedAssertion) (protocol.TypedEvidence, error) {
+func (p *Producer) CreateEvidence(_ context.Context, assertion protocol.TypedAssertion) (protocol.TypedEvidence, error) {
 	if assertion.PredicateType == "" || len(assertion.Bytes) == 0 {
 		return protocol.TypedEvidence{}, errors.New("assertion predicate type and bytes are required")
 	}
@@ -91,13 +93,13 @@ func (c *Client) CreateEvidence(_ context.Context, assertion protocol.TypedAsser
 	if err != nil {
 		return protocol.TypedEvidence{}, err
 	}
-	signed := signatureMaterial(c.principal, assertion.PredicateType, contentDigest)
-	signature, err := sign(c.privateKey, purposeAssertion, signed)
+	signed := signatureMaterial(p.principal, assertion.PredicateType, contentDigest)
+	signature, err := sign(p.privateKey, purposeAssertion, signed)
 	if err != nil {
 		return protocol.TypedEvidence{}, fmt.Errorf("sign assertion: %w", err)
 	}
 	body := SignatureBody{
-		Principal: c.principal,
+		Principal: p.principal,
 		Assertion: protocol.TypedAssertion{
 			PredicateType: assertion.PredicateType,
 			Bytes:         append([]byte(nil), assertion.Bytes...),
