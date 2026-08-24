@@ -22,8 +22,9 @@ const (
 )
 
 var (
-	ErrUnauthorized     = errors.New("resource-manager authorization denied")
-	ErrAgentUnavailable = errors.New("delivery agent is unavailable")
+	ErrUnauthorized            = errors.New("resource-manager authorization denied")
+	ErrAgentUnavailable        = errors.New("delivery agent is unavailable")
+	ErrInvalidRequestSignature = errors.New("request signature verification failed")
 )
 
 type AuthorizationRequest struct {
@@ -165,6 +166,9 @@ func (m *Manager) SubmitEnrollment(enrollment protocol.EnrollmentPackage) (proto
 	if enrollment.Intent.TenantID != m.tenantID || enrollment.IdentityID == "" {
 		return protocol.AuthenticatedMapUpdate{}, fmt.Errorf("enrollment tenant or identity does not match manager tenant")
 	}
+	if err := protocol.VerifyEnrollmentProofOfPossession(enrollment); err != nil {
+		return protocol.AuthenticatedMapUpdate{}, fmt.Errorf("%w: %v", ErrInvalidRequestSignature, err)
+	}
 	if err := m.authorizer(AuthorizationRequest{TenantID: m.tenantID, CallerID: enrollment.IdentityID, Action: ActionEnroll}); err != nil {
 		return protocol.AuthenticatedMapUpdate{}, fmt.Errorf("%w: %v", ErrUnauthorized, err)
 	}
@@ -178,7 +182,7 @@ func (m *Manager) SubmitEnrollment(enrollment protocol.EnrollmentPackage) (proto
 }
 
 func (m *Manager) SubmitRotation(callerID string, rotation protocol.RotationPackage) (RotationCommit, error) {
-	if rotation.Intent.TenantID != m.tenantID || rotation.Intent.IdentityID != callerID {
+	if rotation.Authorization.TenantID != m.tenantID || rotation.Authorization.IdentityID != callerID {
 		return RotationCommit{}, fmt.Errorf("%w: rotation caller or tenant mismatch", ErrUnauthorized)
 	}
 	if err := m.authorizer(AuthorizationRequest{
@@ -192,8 +196,18 @@ func (m *Manager) SubmitRotation(callerID string, rotation protocol.RotationPack
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	currentHead, ok := m.histories[callerID]
-	if !ok || currentHead.CurrentStateDigest != rotation.Intent.PreviousStateDigest {
+	if !ok || currentHead.CurrentStateDigest != rotation.Authorization.PreviousStateDigest {
 		return RotationCommit{}, errors.New("rotation does not continue manager's current key history")
+	}
+	oldKey, err := m.currentPublicKeyLocked(callerID)
+	if err != nil {
+		return RotationCommit{}, err
+	}
+	if err := protocol.VerifyRotationAuthorization(rotation, oldKey); err != nil {
+		return RotationCommit{}, fmt.Errorf("%w: %v", ErrInvalidRequestSignature, err)
+	}
+	if _, digest, err := protocol.ReconstructSuccessorState(rotation); err != nil || digest != rotation.Authorization.NewStateDigest {
+		return RotationCommit{}, fmt.Errorf("%w: successor state does not match signed digest", ErrInvalidRequestSignature)
 	}
 	return m.appendRotationLocked(rotation)
 }
@@ -210,6 +224,15 @@ func (m *Manager) SubmitDelivery(callerID string, delivery protocol.SignedDelive
 		TargetID: attestation.TargetID,
 	}); err != nil {
 		return protocol.DeliveryRecord{}, fmt.Errorf("%w: %v", ErrUnauthorized, err)
+	}
+	m.mu.Lock()
+	publicKey, err := m.publicKeyForStateLocked(attestation.IdentityID, attestation.SigningStateDigest)
+	m.mu.Unlock()
+	if err != nil {
+		return protocol.DeliveryRecord{}, err
+	}
+	if err := protocol.VerifyDeliverySignature(delivery, publicKey); err != nil {
+		return protocol.DeliveryRecord{}, fmt.Errorf("%w: %v", ErrInvalidRequestSignature, err)
 	}
 	record, err := m.appendDelivery(delivery)
 	if err != nil {
@@ -232,7 +255,7 @@ func (m *Manager) RetryDelivery(index uint64) error {
 	}
 	record := cloneDeliveryRecord(m.deliveries[index])
 	m.mu.RUnlock()
-	if record.Event.Kind != protocol.DeliveryLogEventDelivery || record.Event.Delivery == nil {
+	if record.Event.Kind != protocol.DeliveryLogEventDelivery || record.Delivery == nil {
 		return fmt.Errorf("delivery-log index %d is not a delivery", index)
 	}
 	if err := m.pushDelivery(record); err != nil {
@@ -242,10 +265,10 @@ func (m *Manager) RetryDelivery(index uint64) error {
 }
 
 func (m *Manager) pushDelivery(record protocol.DeliveryRecord) error {
-	if record.Event.Delivery == nil {
+	if record.Delivery == nil {
 		return errors.New("delivery record has no signed delivery")
 	}
-	targetID := record.Event.Delivery.Attestation.TargetID
+	targetID := record.Delivery.Attestation.TargetID
 	m.mu.RLock()
 	route, ok := m.agents[targetID]
 	m.mu.RUnlock()
@@ -261,22 +284,31 @@ func (m *Manager) pushDelivery(record protocol.DeliveryRecord) error {
 	for {
 		mapRoot := route.agent.MapRoot()
 		m.mu.RLock()
+		mapUpdates := m.cloneMapUpdatesAfterLocked(mapRoot)
+		proofRoot := mapRoot
+		if len(mapUpdates) > 0 {
+			proofRoot = mapUpdates[len(mapUpdates)-1].Root
+		}
 		identityProof, identityErr := m.identityTrustProofAtLocked(
-			record.Event.Delivery.Attestation.IdentityID,
-			record.Event.Delivery.Attestation.SigningStateDigest,
-			mapRoot,
+			record.Delivery.Attestation.IdentityID,
+			record.Delivery.Attestation.SigningStateDigest,
+			proofRoot,
 		)
+		if identityErr != nil {
+			m.mu.RUnlock()
+			return fmt.Errorf("construct identity trust proof: %w", identityErr)
+		}
 		indexes := deliveryProofIndexes(record, identityProof)
 		update, err := deliveryLogUpdate(m.deliveryTree, m.deliveries, route.checkpoint, indexes...)
+		if err == nil {
+			err = m.attachMarkerInclusionsLocked(mapUpdates, update.Checkpoint)
+		}
 		m.mu.RUnlock()
 		if err != nil {
 			return fmt.Errorf("construct proof from acknowledged agent checkpoint: %w", err)
 		}
-		if identityErr != nil {
-			return fmt.Errorf("construct identity trust proof: %w", identityErr)
-		}
 
-		if err := route.agent.Deliver(record, protocol.DeliveryProof{Log: update, Identity: identityProof}); err != nil {
+		if err := route.agent.Deliver(record, protocol.DeliveryProof{MapUpdates: mapUpdates, Log: update, Identity: identityProof}); err != nil {
 			var stale staleCheckpointError
 			if !errors.As(err, &stale) {
 				return err
@@ -316,8 +348,7 @@ func (m *Manager) validateAgentCheckpoint(checkpoint protocol.Checkpoint) error 
 // bound its signing state under the verifier's accepted identity history. The
 // consistency proof commits all undisclosed intervening leaves.
 func deliveryProofIndexes(record protocol.DeliveryRecord, identityProof protocol.IdentityTrustProof) []uint64 {
-	delivery := record.Event.Delivery
-	if delivery == nil {
+	if record.Delivery == nil {
 		return []uint64{record.Index}
 	}
 	indexes := make([]uint64, 0, 3)
@@ -357,17 +388,19 @@ func (m *Manager) DeliveryCheckpoint() protocol.Checkpoint {
 func (m *Manager) MapUpdatesAfter(root string) []protocol.AuthenticatedMapUpdate {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.cloneMapUpdatesAfterLocked(root)
+}
+
+func (m *Manager) cloneMapUpdatesAfterLocked(root string) []protocol.AuthenticatedMapUpdate {
 	if root == m.mapRoot {
 		return nil
 	}
-	start := -1
-	for i := range m.mapUpdates {
-		if m.mapUpdates[i].PreviousRoot == root {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
+	// mapRevisions stores the SMT revision at which root became current. That
+	// value is also the slice index of the next catch-up update because the
+	// empty map is revision 0 and each committed leaf replacement appends one
+	// AuthenticatedMapUpdate.
+	start, ok := m.mapRevisions[root]
+	if !ok || start >= uint64(len(m.mapUpdates)) {
 		return nil
 	}
 	updates := m.mapUpdates[start:]
@@ -376,6 +409,49 @@ func (m *Manager) MapUpdatesAfter(root string) []protocol.AuthenticatedMapUpdate
 		out[i] = cloneAuthenticatedMapUpdate(updates[i])
 	}
 	return out
+}
+
+// MapUpdatesAfterCheckpoint is MapUpdatesAfter plus eager marker-inclusion
+// proofs under logCheckpoint, used when that checkpoint is already past a
+// referenced rotation marker.
+func (m *Manager) MapUpdatesAfterCheckpoint(root string, logCheckpoint protocol.Checkpoint) []protocol.AuthenticatedMapUpdate {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	updates := m.cloneMapUpdatesAfterLocked(root)
+	if err := m.attachMarkerInclusionsLocked(updates, logCheckpoint); err != nil {
+		return nil
+	}
+	return updates
+}
+
+func (m *Manager) attachMarkerInclusionsLocked(updates []protocol.AuthenticatedMapUpdate, logCheckpoint protocol.Checkpoint) error {
+	if logCheckpoint.Size == 0 {
+		return nil
+	}
+	want, err := checkpointAt(m.deliveryTree, logCheckpoint.Size)
+	if err != nil {
+		return err
+	}
+	if want != logCheckpoint {
+		return errors.New("log checkpoint is not on the retained delivery-log branch")
+	}
+	for i := range updates {
+		marker := updates[i].KeyHistory.Event.Event.RotationMarker
+		if marker == nil || logCheckpoint.Size <= marker.Index {
+			continue
+		}
+		if updates[i].RotationRecord == nil {
+			return fmt.Errorf("rotation at marker %d is missing its log record", marker.Index)
+		}
+		inclusion, err := m.deliveryTree.InclusionProof(marker.Index, logCheckpoint.Size)
+		if err != nil {
+			return fmt.Errorf("construct eager marker inclusion for index %d: %w", marker.Index, err)
+		}
+		checkpoint := logCheckpoint
+		updates[i].MarkerLogCheckpoint = &checkpoint
+		updates[i].MarkerLogInclusion = protocol.EncodeProof(inclusion)
+	}
+	return nil
 }
 
 // DeliveryLogUpdate returns a compact consistency proof from checkpoint to the
@@ -496,6 +572,7 @@ func deliveryLogUpdate(tree *merklelog.Tree, records []protocol.DeliveryRecord, 
 		return protocol.DeliveryLogUpdate{}, fmt.Errorf("construct delivery-log consistency proof: %w", err)
 	}
 	update := protocol.DeliveryLogUpdate{
+		From:             previous,
 		Checkpoint:       current,
 		ConsistencyProof: protocol.EncodeProof(consistency),
 		Entries:          make([]protocol.DeliveryLogEntryProof, 0, len(indexes)),
@@ -526,14 +603,7 @@ func (m *Manager) Compromised() *CompromisedManager {
 }
 
 func (m *Manager) appendEnrollmentLocked(enrollment protocol.EnrollmentPackage) (protocol.AuthenticatedMapUpdate, error) {
-	state := protocol.ContinuityState{
-		Protocol:            protocol.ContinuityStateProtocol,
-		TenantID:            m.tenantID,
-		IdentityID:          enrollment.IdentityID,
-		Generation:          0,
-		ContinuityPublicKey: append([]byte(nil), enrollment.ContinuityPublicKey...),
-	}
-	stateDigest, err := state.Digest()
+	_, stateDigest, err := protocol.EnrolledContinuityState(m.tenantID, enrollment.IdentityID, enrollment.ContinuityPublicKey)
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, fmt.Errorf("digest enrolled state: %w", err)
 	}
@@ -555,7 +625,7 @@ func (m *Manager) appendEnrollmentLocked(enrollment protocol.EnrollmentPackage) 
 // production store would use an equivalent transaction or ordered durable
 // protocol.
 func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (RotationCommit, error) {
-	_, stateDigest, err := successorState(rotation)
+	stateDigest, err := rotationStateDigest(rotation)
 	if err != nil {
 		return RotationCommit{}, err
 	}
@@ -563,7 +633,7 @@ func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (Rotat
 	if err != nil {
 		return RotationCommit{}, fmt.Errorf("build rotation marker: %w", err)
 	}
-	prepared, err := m.prepareKeyHistoryUpdateLocked(rotation.Intent.IdentityID, stateDigest, protocol.KeyEvent{
+	prepared, err := m.prepareKeyHistoryUpdateLocked(rotation.Authorization.IdentityID, stateDigest, protocol.KeyEvent{
 		Kind:           protocol.KeyEventRotation,
 		Rotation:       cloneRotation(&rotation),
 		RotationMarker: pointerTo(marker.Reference()),
@@ -579,25 +649,22 @@ func (m *Manager) appendRotationLocked(rotation protocol.RotationPackage) (Rotat
 	if err := m.appendDeliveryRecordLocked(marker); err != nil {
 		return RotationCommit{}, fmt.Errorf("append rotation marker: %w", err)
 	}
-	if err := m.commitKeyHistoryLocked(rotation.Intent.IdentityID, prepared); err != nil {
+	if err := m.commitKeyHistoryLocked(rotation.Authorization.IdentityID, prepared); err != nil {
 		return RotationCommit{}, err
 	}
 	return RotationCommit{Marker: cloneDeliveryRecord(marker), MapUpdate: cloneAuthenticatedMapUpdate(prepared.update)}, nil
 }
 
 func (m *Manager) newRotationMarkerLocked(rotation protocol.RotationPackage) (protocol.DeliveryRecord, error) {
-	return protocol.NewDeliveryRecord(m.deliveryTree.Size(), protocol.DeliveryLogEvent{
-		Kind:     protocol.DeliveryLogEventRotation,
-		Rotation: cloneRotation(&rotation),
-	})
+	return protocol.NewRotationLogRecord(m.deliveryTree.Size(), cloneRotationValue(rotation))
 }
 
 func (m *Manager) appendRotationMapUpdateLocked(rotation protocol.RotationPackage, marker protocol.DeliveryLogReference) (protocol.AuthenticatedMapUpdate, error) {
-	_, stateDigest, err := successorState(rotation)
+	stateDigest, err := rotationStateDigest(rotation)
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	prepared, err := m.prepareKeyHistoryUpdateLocked(rotation.Intent.IdentityID, stateDigest, protocol.KeyEvent{
+	prepared, err := m.prepareKeyHistoryUpdateLocked(rotation.Authorization.IdentityID, stateDigest, protocol.KeyEvent{
 		Kind:           protocol.KeyEventRotation,
 		Rotation:       cloneRotation(&rotation),
 		RotationMarker: pointerTo(marker),
@@ -605,7 +672,7 @@ func (m *Manager) appendRotationMapUpdateLocked(rotation protocol.RotationPackag
 	if err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
-	if err := m.commitKeyHistoryLocked(rotation.Intent.IdentityID, prepared); err != nil {
+	if err := m.commitKeyHistoryLocked(rotation.Authorization.IdentityID, prepared); err != nil {
 		return protocol.AuthenticatedMapUpdate{}, err
 	}
 	return cloneAuthenticatedMapUpdate(prepared.update), nil
@@ -780,10 +847,7 @@ func (m *Manager) commitKeyHistoryLocked(identityID string, prepared preparedKey
 func (m *Manager) appendDelivery(delivery protocol.SignedDelivery) (protocol.DeliveryRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	record, err := protocol.NewDeliveryRecord(m.deliveryTree.Size(), protocol.DeliveryLogEvent{
-		Kind:     protocol.DeliveryLogEventDelivery,
-		Delivery: pointerTo(cloneDelivery(delivery)),
-	})
+	record, err := protocol.NewDeliveryLogRecord(m.deliveryTree.Size(), delivery)
 	if err != nil {
 		return protocol.DeliveryRecord{}, fmt.Errorf("append delivery record: %w", err)
 	}
@@ -894,10 +958,7 @@ func (c *CompromisedManager) ForgeDeliveryAt(checkpoint protocol.Checkpoint, del
 		}
 		forkRecords = append(forkRecords, cloneDeliveryRecord(retained))
 	}
-	record, err := protocol.NewDeliveryRecord(checkpoint.Size, protocol.DeliveryLogEvent{
-		Kind:     protocol.DeliveryLogEventDelivery,
-		Delivery: pointerTo(cloneDelivery(delivery)),
-	})
+	record, err := protocol.NewDeliveryLogRecord(checkpoint.Size, delivery)
 	if err != nil {
 		panic(err)
 	}
@@ -919,13 +980,7 @@ func (c *CompromisedManager) ForgeDeliveryAt(checkpoint protocol.Checkpoint, del
 // ForgeEnrollmentFromEmptyMap constructs a structurally valid authenticated-
 // map branch from the empty root without changing the manager's main branch.
 func (c *CompromisedManager) ForgeEnrollmentFromEmptyMap(enrollment protocol.EnrollmentPackage) protocol.AuthenticatedMapUpdate {
-	state := protocol.ContinuityState{
-		Protocol:            protocol.ContinuityStateProtocol,
-		TenantID:            enrollment.Intent.TenantID,
-		IdentityID:          enrollment.IdentityID,
-		ContinuityPublicKey: append([]byte(nil), enrollment.ContinuityPublicKey...),
-	}
-	stateDigest, err := state.Digest()
+	_, stateDigest, err := protocol.EnrolledContinuityState(enrollment.Intent.TenantID, enrollment.IdentityID, enrollment.ContinuityPublicKey)
 	if err != nil {
 		panic(err)
 	}
@@ -943,20 +998,37 @@ func (c *CompromisedManager) ForgeEnrollmentFromEmptyMap(enrollment protocol.Enr
 	return mapUpdate
 }
 
-func successorState(rotation protocol.RotationPackage) (protocol.ContinuityState, string, error) {
-	state := protocol.ContinuityState{
-		Protocol:            protocol.ContinuityStateProtocol,
-		TenantID:            rotation.Intent.TenantID,
-		IdentityID:          rotation.Intent.IdentityID,
-		Generation:          rotation.Intent.NewGeneration,
-		ContinuityPublicKey: append([]byte(nil), rotation.NewContinuityPublicKey...),
-		PreviousStateDigest: rotation.Intent.PreviousStateDigest,
+func rotationStateDigest(rotation protocol.RotationPackage) (string, error) {
+	_, digest, err := protocol.ReconstructSuccessorState(rotation)
+	if err == nil {
+		return digest, nil
 	}
-	digest, err := state.Digest()
-	if err != nil {
-		return protocol.ContinuityState{}, "", fmt.Errorf("digest successor state: %w", err)
+	if rotation.Authorization.NewStateDigest == "" {
+		return "", err
 	}
-	return state, digest, nil
+	// A compromised manager may still structurally commit a package whose
+	// successor digest does not match the signed authorization.
+	return rotation.Authorization.NewStateDigest, nil
+}
+
+func (m *Manager) currentPublicKeyLocked(identityID string) ([]byte, error) {
+	records := m.historyRecords[identityID]
+	if len(records) == 0 {
+		return nil, fmt.Errorf("identity %q has no key events", identityID)
+	}
+	return protocol.ContinuityPublicKeyFromEvent(records[len(records)-1].Event)
+}
+
+func (m *Manager) publicKeyForStateLocked(identityID, stateDigest string) ([]byte, error) {
+	sequences, ok := m.stateEvents[identityID]
+	if !ok {
+		return nil, fmt.Errorf("identity %q has no key events", identityID)
+	}
+	sequence, ok := sequences[stateDigest]
+	if !ok || sequence >= uint64(len(m.historyRecords[identityID])) {
+		return nil, fmt.Errorf("signing state %q is not present for identity %q", stateDigest, identityID)
+	}
+	return protocol.ContinuityPublicKeyFromEvent(m.historyRecords[identityID][sequence].Event)
 }
 
 func checkpointAt(tree *merklelog.Tree, size uint64) (protocol.Checkpoint, error) {
@@ -981,11 +1053,16 @@ func cloneRotation(in *protocol.RotationPackage) *protocol.RotationPackage {
 	if in == nil {
 		return nil
 	}
-	out := *in
+	out := cloneRotationValue(*in)
+	return &out
+}
+
+func cloneRotationValue(in protocol.RotationPackage) protocol.RotationPackage {
+	out := in
 	out.NewContinuityPublicKey = append([]byte(nil), in.NewContinuityPublicKey...)
 	out.SignatureByOldKey = append([]byte(nil), in.SignatureByOldKey...)
 	out.ProofByNewKey = append([]byte(nil), in.ProofByNewKey...)
-	return &out
+	return out
 }
 
 func cloneDelivery(in protocol.SignedDelivery) protocol.SignedDelivery {
@@ -1047,16 +1124,29 @@ func cloneAuthenticatedMapUpdate(in protocol.AuthenticatedMapUpdate) protocol.Au
 		record := cloneDeliveryRecord(*in.RotationRecord)
 		out.RotationRecord = &record
 	}
+	if in.MarkerLogCheckpoint != nil {
+		checkpoint := *in.MarkerLogCheckpoint
+		out.MarkerLogCheckpoint = &checkpoint
+	}
+	out.MarkerLogInclusion = append([]string(nil), in.MarkerLogInclusion...)
 	return out
 }
 
 func cloneDeliveryRecord(in protocol.DeliveryRecord) protocol.DeliveryRecord {
 	out := in
-	if in.Event.Delivery != nil {
-		delivery := cloneDelivery(*in.Event.Delivery)
-		out.Event.Delivery = &delivery
+	if in.Event.Commitment != nil {
+		commitment := *in.Event.Commitment
+		out.Event.Commitment = &commitment
 	}
-	out.Event.Rotation = cloneRotation(in.Event.Rotation)
+	if in.Event.Marker != nil {
+		marker := *in.Event.Marker
+		out.Event.Marker = &marker
+	}
+	if in.Delivery != nil {
+		delivery := cloneDelivery(*in.Delivery)
+		out.Delivery = &delivery
+	}
+	out.Rotation = cloneRotation(in.Rotation)
 	return out
 }
 

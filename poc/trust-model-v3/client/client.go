@@ -24,6 +24,7 @@ type Config struct {
 
 type Delivery struct {
 	TargetID      string
+	DeliveryID    string
 	FulfillmentID string
 	Generation    uint64
 	Action        string
@@ -95,14 +96,7 @@ func (c *Client) Enroll(ctx context.Context, loginHint string) (protocol.Enrollm
 	}
 
 	identityID := protocol.IdentityID(c.config.TenantID, identity.Issuer, identity.Subject)
-	state := protocol.ContinuityState{
-		Protocol:            protocol.ContinuityStateProtocol,
-		TenantID:            c.config.TenantID,
-		IdentityID:          identityID,
-		Generation:          0,
-		ContinuityPublicKey: append([]byte(nil), c.publicKey...),
-	}
-	stateDigest, err := state.Digest()
+	state, stateDigest, err := protocol.EnrolledContinuityState(c.config.TenantID, identityID, c.publicKey)
 	if err != nil {
 		return protocol.EnrollmentPackage{}, fmt.Errorf("digest continuity state: %w", err)
 	}
@@ -131,29 +125,17 @@ func (c *Client) PrepareRotation() (protocol.RotationPackage, *Client, error) {
 	if err != nil {
 		return protocol.RotationPackage{}, nil, fmt.Errorf("generate successor continuity key: %w", err)
 	}
-	intent := protocol.RotationIntent{
-		Protocol:               protocol.RotationProtocol,
-		TenantID:               c.config.TenantID,
-		IdentityID:             c.identityID,
-		PreviousStateDigest:    c.stateDigest,
-		NewGeneration:          c.state.Generation + 1,
-		NewContinuityKeyDigest: protocol.DigestBytes(newPublicKey),
+	newState, authorization, err := protocol.SuccessorContinuityState(c.state, c.stateDigest, newPublicKey)
+	if err != nil {
+		return protocol.RotationPackage{}, nil, fmt.Errorf("construct successor state: %w", err)
 	}
-	oldSignature, err := protocol.Sign(c.privateKey, "continuity-rotation-old-key/v1", intent)
+	oldSignature, err := protocol.Sign(c.privateKey, "continuity-rotation-old-key/v1", authorization)
 	if err != nil {
 		return protocol.RotationPackage{}, nil, fmt.Errorf("authorize rotation: %w", err)
 	}
-	newProof, err := protocol.Sign(newPrivateKey, "continuity-rotation-new-key/v1", intent)
+	newProof, err := protocol.Sign(newPrivateKey, "continuity-rotation-new-key/v1", authorization)
 	if err != nil {
 		return protocol.RotationPackage{}, nil, fmt.Errorf("prove successor key possession: %w", err)
-	}
-	newState := protocol.ContinuityState{
-		Protocol:            protocol.ContinuityStateProtocol,
-		TenantID:            c.config.TenantID,
-		IdentityID:          c.identityID,
-		Generation:          intent.NewGeneration,
-		ContinuityPublicKey: append([]byte(nil), newPublicKey...),
-		PreviousStateDigest: c.stateDigest,
 	}
 	newStateDigest, err := newState.Digest()
 	if err != nil {
@@ -170,7 +152,8 @@ func (c *Client) PrepareRotation() (protocol.RotationPackage, *Client, error) {
 		stateDigest: newStateDigest,
 	}
 	return protocol.RotationPackage{
-		Intent:                 intent,
+		Authorization:          authorization,
+		NewGeneration:          newState.Generation,
 		NewContinuityPublicKey: append([]byte(nil), newPublicKey...),
 		SignatureByOldKey:      oldSignature,
 		ProofByNewKey:          newProof,
@@ -191,6 +174,14 @@ func (c *Client) SignDeliveryAs(identityID, stateDigest string, delivery Deliver
 	if delivery.TargetID == "" || delivery.FulfillmentID == "" || delivery.Action == "" {
 		return protocol.SignedDelivery{}, errors.New("target, fulfillment, and action are required")
 	}
+	deliveryID := delivery.DeliveryID
+	if deliveryID == "" {
+		token, err := randomToken()
+		if err != nil {
+			return protocol.SignedDelivery{}, fmt.Errorf("create delivery ID: %w", err)
+		}
+		deliveryID = token
+	}
 	attestation := protocol.ContentAttestation{
 		Protocol: protocol.DeliveryProtocol,
 		TenantID: c.config.TenantID,
@@ -199,6 +190,7 @@ func (c *Client) SignDeliveryAs(identityID, stateDigest string, delivery Deliver
 		IdentityID:         identityID,
 		SigningStateDigest: stateDigest,
 		TargetID:           delivery.TargetID,
+		DeliveryID:         deliveryID,
 		FulfillmentID:      delivery.FulfillmentID,
 		Generation:         delivery.Generation,
 		Action:             delivery.Action,
@@ -217,6 +209,10 @@ func (c *Client) SignDeliveryAs(identityID, stateDigest string, delivery Deliver
 
 func (c *Client) IdentityID() string {
 	return c.identityID
+}
+
+func (c *Client) ContinuityState() protocol.ContinuityState {
+	return c.state
 }
 
 func (c *Client) ContinuityStateDigest() string {

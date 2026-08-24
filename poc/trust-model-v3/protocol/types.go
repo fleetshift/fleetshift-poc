@@ -20,12 +20,17 @@ import (
 )
 
 const (
-	EnrollmentProtocol      = "fleetshift.dev/trust-v3/enrollment/v1"
+	// EnrollmentProtocol is the design's user-key-enrollment-v1 identifier.
+	EnrollmentProtocol      = "user-key-enrollment-v1"
 	ContinuityStateProtocol = "fleetshift.dev/trust-v3/continuity-state/v1"
 	RotationProtocol        = "fleetshift.dev/trust-v3/rotation/v1"
 	DeliveryProtocol        = "fleetshift.dev/trust-v3/content-delivery/v1"
 	KeyHistoryHeadProtocol  = "fleetshift.dev/trust-v3/key-history-head/v1"
 	KeyHistoryMapProtocol   = "fleetshift.dev/trust-v3/key-history-map/v1"
+	TrustManifestProtocol   = "fleetshift.dev/trust-v3/trust-manifest/v1"
+	IdentityProtocol        = "fleetshift.dev/trust-v3/identity/v1"
+
+	TrustUpdatePolicyProvisioned = "provisioned"
 
 	KeyEventEnrollment = "enrollment"
 	KeyEventRotation   = "rotation"
@@ -66,6 +71,21 @@ func NewCheckpoint(size uint64, root []byte) (Checkpoint, error) {
 	return checkpoint, nil
 }
 
+// TenantTrustManifest is the provisioned tenant trust root. This POC uses a
+// bootstrap-only manifest (TrustUpdatePolicyProvisioned); signed manifest
+// rotation and TUF remain future work.
+type TenantTrustManifest struct {
+	Protocol                      string   `json:"protocol"`
+	TenantID                      string   `json:"tenant_id"`
+	Version                       uint64   `json:"version"`
+	PreviousManifestDigest        string   `json:"previous_manifest_digest,omitempty"`
+	TrustUpdatePolicy             string   `json:"trust_update_policy"`
+	OIDCIssuer                    string   `json:"oidc_issuer"`
+	EnrollmentClientID            string   `json:"enrollment_client_id"`
+	PermittedIDTokenAlgorithms    []string `json:"permitted_id_token_algorithms,omitempty"`
+	PermittedContinuityAlgorithms []string `json:"permitted_continuity_algorithms,omitempty"`
+}
+
 type EnrollmentIntent struct {
 	Protocol            string `json:"protocol"`
 	TenantID            string `json:"tenant_id"`
@@ -83,33 +103,43 @@ type EnrollmentPackage struct {
 	IDToken             string           `json:"id_token"`
 }
 
+// ContinuityState is the design's per-generation identity state. The public
+// key is carried here because this POC has no separate content-addressed
+// evidence store; ContinuityKeyDigest is the committed key binding.
 type ContinuityState struct {
-	Protocol            string `json:"protocol"`
-	TenantID            string `json:"tenant_id"`
-	IdentityID          string `json:"identity_id"`
-	Generation          uint64 `json:"generation"`
-	ContinuityPublicKey []byte `json:"continuity_public_key"`
-	PreviousStateDigest string `json:"previous_state_digest,omitempty"`
+	Protocol             string `json:"protocol"`
+	TenantID             string `json:"tenant_id"`
+	IdentityID           string `json:"identity_id"`
+	Generation           uint64 `json:"generation"`
+	ContinuityPublicKey  []byte `json:"continuity_public_key"`
+	ContinuityKeyDigest  string `json:"continuity_key_digest"`
+	RecoveryPolicyDigest string `json:"recovery_policy_digest,omitempty"`
+	PreviousStateDigest  string `json:"previous_state_digest,omitempty"`
+	TransitionDigest     string `json:"transition_digest,omitempty"`
 }
 
 func (s ContinuityState) Digest() (string, error) {
 	return ObjectDigest(s)
 }
 
-type RotationIntent struct {
-	Protocol               string `json:"protocol"`
-	TenantID               string `json:"tenant_id"`
-	IdentityID             string `json:"identity_id"`
-	PreviousStateDigest    string `json:"previous_state_digest"`
-	NewGeneration          uint64 `json:"new_generation"`
-	NewContinuityKeyDigest string `json:"new_continuity_key_digest"`
+// RotationAuthorization is the cutoff-free signed object: the old key binds
+// the predecessor and successor state digests, and the new key proves
+// possession of the same authorization. Neither signature covers a manager
+// checkpoint.
+type RotationAuthorization struct {
+	Protocol            string `json:"protocol"`
+	TenantID            string `json:"tenant_id"`
+	IdentityID          string `json:"identity_id"`
+	PreviousStateDigest string `json:"previous_state_digest"`
+	NewStateDigest      string `json:"new_state_digest"`
 }
 
 type RotationPackage struct {
-	Intent                 RotationIntent `json:"intent"`
-	NewContinuityPublicKey []byte         `json:"new_continuity_public_key"`
-	SignatureByOldKey      []byte         `json:"signature_by_old_key"`
-	ProofByNewKey          []byte         `json:"proof_by_new_key"`
+	Authorization          RotationAuthorization `json:"authorization"`
+	NewGeneration          uint64                `json:"new_generation"`
+	NewContinuityPublicKey []byte                `json:"new_continuity_public_key"`
+	SignatureByOldKey      []byte                `json:"signature_by_old_key"`
+	ProofByNewKey          []byte                `json:"proof_by_new_key"`
 }
 
 type ContentAttestation struct {
@@ -118,6 +148,7 @@ type ContentAttestation struct {
 	IdentityID         string `json:"identity_id"`
 	SigningStateDigest string `json:"signing_state_digest"`
 	TargetID           string `json:"target_id"`
+	DeliveryID         string `json:"delivery_id"`
 	FulfillmentID      string `json:"fulfillment_id"`
 	Generation         uint64 `json:"generation"`
 	Action             string `json:"action"`
@@ -130,6 +161,27 @@ type SignedDelivery struct {
 	Signature   []byte             `json:"signature"`
 }
 
+// DeliveryCommitment is the compact delivery-log leaf for an infrastructure
+// delivery. The signed package is support material, not part of the leaf.
+type DeliveryCommitment struct {
+	TenantID              string `json:"tenant_id"`
+	DeliveryID            string `json:"delivery_id"`
+	FulfillmentID         string `json:"fulfillment_id"`
+	TargetID              string `json:"target_id"`
+	Generation            uint64 `json:"generation"`
+	Action                string `json:"action"`
+	SigningIdentityID     string `json:"signing_identity_id"`
+	SigningStateDigest    string `json:"signing_state_digest"`
+	DeliveryPackageDigest string `json:"delivery_package_digest"`
+}
+
+// KeyRotationMarker is the compact delivery-log leaf for a key transition.
+type KeyRotationMarker struct {
+	TenantID                    string `json:"tenant_id"`
+	IdentityID                  string `json:"identity_id"`
+	RotationAuthorizationDigest string `json:"rotation_authorization_digest"`
+}
+
 // DeliveryLogReference binds a key-history event to one exact record in the
 // tenant delivery log. Index alone is insufficient because it would allow a
 // compromised log operator to reinterpret the same position on another fork.
@@ -140,7 +192,7 @@ type DeliveryLogReference struct {
 
 // KeyEvent is one identity-local key-history event. RotationMarker is assigned
 // by the delivery-log sequencer and is therefore deliberately outside the
-// client-signed RotationIntent.
+// client-signed RotationAuthorization.
 type KeyEvent struct {
 	Kind           string                `json:"kind"`
 	Enrollment     *EnrollmentPackage    `json:"enrollment,omitempty"`
@@ -207,14 +259,16 @@ type KeyHistoryUpdate struct {
 // against the verifier's retained root. Reusing that exact path with the new
 // key-history head produces Root and proves that no other leaf changed.
 type AuthenticatedMapUpdate struct {
-	PreviousRoot   string                  `json:"previous_root"`
-	Root           string                  `json:"root"`
-	PreviousHead   *KeyHistoryHead         `json:"previous_head,omitempty"`
-	KeyHistory     KeyHistoryUpdate        `json:"key_history"`
-	SiblingBitmap  []byte                  `json:"sibling_bitmap"`
-	SiblingHashes  []string                `json:"sibling_hashes,omitempty"`
-	Predecessor    *KeyEventInclusionProof `json:"predecessor,omitempty"`
-	RotationRecord *DeliveryRecord         `json:"rotation_record,omitempty"`
+	PreviousRoot        string                  `json:"previous_root"`
+	Root                string                  `json:"root"`
+	PreviousHead        *KeyHistoryHead         `json:"previous_head,omitempty"`
+	KeyHistory          KeyHistoryUpdate        `json:"key_history"`
+	SiblingBitmap       []byte                  `json:"sibling_bitmap"`
+	SiblingHashes       []string                `json:"sibling_hashes,omitempty"`
+	Predecessor         *KeyEventInclusionProof `json:"predecessor,omitempty"`
+	RotationRecord      *DeliveryRecord         `json:"rotation_record,omitempty"`
+	MarkerLogCheckpoint *Checkpoint             `json:"marker_log_checkpoint,omitempty"`
+	MarkerLogInclusion  []string                `json:"marker_log_inclusion,omitempty"`
 }
 
 // KeyHistoryMapProof proves that Head is the current value for one identity
@@ -236,15 +290,20 @@ type IdentityTrustProof struct {
 }
 
 type DeliveryLogEvent struct {
-	Kind     string           `json:"kind"`
-	Delivery *SignedDelivery  `json:"delivery,omitempty"`
-	Rotation *RotationPackage `json:"rotation,omitempty"`
+	Kind       string              `json:"kind"`
+	Commitment *DeliveryCommitment `json:"commitment,omitempty"`
+	Marker     *KeyRotationMarker  `json:"marker,omitempty"`
 }
 
+// DeliveryRecord is one delivery-log leaf plus the support preimage needed to
+// recompute that leaf. Hash covers only the compact Event; Delivery and
+// Rotation are not part of the Merkle leaf.
 type DeliveryRecord struct {
-	Index uint64           `json:"index"`
-	Event DeliveryLogEvent `json:"event"`
-	Hash  string           `json:"hash"`
+	Index    uint64           `json:"index"`
+	Event    DeliveryLogEvent `json:"event"`
+	Hash     string           `json:"hash"`
+	Delivery *SignedDelivery  `json:"delivery,omitempty"`
+	Rotation *RotationPackage `json:"rotation,omitempty"`
 }
 
 // DeliveryLogEntryProof discloses one selected log record and proves its
@@ -256,23 +315,25 @@ type DeliveryLogEntryProof struct {
 
 // DeliveryLogUpdate proves an append-only transition from a verifier's
 // retained checkpoint and may disclose any selected leaves. Unrelated tenant
-// leaves are not sent to that verifier.
+// leaves are not sent to that verifier. From is the checkpoint the consistency
+// proof was constructed from; it is transport metadata so a manager using a
+// stale cached checkpoint can be distinguished from a log fork.
 type DeliveryLogUpdate struct {
+	From             Checkpoint              `json:"from"`
 	Checkpoint       Checkpoint              `json:"checkpoint"`
 	ConsistencyProof []string                `json:"consistency_proof"`
 	Entries          []DeliveryLogEntryProof `json:"entries,omitempty"`
 }
 
-// DeliveryProof contains the two independent proof axes needed for a
-// delivery: tenant-log position and identity/key provenance.
+// DeliveryProof contains the evidence a targeted agent needs for one push:
+// map catch-up from its retained root, tenant-log position, and identity/key
+// provenance.
 type DeliveryProof struct {
-	Log      DeliveryLogUpdate  `json:"log"`
-	Identity IdentityTrustProof `json:"identity"`
+	MapUpdates []AuthenticatedMapUpdate `json:"map_updates,omitempty"`
+	Log        DeliveryLogUpdate        `json:"log"`
+	Identity   IdentityTrustProof       `json:"identity"`
 }
 
-// commentary: That this includes index makes the log pre-ordered.
-// This makes it difficult to reuse Tessera, if we want to, and may not be necessary.
-// Though it looks like Tessera may be not a good fit for other reasons.
 func NewDeliveryRecord(index uint64, event DeliveryLogEvent) (DeliveryRecord, error) {
 	record := DeliveryRecord{
 		Index: index,
@@ -326,12 +387,12 @@ func VerifyDeliveryLogUpdate(previous Checkpoint, update DeliveryLogUpdate) erro
 	if err != nil {
 		return fmt.Errorf("%w: consistency proof: %v", ErrInvalidRecord, err)
 	}
-	switch {
-	case previous.Size == 0:
+	switch previous.Size {
+	case 0:
 		if len(consistency) != 0 {
 			return fmt.Errorf("%w: consistency proof from empty tree must be empty", ErrInvalidRecord)
 		}
-	case previous.Size == update.Checkpoint.Size:
+	case update.Checkpoint.Size:
 		if len(consistency) != 0 || !bytes.Equal(previousRoot, root) {
 			return fmt.Errorf("%w: equal-size checkpoint changed root or supplied a proof", ErrInvalidRecord)
 		}
@@ -1043,7 +1104,7 @@ func IdentityID(tenantID, issuer, subject string) string {
 		Issuer   string `json:"issuer"`
 		Subject  string `json:"subject"`
 	}{
-		Protocol: "fleetshift.dev/trust-v3/identity/v1",
+		Protocol: IdentityProtocol,
 		TenantID: tenantID,
 		Issuer:   issuer,
 		Subject:  subject,
@@ -1102,9 +1163,8 @@ func signaturePayload(purpose string, value any) ([]byte, error) {
 func deliveryRecordMaterial(record DeliveryRecord) any {
 	return struct {
 		Protocol string           `json:"protocol"`
-		Index    uint64           `json:"index"`
 		Event    DeliveryLogEvent `json:"event"`
-	}{"fleetshift.dev/trust-v3/delivery-log-leaf/v1", record.Index, record.Event}
+	}{"fleetshift.dev/trust-v3/delivery-log-leaf/v1", record.Event}
 }
 
 func keyEventRecordMaterial(record KeyEventRecord) any {

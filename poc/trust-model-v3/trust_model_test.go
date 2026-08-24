@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,6 +119,58 @@ func TestManagerRetryRecoversWhenAgentAppliedButAcknowledgementWasLost(t *testin
 	}
 }
 
+func TestRejectedDeliveryAdvancesCheckpointAndRetryRecoversWithoutApplying(t *testing.T) {
+	s := newEnrolledScenario(t)
+	managerBefore, ok := s.manager.AgentCheckpoint(testTarget)
+	if !ok {
+		t.Fatal("resource manager did not retain the registered-agent checkpoint")
+	}
+
+	attacker, err := client.New(client.Config{TenantID: testTenant})
+	if err != nil {
+		t.Fatalf("new attacker client: %v", err)
+	}
+	forged := mustSignDeliveryAs(t, attacker, s.controlledClient.IdentityID(), s.controlledClient.ContinuityStateDigest(), "rejected-after-log", 1, []byte(`{"owner":"attacker"}`))
+	record := s.manager.Compromised().AppendDelivery(forged)
+
+	if err := s.manager.RetryDelivery(record.Index); !errors.Is(err, deliveryagent.ErrSignature) {
+		t.Fatalf("push forged delivery error = %v, want ErrSignature", err)
+	}
+	if _, applied := s.agent.Applied("rejected-after-log"); applied {
+		t.Fatal("agent applied a delivery it rejected after advancing the log")
+	}
+	if got := s.agent.DeliveryCheckpoint(); got.Size != record.Index+1 {
+		t.Fatalf("agent checkpoint size = %d, want %d after rejecting the included delivery", got.Size, record.Index+1)
+	}
+	if got, _ := s.manager.AgentCheckpoint(testTarget); got != managerBefore {
+		t.Fatalf("manager advanced checkpoint on a rejected delivery: got %#v, want %#v", got, managerBefore)
+	}
+	if got := s.agent.StaleCheckpointResponses(); got != 0 {
+		t.Fatalf("agent stale-checkpoint responses after first rejection = %d, want 0", got)
+	}
+
+	if err := s.manager.RetryDelivery(record.Index); !errors.Is(err, deliveryagent.ErrSignature) {
+		t.Fatalf("retry forged delivery error = %v, want ErrSignature", err)
+	}
+	if _, applied := s.agent.Applied("rejected-after-log"); applied {
+		t.Fatal("retry applied a delivery that remains semantically invalid")
+	}
+	if got, want := s.manager.AgentCheckpoint(testTarget); !want || got != s.agent.DeliveryCheckpoint() {
+		t.Fatalf("manager checkpoint after retry = %#v, %t; want agent checkpoint %#v", got, want, s.agent.DeliveryCheckpoint())
+	}
+	if got, want := s.agent.StaleCheckpointResponses(), uint64(1); got != want {
+		t.Fatalf("agent stale-checkpoint responses = %d, want %d", got, want)
+	}
+
+	signed := mustSignDelivery(t, s.controlledClient, "after-rejected-log", 1, []byte(`{"owner":"alice"}`))
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), signed); err != nil {
+		t.Fatalf("submit valid delivery after checkpoint recovery: %v", err)
+	}
+	if _, ok := s.agent.Applied("after-rejected-log"); !ok {
+		t.Fatal("agent did not apply the valid delivery after recovering the rejected-log checkpoint")
+	}
+}
+
 func TestDeliveryLogCatchUpSelectivelyDisclosesTargetedRecord(t *testing.T) {
 	s := newEnrolledScenario(t)
 
@@ -156,7 +209,7 @@ func TestDeliveryLogCatchUpSelectivelyDisclosesTargetedRecord(t *testing.T) {
 	if !ok {
 		t.Fatal("agent did not retain the manager delivery-attempt summary")
 	}
-	if got, want := attempt.EntryIndexes, []uint64{selected.Index}; !equalIndexes(got, want) {
+	if got, want := attempt.EntryIndexes, []uint64{selected.Index}; !slices.Equal(got, want) {
 		t.Fatalf("disclosed delivery-log indexes = %v, want %v", got, want)
 	}
 	if got := attempt.ConsistencyProofHashes; got == 0 || got > 7 {
@@ -247,8 +300,7 @@ func TestExceptionCapacityBlocksFurtherMapAdvancement(t *testing.T) {
 	agent, err := deliveryagent.New(deliveryagent.Config{
 		TenantID:          testTenant,
 		TargetID:          testTarget,
-		OIDCIssuer:        s.provider.Issuer(),
-		OIDCClientID:      testOIDCClient,
+		TrustManifest:     protocol.ProvisionedTrustManifest(testTenant, s.provider.Issuer(), testOIDCClient),
 		HTTPClient:        s.provider.HTTPClient(),
 		ExceptionCapacity: 1,
 	})
@@ -339,8 +391,7 @@ func TestExceptionalIdentityDescendantsReuseOneExceptionSlot(t *testing.T) {
 	agent, err := deliveryagent.New(deliveryagent.Config{
 		TenantID:          testTenant,
 		TargetID:          testTarget,
-		OIDCIssuer:        s.provider.Issuer(),
-		OIDCClientID:      testOIDCClient,
+		TrustManifest:     protocol.ProvisionedTrustManifest(testTenant, s.provider.Issuer(), testOIDCClient),
 		HTTPClient:        s.provider.HTTPClient(),
 		ExceptionCapacity: 1,
 	})
@@ -395,13 +446,7 @@ func TestExceptionalEnrollmentCannotAuthorizeDelivery(t *testing.T) {
 	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
 		t.Fatalf("register delivery agent: %v", err)
 	}
-	attackerState := protocol.ContinuityState{
-		Protocol:            protocol.ContinuityStateProtocol,
-		TenantID:            testTenant,
-		IdentityID:          enrollment.IdentityID,
-		ContinuityPublicKey: attacker.ContinuityPublicKey(),
-	}
-	attackerStateDigest, err := attackerState.Digest()
+	_, attackerStateDigest, err := protocol.EnrolledContinuityState(testTenant, enrollment.IdentityID, attacker.ContinuityPublicKey())
 	if err != nil {
 		t.Fatalf("digest attacker continuity state: %v", err)
 	}
@@ -1087,24 +1132,21 @@ func TestCompromisedResourceManagerCannotFabricateRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate attacker key: %v", err)
 	}
-	intent := protocol.RotationIntent{
-		Protocol:               protocol.RotationProtocol,
-		TenantID:               testTenant,
-		IdentityID:             s.controlledClient.IdentityID(),
-		PreviousStateDigest:    s.controlledClient.ContinuityStateDigest(),
-		NewGeneration:          1,
-		NewContinuityKeyDigest: protocol.DigestBytes(attackerPublicKey),
+	_, authorization, err := protocol.SuccessorContinuityState(s.controlledClient.ContinuityState(), s.controlledClient.ContinuityStateDigest(), attackerPublicKey)
+	if err != nil {
+		t.Fatalf("construct attacker successor state: %v", err)
 	}
-	oldSignature, err := protocol.Sign(attackerPrivateKey, "continuity-rotation-old-key/v1", intent)
+	oldSignature, err := protocol.Sign(attackerPrivateKey, "continuity-rotation-old-key/v1", authorization)
 	if err != nil {
 		t.Fatalf("forge old-key authorization: %v", err)
 	}
-	newProof, err := protocol.Sign(attackerPrivateKey, "continuity-rotation-new-key/v1", intent)
+	newProof, err := protocol.Sign(attackerPrivateKey, "continuity-rotation-new-key/v1", authorization)
 	if err != nil {
 		t.Fatalf("sign attacker proof of possession: %v", err)
 	}
 	s.manager.Compromised().AppendRotation(protocol.RotationPackage{
-		Intent:                 intent,
+		Authorization:          authorization,
+		NewGeneration:          1,
 		NewContinuityPublicKey: attackerPublicKey,
 		SignatureByOldKey:      oldSignature,
 		ProofByNewKey:          newProof,
@@ -1196,6 +1238,164 @@ func TestEstablishedAgentRejectsAuthenticatedMapFork(t *testing.T) {
 	}
 }
 
+func TestUnverifiableEnrollmentDoesNotBlockUnrelatedRotation(t *testing.T) {
+	s := newEnrolledScenario(t)
+	carol, err := client.New(client.Config{
+		TenantID:     testTenant,
+		Issuer:       s.provider.Issuer(),
+		OIDCClientID: testOIDCClient,
+		RedirectURI:  testRedirectURI,
+		HTTPClient:   s.provider.HTTPClient(),
+	})
+	if err != nil {
+		t.Fatalf("new carol client: %v", err)
+	}
+	carolEnrollment, err := carol.Enroll(context.Background(), "carol")
+	if err != nil {
+		t.Fatalf("enroll carol: %v", err)
+	}
+	if _, err := s.manager.SubmitEnrollment(carolEnrollment); err != nil {
+		t.Fatalf("submit carol enrollment: %v", err)
+	}
+	s.provider.Close()
+
+	rotation, rotatedClient, err := s.controlledClient.PrepareRotation()
+	if err != nil {
+		t.Fatalf("prepare unrelated rotation: %v", err)
+	}
+	commit, err := s.manager.SubmitRotation(s.controlledClient.IdentityID(), rotation)
+	if err != nil {
+		t.Fatalf("submit unrelated rotation: %v", err)
+	}
+
+	err = s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfter(s.agent.MapRoot()))
+	if !errors.Is(err, deliveryagent.ErrEnrollment) {
+		t.Fatalf("sync with unreachable IdP error = %v, want ErrEnrollment", err)
+	}
+	if got, want := s.agent.MapRoot(), commit.MapUpdate.Root; got != want {
+		t.Fatalf("map root after unverifiable enrollment = %q, want rotation root %q", got, want)
+	}
+	if got := len(s.agent.VerifierCheckpoint().Exceptions); got != 1 {
+		t.Fatalf("exceptions = %d, want 1 for unreachable enrollment", got)
+	}
+
+	signed := mustSignDelivery(t, rotatedClient, "after-unrelated-exception", 1, []byte(`{"ok":true}`))
+	if _, err := s.manager.SubmitDelivery(rotatedClient.IdentityID(), signed); err != nil {
+		t.Fatalf("unrelated identity delivery after unverifiable enrollment: %v", err)
+	}
+}
+
+func TestResourceManagerRejectsInvalidRequestSignatures(t *testing.T) {
+	s := newEnrolledScenario(t)
+
+	t.Run("enrollment proof of possession", func(t *testing.T) {
+		controlledClient, err := client.New(client.Config{
+			TenantID:     testTenant,
+			Issuer:       s.provider.Issuer(),
+			OIDCClientID: testOIDCClient,
+			RedirectURI:  testRedirectURI,
+			HTTPClient:   s.provider.HTTPClient(),
+		})
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+		enrollment, err := controlledClient.Enroll(context.Background(), "bob")
+		if err != nil {
+			t.Fatalf("enroll: %v", err)
+		}
+		enrollment.ProofOfPossession[0] ^= 0xff
+		if _, err := s.manager.SubmitEnrollment(enrollment); !errors.Is(err, resourcemanager.ErrInvalidRequestSignature) {
+			t.Fatalf("submit enrollment error = %v, want ErrInvalidRequestSignature", err)
+		}
+	})
+
+	t.Run("rotation authorization", func(t *testing.T) {
+		rotation, _, err := s.controlledClient.PrepareRotation()
+		if err != nil {
+			t.Fatalf("prepare rotation: %v", err)
+		}
+		rotation.SignatureByOldKey[0] ^= 0xff
+		if _, err := s.manager.SubmitRotation(s.controlledClient.IdentityID(), rotation); !errors.Is(err, resourcemanager.ErrInvalidRequestSignature) {
+			t.Fatalf("submit rotation error = %v, want ErrInvalidRequestSignature", err)
+		}
+	})
+
+	t.Run("delivery signature", func(t *testing.T) {
+		signed := mustSignDelivery(t, s.controlledClient, "bad-sig", 1, []byte(`{"ok":true}`))
+		signed.Signature[0] ^= 0xff
+		if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), signed); !errors.Is(err, resourcemanager.ErrInvalidRequestSignature) {
+			t.Fatalf("submit delivery error = %v, want ErrInvalidRequestSignature", err)
+		}
+	})
+}
+
+func TestDeliveryPushAdvancesLaggingMapWithoutPriorSync(t *testing.T) {
+	s := newScenario(t)
+	enrollment := mustEnroll(t, s.controlledClient)
+	if _, err := s.manager.SubmitEnrollment(enrollment); err != nil {
+		t.Fatalf("submit enrollment: %v", err)
+	}
+	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
+		t.Fatalf("register delivery agent: %v", err)
+	}
+
+	signed := mustSignDelivery(t, s.controlledClient, "bundled-map", 1, []byte(`{"source":"delivery-push"}`))
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), signed); err != nil {
+		t.Fatalf("submit delivery with bundled map updates: %v", err)
+	}
+	attempt, ok := s.agent.LastDeliveryAttempt()
+	if !ok {
+		t.Fatal("agent did not retain the delivery-attempt summary")
+	}
+	if attempt.MapUpdates == 0 {
+		t.Fatal("delivery push omitted the map-advance chain")
+	}
+	if _, ok := s.agent.Applied("bundled-map"); !ok {
+		t.Fatal("agent did not apply delivery after bundled map advancement")
+	}
+}
+
+func TestDeliverReportsLogForkNotStaleCheckpoint(t *testing.T) {
+	s := newEnrolledScenario(t)
+	oldCheckpoint := s.manager.DeliveryCheckpoint()
+
+	first := mustSignDelivery(t, s.controlledClient, "main-branch-deliver", 1, []byte(`{"branch":"main"}`))
+	if _, err := s.manager.SubmitDelivery(s.controlledClient.IdentityID(), first); err != nil {
+		t.Fatalf("submit main delivery: %v", err)
+	}
+
+	forked := mustSignDelivery(t, s.controlledClient, "fork-deliver", 1, []byte(`{"branch":"fork"}`))
+	forkRecord, forkUpdate := s.manager.Compromised().ForgeDeliveryAt(oldCheckpoint, forked)
+	if err := s.agent.Deliver(forkRecord, protocol.DeliveryProof{Log: forkUpdate}); !errors.Is(err, deliveryagent.ErrLogFork) {
+		t.Fatalf("deliver forked log error = %v, want ErrLogFork", err)
+	}
+	if got := s.agent.StaleCheckpointResponses(); got != 0 {
+		t.Fatalf("stale-checkpoint responses = %d, want 0", got)
+	}
+}
+
+func TestEagerMarkerValidationRejectsMismatchedAcceptedLogLeaf(t *testing.T) {
+	s := newEnrolledScenario(t)
+	rotation, _, err := s.controlledClient.PrepareRotation()
+	if err != nil {
+		t.Fatalf("prepare rotation: %v", err)
+	}
+	marker := s.manager.Compromised().AppendRotationMarker(rotation)
+	if err := s.agent.AdvanceDeliveryLog(mustDeliveryLogUpdate(t, s.manager, s.agent, marker.Index)); err != nil {
+		t.Fatalf("advance genuine marker: %v", err)
+	}
+
+	second, _, err := s.controlledClient.PrepareRotation()
+	if err != nil {
+		t.Fatalf("prepare second rotation: %v", err)
+	}
+	s.manager.Compromised().AppendRotationMapUpdate(second, marker.Reference())
+	err = s.agent.SyncMap(context.Background(), s.manager.MapUpdatesAfterCheckpoint(s.agent.MapRoot(), s.agent.DeliveryCheckpoint()))
+	if !errors.Is(err, deliveryagent.ErrRotation) || !strings.Contains(err.Error(), "marker") {
+		t.Fatalf("eager mismatched marker error = %v, want marker ErrRotation", err)
+	}
+}
+
 type scenario struct {
 	provider         *testoidc.Provider
 	controlledClient *client.Client
@@ -1263,11 +1463,10 @@ func newEnrolledScenarioWithAuthorizer(t *testing.T, authorizer resourcemanager.
 func newAgent(t *testing.T, s scenario) *deliveryagent.Agent {
 	t.Helper()
 	agent, err := deliveryagent.New(deliveryagent.Config{
-		TenantID:     testTenant,
-		TargetID:     testTarget,
-		OIDCIssuer:   s.provider.Issuer(),
-		OIDCClientID: testOIDCClient,
-		HTTPClient:   s.provider.HTTPClient(),
+		TenantID:      testTenant,
+		TargetID:      testTarget,
+		TrustManifest: protocol.ProvisionedTrustManifest(testTenant, s.provider.Issuer(), testOIDCClient),
+		HTTPClient:    s.provider.HTTPClient(),
 	})
 	if err != nil {
 		t.Fatalf("new delivery agent: %v", err)
@@ -1329,7 +1528,7 @@ func assertLastDeliveryAttemptIndexes(t *testing.T, agent *deliveryagent.Agent, 
 	if !ok {
 		t.Fatal("agent did not retain the manager delivery-attempt summary")
 	}
-	if !equalIndexes(attempt.EntryIndexes, want) {
+	if !slices.Equal(attempt.EntryIndexes, want) {
 		t.Fatalf("disclosed delivery-log indexes = %v, want %v", attempt.EntryIndexes, want)
 	}
 }
@@ -1340,7 +1539,7 @@ func assertLastIdentityProofSequences(t *testing.T, agent *deliveryagent.Agent, 
 	if !ok {
 		t.Fatal("agent did not retain the manager delivery-attempt summary")
 	}
-	if !equalIndexes(attempt.IdentityEventSequences, want) {
+	if !slices.Equal(attempt.IdentityEventSequences, want) {
 		t.Fatalf("disclosed identity-event sequences = %v, want %v", attempt.IdentityEventSequences, want)
 	}
 	if got, want := attempt.MapSiblingBitmapBytes, 32; got != want {
@@ -1349,18 +1548,6 @@ func assertLastIdentityProofSequences(t *testing.T, agent *deliveryagent.Agent, 
 	if got := attempt.MapSiblingHashes; got != 0 {
 		t.Fatalf("single-identity delivery proof disclosed %d non-empty map siblings, want 0", got)
 	}
-}
-
-func equalIndexes(got, want []uint64) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func mustDeliveryLogUpdate(t *testing.T, manager *resourcemanager.Manager, agent *deliveryagent.Agent, indexes ...uint64) protocol.DeliveryLogUpdate {
@@ -1374,10 +1561,10 @@ func mustDeliveryLogUpdate(t *testing.T, manager *resourcemanager.Manager, agent
 
 func mustDeliveryProof(t *testing.T, manager *resourcemanager.Manager, agent *deliveryagent.Agent, record protocol.DeliveryRecord, indexes ...uint64) protocol.DeliveryProof {
 	t.Helper()
-	if record.Event.Delivery == nil {
+	if record.Delivery == nil {
 		t.Fatal("delivery proof requested for a non-delivery record")
 	}
-	identityProof, err := manager.IdentityTrustProofAt(record.Event.Delivery.Attestation.IdentityID, record.Event.Delivery.Attestation.SigningStateDigest, agent.MapRoot())
+	identityProof, err := manager.IdentityTrustProofAt(record.Delivery.Attestation.IdentityID, record.Delivery.Attestation.SigningStateDigest, agent.MapRoot())
 	if err != nil {
 		t.Fatalf("build identity trust proof: %v", err)
 	}

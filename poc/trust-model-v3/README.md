@@ -27,16 +27,17 @@ controlled client
                v
 resource manager
   - performs ordinary API authorization through an Authorizer hook
-  - serializes deliveries and rotation markers in one RFC 6962 tenant log
+  - validates enrollment, rotation, and delivery signatures at ingress
+  - serializes compact delivery commitments and rotation markers in one RFC 6962 tenant log
   - maintains RFC 6962 per-identity key histories
   - derives direct CONIKS sparse-map leaf-update proofs for history heads
-  - assembles identity history/map proofs and selected log proofs for the target
+  - assembles map-advance, identity history/map, and selected log proofs for the target
   - has an explicit CompromisedManager attack harness in the tests
                |
                | untrusted records and evidence
                v
 delivery agent
-  - is provisioned with tenant, target, OIDC issuer, and enrollment client ID
+  - is provisioned with tenant, target, and a bootstrap tenant trust manifest
   - independently fetches OIDC discovery and JWKS
   - reconstructs identity state ephemerally while verifying nonce binding, key
     possession, signatures, history, map roots, markers, target, and generation
@@ -108,11 +109,16 @@ shapes deliberately match the intended server design:
   non-empty sibling hashes, omitting position-derived canonical empty nodes;
 - a rotation map update carries the new event, its append/consistency proof,
   one authenticated immediate-predecessor event, and the exact marker record;
+  when the agent's log checkpoint is already past that marker, it also carries
+  an inclusion proof under that checkpoint;
 - a delivery carries one authenticated signing event and, only for a
-  historical signing state, its immediate successor event; and
-- a delivery-log update discloses only the delivery and its zero, one, or two
-  adjacent rotation markers. Unrelated leaves are represented by logarithmic
-  consistency and inclusion paths.
+  historical signing state, its immediate successor event;
+- a delivery push includes the chain of map leaf-update proofs from the
+  agent's retained map root when the map must advance; and
+- a delivery-log update discloses only the compact delivery commitment and its
+  zero, one, or two adjacent rotation markers. Unrelated leaves are represented
+  by logarithmic consistency and inclusion paths. The signed package is support
+  material used to recompute the commitment, not part of the Merkle leaf.
 
 The POC deliberately chooses the minimum-state verifier profile. The agent's
 complete cryptographic trust state is the accepted map root, delivery-log
@@ -156,12 +162,22 @@ MapAdvanceEvidence {
     key_history_append { new_event, successor_head, inclusion, consistency }
     predecessor_event?  // exactly previous_head.size - 1 for rotation
     rotation_record?    // exact index/hash/package referenced by new_event
+    marker_log_inclusion?  // required when retained log size > marker index
 }
 
 DeliveryIdentityEvidence {
     current_head_and_compressed_map_membership
     signing_event
     successor_event?    // exactly signing_event.sequence + 1
+}
+
+DeliveryCommitment {
+    tenant_id, delivery_id, fulfillment_id, target_id, generation, action
+    signing_identity_id, signing_state_digest, delivery_package_digest
+}
+
+KeyRotationMarker {
+    tenant_id, identity_id, rotation_authorization_digest
 }
 ```
 
@@ -192,22 +208,28 @@ purpose-separated `ContentAttestation` binding:
 
 - tenant and target;
 - identity and continuity-state digest;
-- fulfillment and generation;
+- delivery identity, fulfillment, and generation;
 - put or remove action; and
 - the exact content digest.
 
 This stands in for the authoritative input/derivation/output/removal model in
 `poc/attestation/hybrid` and `poc/attestation/sigstore_tuf_bundle`. Device and
-session delegation are collapsed into the continuity key. There is no trust
-manifest rotation, TUF, DSSE/in-toto envelope, TSA, tombstone, recovery,
-exception-resolution protocol, durable semantic anchor, external apply loop,
-durable persistence, or external fork witness yet. The in-process push and
-acknowledgement model exercises retry semantics, but both manager and agent
-state still live only in memory.
+session delegation are collapsed into the continuity key. The agent is
+provisioned with a bootstrap `TenantTrustManifest` pinning the OIDC issuer and
+enrollment client. There is no trust-manifest rotation, TUF, DSSE/in-toto
+envelope, TSA, tombstone, recovery, exception-resolution protocol, durable
+semantic anchor, external apply loop, durable persistence, or external fork
+witness yet. Continuity state commits an empty recovery-policy digest as a
+placeholder for later recovery policy. The in-process push and acknowledgement
+model exercises retry semantics, but both manager and agent state still live
+only in memory.
 
 The resource manager's `Authorizer` is intentionally an interface boundary,
 not another identity system in this POC. It makes the distinction between
-ordinary platform permission and delivery-agent provenance explicit.
+ordinary platform permission and delivery-agent provenance explicit. The
+manager also validates enrollment proof of possession, rotation authorization
+signatures, and delivery signatures at ingress; a compromised manager can still
+bypass those checks through the explicit attack harness.
 
 ## Protocol exercised
 
@@ -221,28 +243,33 @@ ordinary platform permission and delivery-agent provenance explicit.
 4. The client proves possession of the continuity key by signing the intent.
 5. The resource manager creates the first per-identity key event and advances
    the authenticated map to its history head.
-6. The delivery agent repeats ID-token validation, checks the nonce and proof
-   of possession, derives `identity_id = H(tenant, iss, sub)`, and verifies the
-   map update. It then retains only the successor map root, or that root plus a
-   structured exception if the authenticated event is invalid.
+6. The delivery agent repeats ID-token validation against the provisioned
+   trust manifest, checks the nonce and proof of possession, derives
+   `identity_id = H(protocol, tenant_id, iss, sub)`, and verifies the map
+   update. It then retains only the successor map root, or that root plus a
+   structured exception if the authenticated event is invalid. An unverifiable
+   enrollment is recorded as an exception so unrelated identities can continue.
 
 ### Delivery
 
-1. The client signs the simple content attestation.
-2. The resource manager performs its normal authorization check and appends a
-   delivery record.
+1. The client signs the simple content attestation, including a delivery ID.
+2. The resource manager validates the signature, performs its normal
+   authorization check, recomputes a compact `DeliveryCommitment`, and appends
+   that commitment to the tenant delivery log.
 3. The resource manager constructs an RFC 6962 consistency proof from its last
    checkpoint acknowledged by that target's agent. It includes only the
-   delivery and the rotation-marker leaves bounding its signing state.
-4. It also constructs a compressed sparse-map membership proof and supplies
-   only the signing event plus its immediate successor when the signer is
-   historical. Those events identify the adjacent marker records to prove.
-5. The resource manager pushes the record and proofs through an in-process
-   delivery-agent interface.
-6. The delivery agent reconstructs the identity's states ephemerally, verifies
-   both proof axes, the content signature, marker-bounded validity interval,
-   and stale-generation fencing, then applies the POC's in-memory content state
-   and acknowledges.
+   commitment leaf and the rotation-marker leaves bounding its signing state.
+4. It also constructs the chain of map leaf-update proofs from the agent's
+   retained map root, a compressed sparse-map membership proof, and only the
+   signing event plus its immediate successor when the signer is historical.
+   Those events identify the adjacent marker records to prove.
+5. The resource manager pushes the record, package, and proofs through an
+   in-process delivery-agent interface.
+6. The delivery agent advances its log, applies any bundled map updates,
+   recomputes the delivery commitment from the package, reconstructs the
+   identity's states ephemerally, verifies both proof axes, the content
+   signature, marker-bounded validity interval, and stale-generation fencing,
+   then applies the POC's in-memory content state and acknowledges.
 7. Only after that acknowledgement does the resource manager advance its
    per-agent checkpoint.
 
@@ -262,17 +289,19 @@ only that record with the logarithmic consistency and inclusion proofs.
 
 ### Rotation
 
-1. The old continuity key signs an authorization binding the predecessor
-   state, new-key digest, and new generation; it signs no manager checkpoint.
+1. The old continuity key signs a `RotationAuthorization` binding the
+   predecessor state digest and successor state digest; it signs no manager
+   checkpoint.
 2. The new key signs the same authorization as proof of possession.
-3. Under one sequencer lock, the resource manager appends that package as a
-   rotation marker in the tenant delivery log and creates the next per-user
+3. Under one sequencer lock, the resource manager appends a compact
+   `KeyRotationMarker` to the tenant delivery log and creates the next per-user
    key event referencing the exact marker index and hash.
 4. The authenticated map advances from the previous key-history head to the
    append-only successor head using a direct old-root-to-new-root leaf proof.
 5. An agent may accept this structural map update before reaching the marker,
    but it cannot use either side of the affected key interval until the exact
-   marker is proven in its accepted delivery-log history.
+   marker is proven in its accepted delivery-log history. If the agent's log
+   checkpoint is already past the marker, it validates inclusion eagerly.
 6. If the marker occupies index `C`, the old state is valid for delivery
    indexes below `C`; the new state is valid for indexes above `C`.
 
@@ -298,6 +327,7 @@ only that record with the logarithmic consistency and inclusion proofs.
 | A historical delivery is presented after rotation | Accepted when its signing event, immediate successor, adjacent markers, current history head, and log inclusions verify |
 | Retired key signs at or after a marker already accepted by an agent | Rejected by that agent |
 | Delivery push fails before the agent accepts it | Both sides retain the prior acknowledged checkpoint; a later manager retry catches up with selective proofs |
+| Agent accepts the log continuation, then rejects the included delivery | Agent checkpoint moves ahead; manager retry recovers that checkpoint without applying the rejected content |
 | Agent accepts and applies a delivery but its acknowledgement is lost | Manager retains its older checkpoint; retry recovers the agent's newer checkpoint and idempotently succeeds |
 | Resource manager presents a fork from an older delivery checkpoint | Rejected by an established agent that retained the newer checkpoint |
 | Resource manager presents a map branch rooted before the agent's retained map root | Rejected by the established agent |
@@ -309,8 +339,12 @@ only that record with the logarithmic consistency and inclusion proofs.
 | A sparse map contains mostly empty branches | The proof sends a 32-byte bitmap and only non-empty siblings |
 | Many users enroll successfully | Agent trust-state size remains constant; no per-user head or state is retained |
 | One authenticated key event is semantically invalid | Its digest enters the bounded exception set and unrelated valid map updates can continue |
+| An enrollment is unverifiable because the IdP is unreachable | It is recorded as an exception; unrelated rotations still advance |
 | More events descend from an already exceptional identity | The Agent may advance structurally without consuming another exception slot; the identity remains unusable |
 | A new invalid event arrives when the exception set is full | The agent refuses that successor map root |
+| Resource manager is given a delivery, rotation, or enrollment with a bad signature | Rejected at ingress before storage; the compromise harness can still append it |
+| Agent map root lags at delivery time | The push carries the map-advance chain; the agent enrolls and applies in one step |
+| Agent log is already past a rotation marker | Map sync validates that marker's inclusion eagerly and rejects a mismatched leaf |
 
 The RBAC-bypass and stale-agent rows are tests, not disclaimers hidden outside
 the executable model. They establish the precise boundary of the additional
@@ -334,7 +368,7 @@ required.
 | `client/` | Controlled-client OIDC flow, continuity key, delivery signing, and rotation |
 | `resourcemanager/` | Ordinary authorization, ordered storage, in-process push routing, per-agent acknowledged checkpoints, and explicit compromise harness |
 | `deliveryagent/` | Minimal trust checkpoints, ephemeral OIDC/history/signature verification, application-state modeling, and delivery fault injection |
-| `protocol/` | Purpose-separated messages, signatures, digests, self-contained identity evidence, RFC 6962 proofs, and sparse-map updates/membership proofs |
+| `protocol/` | Purpose-separated messages, compact log commitments, rotation authorization, trust manifest, RFC 6962 proofs, and sparse-map updates/membership proofs |
 | `internal/merklelog/` | In-memory storage adapter around `transparency-dev/merkle` |
 | `internal/sparsemap/` | In-memory storage and proof adapter around Trillian SMT and CONIKS primitives |
 | `internal/testoidc/` | Minimal TLS OIDC authorization-code provider |

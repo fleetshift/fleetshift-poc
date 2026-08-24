@@ -98,7 +98,7 @@ func authenticateOIDC(ctx context.Context, config oidcConfig, nonce, loginHint s
 	if err != nil {
 		return oidcIdentity{}, "", fmt.Errorf("authorization request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusFound {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return oidcIdentity{}, "", fmt.Errorf("authorization response %s: %s", response.Status, strings.TrimSpace(string(body)))
@@ -131,7 +131,7 @@ func authenticateOIDC(ctx context.Context, config oidcConfig, nonce, loginHint s
 	if err != nil {
 		return oidcIdentity{}, "", fmt.Errorf("token request: %w", err)
 	}
-	defer tokenHTTPResponse.Body.Close()
+	defer func() { _ = tokenHTTPResponse.Body.Close() }()
 	var tokens tokenResponse
 	if err := json.NewDecoder(io.LimitReader(tokenHTTPResponse.Body, 1<<20)).Decode(&tokens); err != nil {
 		return oidcIdentity{}, "", fmt.Errorf("decode token response: %w", err)
@@ -159,7 +159,7 @@ func discover(ctx context.Context, client *http.Client, issuer string) (discover
 	if err != nil {
 		return discoveryDocument{}, fmt.Errorf("OIDC discovery: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return discoveryDocument{}, fmt.Errorf("OIDC discovery response: %s", response.Status)
 	}
@@ -182,7 +182,7 @@ func verifyIDToken(ctx context.Context, client *http.Client, discovery discovery
 	if err != nil {
 		return oidcIdentity{}, fmt.Errorf("fetch JWKS: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return oidcIdentity{}, fmt.Errorf("JWKS response: %s", response.Status)
 	}

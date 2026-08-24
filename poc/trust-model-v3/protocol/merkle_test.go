@@ -178,14 +178,16 @@ func TestDeliveryLogUpdateVerifiesSelectiveInclusionAndConsistency(t *testing.T)
 	tree := merklelog.New()
 	records := make([]DeliveryRecord, 32)
 	for i := range records {
-		event := DeliveryLogEvent{
-			Kind: DeliveryLogEventDelivery,
-			Delivery: &SignedDelivery{Attestation: ContentAttestation{
-				Protocol:      DeliveryProtocol,
-				FulfillmentID: fmt.Sprintf("fulfillment-%d", i),
-			}},
-		}
-		record, err := NewDeliveryRecord(uint64(i), event)
+		record, err := NewDeliveryLogRecord(uint64(i), SignedDelivery{Attestation: ContentAttestation{
+			Protocol:      DeliveryProtocol,
+			TenantID:      "tenant-acme",
+			IdentityID:    "identity-alice",
+			DeliveryID:    fmt.Sprintf("delivery-%d", i),
+			FulfillmentID: fmt.Sprintf("fulfillment-%d", i),
+			TargetID:      "target-east",
+			Action:        ActionPut,
+			ContentDigest: DigestBytes(nil),
+		}})
 		if err != nil {
 			t.Fatalf("record %d: %v", i, err)
 		}
@@ -440,13 +442,21 @@ func cloneDeliveryLogUpdateForTest(in DeliveryLogUpdate) DeliveryLogUpdate {
 	for i, entry := range in.Entries {
 		out.Entries[i] = entry
 		out.Entries[i].InclusionProof = append([]string(nil), entry.InclusionProof...)
-		if entry.Record.Event.Delivery != nil {
-			delivery := *entry.Record.Event.Delivery
-			out.Entries[i].Record.Event.Delivery = &delivery
+		if entry.Record.Event.Commitment != nil {
+			commitment := *entry.Record.Event.Commitment
+			out.Entries[i].Record.Event.Commitment = &commitment
 		}
-		if entry.Record.Event.Rotation != nil {
-			rotation := *entry.Record.Event.Rotation
-			out.Entries[i].Record.Event.Rotation = &rotation
+		if entry.Record.Event.Marker != nil {
+			marker := *entry.Record.Event.Marker
+			out.Entries[i].Record.Event.Marker = &marker
+		}
+		if entry.Record.Delivery != nil {
+			delivery := *entry.Record.Delivery
+			out.Entries[i].Record.Delivery = &delivery
+		}
+		if entry.Record.Rotation != nil {
+			rotation := *entry.Record.Rotation
+			out.Entries[i].Record.Rotation = &rotation
 		}
 	}
 	return out

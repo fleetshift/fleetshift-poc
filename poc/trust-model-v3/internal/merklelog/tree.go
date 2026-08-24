@@ -80,10 +80,10 @@ func (t *Tree) AppendHash(leafHash []byte) (uint64, []byte, error) {
 func (t *Tree) BeginAppendHash(leafHash []byte) (*PendingAppend, error) {
 	index := t.Size()
 	if index == math.MaxUint64 {
-		return nil, fmt.Errorf("Merkle tree is at maximum uint64 size")
+		return nil, fmt.Errorf("tree is at maximum uint64 Merkle size")
 	}
 	if got, want := len(leafHash), rfc6962.DefaultHasher.Size(); got != want {
-		return nil, fmt.Errorf("Merkle leaf hash has length %d, want %d", got, want)
+		return nil, fmt.Errorf("leaf hash has length %d, want %d", got, want)
 	}
 	leafHash = cloneHash(leafHash)
 
@@ -191,7 +191,7 @@ func (p *PendingAppend) checkUsable() error {
 		return fmt.Errorf("pending Merkle append is already committed")
 	}
 	if p.tree.Size() != p.baseSize {
-		return fmt.Errorf("Merkle tree advanced from size %d to %d before pending append committed", p.baseSize, p.tree.Size())
+		return fmt.Errorf("tree advanced from size %d to %d before pending Merkle append committed", p.baseSize, p.tree.Size())
 	}
 	return nil
 }
@@ -205,7 +205,7 @@ func (p *PendingAppend) getNodes(ids []compact.NodeID) ([][]byte, error) {
 		}
 		if !ok {
 			begin, end := id.Coverage()
-			return nil, fmt.Errorf("Merkle node (level=%d index=%d range=[%d,%d)) is unavailable", id.Level, id.Index, begin, end)
+			return nil, fmt.Errorf("node (level=%d index=%d range=[%d,%d)) is unavailable", id.Level, id.Index, begin, end)
 		}
 		hashes[i] = cloneHash(hash)
 	}
@@ -290,7 +290,7 @@ func (t *Tree) getNodes(ids []compact.NodeID) ([][]byte, error) {
 		hash, ok := t.nodes[id]
 		if !ok {
 			begin, end := id.Coverage()
-			return nil, fmt.Errorf("Merkle node (level=%d index=%d range=[%d,%d)) is unavailable", id.Level, id.Index, begin, end)
+			return nil, fmt.Errorf("node (level=%d index=%d range=[%d,%d)) is unavailable", id.Level, id.Index, begin, end)
 		}
 		hashes[i] = cloneHash(hash)
 	}
