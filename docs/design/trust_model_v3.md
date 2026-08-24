@@ -254,46 +254,28 @@ The resource manager should retain proof-oriented indexes rather than rebuild ei
 
 ### 4.2 Ordered durable-delivery log
 
-The delivery log is an append-only Merkle event log containing compact commitments to infrastructure deliveries and key-rotation markers.
-
-A leaf may contain:
-
-```
-DeliveryCommitment {
-    tenant_id
-    delivery_id
-    fulfillment_id
-    target_id
-    generation
-    action
-    signing_identity_id
-    signing_state_digest
-    delivery_package_digest
-}
-
-KeyRotationMarker {
-    tenant_id
-    identity_id
-    rotation_authorization_digest
-}
-```
+The delivery log is an append-only Merkle event log. Each leaf binds one root statement's evidence identity to an assigned position. Continuity/v3 uses that common order for rotation cutoffs: a key-history event names one exact log position and leaf hash.
 
 The log answers:
 
-> Was this exact delivery commitment included before or after the exact marker for a key transition?
+> Was this exact logged assertion included before or after the exact rotation marker?
 
 Only durable deliveries and transitions whose key-validity semantics depend on delivery ordering need log inclusion. Ordinary signed queries can be verified once and discarded.
 
-The marker contains the signed rotation package or commits its digest. The resulting key-history event references the exact marker leaf by position and leaf hash, not merely by a manager-provided checkpoint or integer. This binds the authenticated-map update to one ordering fact on one delivery-log branch.
+A rotation is itself a logged, independently authenticated assertion—not a second leaf schema and not trusted merely because it occupies a log slot. Compact v3 fields such as signing-state digest, delivery-package digest, and rotation-authorization digest live in the authenticated assertion or as reconstructable support, not as a parallel common commitment type.
+
+The resulting key-history event references the exact marker leaf by position and leaf hash, not merely by a manager-provided checkpoint or integer. This binds the authenticated-map update to one ordering fact on one delivery-log branch.
 
 The resource manager stores the ordered leaves and Merkle nodes. A delivery agent stores only a log root and log size.
 
-A delivery agent does not consume every delivery in the tenant. When it receives its next targeted delivery, the resource manager supplies:
+A delivery agent does not consume every delivery in the tenant. When it receives its next targeted delivery, the resource manager supplies a log update:
 
-- that delivery’s inclusion proof;
-- a consistency proof from the delivery agent’s previous log root to the newer root.
+- the checkpoint the proofs were built from;
+- the new log size and root;
+- a consistency proof from the delivery agent’s previous log root to the newer root;
+- that delivery’s inclusion proof.
 
-This lets a delivery agent skip all unrelated delivery and marker leaves while still verifying append-only growth.
+Proofs are reconstructable and are not part of the leaf. This lets a delivery agent skip all unrelated content leaves while still verifying append-only growth. Trust updates and rotations this agent will rely on are ordinary packages it must verify and apply; they are not extra disclosed entries beside a content delivery.
 
 ## 5. Delivery-agent state
 
