@@ -27,9 +27,9 @@ type TenantID string
 // FullResourceName is an AIP-122 full resource name of the form
 // "//{service}/{collection}/{id}", for example
 // "//fleetshift.io/deployments/web" or
-// "//kind.fleetshift.io/clusters/prod". It is the client-defined unique
+// "//kind.fleetshift.io/clusters/prod". It is the producer-defined unique
 // identity of a Deployment or ManagedResource. That resource is 1-1 with
-// its underlying fulfillment; clients do not know an RM-assigned
+// its underlying fulfillment; producers do not know an RM-assigned
 // fulfillment ID.
 type FullResourceName string
 

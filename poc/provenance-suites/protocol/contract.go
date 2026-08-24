@@ -2,14 +2,14 @@ package protocol
 
 import "context"
 
-// ClientAPI is the client or publisher side of a provenance profile.
-// Common client code identifies the allowed provenance type and principal
+// ProducerAPI is the producer side of a provenance profile.
+// Common producer code identifies the allowed provenance type and principal
 // authority; it does not obtain an RM-maintained profile or anchor ID.
 //
 // Implementations own their signing ceremony and expose purpose-specific
 // operations over known content. They must not return private-key bytes or a
 // general signing oracle.
-type ClientAPI interface {
+type ProducerAPI interface {
 	ProvenanceType() ProvenanceType
 	CreateEvidence(ctx context.Context, assertion TypedAssertion) (TypedEvidence, error)
 }

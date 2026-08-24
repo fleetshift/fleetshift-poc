@@ -10,10 +10,10 @@ import (
 )
 
 func TestVerifyRejectsNonEmptyProfileParameters(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	target := NewTarget()
-	mustEnroll(t, target, client)
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	mustEnroll(t, target, producer)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -29,10 +29,10 @@ func TestVerifyRejectsNonEmptyProfileParameters(t *testing.T) {
 }
 
 func TestVerifyRejectsAuthorityConfigForADifferentPrincipalAuthority(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	target := NewTarget()
-	mustEnroll(t, target, client)
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	mustEnroll(t, target, producer)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -50,8 +50,8 @@ func TestVerifyRejectsAuthorityConfigForADifferentPrincipalAuthority(t *testing.
 }
 
 func TestCreateEvidenceCarriesUserReferenceNotPublicKey(t *testing.T) {
-	client := newTestClient(t)
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	producer := newTestProducer(t)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -74,8 +74,8 @@ func TestCreateEvidenceCarriesUserReferenceNotPublicKey(t *testing.T) {
 	if err := json.Unmarshal(evidence.Bytes, &body); err != nil {
 		t.Fatalf("unmarshal signature body: %v", err)
 	}
-	if !body.Principal.Equal(client.Principal()) {
-		t.Fatalf("user reference = %#v, want %#v", body.Principal, client.Principal())
+	if !body.Principal.Equal(producer.Principal()) {
+		t.Fatalf("user reference = %#v, want %#v", body.Principal, producer.Principal())
 	}
 	if len(body.Signature) == 0 {
 		t.Fatal("delivery evidence has no signature")
@@ -86,8 +86,8 @@ func TestCreateEvidenceCarriesUserReferenceNotPublicKey(t *testing.T) {
 }
 
 func TestParseHintsEnrollmentReturnsEnrollmentPredicate(t *testing.T) {
-	client := newTestClient(t)
-	enrollment, err := client.CreateEnrollment()
+	producer := newTestProducer(t)
+	enrollment, err := producer.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
@@ -104,8 +104,8 @@ func TestParseHintsEnrollmentReturnsEnrollmentPredicate(t *testing.T) {
 }
 
 func TestVerifyAndApplyEnrollmentRetainsMapping(t *testing.T) {
-	client := newTestClient(t)
-	enrollment, err := client.CreateEnrollment()
+	producer := newTestProducer(t)
+	enrollment, err := producer.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
@@ -124,25 +124,25 @@ func TestVerifyAndApplyEnrollmentRetainsMapping(t *testing.T) {
 	if assertion.PredicateType != PredicateTypeEnrollmentV1 {
 		t.Fatalf("assertion predicate = %s, want %s", assertion.PredicateType, PredicateTypeEnrollmentV1)
 	}
-	if _, ok := target.PublicKey(client.Principal()); ok {
+	if _, ok := target.PublicKey(producer.Principal()); ok {
 		t.Fatal("Verify retained the mapping; Apply should be the mapping transition")
 	}
 
 	if err := applyEnrollment(t, target, enrollment, authenticated, assertion); err != nil {
 		t.Fatalf("Apply enrollment: %v", err)
 	}
-	got, ok := target.PublicKey(client.Principal())
+	got, ok := target.PublicKey(producer.Principal())
 	if !ok {
 		t.Fatal("verifier did not retain the public key mapping")
 	}
-	if string(got) != string(client.PublicKey()) {
+	if string(got) != string(producer.PublicKey()) {
 		t.Fatal("retained public key does not match enrolled key")
 	}
 }
 
 func TestVerifyEnrollmentDoesNotRequireRetainedKey(t *testing.T) {
-	client := newTestClient(t)
-	enrollment, err := client.CreateEnrollment()
+	producer := newTestProducer(t)
+	enrollment, err := producer.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
@@ -153,15 +153,15 @@ func TestVerifyEnrollmentDoesNotRequireRetainedKey(t *testing.T) {
 }
 
 func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	target := NewTarget()
-	mustEnroll(t, target, client)
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	mustEnroll(t, target, producer)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
 
-	attacker := newTestClient(t)
+	attacker := newTestProducer(t)
 	support := protocol.SupportMaterial{
 		MediaType: MediaTypeEnrollment,
 		Bytes:     attacker.PublicKey(),
@@ -190,8 +190,8 @@ func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
 }
 
 func TestVerifyFailsWithoutEnrollment(t *testing.T) {
-	client := newTestClient(t)
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	producer := newTestProducer(t)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -207,8 +207,8 @@ func TestVerifyFailsWithoutEnrollment(t *testing.T) {
 }
 
 func TestVerifyFailsWhenSignatureDoesNotMatchRetainedKey(t *testing.T) {
-	alice := newTestClient(t)
-	mallory := newTestClient(t)
+	alice := newTestProducer(t)
+	mallory := newTestProducer(t)
 	target := NewTarget()
 	mustEnroll(t, target, alice)
 
@@ -229,13 +229,13 @@ func TestVerifyFailsWhenSignatureDoesNotMatchRetainedKey(t *testing.T) {
 
 func TestFirstEnrollmentIsUnauthenticatedTOFU(t *testing.T) {
 	target := NewTarget()
-	attacker, err := NewClient(protocol.Principal{
+	attacker, err := NewProducer(protocol.Principal{
 		Scheme:    protocol.IdentitySchemeOIDCSubV1,
 		Authority: "https://issuer.example.test",
 		Subject:   "alice",
 	})
 	if err != nil {
-		t.Fatalf("NewClient: %v", err)
+		t.Fatalf("NewProducer: %v", err)
 	}
 	enrollment, err := attacker.CreateEnrollment()
 	if err != nil {
@@ -255,14 +255,14 @@ func TestFirstEnrollmentIsUnauthenticatedTOFU(t *testing.T) {
 }
 
 func TestVerifyEnrollmentRejectsTamperedPrincipal(t *testing.T) {
-	alice := newTestClient(t)
-	attacker, err := NewClient(protocol.Principal{
+	alice := newTestProducer(t)
+	attacker, err := NewProducer(protocol.Principal{
 		Scheme:    protocol.IdentitySchemeOIDCSubV1,
 		Authority: "https://issuer.example.test",
 		Subject:   "mallory",
 	})
 	if err != nil {
-		t.Fatalf("NewClient: %v", err)
+		t.Fatalf("NewProducer: %v", err)
 	}
 	enrollment, err := attacker.CreateEnrollment()
 	if err != nil {
@@ -286,13 +286,13 @@ func TestVerifyEnrollmentRejectsTamperedPrincipal(t *testing.T) {
 }
 
 func TestApplyRejectsKeySubstitutionForEstablishedPrincipal(t *testing.T) {
-	alice := newTestClient(t)
+	alice := newTestProducer(t)
 	target := NewTarget()
 	mustEnroll(t, target, alice)
 
-	attacker, err := NewClient(alice.Principal())
+	attacker, err := NewProducer(alice.Principal())
 	if err != nil {
-		t.Fatalf("NewClient: %v", err)
+		t.Fatalf("NewProducer: %v", err)
 	}
 	enrollment, err := attacker.CreateEnrollment()
 	if err != nil {
@@ -329,10 +329,10 @@ func TestOwnsEnrollmentNotIntent(t *testing.T) {
 }
 
 func TestApplyOfDeploymentPredicateFailsClosed(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	target := NewTarget()
-	mustEnroll(t, target, client)
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	mustEnroll(t, target, producer)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -370,21 +370,21 @@ func TestParseHintsFailClosedOnUnknownMediaType(t *testing.T) {
 }
 
 func TestManagerStoresImmutableEvidenceAndEmptySupport(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	manager := NewManager()
-	enrollment, err := client.CreateEnrollment()
+	enrollment, err := producer.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
 	if err := manager.CommitEnrollment(context.Background(), enrollment); err != nil {
 		t.Fatalf("CommitEnrollment: %v", err)
 	}
-	key, ok := manager.PublicKey(client.Principal())
-	if !ok || string(key) != string(client.PublicKey()) {
+	key, ok := manager.PublicKey(producer.Principal())
+	if !ok || string(key) != string(producer.PublicKey()) {
 		t.Fatal("resource manager did not courier the enrollment public key")
 	}
 
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -409,9 +409,9 @@ func TestManagerStoresImmutableEvidenceAndEmptySupport(t *testing.T) {
 }
 
 func TestDecodeAssertionThenDecodeDeliveryScope(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	want := testAssertion(t)
-	evidence, err := client.CreateEvidence(context.Background(), want)
+	evidence, err := producer.CreateEvidence(context.Background(), want)
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -435,16 +435,16 @@ func TestDecodeAssertionThenDecodeDeliveryScope(t *testing.T) {
 }
 
 func TestDecodeAssertionDoesNotAuthenticate(t *testing.T) {
-	client := newTestClient(t)
+	producer := newTestProducer(t)
 	manager := NewManager()
-	enrollment, err := client.CreateEnrollment()
+	enrollment, err := producer.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
 	if err := manager.CommitEnrollment(context.Background(), enrollment); err != nil {
 		t.Fatalf("CommitEnrollment: %v", err)
 	}
-	evidence, err := client.CreateEvidence(context.Background(), testAssertion(t))
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
@@ -471,22 +471,22 @@ func TestDecodeAssertionDoesNotAuthenticate(t *testing.T) {
 	}
 }
 
-func newTestClient(t *testing.T) *Client {
+func newTestProducer(t *testing.T) *Producer {
 	t.Helper()
-	client, err := NewClient(protocol.Principal{
+	producer, err := NewProducer(protocol.Principal{
 		Scheme:    protocol.IdentitySchemeOIDCSubV1,
 		Authority: "https://issuer.example.test",
 		Subject:   "alice",
 	})
 	if err != nil {
-		t.Fatalf("NewClient: %v", err)
+		t.Fatalf("NewProducer: %v", err)
 	}
-	return client
+	return producer
 }
 
-func mustEnroll(t *testing.T, target *Target, client *Client) {
+func mustEnroll(t *testing.T, target *Target, producer *Producer) {
 	t.Helper()
-	enrollment, err := client.CreateEnrollment()
+	enrollment, err := producer.CreateEnrollment()
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}

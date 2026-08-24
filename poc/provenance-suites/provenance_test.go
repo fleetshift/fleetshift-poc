@@ -7,9 +7,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/client"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/deliveryagent"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
+	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/producer"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
 )
@@ -156,7 +156,7 @@ func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
 		Profiles:       []protocol.ProfileConfig{profile},
 	})
 	s := newScenarioWithTrust(t, trust)
-	enrollClient(t, s, s.user)
+	enrollProducer(t, s, s.user)
 	afterEnroll := s.agent.SuiteApplyCount()
 
 	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
@@ -190,7 +190,7 @@ func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
 
 func TestResourceManagerCannotForgeDeliverySignature(t *testing.T) {
 	s := newEnrolledScenario(t)
-	attacker := mustClient(t, "mallory")
+	attacker := mustProducer(t, "mallory")
 	evidence := mustSignDeployment(t, attacker, deploymentName("forged"), 1, []byte(`{"replicas":9}`))
 
 	_, err := s.manager.Compromised().PushDelivery(context.Background(), evidence)
@@ -225,7 +225,7 @@ func TestResourceManagerCannotAlterSignedContent(t *testing.T) {
 
 func TestFirstEnrollmentIsTOFUWonByWhoeverArrivesFirst(t *testing.T) {
 	s := newScenario(t)
-	attacker := mustClient(t, "alice")
+	attacker := mustProducer(t, "alice")
 	enrollment, err := attacker.DirectKey().CreateEnrollment()
 	if err != nil {
 		t.Fatalf("attacker enrollment: %v", err)
@@ -238,7 +238,7 @@ func TestFirstEnrollmentIsTOFUWonByWhoeverArrivesFirst(t *testing.T) {
 		t.Fatal("TOFU limitation was not visible: attacker did not win the first bind")
 	}
 
-	genuine := mustClient(t, "alice")
+	genuine := mustProducer(t, "alice")
 	genuineEnrollment, err := genuine.DirectKey().CreateEnrollment()
 	if err != nil {
 		t.Fatalf("genuine enrollment: %v", err)
@@ -301,7 +301,7 @@ func TestUninitializedVerifierRejectsDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
 	}
-	user := mustClient(t, "alice")
+	user := mustProducer(t, "alice")
 	evidence := mustSignDeployment(t, user, deploymentName("too-early"), 1, []byte(`{}`))
 	err = agent.Deliver(resourcemanager.DeliveryPackage{Root: protocol.SignedStatement{Evidence: evidence}})
 	if !errors.Is(err, protocol.ErrUninitializedVerifier) {
@@ -364,7 +364,7 @@ func TestRejectedDeliveryAdvancesCheckpointAndRetryRecoversWithoutApplying(t *te
 		t.Fatal("resource manager did not retain the registered-agent checkpoint")
 	}
 
-	attacker := mustClient(t, "mallory")
+	attacker := mustProducer(t, "mallory")
 	forged := mustSignDeployment(t, attacker, deploymentName("rejected-after-log"), 1, []byte(`{"owner":"attacker"}`))
 	update, err := s.manager.Compromised().PushDelivery(context.Background(), forged)
 	if !errors.Is(err, protocol.ErrVerificationFailed) {
@@ -482,7 +482,7 @@ func TestManagedResourceRejectsFulfillmentRelationWithWrongResourceType(t *testi
 
 func TestManagedResourceRejectsRelationSignedByUnenrolledKey(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
-	rogue := mustClient(t, "rogue-addon")
+	rogue := mustProducer(t, "rogue-addon")
 	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-rogue"), 1, json.RawMessage(`{"region":"us-east-1"}`))
 	relEvidence := mustSignRelation(t, rogue, testResourceType, testClusterSpecMediaType)
 	_, err := s.manager.Compromised().PushDelivery(context.Background(), evidence, relEvidence)
@@ -594,7 +594,7 @@ func TestPredicateTypeTamperFailsContentBinding(t *testing.T) {
 }
 
 func TestSignDeploymentRequiresCompleteDeliveryScope(t *testing.T) {
-	c := mustClient(t, "alice")
+	c := mustProducer(t, "alice")
 	_, err := c.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
 		Manifests: []protocol.TypedManifest{{
 			MediaType: testReplicasMediaType,
@@ -607,7 +607,7 @@ func TestSignDeploymentRequiresCompleteDeliveryScope(t *testing.T) {
 }
 
 func TestSignDeploymentRequiresResourceName(t *testing.T) {
-	c := mustClient(t, "alice")
+	c := mustProducer(t, "alice")
 	_, err := c.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
 			TargetID: testTarget,
@@ -624,7 +624,7 @@ func TestSignDeploymentRequiresResourceName(t *testing.T) {
 }
 
 func TestSignManagedResourceRequiresCompleteDeliveryScope(t *testing.T) {
-	c := mustClient(t, "alice")
+	c := mustProducer(t, "alice")
 	_, err := c.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{
 		ResourceType: testResourceType,
 		Spec:         json.RawMessage(`{}`),
@@ -798,8 +798,8 @@ func (r *recordingAgent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 }
 
 type scenario struct {
-	user     *client.Client
-	addon    *client.Client
+	user     *producer.Producer
+	addon    *producer.Producer
 	manager  *resourcemanager.Manager
 	agent    *deliveryagent.Agent
 	west     *deliveryagent.Agent
@@ -813,7 +813,7 @@ func newScenario(t *testing.T) *scenario {
 
 func newScenarioWithTrust(t *testing.T, trust protocol.TrustConfiguration) *scenario {
 	t.Helper()
-	user := mustClient(t, "alice")
+	user := mustProducer(t, "alice")
 	agent, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
@@ -831,21 +831,21 @@ func newScenarioWithTrust(t *testing.T, trust protocol.TrustConfiguration) *scen
 func newEnrolledScenario(t *testing.T) *scenario {
 	t.Helper()
 	s := newScenario(t)
-	enrollClient(t, s, s.user)
+	enrollProducer(t, s, s.user)
 	return s
 }
 
 func newEnrolledManagedResourceScenario(t *testing.T) *scenario {
 	t.Helper()
 	s := newEnrolledScenario(t)
-	s.addon = mustClient(t, "addon-clusters")
-	enrollClient(t, s, s.addon)
+	s.addon = mustProducer(t, "addon-clusters")
+	enrollProducer(t, s, s.addon)
 	return s
 }
 
 func newTwoTargetScenario(t *testing.T, westTarget string) *scenario {
 	t.Helper()
-	user := mustClient(t, "alice")
+	user := mustProducer(t, "alice")
 	east, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new east agent: %v", err)
@@ -869,14 +869,14 @@ func newTwoTargetScenario(t *testing.T, westTarget string) *scenario {
 		t.Fatalf("register west agent: %v", err)
 	}
 	s := &scenario{user: user, manager: manager, agent: east, west: west, recorder: recorder}
-	enrollClient(t, s, s.user)
+	enrollProducer(t, s, s.user)
 	if _, ok := west.PublicKey(s.user.Principal()); !ok {
 		t.Fatal("west agent did not retain the enrollment mapping")
 	}
 	return s
 }
 
-func enrollClient(t *testing.T, s *scenario, c *client.Client) {
+func enrollProducer(t *testing.T, s *scenario, c *producer.Producer) {
 	t.Helper()
 	enrollment, err := c.DirectKey().CreateEnrollment()
 	if err != nil {
@@ -890,9 +890,9 @@ func enrollClient(t *testing.T, s *scenario, c *client.Client) {
 	}
 }
 
-func mustClient(t *testing.T, subject protocol.Subject) *client.Client {
+func mustProducer(t *testing.T, subject protocol.Subject) *producer.Producer {
 	t.Helper()
-	c, err := client.New(client.Config{
+	c, err := producer.New(producer.Config{
 		TenantID: testTenant,
 		Principal: protocol.Principal{
 			Scheme:    protocol.IdentitySchemeOIDCSubV1,
@@ -901,17 +901,17 @@ func mustClient(t *testing.T, subject protocol.Subject) *client.Client {
 		},
 	})
 	if err != nil {
-		t.Fatalf("new client: %v", err)
+		t.Fatalf("new producer: %v", err)
 	}
 	return c
 }
 
-func mustSignDeployment(t *testing.T, c *client.Client, name protocol.FullResourceName, generation uint64, payload []byte) protocol.TypedEvidence {
+func mustSignDeployment(t *testing.T, c *producer.Producer, name protocol.FullResourceName, generation uint64, payload []byte) protocol.TypedEvidence {
 	t.Helper()
 	return mustSignDeploymentFor(t, c, testTarget, name, generation, payload)
 }
 
-func mustSignDeploymentFor(t *testing.T, c *client.Client, target string, name protocol.FullResourceName, generation uint64, payload []byte) protocol.TypedEvidence {
+func mustSignDeploymentFor(t *testing.T, c *producer.Producer, target string, name protocol.FullResourceName, generation uint64, payload []byte) protocol.TypedEvidence {
 	t.Helper()
 	evidence, err := c.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
@@ -931,7 +931,7 @@ func mustSignDeploymentFor(t *testing.T, c *client.Client, target string, name p
 	return evidence
 }
 
-func mustSignManagedResource(t *testing.T, c *client.Client, name protocol.FullResourceName, generation uint64, spec json.RawMessage) protocol.TypedEvidence {
+func mustSignManagedResource(t *testing.T, c *producer.Producer, name protocol.FullResourceName, generation uint64, spec json.RawMessage) protocol.TypedEvidence {
 	t.Helper()
 	evidence, err := c.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
@@ -949,7 +949,7 @@ func mustSignManagedResource(t *testing.T, c *client.Client, name protocol.FullR
 	return evidence
 }
 
-func mustSignRelation(t *testing.T, c *client.Client, resourceType string, mediaType protocol.MediaType) protocol.TypedEvidence {
+func mustSignRelation(t *testing.T, c *producer.Producer, resourceType string, mediaType protocol.MediaType) protocol.TypedEvidence {
 	t.Helper()
 	evidence, err := c.SignFulfillmentRelation(context.Background(), protocol.FulfillmentRelation{
 		ResourceType: resourceType,

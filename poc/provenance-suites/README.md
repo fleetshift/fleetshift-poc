@@ -6,7 +6,7 @@ without committing to Sigstore, TUF, or continuity/v3.
 
 It asks:
 
-> Can a client, resource manager, and target share one profile contract —
+> Can a producer, resource manager, and target share one profile contract —
 > create evidence, store and assemble it, verify it against authenticated
 > authority configuration — so that a later well-known profile can replace the
 > naive implementation without changing common selection or
@@ -20,7 +20,7 @@ The tests demonstrate that the answer is yes for a deliberately naive
 A provenance profile is a configured implementation of a common contract:
 
 ```text
-ClientAPI
+ProducerAPI
   CreateEvidence(exact purpose-typed assertion) -> TypedEvidence
 
 ResourceManagerAPI
@@ -104,7 +104,7 @@ with a deployment does not change apply.
 
 `direct-key/v1` is a stand-in, not one of the initial production profiles.
 
-- The client holds one Ed25519 key pair bound to a claimed `oidc-sub/v1`
+- The producer holds one Ed25519 key pair bound to a claimed `oidc-sub/v1`
   principal.
 - Enrollment evidence directly shares the public key plus a proof of
   possession. `Verify` authenticates that proof without a retained key.
@@ -124,7 +124,7 @@ signed content and have the target accept it.
 ## The three FleetShift roles
 
 ```text
-controlled client
+controlled producer
   - identifies the allowed provenance type and principal authority
   - creates purpose-typed deployment and managed-resource authorizations
   - uses direct-key CreateEvidence and CreateEnrollment
@@ -171,11 +171,11 @@ fulfillment relations.
 
 | Scenario | Result |
 | --- | --- |
-| Client enrolls and signs a `deployment/v1` authorization | Target applies the typed manifests |
+| Producer enrolls and signs a `deployment/v1` authorization | Target applies the typed manifests |
 | Enrollment is logged and Delivered to every registered agent | Both agents Apply the mapping; later content consistency-proves over the enrollment leaf |
 | `deployment/v1` and `trust-config-update/v1` | Do not call suite `Apply`; trust-config-update fails closed until the agent handler exists |
 | Policy-matched predicate the profile does not `Owns` | Fail closed without calling suite `Apply` |
-| Client signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type |
+| Producer signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type |
 | Managed resource with no relation, wrong resource type, or unenrolled relation signer | Rejected |
 | Fulfillment relation couriered with a deployment | Ignored; deployment apply is unchanged |
 | Unknown root predicate | Fail closed |
@@ -211,7 +211,7 @@ No external identity provider, database, or transparency service is required.
 | `protocol/` | TypedEvidence, Principal, AuthorityConfig, selection, log update, and the three APIs |
 | `internal/merklelog/` | In-memory RFC 6962 compact-range store copied from the v3 POC |
 | `directkey/` | Naive profile: enrollment, signature encoding, retained mapping |
-| `client/` | Controlled-client role |
+| `producer/` | Controlled-producer role |
 | `resourcemanager/` | Authorization, storage, Merkle log, last-ack cache, typed enrollment submit, compromise harness |
 | `deliveryagent/` | Bootstrap, log verification, selection, verification, predicate dispatch, apply |
 | `provenance_test.go` | End-to-end guarantees and accepted TOFU limitation |
