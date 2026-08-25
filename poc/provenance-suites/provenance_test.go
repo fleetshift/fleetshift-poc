@@ -518,6 +518,39 @@ func TestDeploymentIgnoresCourieredFulfillmentRelation(t *testing.T) {
 	}
 }
 
+func TestDeploymentIgnoresTamperedUnusedSupportingInclusion(t *testing.T) {
+	s := newEnrolledManagedResourceScenario(t)
+	s.agent.FailNextDeliveriesBeforeAccepting(1)
+	evidence := mustSignDeployment(t, s.user, deploymentName("deploy-with-tampered-relation"), 1, []byte(`{"replicas":3}`))
+	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
+	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
+	if !errors.Is(err, deliveryagent.ErrDeliveryUnavailable) {
+		t.Fatalf("error = %v, want ErrDeliveryUnavailable", err)
+	}
+
+	pkg := s.recorder.last
+	if len(pkg.Supporting) != 1 || pkg.Supporting[0].EvidenceLog == nil {
+		t.Fatalf("expected one supporting item with an inclusion, got %+v", pkg.Supporting)
+	}
+	tampered := *pkg.Supporting[0].EvidenceLog
+	tampered.Index++
+	pkg.Supporting[0].EvidenceLog = &tampered
+
+	if err := s.agent.Deliver(pkg); err != nil {
+		t.Fatalf("tampered unused supporting inclusion rejected: %v", err)
+	}
+	applied, ok := s.agent.Applied(deploymentName("deploy-with-tampered-relation"))
+	if !ok {
+		t.Fatal("agent did not apply the deployment")
+	}
+	if applied.PredicateType != protocol.PredicateTypeDeploymentV1 {
+		t.Fatalf("applied predicate = %s, want %s", applied.PredicateType, protocol.PredicateTypeDeploymentV1)
+	}
+	if applied.Manifests[0].MediaType != testReplicasMediaType {
+		t.Fatalf("unused relation became apply authority: media type = %s", applied.Manifests[0].MediaType)
+	}
+}
+
 func TestUnknownRootPredicateFailsClosed(t *testing.T) {
 	s := newEnrolledScenario(t)
 	scope := protocol.DeliveryScope{
@@ -1024,6 +1057,9 @@ func TestAgentRejectsLogInclusionThatDoesNotMatchRootEvidence(t *testing.T) {
 	})
 	if !errors.Is(err, deliveryagent.ErrLogFork) {
 		t.Fatalf("error = %v, want ErrLogFork", err)
+	}
+	if !errors.Is(err, protocol.ErrInvalidLogInclusion) {
+		t.Fatalf("error = %v, want ErrInvalidLogInclusion", err)
 	}
 	assertNotStale(t, err)
 	if _, ok := s.agent.Applied(deploymentName("mismatch")); ok {

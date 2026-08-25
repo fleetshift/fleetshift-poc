@@ -73,7 +73,7 @@ func LeafHash(identity Digest) ([]byte, error) {
 
 // VerifyEvidenceLogUpdate verifies the RFC 6962 consistency proof from
 // previous to update.Checkpoint. From is transport metadata and is not
-// compared to previous.
+// compared to previous; exact From matching is the caller's concern.
 func VerifyEvidenceLogUpdate(previous Checkpoint, update EvidenceLogUpdate) error {
 	previousRoot, err := validateCheckpoint(previous)
 	if err != nil {
