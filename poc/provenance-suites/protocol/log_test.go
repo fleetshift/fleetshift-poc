@@ -26,10 +26,10 @@ func TestEmptyCheckpointUsesRFC6962EmptyRoot(t *testing.T) {
 func TestVerifyEvidenceLogUpdateStartsFromEmptyTree(t *testing.T) {
 	tree := merklelog.New()
 	evidence := testLogEvidence("first")
-	update := mustAppendEvidenceLogUpdate(t, tree, EmptyCheckpoint(), evidence)
+	update, inclusion := mustAppendLog(t, tree, EmptyCheckpoint(), evidence)
 
-	if update.Index != 0 {
-		t.Fatalf("first index = %d, want 0", update.Index)
+	if inclusion.Index != 0 {
+		t.Fatalf("first index = %d, want 0", inclusion.Index)
 	}
 	if update.Checkpoint.Size != 1 {
 		t.Fatalf("first checkpoint size = %d, want 1", update.Checkpoint.Size)
@@ -37,39 +37,40 @@ func TestVerifyEvidenceLogUpdateStartsFromEmptyTree(t *testing.T) {
 	if len(update.ConsistencyProof) != 0 {
 		t.Fatalf("empty-tree consistency proof has %d hashes, want 0", len(update.ConsistencyProof))
 	}
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), update, evidence); err != nil {
+	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), update); err != nil {
 		t.Fatalf("verify first update: %v", err)
+	}
+	if err := VerifyEvidenceLogInclusion(update.Checkpoint, evidence, inclusion); err != nil {
+		t.Fatalf("verify first inclusion: %v", err)
 	}
 }
 
-func TestVerifyEvidenceLogUpdateRequiresLeafToEqualRootIdentity(t *testing.T) {
+func TestVerifyEvidenceLogInclusionRequiresAdjacentEvidenceIdentity(t *testing.T) {
 	tree := merklelog.New()
 	evidence := testLogEvidence("bound")
-	update := mustAppendEvidenceLogUpdate(t, tree, EmptyCheckpoint(), evidence)
+	update, inclusion := mustAppendLog(t, tree, EmptyCheckpoint(), evidence)
 	other := testLogEvidence("other")
 
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), update, other); !errors.Is(err, ErrInvalidLogUpdate) {
-		t.Fatalf("mismatched evidence error = %v, want ErrInvalidLogUpdate", err)
-	}
-
-	update.Leaf = mustIdentity(t, other)
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), update, evidence); !errors.Is(err, ErrInvalidLogUpdate) {
-		t.Fatalf("mismatched leaf error = %v, want ErrInvalidLogUpdate", err)
+	if err := VerifyEvidenceLogInclusion(update.Checkpoint, other, inclusion); !errors.Is(err, ErrInvalidLogInclusion) {
+		t.Fatalf("mismatched evidence error = %v, want ErrInvalidLogInclusion", err)
 	}
 }
 
 func TestVerifyEvidenceLogUpdateAcceptsAppendAndRetry(t *testing.T) {
 	tree := merklelog.New()
 	firstEvidence := testLogEvidence("one")
-	first := mustAppendEvidenceLogUpdate(t, tree, EmptyCheckpoint(), firstEvidence)
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), first, firstEvidence); err != nil {
+	first, firstInclusion := mustAppendLog(t, tree, EmptyCheckpoint(), firstEvidence)
+	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), first); err != nil {
 		t.Fatalf("verify first append: %v", err)
+	}
+	if err := VerifyEvidenceLogInclusion(first.Checkpoint, firstEvidence, firstInclusion); err != nil {
+		t.Fatalf("verify first inclusion: %v", err)
 	}
 
 	secondEvidence := testLogEvidence("two")
-	second := mustAppendEvidenceLogUpdate(t, tree, first.Checkpoint, secondEvidence)
-	if second.Index != 1 {
-		t.Fatalf("second index = %d, want 1", second.Index)
+	second, secondInclusion := mustAppendLog(t, tree, first.Checkpoint, secondEvidence)
+	if secondInclusion.Index != 1 {
+		t.Fatalf("second index = %d, want 1", secondInclusion.Index)
 	}
 	if second.Checkpoint.Size != 2 {
 		t.Fatalf("second checkpoint size = %d, want 2", second.Checkpoint.Size)
@@ -77,20 +78,27 @@ func TestVerifyEvidenceLogUpdateAcceptsAppendAndRetry(t *testing.T) {
 	if len(second.ConsistencyProof) == 0 {
 		t.Fatal("one-to-two extension has no consistency proof")
 	}
-	if err := VerifyEvidenceLogUpdate(first.Checkpoint, second, secondEvidence); err != nil {
+	if err := VerifyEvidenceLogUpdate(first.Checkpoint, second); err != nil {
 		t.Fatalf("verify second append: %v", err)
 	}
+	if err := VerifyEvidenceLogInclusion(second.Checkpoint, secondEvidence, secondInclusion); err != nil {
+		t.Fatalf("verify second inclusion: %v", err)
+	}
 
-	retry := mustEvidenceLogUpdate(t, tree, second.Checkpoint, second.Index, second.Leaf)
+	retry := mustEvidenceLogUpdate(t, tree, second.Checkpoint)
 	if len(retry.ConsistencyProof) != 0 {
 		t.Fatalf("equal-size retry consistency proof has %d hashes, want 0", len(retry.ConsistencyProof))
 	}
-	if err := VerifyEvidenceLogUpdate(second.Checkpoint, retry, secondEvidence); err != nil {
+	if err := VerifyEvidenceLogUpdate(second.Checkpoint, retry); err != nil {
 		t.Fatalf("verify same-head retry: %v", err)
+	}
+	retryInclusion := mustEvidenceLogInclusion(t, tree, secondInclusion.Index)
+	if err := VerifyEvidenceLogInclusion(retry.Checkpoint, secondEvidence, retryInclusion); err != nil {
+		t.Fatalf("verify same-head inclusion: %v", err)
 	}
 }
 
-func TestVerifyEvidenceLogUpdateLeafDoesNotIncludeIndex(t *testing.T) {
+func TestVerifyEvidenceLogInclusionDoesNotIncludeIndexInLeafHash(t *testing.T) {
 	evidence := testLogEvidence("same-payload")
 	identity := mustIdentity(t, evidence)
 	leafHash, err := LeafHash(identity)
@@ -106,56 +114,56 @@ func TestVerifyEvidenceLogUpdateLeafDoesNotIncludeIndex(t *testing.T) {
 		t.Fatalf("append index 1: %v", err)
 	}
 
-	first := mustEvidenceLogUpdate(t, tree, EmptyCheckpoint(), 0, identity)
-	second := mustEvidenceLogUpdate(t, tree, EmptyCheckpoint(), 1, identity)
-	if first.Leaf != second.Leaf {
-		t.Fatalf("same identity produced different leaves: %q vs %q", first.Leaf, second.Leaf)
-	}
+	checkpoint := mustCheckpoint(t, tree, tree.Size())
+	first := mustEvidenceLogInclusion(t, tree, 0)
+	second := mustEvidenceLogInclusion(t, tree, 1)
 	if first.Index == second.Index {
 		t.Fatal("same identity at two positions collapsed to one index")
 	}
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), first, evidence); err != nil {
+	if err := VerifyEvidenceLogInclusion(checkpoint, evidence, first); err != nil {
 		t.Fatalf("verify identity at index 0: %v", err)
 	}
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), second, evidence); err != nil {
+	if err := VerifyEvidenceLogInclusion(checkpoint, evidence, second); err != nil {
 		t.Fatalf("verify identity at index 1: %v", err)
 	}
 
 	otherTree := merklelog.New()
-	mustAppendEvidenceLogUpdate(t, otherTree, EmptyCheckpoint(), evidence)
-	mustAppendEvidenceLogUpdate(t, otherTree, mustCheckpoint(t, otherTree, 1), testLogEvidence("other"))
-	moved := mustEvidenceLogUpdate(t, otherTree, EmptyCheckpoint(), 0, identity)
+	mustAppendLog(t, otherTree, EmptyCheckpoint(), evidence)
+	mustAppendLog(t, otherTree, mustCheckpoint(t, otherTree, 1), testLogEvidence("other"))
+	moved := mustEvidenceLogInclusion(t, otherTree, 0)
 	moved.Index = 1
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), moved, evidence); !errors.Is(err, ErrInvalidLogUpdate) {
-		t.Fatalf("moved index without a matching inclusion proof error = %v, want ErrInvalidLogUpdate", err)
+	if err := VerifyEvidenceLogInclusion(mustCheckpoint(t, otherTree, otherTree.Size()), evidence, moved); !errors.Is(err, ErrInvalidLogInclusion) {
+		t.Fatalf("moved index without a matching inclusion proof error = %v, want ErrInvalidLogInclusion", err)
 	}
 }
 
-func TestVerifyEvidenceLogUpdateSkipsUnrelatedLeaf(t *testing.T) {
+func TestVerifyEvidenceLogInclusionSkipsUnrelatedLeaf(t *testing.T) {
 	tree := merklelog.New()
 	unrelated := testLogEvidence("other-target")
-	mustAppendEvidenceLogUpdate(t, tree, EmptyCheckpoint(), unrelated)
+	mustAppendLog(t, tree, EmptyCheckpoint(), unrelated)
 
 	relevant := testLogEvidence("this-target")
 	from := mustCheckpoint(t, tree, 1)
-	update := mustAppendEvidenceLogUpdate(t, tree, from, relevant)
-	if update.Index != 1 || update.Checkpoint.Size != 2 {
-		t.Fatalf("update index = %d size = %d, want index 1 size 2", update.Index, update.Checkpoint.Size)
+	update, inclusion := mustAppendLog(t, tree, from, relevant)
+	if inclusion.Index != 1 || update.Checkpoint.Size != 2 {
+		t.Fatalf("update index = %d size = %d, want index 1 size 2", inclusion.Index, update.Checkpoint.Size)
 	}
-	if update.Leaf != mustIdentity(t, relevant) {
-		t.Fatal("update disclosed an unrelated leaf payload")
+
+	fromEmpty := mustEvidenceLogUpdate(t, tree, EmptyCheckpoint())
+	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), fromEmpty); err != nil {
+		t.Fatalf("verify consistency over an unrelated leaf: %v", err)
 	}
-	if err := VerifyEvidenceLogUpdate(EmptyCheckpoint(), mustEvidenceLogUpdate(t, tree, EmptyCheckpoint(), 1, update.Leaf), relevant); err != nil {
-		t.Fatalf("verify inclusion of this leaf under a tree that also contains an unrelated leaf: %v", err)
+	if err := VerifyEvidenceLogInclusion(fromEmpty.Checkpoint, relevant, mustEvidenceLogInclusion(t, tree, 1)); err != nil {
+		t.Fatalf("verify inclusion of this identity under a tree that also contains an unrelated leaf: %v", err)
 	}
 }
 
 func TestVerifyEvidenceLogUpdateRejectsTamperingAndForks(t *testing.T) {
 	tree := merklelog.New()
 	firstEvidence := testLogEvidence("one")
-	first := mustAppendEvidenceLogUpdate(t, tree, EmptyCheckpoint(), firstEvidence)
+	first, _ := mustAppendLog(t, tree, EmptyCheckpoint(), firstEvidence)
 	secondEvidence := testLogEvidence("two")
-	second := mustAppendEvidenceLogUpdate(t, tree, first.Checkpoint, secondEvidence)
+	second, _ := mustAppendLog(t, tree, first.Checkpoint, secondEvidence)
 
 	forkRoot, err := EncodeDigest(bytes.Repeat([]byte{0xff}, rfc6962.DefaultHasher.Size()))
 	if err != nil {
@@ -166,8 +174,6 @@ func TestVerifyEvidenceLogUpdateRejectsTamperingAndForks(t *testing.T) {
 		name   string
 		mutate func(*EvidenceLogUpdate)
 	}{
-		{name: "leaf", mutate: func(update *EvidenceLogUpdate) { update.Leaf = mustIdentity(t, testLogEvidence("attacker")) }},
-		{name: "inclusion proof", mutate: func(update *EvidenceLogUpdate) { update.InclusionProof[0] = forkRoot }},
 		{name: "consistency proof", mutate: func(update *EvidenceLogUpdate) { update.ConsistencyProof[0] = forkRoot }},
 		{name: "forked root", mutate: func(update *EvidenceLogUpdate) { update.Checkpoint.Root = forkRoot }},
 		{name: "skip-ahead size", mutate: func(update *EvidenceLogUpdate) { update.Checkpoint.Size = 99 }},
@@ -175,12 +181,29 @@ func TestVerifyEvidenceLogUpdateRejectsTamperingAndForks(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tampered := second
 			tampered.ConsistencyProof = append([]Digest(nil), second.ConsistencyProof...)
-			tampered.InclusionProof = append([]Digest(nil), second.InclusionProof...)
 			tc.mutate(&tampered)
-			if err := VerifyEvidenceLogUpdate(first.Checkpoint, tampered, secondEvidence); !errors.Is(err, ErrInvalidLogUpdate) {
+			if err := VerifyEvidenceLogUpdate(first.Checkpoint, tampered); !errors.Is(err, ErrInvalidLogUpdate) {
 				t.Fatalf("error = %v, want ErrInvalidLogUpdate", err)
 			}
 		})
+	}
+}
+
+func TestVerifyEvidenceLogInclusionRejectsTamperedProof(t *testing.T) {
+	tree := merklelog.New()
+	mustAppendLog(t, tree, EmptyCheckpoint(), testLogEvidence("one"))
+	secondEvidence := testLogEvidence("two")
+	update, inclusion := mustAppendLog(t, tree, mustCheckpoint(t, tree, 1), secondEvidence)
+
+	forkRoot, err := EncodeDigest(bytes.Repeat([]byte{0xff}, rfc6962.DefaultHasher.Size()))
+	if err != nil {
+		t.Fatalf("encode fork root: %v", err)
+	}
+	tampered := inclusion
+	tampered.InclusionProof = append([]Digest(nil), inclusion.InclusionProof...)
+	tampered.InclusionProof[0] = forkRoot
+	if err := VerifyEvidenceLogInclusion(update.Checkpoint, secondEvidence, tampered); !errors.Is(err, ErrInvalidLogInclusion) {
+		t.Fatalf("error = %v, want ErrInvalidLogInclusion", err)
 	}
 }
 
@@ -216,28 +239,33 @@ func mustCheckpoint(t *testing.T, tree *merklelog.Tree, size uint64) Checkpoint 
 	return checkpoint
 }
 
-func mustEvidenceLogUpdate(t *testing.T, tree *merklelog.Tree, from Checkpoint, index uint64, leaf Digest) EvidenceLogUpdate {
+func mustEvidenceLogUpdate(t *testing.T, tree *merklelog.Tree, from Checkpoint) EvidenceLogUpdate {
 	t.Helper()
 	current := mustCheckpoint(t, tree, tree.Size())
 	consistency, err := tree.ConsistencyProof(from.Size, current.Size)
 	if err != nil {
 		t.Fatalf("consistency proof: %v", err)
 	}
-	inclusion, err := tree.InclusionProof(index, current.Size)
-	if err != nil {
-		t.Fatalf("inclusion proof: %v", err)
-	}
 	return EvidenceLogUpdate{
 		From:             from,
 		Checkpoint:       current,
 		ConsistencyProof: EncodeProof(consistency),
-		Index:            index,
-		Leaf:             leaf,
-		InclusionProof:   EncodeProof(inclusion),
 	}
 }
 
-func mustAppendEvidenceLogUpdate(t *testing.T, tree *merklelog.Tree, from Checkpoint, evidence TypedEvidence) EvidenceLogUpdate {
+func mustEvidenceLogInclusion(t *testing.T, tree *merklelog.Tree, index uint64) EvidenceLogInclusion {
+	t.Helper()
+	inclusion, err := tree.InclusionProof(index, tree.Size())
+	if err != nil {
+		t.Fatalf("inclusion proof: %v", err)
+	}
+	return EvidenceLogInclusion{
+		Index:          index,
+		InclusionProof: EncodeProof(inclusion),
+	}
+}
+
+func mustAppendLog(t *testing.T, tree *merklelog.Tree, from Checkpoint, evidence TypedEvidence) (EvidenceLogUpdate, EvidenceLogInclusion) {
 	t.Helper()
 	identity := mustIdentity(t, evidence)
 	leafHash, err := LeafHash(identity)
@@ -248,5 +276,5 @@ func mustAppendEvidenceLogUpdate(t *testing.T, tree *merklelog.Tree, from Checkp
 	if err != nil {
 		t.Fatalf("append leaf: %v", err)
 	}
-	return mustEvidenceLogUpdate(t, tree, from, index, identity)
+	return mustEvidenceLogUpdate(t, tree, from), mustEvidenceLogInclusion(t, tree, index)
 }

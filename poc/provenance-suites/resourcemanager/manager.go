@@ -70,16 +70,15 @@ type StoredDelivery struct {
 }
 
 // DeliveryPackage is the couriered mutation a target verifies. Root and
-// supporting items are the same kind of object: one independently
-// authenticated assertion plus replaceable support for that evidence.
-// The inner assertion is extracted from each statement's evidence by the
-// selected profile. EvidenceLog binds Root.Evidence's identity to the
-// position assigned when that evidence was accepted; it does not authorize
-// content.
+// supporting items are the same kind of object: a SignedStatement plus that
+// statement's optional evidence-log inclusion. The inner assertion is
+// extracted from each statement's evidence by the selected profile.
+// EvidenceLog is the shared checkpoint transition and consistency proof;
+// it does not authorize content. Per-item inclusion lives on Item.
 type DeliveryPackage struct {
-	EvidenceLog protocol.EvidenceLogUpdate
-	Root        protocol.SignedStatement
-	Supporting  []protocol.SignedStatement
+	Root        protocol.Item               `json:"root"`
+	Supporting  []protocol.Item             `json:"supporting,omitempty"`
+	EvidenceLog *protocol.EvidenceLogUpdate `json:"evidence_log,omitempty"`
 }
 
 // DeliveryAgent is the manager-side view of a target. A nil error is the
@@ -474,7 +473,7 @@ func (m *Manager) pushToRoute(ctx context.Context, route *agentRoute, dispatchID
 			m.mu.Unlock()
 			return nil
 		}
-		update, err := m.evidenceLogUpdateLocked(route.checkpoint, stored.Root)
+		update, err := m.evidenceLogUpdateLocked(route.checkpoint)
 		if err != nil {
 			m.mu.Unlock()
 			return fmt.Errorf("construct proof from acknowledged agent checkpoint: %w", err)
@@ -513,34 +512,46 @@ func (m *Manager) pushToRoute(ctx context.Context, route *agentRoute, dispatchID
 }
 
 func (m *Manager) deliveryPackageLocked(ctx context.Context, update protocol.EvidenceLogUpdate, stored storedDelivery) (DeliveryPackage, error) {
-	rootEvidence, err := m.lookupEvidenceLocked(stored.Root)
+	root, err := m.assembleItemLocked(ctx, stored.Root)
 	if err != nil {
 		return DeliveryPackage{}, err
 	}
-	root, err := m.assembleStatement(ctx, rootEvidence)
-	if err != nil {
-		return DeliveryPackage{}, err
-	}
-	out := make([]protocol.SignedStatement, 0, len(stored.Supporting))
+	out := make([]protocol.Item, 0, len(stored.Supporting))
 	for _, id := range stored.Supporting {
-		item, err := m.lookupEvidenceLocked(id)
+		item, err := m.assembleItemLocked(ctx, id)
 		if err != nil {
 			return DeliveryPackage{}, err
 		}
-		stmt, err := m.assembleStatement(ctx, item)
-		if err != nil {
-			return DeliveryPackage{}, err
-		}
-		out = append(out, stmt)
+		out = append(out, item)
 	}
+	updateCopy := update
 	return DeliveryPackage{
-		EvidenceLog: update,
+		EvidenceLog: &updateCopy,
 		Root:        root,
 		Supporting:  out,
 	}, nil
 }
 
-func (m *Manager) evidenceLogUpdateLocked(from protocol.Checkpoint, root protocol.Digest) (protocol.EvidenceLogUpdate, error) {
+func (m *Manager) assembleItemLocked(ctx context.Context, id protocol.Digest) (protocol.Item, error) {
+	evidence, err := m.lookupEvidenceLocked(id)
+	if err != nil {
+		return protocol.Item{}, err
+	}
+	stmt, err := m.assembleStatement(ctx, evidence)
+	if err != nil {
+		return protocol.Item{}, err
+	}
+	inclusion, err := m.evidenceLogInclusionLocked(id)
+	if err != nil {
+		return protocol.Item{}, err
+	}
+	return protocol.Item{
+		SignedStatement: stmt,
+		EvidenceLog:     inclusion,
+	}, nil
+}
+
+func (m *Manager) evidenceLogUpdateLocked(from protocol.Checkpoint) (protocol.EvidenceLogUpdate, error) {
 	if from.Size > m.tree.Size() {
 		return protocol.EvidenceLogUpdate{}, fmt.Errorf("checkpoint size %d is beyond log size %d", from.Size, m.tree.Size())
 	}
@@ -559,24 +570,29 @@ func (m *Manager) evidenceLogUpdateLocked(from protocol.Checkpoint, root protoco
 	if err != nil {
 		return protocol.EvidenceLogUpdate{}, fmt.Errorf("construct evidence-log consistency proof: %w", err)
 	}
-	index, ok := m.logIndexByEvidenceID[root]
-	if !ok {
-		return protocol.EvidenceLogUpdate{}, fmt.Errorf("%w: %s", errUnknownEvidence, root)
-	}
-	if index >= current.Size {
-		return protocol.EvidenceLogUpdate{}, fmt.Errorf("evidence-log index %d is beyond size %d", index, current.Size)
-	}
-	inclusion, err := m.tree.InclusionProof(index, current.Size)
-	if err != nil {
-		return protocol.EvidenceLogUpdate{}, fmt.Errorf("construct inclusion proof for index %d: %w", index, err)
-	}
 	return protocol.EvidenceLogUpdate{
 		From:             from,
 		Checkpoint:       current,
 		ConsistencyProof: protocol.EncodeProof(consistency),
-		Index:            index,
-		Leaf:             root,
-		InclusionProof:   protocol.EncodeProof(inclusion),
+	}, nil
+}
+
+func (m *Manager) evidenceLogInclusionLocked(identity protocol.Digest) (*protocol.EvidenceLogInclusion, error) {
+	index, ok := m.logIndexByEvidenceID[identity]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", errUnknownEvidence, identity)
+	}
+	size := m.tree.Size()
+	if index >= size {
+		return nil, fmt.Errorf("evidence-log index %d is beyond size %d", index, size)
+	}
+	inclusion, err := m.tree.InclusionProof(index, size)
+	if err != nil {
+		return nil, fmt.Errorf("construct inclusion proof for index %d: %w", index, err)
+	}
+	return &protocol.EvidenceLogInclusion{
+		Index:          index,
+		InclusionProof: protocol.EncodeProof(inclusion),
 	}, nil
 }
 

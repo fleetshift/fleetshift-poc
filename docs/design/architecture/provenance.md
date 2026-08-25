@@ -482,13 +482,15 @@ replace their authorship, or create a signature that speaks for the aggregate.
 
 An aggregate evidence package is therefore not a new provenance authority.
 It is a collection assembled by the RM so the target can evaluate one delivery.
-Each independently authenticated item is couriered as a signed statement:
-immutable `TypedEvidence` plus replaceable support material used to verify
-that evidence. Root and supporting items are the same kind of object. The
-package and the attestation graph remain common and profile-neutral. They
-may contain independently authenticated items that use different provenance
-types and media formats. A Sigstore Bundle represents one such item, not the
-aggregate.
+Each independently authenticated item is couriered as an `Item`: a signed
+statement (immutable `TypedEvidence` plus replaceable support material used
+to verify that evidence) together with that statement's optional evidence-log
+inclusion. Root and supporting items are the same kind of object. Inclusion
+is common couriered material, not `SupportMaterial` and not part of
+`TypedEvidence` identity. The package and the attestation graph remain
+common and profile-neutral. They may contain independently authenticated
+items that use different provenance types and media formats. A Sigstore
+Bundle represents one such item, not the aggregate.
 
 No evidence author is assumed to have seen evidence created later by another
 author.
@@ -903,12 +905,13 @@ items after duplicate removal. The assigned sequence is registration order.
 It is not proof of creation time, producer causality, lifecycle acceptance,
 or application.
 
-The couriered object includes an evidence-log update: the checkpoint the
-proofs were built from, the new size and root, an append-only consistency
-proof, and inclusion of the relevant accepted identities. Those proofs are
-reconstructable and are not part of the leaf. They are common couriered
-material, not profile `SupportMaterial` and not part of the immutable
-`TypedEvidence` identity.
+The couriered package includes a package-wide evidence-log update: the
+checkpoint the proofs were built from, the new size and root, and an
+append-only consistency proof. Each item carries optional inclusion of its
+accepted `TypedEvidence` identity adjacent to its signed statement. Those
+proofs are reconstructable and are not part of the leaf. They are common
+couriered material, not profile `SupportMaterial` and not part of the
+immutable `TypedEvidence` identity.
 
 The log supports:
 

@@ -36,20 +36,27 @@ func NewCheckpoint(size uint64, root []byte) (Checkpoint, error) {
 }
 
 // EvidenceLogUpdate proves an append-only evidence-log transition from a
-// verifier's retained checkpoint and discloses one leaf: this package's root
-// TypedEvidence identity. That identity received its index when the resource
-// manager accepted the evidence, not when a delivery or outbox entry was
-// created. Unrelated accepted-evidence leaves are committed by the
-// consistency proof and are not listed. From is the checkpoint the proofs
-// were constructed from; it is transport metadata so a manager using a stale
-// cached checkpoint can be distinguished from a log fork.
+// verifier's retained checkpoint. Unrelated accepted-evidence leaves are
+// committed by the consistency proof and are not listed. From is the
+// checkpoint the proofs were constructed from; it is transport metadata so
+// a manager using a stale cached checkpoint can be distinguished from a
+// log fork. Per-item inclusion lives on Item, not on this package-wide
+// update.
 type EvidenceLogUpdate struct {
 	From             Checkpoint `json:"from"`
 	Checkpoint       Checkpoint `json:"checkpoint"`
 	ConsistencyProof []Digest   `json:"consistency_proof"`
-	Index            uint64     `json:"index"`
-	Leaf             Digest     `json:"leaf"`
-	InclusionProof   []Digest   `json:"inclusion_proof"`
+}
+
+// EvidenceLogInclusion proves that a TypedEvidence identity is a leaf of
+// the evidence log at Index under a checkpoint. The verifier recomputes
+// the identity from the adjacent statement and derives the RFC 6962 leaf
+// hash; the inclusion does not serialize that digest. That identity
+// received its index when the resource manager accepted the evidence, not
+// when a delivery or outbox entry was created.
+type EvidenceLogInclusion struct {
+	Index          uint64   `json:"index"`
+	InclusionProof []Digest `json:"inclusion_proof"`
 }
 
 // LeafHash returns the RFC 6962 leaf hash of a TypedEvidence identity.
@@ -59,23 +66,15 @@ type EvidenceLogUpdate struct {
 func LeafHash(identity Digest) ([]byte, error) {
 	raw, err := DecodeDigest(identity)
 	if err != nil {
-		return nil, fmt.Errorf("%w: leaf identity: %v", ErrInvalidLogUpdate, err)
+		return nil, fmt.Errorf("leaf identity: %v", err)
 	}
 	return rfc6962.DefaultHasher.HashLeaf(raw), nil
 }
 
 // VerifyEvidenceLogUpdate verifies the RFC 6962 consistency proof from
-// previous to update.Checkpoint, inclusion of HashLeaf(Leaf) at Index under
-// that checkpoint, and that Leaf equals the couriered root evidence identity.
-func VerifyEvidenceLogUpdate(previous Checkpoint, update EvidenceLogUpdate, root TypedEvidence) error {
-	identity, err := root.Identity()
-	if err != nil {
-		return fmt.Errorf("%w: root evidence identity: %v", ErrInvalidLogUpdate, err)
-	}
-	if update.Leaf != identity {
-		return fmt.Errorf("%w: log leaf %q does not match root evidence identity %q", ErrInvalidLogUpdate, update.Leaf, identity)
-	}
-
+// previous to update.Checkpoint. From is transport metadata and is not
+// compared to previous.
+func VerifyEvidenceLogUpdate(previous Checkpoint, update EvidenceLogUpdate) error {
 	previousRoot, err := validateCheckpoint(previous)
 	if err != nil {
 		return fmt.Errorf("%w: previous checkpoint: %v", ErrInvalidLogUpdate, err)
@@ -86,9 +85,6 @@ func VerifyEvidenceLogUpdate(previous Checkpoint, update EvidenceLogUpdate, root
 	}
 	if update.Checkpoint.Size < previous.Size {
 		return fmt.Errorf("%w: successor size %d is before retained size %d", ErrInvalidLogUpdate, update.Checkpoint.Size, previous.Size)
-	}
-	if update.Index >= update.Checkpoint.Size {
-		return fmt.Errorf("%w: index %d is beyond checkpoint size %d", ErrInvalidLogUpdate, update.Index, update.Checkpoint.Size)
 	}
 
 	consistency, err := decodeProof(update.ConsistencyProof)
@@ -116,24 +112,43 @@ func VerifyEvidenceLogUpdate(previous Checkpoint, update EvidenceLogUpdate, root
 			return fmt.Errorf("%w: consistency proof: %v", ErrInvalidLogUpdate, err)
 		}
 	}
+	return nil
+}
 
-	leafHash, err := LeafHash(update.Leaf)
+// VerifyEvidenceLogInclusion verifies that evidence's TypedEvidence
+// identity is the leaf at inclusion.Index under checkpoint. The leaf hash
+// is recomputed from the adjacent evidence; inclusion does not carry a
+// couriered digest.
+func VerifyEvidenceLogInclusion(checkpoint Checkpoint, evidence TypedEvidence, inclusion EvidenceLogInclusion) error {
+	identity, err := evidence.Identity()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: evidence identity: %v", ErrInvalidLogInclusion, err)
 	}
-	inclusion, err := decodeProof(update.InclusionProof)
+	root, err := validateCheckpoint(checkpoint)
 	if err != nil {
-		return fmt.Errorf("%w: inclusion proof: %v", ErrInvalidLogUpdate, err)
+		return fmt.Errorf("%w: checkpoint: %v", ErrInvalidLogInclusion, err)
+	}
+	if inclusion.Index >= checkpoint.Size {
+		return fmt.Errorf("%w: index %d is beyond checkpoint size %d", ErrInvalidLogInclusion, inclusion.Index, checkpoint.Size)
+	}
+
+	leafHash, err := LeafHash(identity)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidLogInclusion, err)
+	}
+	proofHashes, err := decodeProof(inclusion.InclusionProof)
+	if err != nil {
+		return fmt.Errorf("%w: inclusion proof: %v", ErrInvalidLogInclusion, err)
 	}
 	if err := proof.VerifyInclusion(
 		rfc6962.DefaultHasher,
-		update.Index,
-		update.Checkpoint.Size,
+		inclusion.Index,
+		checkpoint.Size,
 		leafHash,
-		inclusion,
-		successorRoot,
+		proofHashes,
+		root,
 	); err != nil {
-		return fmt.Errorf("%w: inclusion proof: %v", ErrInvalidLogUpdate, err)
+		return fmt.Errorf("%w: inclusion proof: %v", ErrInvalidLogInclusion, err)
 	}
 	return nil
 }

@@ -37,10 +37,13 @@ TargetAPI
       -> update suite-owned retained state
 ```
 
-A `SignedStatement` is one independently authenticated assertion as couriered:
+A `SignedStatement` is one independently authenticated assertion:
 immutable `TypedEvidence` plus replaceable `SupportMaterial` used to verify
-that evidence. Root and supporting items in a delivery package are the same
-type. The inner statement lives in the evidence bytes; `Verify` emits it.
+that evidence. A delivery package couriers each statement as an `Item`,
+which may also carry that statement's evidence-log inclusion. Root and
+supporting items are the same kind of object. The inner statement lives in
+the evidence bytes; `Verify` emits it. Profile selection and `Apply` take
+the `SignedStatement`, not the enclosing `Item`.
 
 Common resource-manager code never parses `TypedEvidence` bytes. It owns the
 immutable evidence repository and assigns each accepted identity one
@@ -142,24 +145,26 @@ resource manager
     or target fanout
   - enqueues separate delivery/outbox records; a log index is not a retry
     handle
-  - couriers an evidence-log update (consistency from the agent's last ack
-    plus inclusion of the root leaf) with each independently authenticated
-    SignedStatement (root plus optional supporting statements such as
-    fulfillment relations)
+  - couriers a package-wide evidence-log update (checkpoint transition and
+    consistency from the agent's last ack) plus an Item for each stored
+    identity (SignedStatement with that identity's inclusion), including
+    optional supporting items such as fulfillment relations
   - submits typed direct-key enrollment the same way: register, enqueue,
     then Dispatch to every currently registered agent
   - assembles empty support material for this profile
   - has an explicit CompromisedManager attack harness
                |
                | untrusted package
-               |   EvidenceLog  EvidenceLogUpdate
-               |   Root         SignedStatement
-               |   Supporting  []SignedStatement
+               |   EvidenceLog  *EvidenceLogUpdate (checkpoint + consistency)
+               |   Root         Item (SignedStatement + inclusion)
+               |   Supporting  []Item
                v
 delivery agent
   - is bootstrapped with authenticated AuthorityConfig
   - never returns to TOFU after initialization
-  - verifies log consistency and inclusion before profile selection
+  - verifies package-wide log consistency and inclusion of the root Item
+    before profile selection. This POC does not yet verify supporting-item
+    inclusion.
   - selects a profile from policy and verifies independently
   - dispatches on authenticated predicate type: intent apply, profile-owned
     suite Apply, or the reserved trust-config-update handler
@@ -168,14 +173,15 @@ delivery agent
 Storage is in memory. The evidence log is an RFC 6962 Merkle tree. The honest
 RM assigns each accepted `TypedEvidence` identity one canonical leaf at
 acceptance, not per delivery or outbox entry. Retrying or reusing evidence
-does not append it again. Each couriered package discloses one leaf — this
-root identity's accepted position — and proves append-only growth from the
-agent's retained `(size, root)` checkpoint. Unrelated accepted-evidence
-leaves, including supporting evidence registered in the same mutation, are
-skipped via consistency, not listed. There is no attestation graph,
-credential presentation, rotation, or historical cutoff yet. Those belong to
-the hybrid attestation POC and the mature profiles. This suite implements
-only `RegisteredSelfTarget` for fulfillment relations.
+does not append it again. Each couriered package carries a shared checkpoint
+transition plus consistency proof, and each `Item` discloses that statement's
+accepted position. The verifier recomputes the evidence identity from the
+adjacent statement; inclusion does not serialize a leaf digest. Unrelated
+accepted-evidence leaves are skipped via consistency, not listed. This POC
+still verifies inclusion only for the root Item. There is no attestation
+graph, credential presentation, rotation, or historical cutoff yet. Those
+belong to the hybrid attestation POC and the mature profiles. This suite
+implements only `RegisteredSelfTarget` for fulfillment relations.
 
 ## Security cases pinned by tests
 
@@ -192,7 +198,7 @@ only `RegisteredSelfTarget` for fulfillment relations.
 | Acknowledged Dispatch retry | No-op; no new leaf and no repeated authorization |
 | `deployment/v1` and `trust-config-update/v1` | Do not call suite `Apply`; trust-config-update fails closed until the agent handler exists |
 | Policy-matched predicate the profile does not `Owns` | Fail closed without calling suite `Apply` |
-| Producer signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type |
+| Producer signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type; supporting items carry inclusions at their canonical indexes |
 | Managed resource with no relation, wrong resource type, or unenrolled relation signer | Rejected |
 | Fulfillment relation couriered with a deployment | Ignored; deployment apply is unchanged |
 | Unknown root predicate | Fail closed |
@@ -208,7 +214,7 @@ only `RegisteredSelfTarget` for fulfillment relations.
 | Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs without appending evidence |
 | Rejected delivery after a verified log update | Log checkpoint advances; retry recovers the manager cache without applying or growing the log |
 | Delivery to B while A is idle, then delivery to A | A's consistency proof covers B's leaf without disclosing B's evidence |
-| Log leaf does not match root evidence identity | Rejected |
+| Root Item inclusion does not prove root evidence identity | Rejected |
 | Forked or skip-ahead log proofs | Rejected as a log fork, not reported as stale |
 
 ## Run it
@@ -225,12 +231,12 @@ No external identity provider, database, or transparency service is required.
 
 | Path | Purpose |
 | --- | --- |
-| `protocol/` | TypedEvidence, Principal, AuthorityConfig, selection, evidence-log update, and the three APIs |
+| `protocol/` | TypedEvidence, Item, Principal, AuthorityConfig, selection, evidence-log update and inclusion, and the three APIs |
 | `internal/merklelog/` | In-memory RFC 6962 compact-range store copied from the v3 POC |
 | `directkey/` | Naive profile: enrollment, signature encoding, retained mapping |
 | `producer/` | Controlled-producer role |
 | `resourcemanager/` | Authorization, common evidence repository, evidence log, delivery/outbox, last-ack cache, typed enrollment accept, compromise harness |
-| `deliveryagent/` | Bootstrap, evidence-log verification, selection, verification, predicate dispatch, apply |
+| `deliveryagent/` | Bootstrap, package-wide log consistency, root Item inclusion, selection, verification, predicate dispatch, apply |
 | `provenance_test.go` | End-to-end guarantees and accepted TOFU limitation |
 
 ## Recommended next experiments

@@ -55,6 +55,11 @@ var (
 	ErrVerificationFailed = errors.New("provenance verification failed")
 
 	// ErrInvalidLogUpdate is returned when an evidence-log update does not
-	// prove append-only consistency or inclusion of the claimed leaf.
+	// prove append-only consistency from a retained checkpoint.
 	ErrInvalidLogUpdate = errors.New("invalid evidence-log update")
+
+	// ErrInvalidLogInclusion is returned when an evidence-log inclusion
+	// proof does not place the adjacent TypedEvidence identity at the
+	// stated index under the given checkpoint.
+	ErrInvalidLogInclusion = errors.New("invalid evidence-log inclusion")
 )

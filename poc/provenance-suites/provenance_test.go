@@ -295,7 +295,7 @@ func TestUninitializedVerifierRejectsDelivery(t *testing.T) {
 	}
 	user := mustProducer(t, "alice")
 	evidence := mustSignDeployment(t, user, deploymentName("too-early"), 1, []byte(`{}`))
-	err = agent.Deliver(resourcemanager.DeliveryPackage{Root: protocol.SignedStatement{Evidence: evidence}})
+	err = agent.Deliver(resourcemanager.DeliveryPackage{Root: protocol.Item{SignedStatement: protocol.SignedStatement{Evidence: evidence}}})
 	if !errors.Is(err, protocol.ErrUninitializedVerifier) {
 		t.Fatalf("error = %v, want ErrUninitializedVerifier", err)
 	}
@@ -430,6 +430,15 @@ func TestManagedResourceAppliesDerivedManifestFromFulfillmentRelation(t *testing
 	if err != nil {
 		t.Fatalf("submit managed resource: %v", err)
 	}
+	pkg := s.recorder.last
+	if pkg.EvidenceLog == nil {
+		t.Fatal("managed-resource package missing evidence-log update")
+	}
+	assertItemInclusion(t, pkg.EvidenceLog.Checkpoint, pkg.Root, evidenceIndex(t, s.manager, evidence))
+	if len(pkg.Supporting) != 1 {
+		t.Fatalf("supporting items = %d, want 1", len(pkg.Supporting))
+	}
+	assertItemInclusion(t, pkg.EvidenceLog.Checkpoint, pkg.Supporting[0], evidenceIndex(t, s.manager, relEvidence))
 	applied, ok := s.agent.Applied(clusterName("cluster-1"))
 	if !ok {
 		t.Fatal("agent did not apply the managed resource")
@@ -676,25 +685,30 @@ func TestTwoTargetDeliverySkipsUnrelatedLeaf(t *testing.T) {
 		t.Fatalf("submit east delivery: %v", err)
 	}
 
-	got := s.recorder.last.EvidenceLog
-	if got.Index != 2 {
-		t.Fatalf("east log index = %d, want 2", got.Index)
+	pkg := s.recorder.last
+	if pkg.EvidenceLog == nil {
+		t.Fatal("east package missing evidence-log update")
 	}
-	if got.Checkpoint.Size != 3 {
-		t.Fatalf("east checkpoint size = %d, want 3", got.Checkpoint.Size)
+	if pkg.EvidenceLog.Checkpoint.Size != 3 {
+		t.Fatalf("east checkpoint size = %d, want 3", pkg.EvidenceLog.Checkpoint.Size)
 	}
-	wantLeaf, err := evidenceA.Identity()
+	assertItemInclusion(t, pkg.EvidenceLog.Checkpoint, pkg.Root, evidenceIndex(t, s.manager, evidenceA))
+	rootID, err := pkg.Root.Evidence.Identity()
+	if err != nil {
+		t.Fatalf("east root identity: %v", err)
+	}
+	wantID, err := evidenceA.Identity()
 	if err != nil {
 		t.Fatalf("east identity: %v", err)
 	}
-	if got.Leaf != wantLeaf {
-		t.Fatalf("east leaf = %q, want %q", got.Leaf, wantLeaf)
+	if rootID != wantID {
+		t.Fatalf("east root identity = %q, want %q", rootID, wantID)
 	}
-	otherLeaf, err := evidenceB.Identity()
+	otherID, err := evidenceB.Identity()
 	if err != nil {
 		t.Fatalf("west identity: %v", err)
 	}
-	if got.Leaf == otherLeaf {
+	if rootID == otherID {
 		t.Fatal("east package disclosed the unrelated west evidence identity")
 	}
 	if _, ok := s.agent.Applied(deploymentName("west-only")); ok {
@@ -994,28 +1008,26 @@ func TestFailedAcceptDoesNotRegisterEvidence(t *testing.T) {
 	}
 }
 
-func TestAgentRejectsLogLeafThatDoesNotMatchRootEvidence(t *testing.T) {
+func TestAgentRejectsLogInclusionThatDoesNotMatchRootEvidence(t *testing.T) {
 	s := newEnrolledScenario(t)
+	retained := s.agent.Checkpoint()
 	evidence := mustSignDeployment(t, s.user, deploymentName("mismatch"), 1, []byte(`{"ok":true}`))
-	other := mustSignDeployment(t, s.user, deploymentName("other"), 1, []byte(`{"ok":false}`))
-	leaf, err := other.Identity()
-	if err != nil {
-		t.Fatalf("other identity: %v", err)
-	}
-	err = s.agent.Deliver(resourcemanager.DeliveryPackage{
-		EvidenceLog: protocol.EvidenceLogUpdate{
-			From:       protocol.EmptyCheckpoint(),
-			Checkpoint: protocol.EmptyCheckpoint(),
-			Leaf:       leaf,
+	err := s.agent.Deliver(resourcemanager.DeliveryPackage{
+		EvidenceLog: &protocol.EvidenceLogUpdate{
+			From:       retained,
+			Checkpoint: retained,
 		},
-		Root: protocol.SignedStatement{Evidence: evidence},
+		Root: protocol.Item{
+			SignedStatement: protocol.SignedStatement{Evidence: evidence},
+			EvidenceLog:     &protocol.EvidenceLogInclusion{Index: 0},
+		},
 	})
 	if !errors.Is(err, deliveryagent.ErrLogFork) {
 		t.Fatalf("error = %v, want ErrLogFork", err)
 	}
 	assertNotStale(t, err)
 	if _, ok := s.agent.Applied(deploymentName("mismatch")); ok {
-		t.Fatal("agent applied a delivery whose log leaf did not match the root evidence")
+		t.Fatal("agent applied a delivery whose root inclusion did not prove the root evidence")
 	}
 }
 
@@ -1028,23 +1040,20 @@ func TestAgentRejectsForkedAndSkipAheadLogProofs(t *testing.T) {
 	retained := s.agent.Checkpoint()
 
 	next := mustSignDeployment(t, s.user, deploymentName("forked"), 1, []byte(`{"ok":false}`))
-	leaf, err := next.Identity()
-	if err != nil {
-		t.Fatalf("forked identity: %v", err)
-	}
 	forkRoot, err := protocol.EncodeDigest(bytes.Repeat([]byte{0xff}, 32))
 	if err != nil {
 		t.Fatalf("encode fork root: %v", err)
 	}
 
 	err = s.agent.Deliver(resourcemanager.DeliveryPackage{
-		EvidenceLog: protocol.EvidenceLogUpdate{
+		EvidenceLog: &protocol.EvidenceLogUpdate{
 			From:       retained,
 			Checkpoint: protocol.Checkpoint{Size: retained.Size + 1, Root: forkRoot},
-			Index:      retained.Size,
-			Leaf:       leaf,
 		},
-		Root: protocol.SignedStatement{Evidence: next},
+		Root: protocol.Item{
+			SignedStatement: protocol.SignedStatement{Evidence: next},
+			EvidenceLog:     &protocol.EvidenceLogInclusion{},
+		},
 	})
 	if !errors.Is(err, deliveryagent.ErrLogFork) {
 		t.Fatalf("forked root error = %v, want ErrLogFork", err)
@@ -1052,13 +1061,14 @@ func TestAgentRejectsForkedAndSkipAheadLogProofs(t *testing.T) {
 	assertNotStale(t, err)
 
 	err = s.agent.Deliver(resourcemanager.DeliveryPackage{
-		EvidenceLog: protocol.EvidenceLogUpdate{
+		EvidenceLog: &protocol.EvidenceLogUpdate{
 			From:       retained,
 			Checkpoint: protocol.Checkpoint{Size: 99, Root: forkRoot},
-			Index:      98,
-			Leaf:       leaf,
 		},
-		Root: protocol.SignedStatement{Evidence: next},
+		Root: protocol.Item{
+			SignedStatement: protocol.SignedStatement{Evidence: next},
+			EvidenceLog:     &protocol.EvidenceLogInclusion{},
+		},
 	})
 	if !errors.Is(err, deliveryagent.ErrLogFork) {
 		t.Fatalf("skip-ahead error = %v, want ErrLogFork", err)
@@ -1103,11 +1113,12 @@ func newScenarioWithTrust(t *testing.T, trust protocol.TrustConfiguration) *scen
 	if err := agent.Bootstrap(trust); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	recorder := &recordingAgent{inner: agent}
 	manager := resourcemanager.New(testTenant, nil)
-	if err := manager.RegisterAgent(testTarget, agent); err != nil {
+	if err := manager.RegisterAgent(testTarget, recorder); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
-	return &scenario{user: user, manager: manager, agent: agent}
+	return &scenario{user: user, manager: manager, agent: agent, recorder: recorder}
 }
 
 func newEnrolledScenario(t *testing.T) *scenario {
@@ -1257,6 +1268,19 @@ func onlyDispatch(t *testing.T, receipt resourcemanager.DeliveryReceipt) resourc
 		t.Fatalf("dispatch IDs = %v, want exactly 1", receipt.DispatchIDs)
 	}
 	return receipt.DispatchIDs[0]
+}
+
+func assertItemInclusion(t *testing.T, checkpoint protocol.Checkpoint, item protocol.Item, wantIndex uint64) {
+	t.Helper()
+	if item.EvidenceLog == nil {
+		t.Fatal("item missing evidence-log inclusion")
+	}
+	if item.EvidenceLog.Index != wantIndex {
+		t.Fatalf("item index = %d, want %d", item.EvidenceLog.Index, wantIndex)
+	}
+	if err := protocol.VerifyEvidenceLogInclusion(checkpoint, item.Evidence, *item.EvidenceLog); err != nil {
+		t.Fatalf("item inclusion: %v", err)
+	}
 }
 
 func evidenceIndex(t *testing.T, manager *resourcemanager.Manager, evidence protocol.TypedEvidence) uint64 {
