@@ -78,24 +78,41 @@ func (t *Tree) AppendHash(leafHash []byte) (uint64, []byte, error) {
 // only the retained compact frontier and Merkle nodes. Tree remains unchanged
 // until Commit succeeds.
 func (t *Tree) BeginAppendHash(leafHash []byte) (*PendingAppend, error) {
+	return t.BeginAppendHashes([][]byte{leafHash})
+}
+
+// BeginAppendHashes prepares an atomic append of already domain-separated RFC
+// 6962 leaf hashes. Assigned indexes are BaseSize through BaseSize+len-1.
+// Tree remains unchanged until Commit succeeds; a later invalid hash does
+// not append earlier hashes.
+func (t *Tree) BeginAppendHashes(hashes [][]byte) (*PendingAppend, error) {
+	if len(hashes) == 0 {
+		return nil, fmt.Errorf("pending Merkle append requires at least one leaf hash")
+	}
 	index := t.Size()
-	if index == math.MaxUint64 {
-		return nil, fmt.Errorf("tree is at maximum uint64 Merkle size")
+	if remaining := math.MaxUint64 - index; remaining < uint64(len(hashes)) {
+		return nil, fmt.Errorf("tree cannot append %d leaves at size %d", len(hashes), index)
 	}
-	if got, want := len(leafHash), rfc6962.DefaultHasher.Size(); got != want {
-		return nil, fmt.Errorf("leaf hash has length %d, want %d", got, want)
+	wantLen := rfc6962.DefaultHasher.Size()
+	cloned := make([][]byte, len(hashes))
+	for i, leafHash := range hashes {
+		if got := len(leafHash); got != wantLen {
+			return nil, fmt.Errorf("leaf hash %d has length %d, want %d", i, got, wantLen)
+		}
+		cloned[i] = cloneHash(leafHash)
 	}
-	leafHash = cloneHash(leafHash)
 
 	next, err := t.factory.NewRange(0, index, cloneHashes(t.frontier.Hashes()))
 	if err != nil {
 		return nil, fmt.Errorf("clone Merkle frontier: %w", err)
 	}
 	writes := make(map[compact.NodeID][]byte)
-	if err := next.Append(leafHash, func(id compact.NodeID, hash []byte) {
-		writes[id] = cloneHash(hash)
-	}); err != nil {
-		return nil, fmt.Errorf("append Merkle leaf: %w", err)
+	for i, leafHash := range cloned {
+		if err := next.Append(leafHash, func(id compact.NodeID, hash []byte) {
+			writes[id] = cloneHash(hash)
+		}); err != nil {
+			return nil, fmt.Errorf("append Merkle leaf %d: %w", i, err)
+		}
 	}
 	return &PendingAppend{
 		tree:     t,
@@ -103,6 +120,11 @@ func (t *Tree) BeginAppendHash(leafHash []byte) (*PendingAppend, error) {
 		frontier: next,
 		writes:   writes,
 	}, nil
+}
+
+// BaseSize is the first assigned index of this pending batch.
+func (p *PendingAppend) BaseSize() uint64 {
+	return p.baseSize
 }
 
 // Size returns the successor tree size.

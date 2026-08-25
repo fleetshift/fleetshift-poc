@@ -140,7 +140,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 - Read [docs/design/architecture/target_delivery_contract.md](architecture/target_delivery_contract.md) for the detailed target-side delivery protocol, reliability guarantees, generation ordering, journaling, and observation reporting.
 - Read [docs/design/security.md](security.md) for the delivery threat model, credential/provenance split, fulfillment security choices, and trust-anchor model.
 - Read [docs/design/authentication.md](authentication.md) for live credential verification and presentation, request signing, target credential exchange, and `PausedAuth`.
-- Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, attestation semantics, trust updates, historical verification, and delivery-log integration.
+- Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, attestation semantics, trust updates, historical verification, and evidence-log integration.
 - Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
 - Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.

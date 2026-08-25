@@ -24,7 +24,6 @@ ProducerAPI
   CreateEvidence(exact purpose-typed assertion) -> TypedEvidence
 
 ResourceManagerAPI
-  StoreEvidence(TypedEvidence)
   AssembleSupportMaterial(TypedEvidence) -> replaceable support material
   DecodeAssertion(TypedEvidence) -> untrusted inner statement
   CheckDelivery(TypedEvidence) -> tentative principal and predicate hints
@@ -34,7 +33,8 @@ TargetAPI
   Verify(SignedStatement, authenticated profile and authority config)
       -> AuthenticatedEvidence, authenticated inner assertion
   Owns(predicate) -> whether this profile applies that suite-owned event
-  Apply(authenticated result, log index) -> update suite-owned retained state
+  Apply(authenticated result, evidence-log index assigned at RM acceptance)
+      -> update suite-owned retained state
 ```
 
 A `SignedStatement` is one independently authenticated assertion as couriered:
@@ -42,13 +42,15 @@ immutable `TypedEvidence` plus replaceable `SupportMaterial` used to verify
 that evidence. Root and supporting items in a delivery package are the same
 type. The inner statement lives in the evidence bytes; `Verify` emits it.
 
-Common resource-manager code never parses `TypedEvidence` bytes. Content
-deliveries look up the installed profile by provenance type, unwrap the inner
-statement with `DecodeAssertion`, then read routing identity with
-`DecodeDeliveryScope`. Suite submit APIs such as enrollment do not: they
-authorize, check, append the evidence identity, and deliver to every
-registered agent. That pairing is why statement encodings can stay common
-while evidence encodings stay profile-owned.
+Common resource-manager code never parses `TypedEvidence` bytes. It owns the
+immutable evidence repository and assigns each accepted identity one
+canonical evidence-log position. Content deliveries look up the installed
+profile by provenance type, unwrap the inner statement with
+`DecodeAssertion`, then read routing identity with `DecodeDeliveryScope`.
+Suite submit APIs such as enrollment do not: they authorize, check, register
+the evidence identity, and enqueue one dispatch per currently relevant
+agent. That pairing is why statement encodings can stay common while
+evidence encodings stay profile-owned.
 
 Common target code runs the documented selection algorithm:
 untrusted provenance type and hints locate `AuthorityConfig`, one
@@ -59,12 +61,13 @@ fail closed.
 
 Lifecycle operations stay typed per mechanism at the resource manager.
 Direct-key enrollment is not a generic `RegisterKey` and is not a method of
-`DeliveryAgent`. After the RM accepts it, enrollment is an ordinary logged
-delivery: the evidence identity is appended and `Deliver` is called on every
-registered agent. Authenticated predicate type then selects apply: intent
-predicates use fulfillment apply, predicates the selected profile `Owns`
-call `TargetAPI.Apply`, and `trust-config-update/v1` is reserved on the
-agent. Unknown predicates fail closed even if policy matched.
+`DeliveryAgent`. After the RM accepts it, enrollment is ordinary accepted
+evidence: the identity is registered once in the evidence log and one
+outbox dispatch is created per currently registered agent. Authenticated
+predicate type then selects apply: intent predicates use fulfillment apply,
+predicates the selected profile `Owns` call `TargetAPI.Apply`, and
+`trust-config-update/v1` is reserved on the agent. Unknown predicates fail
+closed even if policy matched.
 
 ## Typing layers
 
@@ -133,21 +136,25 @@ controlled producer
                v
 resource manager
   - performs ordinary API authorization through an Authorizer hook
-  - stores immutable TypedEvidence
-  - appends the root evidence identity to an RFC 6962 Merkle log
-  - couriers a log update (consistency from the agent's last ack plus
-    inclusion of this leaf) with each independently authenticated
+  - stores immutable TypedEvidence in a common repository
+  - assigns one evidence-log position per accepted TypedEvidence identity
+    (root, supporting, and lifecycle), independently of later deliveries
+    or target fanout
+  - enqueues separate delivery/outbox records; a log index is not a retry
+    handle
+  - couriers an evidence-log update (consistency from the agent's last ack
+    plus inclusion of the root leaf) with each independently authenticated
     SignedStatement (root plus optional supporting statements such as
     fulfillment relations)
-  - submits typed direct-key enrollment the same way: log then Deliver to
-    every registered agent
+  - submits typed direct-key enrollment the same way: register, enqueue,
+    then Dispatch to every currently registered agent
   - assembles empty support material for this profile
   - has an explicit CompromisedManager attack harness
                |
                | untrusted package
-               |   Log         LogUpdate
-               |   Root        SignedStatement
-               |   Supporting []SignedStatement
+               |   EvidenceLog  EvidenceLogUpdate
+               |   Root         SignedStatement
+               |   Supporting  []SignedStatement
                v
 delivery agent
   - is bootstrapped with authenticated AuthorityConfig
@@ -158,21 +165,31 @@ delivery agent
     suite Apply, or the reserved trust-config-update handler
 ```
 
-Storage is in memory. The delivery log is an RFC 6962 Merkle tree. Each
-couriered package discloses one leaf — this root `TypedEvidence` identity —
-and proves append-only growth from the agent's retained `(size, root)`
-checkpoint. Unrelated leaves are skipped via consistency, not listed.
-There is no attestation graph, credential presentation, rotation, or
-historical cutoff yet. Those belong to the hybrid attestation POC and the
-mature profiles. This suite implements only `RegisteredSelfTarget` for
-fulfillment relations.
+Storage is in memory. The evidence log is an RFC 6962 Merkle tree. The honest
+RM assigns each accepted `TypedEvidence` identity one canonical leaf at
+acceptance, not per delivery or outbox entry. Retrying or reusing evidence
+does not append it again. Each couriered package discloses one leaf — this
+root identity's accepted position — and proves append-only growth from the
+agent's retained `(size, root)` checkpoint. Unrelated accepted-evidence
+leaves, including supporting evidence registered in the same mutation, are
+skipped via consistency, not listed. There is no attestation graph,
+credential presentation, rotation, or historical cutoff yet. Those belong to
+the hybrid attestation POC and the mature profiles. This suite implements
+only `RegisteredSelfTarget` for fulfillment relations.
 
 ## Security cases pinned by tests
 
 | Scenario | Result |
 | --- | --- |
 | Producer enrolls and signs a `deployment/v1` authorization | Target applies the typed manifests |
-| Enrollment is logged and Delivered to every registered agent | Both agents Apply the mapping; later content consistency-proves over the enrollment leaf |
+| Enrollment is logged and Delivered to every registered agent | One evidence-log leaf and two dispatches; both agents Apply the mapping; later content consistency-proves over the enrollment leaf |
+| Root plus two supporting statements accepted together | Three new evidence-log leaves; stored delivery holds identities, not duplicate bytes |
+| Same supporting evidence reused in a later delivery | First index retained; log grows only for new evidence |
+| Same evidence resubmitted after intervening leaves | Canonical index does not move; no new leaf |
+| Duplicate supporting evidence in one acceptance | One leaf; stored support lists the identity once |
+| Root repeated in support | Omitted from stored support; one leaf |
+| Accept without a registered route, then Dispatch | Evidence is registered; outbox stays pending until the route exists; Dispatch does not append |
+| Acknowledged Dispatch retry | No-op; no new leaf and no repeated authorization |
 | `deployment/v1` and `trust-config-update/v1` | Do not call suite `Apply`; trust-config-update fails closed until the agent handler exists |
 | Policy-matched predicate the profile does not `Owns` | Fail closed without calling suite `Apply` |
 | Producer signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type |
@@ -187,9 +204,9 @@ fulfillment relations.
 | Resource manager bypasses RBAC but forwards genuine evidence | Accepted by the agent |
 | Unknown provenance type | Fail closed |
 | Second bootstrap of an initialized verifier | Rejected |
-| Lost acknowledgement then retry | Idempotent apply; manager cache catches up via stale-checkpoint recovery |
-| Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs |
-| Rejected delivery after a verified log update | Log checkpoint advances; retry recovers the manager cache without applying |
+| Lost acknowledgement then retry | Idempotent apply via DispatchID; manager cache catches up via stale-checkpoint recovery |
+| Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs without appending evidence |
+| Rejected delivery after a verified log update | Log checkpoint advances; retry recovers the manager cache without applying or growing the log |
 | Delivery to B while A is idle, then delivery to A | A's consistency proof covers B's leaf without disclosing B's evidence |
 | Log leaf does not match root evidence identity | Rejected |
 | Forked or skip-ahead log proofs | Rejected as a log fork, not reported as stale |
@@ -208,12 +225,12 @@ No external identity provider, database, or transparency service is required.
 
 | Path | Purpose |
 | --- | --- |
-| `protocol/` | TypedEvidence, Principal, AuthorityConfig, selection, log update, and the three APIs |
+| `protocol/` | TypedEvidence, Principal, AuthorityConfig, selection, evidence-log update, and the three APIs |
 | `internal/merklelog/` | In-memory RFC 6962 compact-range store copied from the v3 POC |
 | `directkey/` | Naive profile: enrollment, signature encoding, retained mapping |
 | `producer/` | Controlled-producer role |
-| `resourcemanager/` | Authorization, storage, Merkle log, last-ack cache, typed enrollment submit, compromise harness |
-| `deliveryagent/` | Bootstrap, log verification, selection, verification, predicate dispatch, apply |
+| `resourcemanager/` | Authorization, common evidence repository, evidence log, delivery/outbox, last-ack cache, typed enrollment accept, compromise harness |
+| `deliveryagent/` | Bootstrap, evidence-log verification, selection, verification, predicate dispatch, apply |
 | `provenance_test.go` | End-to-end guarantees and accepted TOFU limitation |
 
 ## Recommended next experiments
@@ -222,5 +239,5 @@ No external identity provider, database, or transparency service is required.
 2. Stop at `AuthenticatedEvidence` and hand the result to the hybrid
    attestation graph instead of applying a delivery authorization here.
 3. Implement `trust-config-update/v1` on the agent-owned handler, still
-   through the same log, selection, and delivery path.
+   through the same evidence log, selection, and delivery path.
 4. Add claim-derived tenant mapping and a second authority in one package.

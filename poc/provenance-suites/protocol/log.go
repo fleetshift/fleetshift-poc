@@ -16,8 +16,8 @@ type Checkpoint struct {
 	Root Digest `json:"root"`
 }
 
-// EmptyCheckpoint is the uninitialized log position: size zero and the RFC 6962
-// empty root.
+// EmptyCheckpoint is the uninitialized evidence-log position: size zero and
+// the RFC 6962 empty root.
 func EmptyCheckpoint() Checkpoint {
 	return Checkpoint{Root: encodeDigest(rfc6962.DefaultHasher.EmptyRoot())}
 }
@@ -35,13 +35,15 @@ func NewCheckpoint(size uint64, root []byte) (Checkpoint, error) {
 	return checkpoint, nil
 }
 
-// LogUpdate proves an append-only transition from a verifier's retained
-// checkpoint and discloses one leaf: this package's root TypedEvidence
-// identity. Unrelated tenant leaves are committed by the consistency proof
-// and are not listed. From is the checkpoint the proofs were constructed
-// from; it is transport metadata so a manager using a stale cached
-// checkpoint can be distinguished from a log fork.
-type LogUpdate struct {
+// EvidenceLogUpdate proves an append-only evidence-log transition from a
+// verifier's retained checkpoint and discloses one leaf: this package's root
+// TypedEvidence identity. That identity received its index when the resource
+// manager accepted the evidence, not when a delivery or outbox entry was
+// created. Unrelated accepted-evidence leaves are committed by the
+// consistency proof and are not listed. From is the checkpoint the proofs
+// were constructed from; it is transport metadata so a manager using a stale
+// cached checkpoint can be distinguished from a log fork.
+type EvidenceLogUpdate struct {
 	From             Checkpoint `json:"from"`
 	Checkpoint       Checkpoint `json:"checkpoint"`
 	ConsistencyProof []Digest   `json:"consistency_proof"`
@@ -51,8 +53,9 @@ type LogUpdate struct {
 }
 
 // LeafHash returns the RFC 6962 leaf hash of a TypedEvidence identity.
-// Index is not mixed into the hash: the same identity at two positions is
-// two log slots with the same payload.
+// Index is not mixed into the hash. The honest RM assigns one canonical
+// position per identity; a dishonest log that repeats the payload in two
+// slots remains detectable as the same leaf hash at two indexes.
 func LeafHash(identity Digest) ([]byte, error) {
 	raw, err := DecodeDigest(identity)
 	if err != nil {
@@ -61,10 +64,10 @@ func LeafHash(identity Digest) ([]byte, error) {
 	return rfc6962.DefaultHasher.HashLeaf(raw), nil
 }
 
-// VerifyLogUpdate verifies the RFC 6962 consistency proof from previous to
-// update.Checkpoint, inclusion of HashLeaf(Leaf) at Index under that
-// checkpoint, and that Leaf equals the couriered root evidence identity.
-func VerifyLogUpdate(previous Checkpoint, update LogUpdate, root TypedEvidence) error {
+// VerifyEvidenceLogUpdate verifies the RFC 6962 consistency proof from
+// previous to update.Checkpoint, inclusion of HashLeaf(Leaf) at Index under
+// that checkpoint, and that Leaf equals the couriered root evidence identity.
+func VerifyEvidenceLogUpdate(previous Checkpoint, update EvidenceLogUpdate, root TypedEvidence) error {
 	identity, err := root.Identity()
 	if err != nil {
 		return fmt.Errorf("%w: root evidence identity: %v", ErrInvalidLogUpdate, err)

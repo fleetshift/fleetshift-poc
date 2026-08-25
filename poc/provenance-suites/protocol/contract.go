@@ -15,10 +15,11 @@ type ProducerAPI interface {
 }
 
 // ResourceManagerAPI is the resource-manager side of a provenance profile.
-// The RM stores original immutable TypedEvidence, invokes profile-specific
-// work inside the mutation's durable transaction, and assembles replaceable
-// support material. RM verification is authoritative only for whether the RM
-// accepts an API request; it is not target verification.
+// Common RM code owns immutable TypedEvidence storage and evidence-log
+// registration. The profile invokes work inside the mutation's durable
+// transaction and assembles replaceable support material. RM verification is
+// authoritative only for whether the RM accepts an API request; it is not
+// target verification.
 //
 // DecodeAssertion is the evidence counterpart of DecodeDeliveryScope: it
 // unwraps the inner statement from profile-owned evidence bytes without
@@ -26,7 +27,6 @@ type ProducerAPI interface {
 // statement. The RM never parses TypedEvidence.Bytes itself.
 type ResourceManagerAPI interface {
 	ProvenanceType() ProvenanceType
-	StoreEvidence(ctx context.Context, evidence TypedEvidence) (Digest, error)
 	AssembleSupportMaterial(ctx context.Context, evidence TypedEvidence) (SupportMaterial, error)
 	CheckDelivery(evidence TypedEvidence) (TentativeHints, error)
 	DecodeAssertion(evidence TypedEvidence) (TypedAssertion, error)
@@ -60,15 +60,18 @@ type VerifyRequest struct {
 	DeliveryContext DeliveryContext
 }
 
-// ApplyRequest is the authenticated result of Verify plus the log position of
-// this delivery. Suites use it to update retained proof material for
-// predicates they own. Intent predicates never reach Apply.
+// ApplyRequest is the authenticated result of Verify plus the evidence-log
+// position assigned when the resource manager accepted this evidence. Suites
+// use it to update retained proof material for predicates they own. Intent
+// predicates never reach Apply.
 type ApplyRequest struct {
 	Authenticated AuthenticatedEvidence
 	Assertion     TypedAssertion
 	Statement     SignedStatement
-	// Index is the delivery-log position of this leaf. Continuity/v3 cutoffs
-	// will need it; profiles that do not consult log position ignore it.
+	// Index is the evidence-log position of this evidence identity. The
+	// honest RM assigns it once at acceptance, independently of later
+	// deliveries or outbox entries. Continuity/v3 cutoffs will need it;
+	// profiles that do not consult log position ignore it.
 	Index uint64
 }
 
