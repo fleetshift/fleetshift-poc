@@ -14,6 +14,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
+	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/temporal"
 )
 
 var (
@@ -76,7 +77,7 @@ type Agent struct {
 	trust       protocol.TrustConfiguration
 	initialized bool
 	profile     *directkey.Target
-	checkpoint  protocol.Checkpoint
+	retained    temporal.RetainedState
 
 	applied     map[protocol.FullResourceName]appliedState
 	generations map[protocol.FullResourceName]uint64
@@ -95,7 +96,7 @@ func New(config Config) (*Agent, error) {
 	return &Agent{
 		config:      config,
 		profile:     directkey.NewTarget(),
-		checkpoint:  protocol.EmptyCheckpoint(),
+		retained:    temporal.RetainedState{EvidenceLog: protocol.EmptyCheckpoint()},
 		applied:     make(map[protocol.FullResourceName]appliedState),
 		generations: make(map[protocol.FullResourceName]uint64),
 	}, nil
@@ -118,15 +119,16 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 }
 
 // Deliver verifies package-wide evidence-log consistency and inclusion of
-// the root Item, then provenance under matched policy. Supporting-item
-// inclusions are not verified yet. Authenticated predicate type selects
-// apply: intent predicates use fulfillment apply, trust-config-update is
-// reserved on the agent, and predicates the selected profile Owns call
-// TargetAPI.Apply. Unknown predicates fail closed. A verified evidence-log
-// checkpoint is retained even when the included evidence is later rejected.
-// When the manager constructed proofs from an obsolete checkpoint, Deliver
-// returns the newer retained checkpoint so the manager can retry without
-// applying again.
+// the root Item through temporal.Prepare, then provenance under matched
+// policy. Supporting-item inclusions are not verified yet.
+// Authenticated predicate type selects apply: intent predicates use
+// fulfillment apply, trust-config-update is reserved on the agent, and
+// predicates the selected profile Owns call TargetAPI.Apply. Unknown
+// predicates fail closed. A verified evidence-log checkpoint is retained
+// even when the included evidence is later rejected. When the manager
+// constructed proofs from an obsolete checkpoint, Deliver returns the
+// newer retained checkpoint so the manager can retry without applying
+// again.
 func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -138,25 +140,14 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		return ErrDeliveryUnavailable
 	}
 
-	retained := a.checkpoint
-	if err := a.acceptLogLocked(pkg); err != nil {
+	prepared, err := a.acceptLogLocked(pkg)
+	if err != nil {
 		return err
-	}
-	if isStaleLogProof(*pkg.EvidenceLog, retained) {
-		// RFC 6962 consistency from the empty tree is empty. A proof built from
-		// that older cache can therefore verify as an equal-size no-op against
-		// the retained head. Report the retained checkpoint so the manager can
-		// reconstruct without applying the included delivery again.
-		a.staleCheckpointResponses++
-		return &CheckpointStaleError{
-			checkpoint: retained,
-			cause:      fmt.Errorf("constructed from checkpoint size %d", pkg.EvidenceLog.From.Size),
-		}
 	}
 
 	// The log observation is independent of apply. Pinning it here keeps an
 	// inert rejected leaf in the accepted prefix so a later fork cannot omit it.
-	a.checkpoint = pkg.EvidenceLog.Checkpoint
+	a.retained = prepared.NextState
 
 	authenticated, assertion, err := protocol.SelectAndVerify(
 		context.Background(),
@@ -197,7 +188,7 @@ func (a *Agent) Applied(name protocol.FullResourceName) (AppliedDelivery, bool) 
 func (a *Agent) Checkpoint() protocol.Checkpoint {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.checkpoint
+	return a.retained.EvidenceLog
 }
 
 // StaleCheckpointResponses is the number of times Deliver returned
@@ -276,33 +267,24 @@ func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, authent
 	}
 }
 
-func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) error {
-	if pkg.EvidenceLog == nil {
-		return fmt.Errorf("%w: missing evidence-log update", ErrLogFork)
+func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) (temporal.PreparedUpdate, error) {
+	prepared, err := temporal.Prepare(a.retained, pkg.EvidenceLog, pkg.Root.Evidence, pkg.Root.EvidenceLog)
+	if err != nil {
+		return temporal.PreparedUpdate{}, a.mapLogError(err)
 	}
-	if pkg.Root.EvidenceLog == nil {
-		return fmt.Errorf("%w: missing root evidence-log inclusion", ErrLogFork)
-	}
-	if err := protocol.VerifyEvidenceLogUpdate(a.checkpoint, *pkg.EvidenceLog); err != nil {
-		if isStaleLogProof(*pkg.EvidenceLog, a.checkpoint) {
-			a.staleCheckpointResponses++
-			return &CheckpointStaleError{checkpoint: a.checkpoint, cause: err}
-		}
-		return fmt.Errorf("%w: %v", ErrLogFork, err)
-	}
-	if err := protocol.VerifyEvidenceLogInclusion(pkg.EvidenceLog.Checkpoint, pkg.Root.Evidence, *pkg.Root.EvidenceLog); err != nil {
-		return fmt.Errorf("%w: %v", ErrLogFork, err)
-	}
-	return nil
+	return prepared, nil
 }
 
-func isStaleLogProof(update protocol.EvidenceLogUpdate, retained protocol.Checkpoint) bool {
-	if update.From.Size >= retained.Size {
-		return false
+func (a *Agent) mapLogError(err error) error {
+	var stale *temporal.CheckpointStaleError
+	if errors.As(err, &stale) {
+		a.staleCheckpointResponses++
+		return &CheckpointStaleError{
+			checkpoint: stale.LatestCheckpoint(),
+			cause:      err,
+		}
 	}
-	// A proof constructed from an older manager cache of the same branch either
-	// already matches the retained head (lost acknowledgement) or extends past it.
-	return update.Checkpoint == retained || update.Checkpoint.Size > retained.Size
+	return fmt.Errorf("%w: %w", ErrLogFork, err)
 }
 
 func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) (AppliedDelivery, error) {

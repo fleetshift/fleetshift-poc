@@ -163,8 +163,8 @@ delivery agent
   - is bootstrapped with authenticated AuthorityConfig
   - never returns to TOFU after initialization
   - verifies package-wide log consistency and inclusion of the root Item
-    before profile selection. This POC does not yet verify supporting-item
-    inclusion.
+    through `temporal.Prepare` before profile selection. This POC does not
+    yet verify supporting-item inclusion.
   - selects a profile from policy and verifies independently
   - dispatches on authenticated predicate type: intent apply, profile-owned
     suite Apply, or the reserved trust-config-update handler
@@ -177,11 +177,14 @@ does not append it again. Each couriered package carries a shared checkpoint
 transition plus consistency proof, and each `Item` discloses that statement's
 accepted position. The verifier recomputes the evidence identity from the
 adjacent statement; inclusion does not serialize a leaf digest. Unrelated
-accepted-evidence leaves are skipped via consistency, not listed. This POC
-still verifies inclusion only for the root Item. There is no attestation
-graph, credential presentation, rotation, or historical cutoff yet. Those
-belong to the hybrid attestation POC and the mature profiles. This suite
-implements only `RegisteredSelfTarget` for fulfillment relations.
+accepted-evidence leaves are skipped via consistency, not listed. The agent
+accepts a package only when `From` equals the retained checkpoint exactly;
+an older `From` is stale even if Merkle consistency against the retained head
+would succeed. This POC still verifies inclusion only for the root Item.
+There is no attestation graph, credential presentation, rotation, or
+historical cutoff yet. Those belong to the hybrid attestation POC and the
+mature profiles. This suite implements only `RegisteredSelfTarget` for
+fulfillment relations.
 
 ## Security cases pinned by tests
 
@@ -201,6 +204,7 @@ implements only `RegisteredSelfTarget` for fulfillment relations.
 | Producer signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type; supporting items carry inclusions at their canonical indexes |
 | Managed resource with no relation, wrong resource type, or unenrolled relation signer | Rejected |
 | Fulfillment relation couriered with a deployment | Ignored; deployment apply is unchanged |
+| Tampered unused supporting inclusion | Ignored; deployment still applies |
 | Unknown root predicate | Fail closed |
 | Deployment item missing manifest media type | Rejected |
 | Resource manager signs a delivery with an unenrolled key | Rejected |
@@ -213,6 +217,8 @@ implements only `RegisteredSelfTarget` for fulfillment relations.
 | Lost acknowledgement then retry | Idempotent apply via DispatchID; manager cache catches up via stale-checkpoint recovery |
 | Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs without appending evidence |
 | Rejected delivery after a verified log update | Log checkpoint advances; retry recovers the manager cache without applying or growing the log |
+| Package constructed from an older `From` than the retained checkpoint | Stale, even when equal-size RFC 6962 consistency against the retained head would no-op, and even when the successor lags or forks that head |
+| `From` newer than retained, or same-size different `From` root | Rejected as a log fork, not reported as stale |
 | Delivery to B while A is idle, then delivery to A | A's consistency proof covers B's leaf without disclosing B's evidence |
 | Root Item inclusion does not prove root evidence identity | Rejected |
 | Forked or skip-ahead log proofs | Rejected as a log fork, not reported as stale |
@@ -231,12 +237,13 @@ No external identity provider, database, or transparency service is required.
 
 | Path | Purpose |
 | --- | --- |
-| `protocol/` | TypedEvidence, Item, Principal, AuthorityConfig, selection, evidence-log update and inclusion, and the three APIs |
+| `protocol/` | TypedEvidence, Item, Principal, AuthorityConfig, selection, evidence-log update and inclusion, ordered-log verifier types, and the three APIs |
 | `internal/merklelog/` | In-memory RFC 6962 compact-range store copied from the v3 POC |
+| `temporal/` | Ordered-log adapter: `Prepare`, memoizing `VerifyOccurrence` |
 | `directkey/` | Naive profile: enrollment, signature encoding, retained mapping |
 | `producer/` | Controlled-producer role |
 | `resourcemanager/` | Authorization, common evidence repository, evidence log, delivery/outbox, last-ack cache, typed enrollment accept, compromise harness |
-| `deliveryagent/` | Bootstrap, package-wide log consistency, root Item inclusion, selection, verification, predicate dispatch, apply |
+| `deliveryagent/` | Bootstrap, `temporal.Prepare` for package-wide consistency and root inclusion, selection, verification, predicate dispatch, apply |
 | `provenance_test.go` | End-to-end guarantees and accepted TOFU limitation |
 
 ## Recommended next experiments
