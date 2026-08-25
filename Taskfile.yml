@@ -34,7 +34,7 @@ tasks:
 
   build:all:
     desc: Build all binaries
-    deps: [build:server, build:cli]
+    deps: [build:server, build:cli, build:aio]
 
   build:server:
     desc: Build the server binary
@@ -48,35 +48,13 @@ tasks:
     cmds:
       - go build -o ../bin/fleetctl ./cmd/fleetctl
 
-  test:all:
-    desc: Run unit tests for all modules
-    deps: [test:server, test:cli, test:server-integration, test:deploy]
-
-  test:deploy:
-    desc: Run AIO packaging unit tests
+  build:aio:
+    desc: Build AIO packaging binaries (aio-init, aio-proxy, kind-loopback-forward)
     dir: deploy/aio
     cmds:
-      - go test -count=1 ./...
-
-  test:server:
-    desc: Run server tests
-    dir: server
-    cmds:
-      - go test -count=1 ./...
-
-  test:cli:
-    desc: Run CLI tests
-    dir: cli
-    cmds:
-      - go test -count=1 ./...
-
-  test:server-integration:
-    desc: Docker-heavy integration tests (requires container runtime; fails if missing)
-    dir: server
-    cmds:
-      - go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/
-      - go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/
-      - go test -race -count=1 ./internal/addon/kubernetes/
+      - go build -o ../../bin/aio-init ./cmd/aio-init
+      - go build -o ../../bin/aio-proxy ./cmd/aio-proxy
+      - go build -o ../../bin/kind-loopback-forward ./cmd/kind-loopback-forward
 
   test:stress:
     desc: "Stress test orchestration loop (env: STRESS_RATE, STRESS_DURATION, STRESS_DEPLOYMENTS, STRESS_ACK_DELAY_MIN/MAX, STRESS_COMPLETION_DELAY_MIN/MAX, STRESS_FAILURE_RATE, STRESS_POSTGRES_MAX_CONNS, STRESS_WORKFLOW_POLLERS)"

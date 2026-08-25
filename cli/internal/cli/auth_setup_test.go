@@ -50,25 +50,6 @@ func TestAuthSetup_WritesLocalConfigFromDiscovery(t *testing.T) {
 	}
 }
 
-func TestAuthSetup_LocalConfigFlag(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	issuer := startOIDCDiscovery(t)
-
-	out := runCLI(t,
-		"--server", "127.0.0.1:1",
-		"auth", "setup",
-		"--local-config",
-		"--issuer-url", issuer,
-		"--client-id", "fleetshift-cli",
-	)
-	if !strings.Contains(out, "Local authentication configured") {
-		t.Fatalf("stdout = %q, want local success message", out)
-	}
-	assertAuthJSON(t, home, issuer)
-}
-
 func TestAuthSetup_EmptyScopes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -116,83 +97,6 @@ func TestAuthSetup_WhitespaceOnlyIssuerURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--issuer-url is required") {
 		t.Fatalf("error = %v, want issuer-url validation failure", err)
-	}
-}
-
-func TestAuthSetup_LocalConfigAndConfigureServerConflict(t *testing.T) {
-	_, err := runCLIErr(t,
-		"auth", "setup",
-		"--local-config",
-		"--configure-server",
-		"--issuer-url", "https://issuer.example/dex",
-		"--client-id", "fleetshift-cli",
-	)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("error = %v, want mutually exclusive", err)
-	}
-}
-
-func TestAuthSetup_ServerOnlyFlagRequiresConfigureServer(t *testing.T) {
-	_, err := runCLIErr(t,
-		"auth", "setup",
-		"--issuer-url", "https://issuer.example/dex",
-		"--client-id", "fleetshift-cli",
-		"--audience", "fleetshift",
-	)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "--audience requires --configure-server") {
-		t.Fatalf("error = %v, want --audience requires --configure-server", err)
-	}
-}
-
-func TestAuthSetup_ConfigureServerNotSupported(t *testing.T) {
-	_, err := runCLIErr(t,
-		"--server", "127.0.0.1:1",
-		"auth", "setup",
-		"--configure-server",
-		"--issuer-url", "https://issuer.example/dex",
-		"--client-id", "fleetshift-cli",
-		"--audience", "fleetshift",
-	)
-	if err == nil {
-		t.Fatal("expected configure-server rejection")
-	}
-	if !strings.Contains(err.Error(), "--configure-server is not supported yet") {
-		t.Fatalf("error = %v, want configure-server not supported", err)
-	}
-	if strings.Contains(err.Error(), "connection refused") ||
-		strings.Contains(err.Error(), "connect") ||
-		strings.Contains(err.Error(), "dial") {
-		t.Fatalf("error = %v, must reject before dialing", err)
-	}
-}
-
-func TestAuthSetup_ConfigureServerEmptyScopesSkipsDial(t *testing.T) {
-	_, err := runCLIErr(t,
-		"--server", "127.0.0.1:1",
-		"auth", "setup",
-		"--configure-server",
-		"--issuer-url", "https://issuer.example/dex",
-		"--client-id", "fleetshift-cli",
-		"--audience", "fleetshift",
-		"--scopes", ", ,",
-	)
-	if err == nil {
-		t.Fatal("expected empty scopes error")
-	}
-	if !strings.Contains(err.Error(), "--scopes must include at least one scope") {
-		t.Fatalf("error = %v, want scopes validation failure (before dial)", err)
-	}
-	// Unreachable server: a dial/connect error would mean validation ran too late.
-	if strings.Contains(err.Error(), "connection refused") ||
-		strings.Contains(err.Error(), "connect") ||
-		strings.Contains(err.Error(), "dial") {
-		t.Fatalf("error = %v, scopes must be validated before dialing", err)
 	}
 }
 

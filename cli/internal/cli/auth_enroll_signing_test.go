@@ -16,7 +16,7 @@ import (
 func TestAcquireSigningKey_Generate(t *testing.T) {
 	keyring.MockInit()
 
-	key, generated, err := acquireSigningKey(false)
+	key, generated, err := acquireSigningKey(globalFlags{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,11 +43,11 @@ func TestAcquireSigningKey_ReuseExisting(t *testing.T) {
 		t.Fatalf("marshal key: %v", err)
 	}
 	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
-	if err := auth.SaveSigningKey(string(pemBlock)); err != nil {
+	if err := (auth.KeyringStore{}).SaveSigningKey(string(pemBlock)); err != nil {
 		t.Fatalf("save signing key: %v", err)
 	}
 
-	key, generated, err := acquireSigningKey(true)
+	key, generated, err := acquireSigningKey(globalFlags{}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -62,8 +62,36 @@ func TestAcquireSigningKey_ReuseExisting(t *testing.T) {
 func TestAcquireSigningKey_ReuseNoKey(t *testing.T) {
 	keyring.MockInit()
 
-	_, _, err := acquireSigningKey(true)
+	_, _, err := acquireSigningKey(globalFlags{}, true)
 	if err == nil {
 		t.Fatal("expected error when reusing a non-existent key")
+	}
+}
+
+func TestAcquireSigningKey_ReuseExisting_FileStore(t *testing.T) {
+	flags := globalFlags{configDir: t.TempDir(), insecureStorage: true}
+
+	original, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalECPrivateKey(original)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
+	if err := (auth.FileStore{Dir: flags.configDir}).SaveSigningKey(string(pemBlock)); err != nil {
+		t.Fatalf("save signing key: %v", err)
+	}
+
+	key, generated, err := acquireSigningKey(flags, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if generated {
+		t.Error("expected generated=false when reusing")
+	}
+	if !original.Equal(key) {
+		t.Error("reused key should match the original")
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newDeploymentResumeCmd builds the `fleetctl deployment resume` command.
 func newDeploymentResumeCmd(ctx *cmdContext) *cobra.Command {
 	var sign bool
 
@@ -33,7 +34,7 @@ the orchestration workflow restarts delivery with it.`,
 			}
 
 			if sign {
-				if err := signResumeRequest(cmd, client, req); err != nil {
+				if err := signResumeRequest(ctx.flags, cmd, client, req); err != nil {
 					return fmt.Errorf("sign resume: %w", err)
 				}
 			}
@@ -52,7 +53,9 @@ the orchestration workflow restarts delivery with it.`,
 	return cmd
 }
 
-func signResumeRequest(cmd *cobra.Command, client pb.DeploymentServiceClient, req *pb.ResumeDeploymentRequest) error {
+// signResumeRequest loads the signing key, builds the canonical envelope for
+// the next generation, and populates the signing fields on the request.
+func signResumeRequest(f globalFlags, cmd *cobra.Command, client pb.DeploymentServiceClient, req *pb.ResumeDeploymentRequest) error {
 	dep, err := client.GetDeployment(cmd.Context(), &pb.GetDeploymentRequest{
 		Name: req.Name,
 	})
@@ -60,7 +63,7 @@ func signResumeRequest(cmd *cobra.Command, client pb.DeploymentServiceClient, re
 		return fmt.Errorf("get deployment: %w", err)
 	}
 
-	privKey, err := loadSigningPrivateKey()
+	privKey, err := loadSigningPrivateKey(f)
 	if err != nil {
 		return err
 	}

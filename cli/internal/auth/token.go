@@ -19,25 +19,55 @@ type Tokens struct {
 
 // TokenStore persists OAuth tokens.
 type TokenStore interface {
+	// Save writes tokens, replacing any previously stored set.
 	Save(ctx context.Context, tokens Tokens) error
+	// Load returns the stored tokens. Missing storage is an error.
 	Load(ctx context.Context) (Tokens, error)
+	// Clear removes stored OAuth tokens.
 	Clear(ctx context.Context) error
 }
 
-// RefreshIfNeeded refreshes the token using the given OAuth2 config if it
-// is expired and a refresh token is available. Returns true if a refresh
-// was performed.
+// Store persists OAuth tokens and the PEM signing key.
+type Store interface {
+	TokenStore
+	// SaveSigningKey stores PEM private-key bytes. Implementations do not parse PEM.
+	SaveSigningKey(pemData string) error
+	// LoadSigningKey returns the stored PEM bytes. It does not parse or validate PEM.
+	LoadSigningKey() (string, error)
+}
+
+// TokensFrom copies tok into Tokens, including id_token when present.
+func TokensFrom(tok *oauth2.Token) Tokens {
+	tokens := Tokens{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		TokenType:    tok.TokenType,
+		Expiry:       tok.Expiry,
+	}
+	if idTok, ok := tok.Extra("id_token").(string); ok {
+		tokens.IDToken = idTok
+	}
+	return tokens
+}
+
+// NeedsRefresh reports whether tokens should be refreshed before use.
+// A refresh is needed when fewer than 30 seconds remain until expiry and a
+// refresh token is present.
+func NeedsRefresh(tokens Tokens) bool {
+	return time.Until(tokens.Expiry) <= 30*time.Second && tokens.RefreshToken != ""
+}
+
+// RefreshIfNeeded refreshes the token using cfg when fewer than 30 seconds
+// remain until expiry and a refresh token is present. Tokens with more than
+// 30 seconds remaining, or with no refresh token, are returned unchanged.
+// Returns true if a refresh was performed.
 func RefreshIfNeeded(ctx context.Context, store TokenStore, cfg *oauth2.Config) (Tokens, bool, error) {
 	tokens, err := store.Load(ctx)
 	if err != nil {
 		return Tokens{}, false, fmt.Errorf("load tokens: %w", err)
 	}
 
-	if time.Until(tokens.Expiry) > 30*time.Second {
-		return tokens, false, nil
-	}
-
-	if tokens.RefreshToken == "" {
+	if !NeedsRefresh(tokens) {
 		return tokens, false, nil
 	}
 
@@ -53,15 +83,7 @@ func RefreshIfNeeded(ctx context.Context, store TokenStore, cfg *oauth2.Config) 
 		return Tokens{}, false, fmt.Errorf("refresh token: %w", err)
 	}
 
-	refreshed := Tokens{
-		AccessToken:  newTok.AccessToken,
-		RefreshToken: newTok.RefreshToken,
-		TokenType:    newTok.TokenType,
-		Expiry:       newTok.Expiry,
-	}
-	if idTok, ok := newTok.Extra("id_token").(string); ok {
-		refreshed.IDToken = idTok
-	}
+	refreshed := TokensFrom(newTok)
 
 	if err := store.Save(ctx, refreshed); err != nil {
 		return Tokens{}, false, fmt.Errorf("save refreshed tokens: %w", err)

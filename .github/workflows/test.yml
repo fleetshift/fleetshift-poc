@@ -1,4 +1,4 @@
-name: Tests
+name: Unit/Integration Tests
 
 on:
   push:
@@ -8,18 +8,30 @@ on:
 
 env:
   TESTCONTAINERS_PROVIDER: docker
+  NX_DAEMON: "false"
 
 jobs:
-  test:
-    name: Test (${{ matrix.module }})
+  test-backend:
+    name: Test (${{ matrix.project }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      GOTESTSUM_FORMAT: github-actions
 
     strategy:
       fail-fast: false
       matrix:
-        module: [server, cli, deploy/aio]
+        include:
+          - project: server
+            go-mod: server
+          - project: cli
+            go-mod: cli
+          - project: deploy-aio
+            go-mod: deploy/aio
+            # These are e2e backend unit tests only
+          - project: e2e-backend
+            go-mod: e2e/backend
 
     steps:
       - name: Checkout
@@ -28,34 +40,31 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: ${{ matrix.module }}/go.mod
+          go-version-file: ${{ matrix.go-mod }}/go.mod
           cache: true
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
       - name: Detect Docker host address for kind OIDC tests
-        if: matrix.module == 'server'
+        if: matrix.project == 'server'
         run: echo "KIND_HOST_ADDR=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')" >> "$GITHUB_ENV"
 
-      - name: Run all unit tests
-        working-directory: ${{ matrix.module }}
-        run: go test -count=1 -timeout 15m ./...
+      - name: Run unit tests
+        run: npx nx test ${{ matrix.project }}
 
-      - name: Run kind docker integration tests
-        if: matrix.module == 'server'
-        working-directory: ${{ matrix.module }}
-        run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/
+      - name: Run integration tests
+        if: matrix.project == 'server'
+        run: npx nx test-integration server
 
-      - name: Run kubernetes docker integration tests
-        if: matrix.module == 'server'
-        working-directory: ${{ matrix.module }}
-        run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/
-
-      - name: Run kubernetes race tests
-        if: matrix.module == 'server'
-        working-directory: ${{ matrix.module }}
-        run: go test -race -count=1 ./internal/addon/kubernetes/
-
-  ui-test:
+  test-ui:
     name: UI Tests
     runs-on: ubuntu-latest
     permissions:

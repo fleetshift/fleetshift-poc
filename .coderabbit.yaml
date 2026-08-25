@@ -4,3 +4,4 @@ reviews:
       working_directories:
         - server
         - cli
+        - deploy/aio

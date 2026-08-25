@@ -113,13 +113,14 @@ npx nx run-many -t test     # run target across all projects (parallel)
 npx nx affected -t test     # only test what changed
 ```
 
-Projects: `server`, `cli`, `proto`, `web`, `common`, `build-utils`, `plugins`.
+Projects: `server`, `cli`, `deploy-aio`, `proto`, `web`, `common`, `build-utils`, `plugins`.
 
 ### Build
 
 ```bash
 npx nx run server:build     # server
 npx nx run cli:build        # fleetctl CLI
+npx nx run deploy-aio:build # AIO packaging binaries
 npx nx run common:build     # shared UI types/helpers
 npx nx run plugins:build    # all MF remote plugins
 npx nx run web:build        # SPA shell
@@ -128,6 +129,7 @@ npx nx run-many -t build    # build all (parallel, cached)
 # Or via Taskfile directly:
 task build:server
 task build:cli
+task build:aio
 task build:all
 ```
 
@@ -162,11 +164,18 @@ helpers), `plugins` (12 MF remotes)
 npx nx run-many -t test     # unit tests for all modules
 npx nx affected -t test     # only test what changed
 npx nx run server:test      # Go server tests (cached)
+npx nx run deploy-aio:test  # AIO packaging unit tests
 npx nx run common:test      # shared UI lib tests
 
-# Or via Taskfile:
-task test:all
+npx nx test:e2e e2e-web      # Playwright UI journeys (needs AIO at :8085)
+npx nx test:e2e e2e-backend  # Go scenarios (starts its own AIO; needs podman)
 ```
+
+Frontend e2e expects the sandbox origin
+(`https://fleetshift-sandbox.localhost:8085`). Playwright flags after `--`,
+for example `npx nx test:e2e e2e-web -- --ui` — see
+[e2e/web/README.md](e2e/web/README.md). Backend e2e starts and stops the AIO
+itself.
 
 ### Generate and images
 

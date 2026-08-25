@@ -76,3 +76,23 @@ func TestGeneratePKCE_TwoCallsProduceDifferentVerifiers(t *testing.T) {
 		t.Error("two calls produced same challenge, want different")
 	}
 }
+
+func TestGenerateOAuthState_NonEmptyAndUnique(t *testing.T) {
+	a, err := GenerateOAuthState()
+	if err != nil {
+		t.Fatalf("GenerateOAuthState: %v", err)
+	}
+	b, err := GenerateOAuthState()
+	if err != nil {
+		t.Fatalf("GenerateOAuthState second: %v", err)
+	}
+	if a == "" || b == "" {
+		t.Fatal("GenerateOAuthState returned empty")
+	}
+	if a == b {
+		t.Fatal("GenerateOAuthState returned the same value twice")
+	}
+	if a == "state" || b == "state" {
+		t.Fatal("GenerateOAuthState returned the literal state placeholder")
+	}
+}
