@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +190,95 @@ func TestFileStore_RelativeDirRejected(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("cwd was mutated: %v", names(entries))
+	}
+}
+
+func TestFileStore_RejectsDirSymlink(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	store := auth.FileStore{Dir: link}
+	err := store.Save(context.Background(), auth.Tokens{AccessToken: "tok", TokenType: "Bearer"})
+	if err == nil {
+		t.Fatal("Save through dir symlink: expected error")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("error = %v, want not a directory", err)
+	}
+}
+
+func TestFileStore_RejectsWorldWritableDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	store := auth.FileStore{Dir: dir}
+	err := store.Save(context.Background(), auth.Tokens{AccessToken: "tok", TokenType: "Bearer"})
+	if err == nil {
+		t.Fatal("Save to world-writable dir: expected error")
+	}
+	if !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("error = %v, want writable", err)
+	}
+}
+
+func TestFileStore_AllowsOwnerOnlyWritableDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	store := auth.FileStore{Dir: dir}
+	if err := store.Save(context.Background(), auth.Tokens{AccessToken: "tok", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("Save to 0755 dir: %v", err)
+	}
+}
+
+func TestFileStore_SaveDoesNotFollowCredentialsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	stolen := filepath.Join(t.TempDir(), "stolen")
+	if err := os.WriteFile(stolen, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed stolen: %v", err)
+	}
+	if err := os.Symlink(stolen, filepath.Join(dir, "credentials.json")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	store := auth.FileStore{Dir: dir}
+	if err := store.Save(context.Background(), auth.Tokens{AccessToken: "secret-token", TokenType: "Bearer"}); err == nil {
+		t.Fatal("Save through credentials symlink: expected error")
+	}
+	got, err := os.ReadFile(stolen)
+	if err != nil {
+		t.Fatalf("read stolen: %v", err)
+	}
+	if string(got) != "old" {
+		t.Fatalf("stolen file = %q, want unchanged old", got)
+	}
+}
+
+func TestFileStore_SaveSigningKeyDoesNotFollowSymlink(t *testing.T) {
+	dir := t.TempDir()
+	stolen := filepath.Join(t.TempDir(), "stolen")
+	if err := os.WriteFile(stolen, []byte("old-key"), 0o600); err != nil {
+		t.Fatalf("seed stolen: %v", err)
+	}
+	if err := os.Symlink(stolen, filepath.Join(dir, "signing_key.pem")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	store := auth.FileStore{Dir: dir}
+	if err := store.SaveSigningKey("new-secret-key"); err == nil {
+		t.Fatal("SaveSigningKey through symlink: expected error")
+	}
+	got, err := os.ReadFile(stolen)
+	if err != nil {
+		t.Fatalf("read stolen: %v", err)
+	}
+	if string(got) != "old-key" {
+		t.Fatalf("stolen file = %q, want unchanged old-key", got)
 	}
 }
 

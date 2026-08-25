@@ -95,17 +95,28 @@ func (s FileStore) LoadSigningKey() (string, error) {
 	return string(pem), nil
 }
 
-// writePrivateFile writes data to path and sets mode 0600. os.WriteFile only
-// applies perm when creating a file, so an existing world-readable file would
-// keep its old mode without Chmod.
+// writePrivateFile writes data to path at mode 0600. It refuses to write if
+// path already exists and is not a regular file (Lstat), so a planted symlink
+// is not followed. Chmod tightens an existing regular file that was more
+// permissive.
 func writePrivateFile(path string, data []byte) error {
+	info, err := os.Lstat(path)
+	if err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("not a regular file")
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o600)
 }
 
-// validateDir checks that Dir is a non-empty absolute path. It does not create Dir.
+// validateDir checks that Dir is a non-empty absolute path. If Dir exists, it
+// must be a directory with no group or other write bits. Lstat is used so a
+// symlink is not followed and fails the directory check. Missing Dir is
+// allowed; ensureDir creates it.
 func (s FileStore) validateDir() error {
 	if s.Dir == "" {
 		return fmt.Errorf("file store requires a config directory")
@@ -113,10 +124,30 @@ func (s FileStore) validateDir() error {
 	if !filepath.IsAbs(s.Dir) {
 		return fmt.Errorf("file store requires an absolute config directory")
 	}
+	info, err := os.Lstat(s.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat config dir: %w", err)
+	}
+	return checkStateDir(info)
+}
+
+// checkStateDir reports whether info is a directory without group or other
+// write permission.
+func checkStateDir(info os.FileInfo) error {
+	if !info.IsDir() {
+		return fmt.Errorf("file store config directory is not a directory")
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("file store config directory must not be group- or world-writable")
+	}
 	return nil
 }
 
-// ensureDir creates Dir at mode 0700 after validateDir succeeds.
+// ensureDir creates Dir at mode 0700 after validateDir succeeds, then Lstats
+// the result so a swapped-in symlink fails the directory check.
 func (s FileStore) ensureDir() error {
 	if err := s.validateDir(); err != nil {
 		return err
@@ -124,5 +155,9 @@ func (s FileStore) ensureDir() error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	return nil
+	info, err := os.Lstat(s.Dir)
+	if err != nil {
+		return fmt.Errorf("stat config dir: %w", err)
+	}
+	return checkStateDir(info)
 }
