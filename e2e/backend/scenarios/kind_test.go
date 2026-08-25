@@ -26,6 +26,12 @@ func TestKindClusterLifecycle(t *testing.T) {
 	steps.RunStep(t, "wait OIDC", func(t *testing.T) {
 		steps.WaitForKindOIDC(t, suite, name)
 	})
+	steps.RunStep(t, "query indexed objects", func(t *testing.T) {
+		steps.WaitForIndexedKubernetesObjects(t, suite, name)
+	})
+	steps.RunStep(t, "query cluster matches get", func(t *testing.T) {
+		steps.AssertKindClusterQueryMatchesGet(t, suite, name)
+	})
 	steps.RunStep(t, "deploy configmap", func(t *testing.T) {
 		steps.CreateConfigMapDeployment(t, suite, name)
 	})
@@ -34,6 +40,15 @@ func TestKindClusterLifecycle(t *testing.T) {
 	})
 	steps.RunStep(t, "check configmap", func(t *testing.T) {
 		steps.AssertConfigMapOnKindCluster(t, suite, name)
+	})
+	steps.RunStep(t, "query configmap", func(t *testing.T) {
+		steps.WaitForIndexedConfigMap(t, suite, name)
+	})
+	steps.RunStep(t, "query pagination", func(t *testing.T) {
+		steps.AssertKubernetesObjectQueryPaginates(t, suite, name)
+	})
+	steps.RunStep(t, "query dual nodes", func(t *testing.T) {
+		steps.WaitForDualIndexedNodes(t, suite, name)
 	})
 	steps.RunStep(t, "delete", func(t *testing.T) {
 		steps.DeleteKindCluster(t, suite, name)
