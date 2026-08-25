@@ -54,7 +54,7 @@ var (
 	// evidence fails.
 	ErrVerificationFailed = errors.New("provenance verification failed")
 
-	// ErrInvalidLogUpdate is returned when a delivery-log update does not
+	// ErrInvalidLogUpdate is returned when an evidence-log update does not
 	// prove append-only consistency or inclusion of the claimed leaf.
-	ErrInvalidLogUpdate = errors.New("invalid delivery-log update")
+	ErrInvalidLogUpdate = errors.New("invalid evidence-log update")
 )

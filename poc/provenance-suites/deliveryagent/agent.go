@@ -18,7 +18,7 @@ import (
 
 var (
 	ErrGeneration = errors.New("delivery generation is stale or conflicting")
-	ErrLogFork    = errors.New("delivery does not extend retained checkpoint")
+	ErrLogFork    = errors.New("package does not extend retained evidence-log checkpoint")
 
 	// ErrAcknowledgementLost is a test fault injected after an otherwise
 	// successful, locally retained delivery.
@@ -117,12 +117,12 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 	return nil
 }
 
-// Deliver verifies the log update, then provenance under matched policy.
+// Deliver verifies the evidence-log update, then provenance under matched policy.
 // Authenticated predicate type selects apply: intent predicates use
 // fulfillment apply, trust-config-update is reserved on the agent, and
 // predicates the selected profile Owns call TargetAPI.Apply. Unknown
-// predicates fail closed. A verified log checkpoint is retained even when
-// the included delivery is later rejected. When the manager constructed
+// predicates fail closed. A verified evidence-log checkpoint is retained even
+// when the included evidence is later rejected. When the manager constructed
 // proofs from an obsolete checkpoint, Deliver returns the newer retained
 // checkpoint so the manager can retry without applying again.
 func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
@@ -140,7 +140,7 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	if err := a.acceptLogLocked(pkg); err != nil {
 		return err
 	}
-	if isStaleLogProof(pkg.Log, retained) {
+	if isStaleLogProof(pkg.EvidenceLog, retained) {
 		// RFC 6962 consistency from the empty tree is empty. A proof built from
 		// that older cache can therefore verify as an equal-size no-op against
 		// the retained head. Report the retained checkpoint so the manager can
@@ -148,13 +148,13 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		a.staleCheckpointResponses++
 		return &CheckpointStaleError{
 			checkpoint: retained,
-			cause:      fmt.Errorf("constructed from checkpoint size %d", pkg.Log.From.Size),
+			cause:      fmt.Errorf("constructed from checkpoint size %d", pkg.EvidenceLog.From.Size),
 		}
 	}
 
 	// The log observation is independent of apply. Pinning it here keeps an
 	// inert rejected leaf in the accepted prefix so a later fork cannot omit it.
-	a.checkpoint = pkg.Log.Checkpoint
+	a.checkpoint = pkg.EvidenceLog.Checkpoint
 
 	authenticated, assertion, err := protocol.SelectAndVerify(
 		context.Background(),
@@ -191,7 +191,7 @@ func (a *Agent) Applied(name protocol.FullResourceName) (AppliedDelivery, bool) 
 	return cloneApplied(state.view), true
 }
 
-// Checkpoint is the retained append-only log position.
+// Checkpoint is the retained append-only evidence-log position.
 func (a *Agent) Checkpoint() protocol.Checkpoint {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -269,14 +269,14 @@ func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, authent
 			Authenticated: authenticated,
 			Assertion:     assertion,
 			Statement:     pkg.Root,
-			Index:         pkg.Log.Index,
+			Index:         pkg.EvidenceLog.Index,
 		})
 	}
 }
 
 func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) error {
-	if err := protocol.VerifyLogUpdate(a.checkpoint, pkg.Log, pkg.Root.Evidence); err != nil {
-		if isStaleLogProof(pkg.Log, a.checkpoint) {
+	if err := protocol.VerifyEvidenceLogUpdate(a.checkpoint, pkg.EvidenceLog, pkg.Root.Evidence); err != nil {
+		if isStaleLogProof(pkg.EvidenceLog, a.checkpoint) {
 			a.staleCheckpointResponses++
 			return &CheckpointStaleError{checkpoint: a.checkpoint, cause: err}
 		}
@@ -285,7 +285,7 @@ func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) error {
 	return nil
 }
 
-func isStaleLogProof(update protocol.LogUpdate, retained protocol.Checkpoint) bool {
+func isStaleLogProof(update protocol.EvidenceLogUpdate, retained protocol.Checkpoint) bool {
 	if update.From.Size >= retained.Size {
 		return false
 	}

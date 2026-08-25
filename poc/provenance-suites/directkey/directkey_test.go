@@ -376,7 +376,7 @@ func TestManagerStoresImmutableEvidenceAndEmptySupport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
-	if err := manager.CommitEnrollment(context.Background(), enrollment); err != nil {
+	if err := manager.Enroll(enrollment); err != nil {
 		t.Fatalf("CommitEnrollment: %v", err)
 	}
 	key, ok := manager.PublicKey(producer.Principal())
@@ -387,17 +387,6 @@ func TestManagerStoresImmutableEvidenceAndEmptySupport(t *testing.T) {
 	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
-	}
-	identity, err := manager.StoreEvidence(context.Background(), evidence)
-	if err != nil {
-		t.Fatalf("StoreEvidence: %v", err)
-	}
-	want, err := evidence.Identity()
-	if err != nil {
-		t.Fatalf("identity: %v", err)
-	}
-	if identity != want {
-		t.Fatalf("stored identity = %q, want %q", identity, want)
 	}
 	support, err := manager.AssembleSupportMaterial(context.Background(), evidence)
 	if err != nil {
@@ -441,7 +430,7 @@ func TestDecodeAssertionDoesNotAuthenticate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
-	if err := manager.CommitEnrollment(context.Background(), enrollment); err != nil {
+	if err := manager.Enroll(enrollment); err != nil {
 		t.Fatalf("CommitEnrollment: %v", err)
 	}
 	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))

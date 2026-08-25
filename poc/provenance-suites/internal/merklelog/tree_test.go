@@ -176,6 +176,54 @@ func TestTreeDoesNotExposeMutableHashStorage(t *testing.T) {
 	}
 }
 
+func TestBeginAppendHashesIsAtomic(t *testing.T) {
+	tree := New()
+	if _, _, err := tree.Append([]byte("existing")); err != nil {
+		t.Fatalf("Append existing: %v", err)
+	}
+	beforeSize := tree.Size()
+	beforeRoot, err := tree.Root()
+	if err != nil {
+		t.Fatalf("root before batch: %v", err)
+	}
+
+	valid := rfc6962.DefaultHasher.HashLeaf([]byte("first-new"))
+	pending, err := tree.BeginAppendHashes([][]byte{valid, make([]byte, rfc6962.DefaultHasher.Size()-1)})
+	if err == nil {
+		t.Fatal("BeginAppendHashes accepted an invalid later hash")
+	}
+	if pending != nil {
+		t.Fatal("BeginAppendHashes returned a pending append after a later invalid hash")
+	}
+	if tree.Size() != beforeSize {
+		t.Fatalf("invalid later hash appended earlier leaves: size = %d, want %d", tree.Size(), beforeSize)
+	}
+	if root, err := tree.Root(); err != nil || !bytes.Equal(root, beforeRoot) {
+		t.Fatalf("invalid later hash mutated the tree: root = %x, err = %v", root, err)
+	}
+
+	second := rfc6962.DefaultHasher.HashLeaf([]byte("second-new"))
+	pending, err = tree.BeginAppendHashes([][]byte{valid, second})
+	if err != nil {
+		t.Fatalf("BeginAppendHashes: %v", err)
+	}
+	if got, want := pending.BaseSize(), beforeSize; got != want {
+		t.Fatalf("BaseSize = %d, want %d", got, want)
+	}
+	if got, want := pending.Size(), beforeSize+2; got != want {
+		t.Fatalf("pending size = %d, want %d", got, want)
+	}
+	if tree.Size() != beforeSize {
+		t.Fatalf("tree changed before commit: size = %d, want %d", tree.Size(), beforeSize)
+	}
+	if err := pending.Commit(); err != nil {
+		t.Fatalf("commit batch: %v", err)
+	}
+	if got, want := tree.Size(), beforeSize+2; got != want {
+		t.Fatalf("committed size = %d, want %d", got, want)
+	}
+}
+
 func TestPendingAppendBuildsProofsWithoutMutatingTree(t *testing.T) {
 	tree := New()
 	for i := 0; i < 7; i++ {

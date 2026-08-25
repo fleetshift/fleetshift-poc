@@ -10,7 +10,7 @@ The trust machinery used to authenticate FleetShift delivery evidence:
 - the boundary between profile verification and common attestation semantics
 - typed outer evidence versus inner assertion typing
 - credential presentation and request signing where they intersect provenance
-- verifier-owned profile state and the common append-only delivery log
+- verifier-owned profile state and the common append-only evidence log
 - trust updates and historical verification
 - the initial TUF, Sigstore, and continuity/v3 profiles, including their
   per-item encodings
@@ -72,7 +72,7 @@ verify them itself.
 There is no single best cryptographic mechanism for every authority or
 environment. Sigstore can bind an OIDC identity to a short-lived certificate
 and Bundle; continuity/v3 can bind a principal to an authenticated key history
-and delivery-log position; TUF can authenticate content published by a
+and evidence-log position; TUF can authenticate content published by a
 repository role. They differ in signing workflow, trust anchors, retained
 state, historical verification, availability, and compromise guarantees. The
 initial Sigstore and continuity/v3 profiles share Sigstore Bundle v0.3 as the
@@ -626,9 +626,11 @@ verifies.
 Dynamic-scope assertions may intentionally omit one concrete generation when
 they authorize a standing or selector-based relationship. The applicable
 predicate type and constraints must define whether authorization is standing,
-once per target, or snapshot-scoped. The common delivery log supplies durable
+once per target, or snapshot-scoped. The common evidence log supplies durable
 ordering and rollback resistance but does not silently turn a reusable
-assertion into single-use authorization.
+assertion into single-use authorization. Log positions are assigned when the
+resource manager accepts evidence, not when a delivery or outbox entry is
+created.
 
 The [hybrid prototype](../../../poc/attestation/hybrid/README.md) exercises
 these graph, derivation, placement, removal, and constraint semantics using an
@@ -738,7 +740,10 @@ The RM:
   objects;
 - records resource intent and history;
 - invokes profile-specific work needed by the mutation's durable transaction;
-- commits durable deliveries to the common delivery log;
+- registers accepted evidence in the common evidence log, assigning each
+  identity one canonical position independent of later deliveries or targets;
+- enqueues separate delivery and outbox work; a log index is not a retry
+  handle;
 - assembles the attestation graph and replaceable verification material for
   the target's retained state; and
 - routes the resulting package to the target.
@@ -759,10 +764,12 @@ choose a profile outside authenticated target policy, or make unverified proof
 material satisfy target-retained constraints.
 
 Acceptance of an RM mutation must durably couple the resource change, original
-evidence, resource history, and required delivery-log or profile work. A
+evidence, resource history, and required evidence-log or profile work. A
 database transaction, transactional outbox, or equivalent durable workflow may
 provide that boundary. Profile-specific code participates in the operation but
 does not own or bypass the RM's transaction and authorization rules.
+Delivery and outbox records are a separate dispatch identity from the
+evidence-log position assigned at acceptance.
 
 ### Target
 
@@ -773,7 +780,7 @@ The target or delivery agent:
 - verifies credentials and provenance under matched delivery policy;
 - validates the attestation graph and target-local constraints;
 - applies authenticated content through profile-neutral delivery machinery;
-- retains profile and delivery-log state required by its accepted profiles; and
+- retains profile and evidence-log state required by its accepted profiles; and
 - acknowledges only after it has durably guaranteed safe progress or retry.
 
 The boundary is conceptual rather than a required pair of protocol methods:
@@ -812,15 +819,16 @@ Examples:
 Common FleetShift API conventions still apply: authenticate the caller,
 perform RM authorization, route through authenticated authority config, use
 idempotency keys where needed, and integrate with durable workflows and the
-delivery log where ordering has security meaning. The provenance type or
+evidence log where ordering has security meaning. The provenance type or
 credential method owns its operation schema, validation, and state transition.
 
-Those typed submit APIs still become ordinary logged deliveries. After the
-resource manager accepts the request, it appends the evidence identity to the
-delivery log and couriers it to the agents that must apply it. Enrollment is
+Those typed submit APIs still become ordinary accepted evidence. After the
+resource manager accepts the request, it registers the evidence identity in
+the evidence log—once, at first acceptance of that exact envelope—and
+enqueues courier work to the agents that must apply it. Enrollment is
 relevant to every agent that will later verify that principal; there is no
 fulfillment target. Rotation, revocation, and similar suite events follow the
-same path.
+same path. Fan-out to many targets does not create many log positions.
 
 After log verification and profile selection, the authenticated predicate type
 selects apply:
@@ -841,7 +849,7 @@ suite events.
 An agent treats a suite event as just another delivery. The owned predicate
 type is what routes apply to the suite implementation at the target.
 
-## Retained State And Delivery Ordering
+## Retained State And Evidence-Log Ordering
 
 ### Profile-owned verifier state
 
@@ -867,26 +875,46 @@ The common requirement is crash-consistent, idempotent durable progression:
 - an older or unverified delivery cannot overwrite newer accepted state; and
 - retry after any crash converges without duplicating the effect.
 
-This does not require profile state, the delivery-log checkpoint, target
+This does not require profile state, the evidence-log checkpoint, target
 generation, and external apply effects to share one isolation transaction.
 Transactions, ordered idempotent writes, compare-and-swap, leases, generation
 fences, and durable workflow records are all valid implementations when they
 preserve the invariants above.
 
-### Common append-only delivery log
+### Common append-only evidence log
 
-Every durable mutation is committed to a common append-only log before
-dispatch. A log leaf binds the root `TypedEvidence` identity to an assigned
-position. The couriered object is a log update: the checkpoint the proofs were
-built from, the new size and root, an append-only consistency proof, and an
-inclusion proof of this leaf. Those proofs are reconstructable and are not
-part of the leaf.
+When the resource manager accepts `TypedEvidence` selected for logging, it
+assigns that evidence identity one canonical position in a common append-only
+log. A log leaf binds the exact `TypedEvidence` identity to that position.
+The honest RM registers an identity at most once: retrying the same envelope,
+assembling another delivery around it, or fanning out to more targets does
+not append another leaf. Delivery and outbox records are a separate dispatch
+identity; a log index is not a retry handle.
+
+A log leaf is created at evidence acceptance, not at delivery construction
+and not per outbox entry. Root, supporting, and typed lifecycle statements
+are registered when accepted. Replaceable support material, Merkle proofs,
+checkpoints, and manifests embedded inside an authenticated assertion are
+not leaves.
+
+If several new evidence objects arrive in one mutation, the honest RM
+registers them in a deterministic order: the root first, then supporting
+items after duplicate removal. The assigned sequence is registration order.
+It is not proof of creation time, producer causality, lifecycle acceptance,
+or application.
+
+The couriered object includes an evidence-log update: the checkpoint the
+proofs were built from, the new size and root, an append-only consistency
+proof, and inclusion of the relevant accepted identities. Those proofs are
+reconstructable and are not part of the leaf. They are common couriered
+material, not profile `SupportMaterial` and not part of the immutable
+`TypedEvidence` identity.
 
 The log supports:
 
-- inclusion of this exact root evidence at its assigned position;
+- inclusion of this exact evidence identity at its assigned position;
 - append-only consistency from a target's retained checkpoint;
-- skipping unrelated content leaves without disclosing them;
+- skipping unrelated accepted-evidence leaves without disclosing them;
 - idempotent retry and recovery from lost acknowledgements;
 - local rollback protection for established targets; and
 - ordering-sensitive profile rules such as v3 rotation cutoffs.
@@ -895,12 +923,12 @@ Appending a record does not authorize its content. The log orders identities;
 the applicable credential, provenance profile, graph, constraints, and target
 checks establish authority. Predicate type selects apply: intent, predicates
 the selected profile owns, or the agent-owned trust-configuration handler.
-Trust updates and rotations are ordinary logged assertions this agent must
+Trust updates and rotations are ordinary accepted assertions this agent must
 verify and apply if it will rely on them; unrelated content leaves are skipped
 via consistency.
 An inert or invalid profile-control marker remains inert. A verifier that has
 checked consistency and inclusion pins that checkpoint even when the included
-delivery is later rejected, so a later fork cannot omit the leaf. A manager
+evidence is later rejected, so a later fork cannot omit the leaf. A manager
 whose last-ack cache is behind that pin reconstructs from the agent's retained
 checkpoint rather than treating a same-head retry as a fresh apply.
 
@@ -945,7 +973,7 @@ checks:
 - exact predecessor matching and consecutive catch-up;
 - update scope and tenant-partition authority;
 - successor schema, policy, and profile validity;
-- delivery-log ordering where applicable; and
+- evidence-log ordering where applicable; and
 - consistency between successor bytes and the committed digest.
 
 It then installs the successor configuration and required profile state using
@@ -986,7 +1014,7 @@ requests or waits for authenticated updates rather than accepting supplied
 trust bytes at face value.
 
 No separate security-significant revision counter is required. Predecessor
-digests and delivery-log positions establish transition ordering.
+digests and evidence-log positions establish transition ordering.
 
 ### Profiles used for trust updates
 
@@ -996,7 +1024,7 @@ TUF, Sigstore, and continuity/v3 are peers at the trust-update boundary:
 | ------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | TUF           | Publishes the exact canonical trust-update content as a repository target | Retained TUF root/metadata; configured role, target path, version, and freshness checks                 |
 | Sigstore      | Signs the exact canonical content in a Sigstore Bundle v0.3               | Configured Fulcio CA, OIDC issuer constraints, trusted TSA/time, and optional transparency requirements |
-| Continuity/v3 | Signs the exact canonical content in a public-key Sigstore Bundle v0.3    | Current map/history checkpoint, delivery-log branch, key-event semantics, and rotation cutoffs          |
+| Continuity/v3 | Signs the exact canonical content in a public-key Sigstore Bundle v0.3    | Current map/history checkpoint, evidence-log branch, key-event semantics, and rotation cutoffs          |
 
 TUF is especially suitable for low-churn trust updates, but it is neither
 mandatory nor coupled to Sigstore. A policy may also admit TUF for other
@@ -1026,7 +1054,7 @@ evidence remains admissible. The baseline supports two retention shapes:
 The second shape lets a CA, issuer, or mechanism change without inventing a
 generic proof accumulator for profile configuration. An old retained profile
 is not automatically valid for fresh evidence: trusted signing-time windows,
-TSA or delivery-log cutoffs, content constraints, and current distrust policy
+TSA or evidence-log cutoffs, content constraints, and current distrust policy
 limit its use.
 
 The RM remains a courier for historical objects:
@@ -1036,9 +1064,9 @@ The RM remains a courier for historical objects:
   roots and trusted-time constraints needed to verify it.
 - Continuity/v3 retains a compact current checkpoint that commits accepted
   history. The RM supplies the historical Bundle, event bodies, the immediate
-  successor when needed, and current-branch map/history/log proofs. Those
-  couriered objects gain authority only by verifying against the retained
-  checkpoint.
+  successor when needed, and current-branch map/history proofs plus
+  evidence-log proofs. Those couriered objects gain authority only by
+  verifying against the retained checkpoint.
 - TUF retains the repository state and target metadata required by its
   configured historical policy, or the authority retains an older constrained
   TUF profile.
@@ -1085,8 +1113,9 @@ in-toto statement.
   configured transparency material inside the Bundle.
 - Continuity/v3 uses the Bundle public-key identifier as an untrusted
   proof-selection hint, with a matching DSSE `keyid`. Authenticated history
-  and delivery-log proofs remain separate support material and may be shared
-  by many items.
+  proofs remain separate support material and may be shared by many items.
+  FleetShift evidence-log inclusion is common couriered material, not profile
+  support, and is assigned after production when the RM accepts the evidence.
 
 The selected profile validates the Bundle shape and accepts only its own
 verification-material form. The initial continuity/v3 profile rejects
@@ -1104,25 +1133,27 @@ a continuity Bundle plus couriered proofs, or a TUF target.
 The continuity/v3 profile uses ordinary OIDC for initial identity enrollment,
 then user-controlled continuity, device, and session keys for durable
 provenance. An authenticated map commits each principal's history head, while
-the common delivery log orders deliveries against rotation markers.
+the common evidence log orders accepted evidence against rotation markers.
+Those log positions are the positions assigned when the RM accepted the
+relevant evidence identities, not delivery or outbox identifiers.
 
 Each independently authenticated assertion is encoded as a Sigstore Bundle
 v0.3 using the public-key identifier form described in
 [Initial evidence encodings](#initial-evidence-encodings). The hint selects
 candidate proof material; it grants no identity or authority. The RM supplies
-authenticated-map, history, and delivery-log proofs as replaceable support
-material.
+authenticated-map and history proofs as replaceable support material. Common
+code couriers evidence-log inclusion separately from that profile support.
 
 An established verifier retains a compact map/history checkpoint and local
-delivery-log checkpoint. The RM constructs selective proofs for the exact
+evidence-log checkpoint. The RM constructs selective proofs for the exact
 signing state used by an assertion. The profile protects that verifier from
 key substitution, accepted-prefix rollback, and movement of an already pinned
 rotation cutoff.
 
 The guarantee is local to each verifier's retained branch. Without witnesses
 or gossip, the RM can withhold transitions and keep another verifier on a
-stale branch. V3 supplies logical delivery ordering but no trusted wall-clock
-time.
+stale branch. V3 supplies logical evidence-log ordering but no trusted
+wall-clock time.
 
 ### Sigstore
 
@@ -1176,7 +1207,7 @@ Failures are classified at the layer that detects them:
   identity agreement;
 - missing or invalid profile state and historical material;
 - invalid graph relationship, constraint, placement, removal, or generation;
-- delivery-log inconsistency or retained-state rollback; and
+- evidence-log inconsistency or retained-state rollback; and
 - target apply or durable-progress failure after successful authentication.
 
 Missing, expired, or temporarily unavailable authorization material normally
@@ -1228,7 +1259,7 @@ never makes it an uninitialized verifier.
     new profiles cannot select or authorize their own installation.
 14. **Current historical policy:** old anchors or profiles are usable only
     where current authenticated constraints admit their historical interval.
-15. **Append-only continuity:** established targets extend retained delivery
+15. **Append-only continuity:** established targets extend retained evidence-log
     and profile checkpoints or fail closed; they do not roll back or rebootstrap.
 16. **Crash-safe progression:** acknowledgement follows durable safe progress;
     partial state cannot authorize unverified content or apply an older
@@ -1259,8 +1290,11 @@ Common protocol tests apply to every provenance implementation:
 - trust updates with forged, stale, wrong-predecessor, rollback, wrong-scope,
   and self-authorizing successor configurations;
 - new authorities and profiles authorized only by predecessor policy;
-- delivery-log inclusion/consistency tamper, stale checkpoints, lost
+- evidence-log inclusion/consistency tamper, stale checkpoints, lost
   acknowledgements, state drift, and crash recovery at every durable boundary;
+- honest RM first-registration of evidence identities: reuse across deliveries
+  and targets keeps the canonical index, duplicate envelopes in one mutation
+  append once, and identity collisions fail closed;
 - historical evidence, cutoffs, retained-profile constraints, missing history,
   and rejection of fresh evidence under constraints limited to past intervals;
 - unbound workload JWTs presented as durable supporting provenance;
@@ -1300,7 +1334,7 @@ different security and availability tradeoffs.
   [Initial evidence encodings](#initial-evidence-encodings).
 - How are profile-owned state records associated across routine config updates
   without making an RM-supplied storage key authoritative?
-- What delivery-log scope, compaction, permanent-rejection progression, and
+- What evidence-log scope, compaction, permanent-rejection progression, and
   recovery policy fit the target scale range?
 - Where optional TSA, witness, or gossip extensions are enabled, are they
   authority-wide or partition-specific?
