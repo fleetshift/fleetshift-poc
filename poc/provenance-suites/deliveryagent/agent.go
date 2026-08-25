@@ -117,14 +117,16 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 	return nil
 }
 
-// Deliver verifies the evidence-log update, then provenance under matched policy.
-// Authenticated predicate type selects apply: intent predicates use
-// fulfillment apply, trust-config-update is reserved on the agent, and
-// predicates the selected profile Owns call TargetAPI.Apply. Unknown
-// predicates fail closed. A verified evidence-log checkpoint is retained even
-// when the included evidence is later rejected. When the manager constructed
-// proofs from an obsolete checkpoint, Deliver returns the newer retained
-// checkpoint so the manager can retry without applying again.
+// Deliver verifies package-wide evidence-log consistency and inclusion of
+// the root Item, then provenance under matched policy. Supporting-item
+// inclusions are not verified yet. Authenticated predicate type selects
+// apply: intent predicates use fulfillment apply, trust-config-update is
+// reserved on the agent, and predicates the selected profile Owns call
+// TargetAPI.Apply. Unknown predicates fail closed. A verified evidence-log
+// checkpoint is retained even when the included evidence is later rejected.
+// When the manager constructed proofs from an obsolete checkpoint, Deliver
+// returns the newer retained checkpoint so the manager can retry without
+// applying again.
 func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -140,7 +142,7 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	if err := a.acceptLogLocked(pkg); err != nil {
 		return err
 	}
-	if isStaleLogProof(pkg.EvidenceLog, retained) {
+	if isStaleLogProof(*pkg.EvidenceLog, retained) {
 		// RFC 6962 consistency from the empty tree is empty. A proof built from
 		// that older cache can therefore verify as an equal-size no-op against
 		// the retained head. Report the retained checkpoint so the manager can
@@ -158,7 +160,7 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 
 	authenticated, assertion, err := protocol.SelectAndVerify(
 		context.Background(),
-		pkg.Root,
+		pkg.Root.SignedStatement,
 		protocol.DeliveryContext{
 			ClaimedTenant:     a.config.TenantID,
 			RootAuthorization: true,
@@ -268,18 +270,27 @@ func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, authent
 		return target.Apply(context.Background(), protocol.ApplyRequest{
 			Authenticated: authenticated,
 			Assertion:     assertion,
-			Statement:     pkg.Root,
-			Index:         pkg.EvidenceLog.Index,
+			Statement:     pkg.Root.SignedStatement,
+			Index:         pkg.Root.EvidenceLog.Index,
 		})
 	}
 }
 
 func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) error {
-	if err := protocol.VerifyEvidenceLogUpdate(a.checkpoint, pkg.EvidenceLog, pkg.Root.Evidence); err != nil {
-		if isStaleLogProof(pkg.EvidenceLog, a.checkpoint) {
+	if pkg.EvidenceLog == nil {
+		return fmt.Errorf("%w: missing evidence-log update", ErrLogFork)
+	}
+	if pkg.Root.EvidenceLog == nil {
+		return fmt.Errorf("%w: missing root evidence-log inclusion", ErrLogFork)
+	}
+	if err := protocol.VerifyEvidenceLogUpdate(a.checkpoint, *pkg.EvidenceLog); err != nil {
+		if isStaleLogProof(*pkg.EvidenceLog, a.checkpoint) {
 			a.staleCheckpointResponses++
 			return &CheckpointStaleError{checkpoint: a.checkpoint, cause: err}
 		}
+		return fmt.Errorf("%w: %v", ErrLogFork, err)
+	}
+	if err := protocol.VerifyEvidenceLogInclusion(pkg.EvidenceLog.Checkpoint, pkg.Root.Evidence, *pkg.Root.EvidenceLog); err != nil {
 		return fmt.Errorf("%w: %v", ErrLogFork, err)
 	}
 	return nil
@@ -350,7 +361,7 @@ func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPack
 		if found != nil {
 			return protocol.FulfillmentRelation{}, fmt.Errorf("%w: multiple fulfillment relations", protocol.ErrAmbiguousPolicy)
 		}
-		found = item
+		found = &item.SignedStatement
 	}
 	if found == nil {
 		return protocol.FulfillmentRelation{}, ErrFulfillmentRelationRequired

@@ -135,11 +135,23 @@ type SupportMaterial Encoded
 // to a verifier. Evidence is the immutable proof encoding; the inner
 // statement lives in those bytes. Support is replaceable material used by
 // the selected profile to verify that evidence. It is not a second signed
-// assertion. Root and supporting items in a delivery package are the same
-// type.
+// assertion. A delivery package couriers each statement as an Item, which
+// may also carry that statement's evidence-log inclusion.
 type SignedStatement struct {
 	Evidence TypedEvidence   `json:"evidence"`
 	Support  SupportMaterial `json:"support"`
+}
+
+// Item is one slot in a couriered delivery package: a SignedStatement plus
+// that statement's optional FleetShift evidence-log inclusion. It is a
+// package slot, not a provenance type. Embedding keeps the JSON object
+// flat (evidence, support, evidence_log) while keeping SignedStatement
+// distinct. VerifyRequest, SelectAndVerify, and ApplyRequest continue to
+// take SignedStatement. The inclusion is common couriered material, not
+// SupportMaterial and not part of TypedEvidence identity.
+type Item struct {
+	SignedStatement
+	EvidenceLog *EvidenceLogInclusion `json:"evidence_log,omitempty"`
 }
 
 // DeliveryContext is the bounded context used to match a delivery policy
