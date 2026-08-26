@@ -162,7 +162,9 @@ func finishSharedKind(t *testing.T, f *harness.Fixture, name string, ready *bool
 	*ready = true
 }
 
-// kindClusterPresent reports whether fleetctl resource get succeeds for this Kind cluster id.
+// kindClusterPresent reports whether this Kind cluster is not known to be gone.
+// A successful get or a non-NotFound error counts as present so a connection
+// blip is not treated as deletion.
 func kindClusterPresent(f *harness.Fixture, name string) bool {
 	if f == nil || name == "" {
 		return false
@@ -170,7 +172,7 @@ func kindClusterPresent(f *harness.Fixture, name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 	defer cancel()
 	res := f.Run(ctx, "resource", "get", kindClusterType, name)
-	return res.Err == nil
+	return !rpcNotFound(res)
 }
 
 // isSharedKindCluster reports whether name is a suite pool id.
