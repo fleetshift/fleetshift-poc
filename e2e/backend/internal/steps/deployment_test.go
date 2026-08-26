@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -93,4 +94,34 @@ func TestDeploymentTerminalFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeploymentPaused(t *testing.T) {
+	t.Parallel()
+	if deploymentPaused(deploymentView{State: "STATE_CREATING"}) {
+		t.Fatal("empty pauseReason is not paused")
+	}
+	if !deploymentPaused(deploymentView{State: "STATE_CREATING", PauseReason: "forbidden"}) {
+		t.Fatal("non-empty pauseReason is paused")
+	}
+	if deploymentPaused(deploymentView{State: "STATE_CREATING", PauseReason: "  "}) {
+		t.Fatal("blank pauseReason is not paused")
+	}
+}
+
+func TestDeliveryAuthPause(t *testing.T) {
+	t.Parallel()
+	got := "delivery auth failed: pausing for fresh credentials: delivery d: apply manifest 1: forbidden"
+	if !strings.Contains(got, deliveryAuthPause) {
+		t.Fatalf("%q must match %q", got, deliveryAuthPause)
+	}
+	if strings.Contains("quota exceeded", deliveryAuthPause) {
+		t.Fatal("non-auth pause must not match")
+	}
+}
+
+func TestCleanupDeployment_NilOrEmpty(t *testing.T) {
+	t.Parallel()
+	CleanupDeployment(t, nil, "cm-x")
+	CleanupDeployment(t, nil, "")
 }

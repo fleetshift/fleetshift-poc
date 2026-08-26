@@ -14,16 +14,51 @@ import (
 )
 
 // Login runs auth setup + auth login --no-browser and completes Dex through
-// Playwright. TestMain owns this; tests must not call it again.
+// Playwright into the suite --config-dir. TestMain owns this for ops; tests
+// must not call it again for that directory. Use [Fixture.LoginAs] for a
+// second persona.
 func (f *Fixture) Login(persona string) error {
 	if persona == "" {
-		persona = "ops"
+		persona = PersonaOps
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
 	defer cancel()
 
-	if err := poll(ctx, time.Second, func() error {
-		setup := f.Run(ctx,
+	if err := f.authSetup(ctx, f.configDir); err != nil {
+		return err
+	}
+	return f.loginNoBrowser(ctx, f.configDir, persona)
+}
+
+// LoginAs logs persona into a new --config-dir under the fixture work
+// directory, reusing the suite auth.json from TestMain setup. The returned
+// directory is owned by the fixture (Stop removes it).
+func (f *Fixture) LoginAs(persona string) (string, error) {
+	if f == nil {
+		return "", fmt.Errorf("nil fixture")
+	}
+	if persona == "" {
+		return "", fmt.Errorf("persona is required")
+	}
+	dir := filepath.Join(f.workDir, "fleetctl-"+persona)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("config dir: %w", err)
+	}
+	if err := copyAuthJSON(f.configDir, dir); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
+	defer cancel()
+	if err := f.loginNoBrowser(ctx, dir, persona); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// authSetup polls `auth setup` until it writes auth.json under configDir.
+func (f *Fixture) authSetup(ctx context.Context, configDir string) error {
+	return poll(ctx, time.Second, func() error {
+		setup := f.RunWithConfigDir(ctx, configDir,
 			"auth", "setup",
 			"--issuer-url", Issuer,
 			"--client-id", cliClientID,
@@ -34,11 +69,12 @@ func (f *Fixture) Login(persona string) error {
 			return fmt.Errorf("auth setup: %s", setup.Stderr)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
+	})
+}
 
-	args := append(fleetctlArgs(f.configDir), "auth", "login", "--no-browser")
+// loginNoBrowser runs auth login --no-browser and completes Dex through Playwright.
+func (f *Fixture) loginNoBrowser(ctx context.Context, configDir, persona string) error {
+	args := append(fleetctlArgs(configDir), "auth", "login", "--no-browser")
 	cmd := exec.CommandContext(ctx, f.fleetctl, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -63,20 +99,40 @@ func (f *Fixture) Login(persona string) error {
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("auth login: %w\n%s", err, stderr.String())
 	}
-	if _, err := os.Stat(f.CredentialsPath()); err != nil {
+	if _, err := os.Stat(credentialsPath(configDir)); err != nil {
 		return fmt.Errorf("credentials after login: %w", err)
 	}
 	f.logf("logged in as %s", persona)
 	return nil
 }
 
+// copyAuthJSON copies auth.json from srcDir to dstDir. It does not copy credentials.json.
+func copyAuthJSON(srcDir, dstDir string) error {
+	src := filepath.Join(srcDir, authConfigName)
+	dst := filepath.Join(dstDir, authConfigName)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read auth.json: %w", err)
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		return fmt.Errorf("write auth.json: %w", err)
+	}
+	return nil
+}
+
 // AccessToken returns the suite fleetctl access token from insecure-storage
 // credentials.json. Do not log the return value.
 func (f *Fixture) AccessToken() (string, error) {
+	return f.AccessTokenFrom(f.configDir)
+}
+
+// AccessTokenFrom returns the access token stored under configDir.
+// Do not log the return value.
+func (f *Fixture) AccessTokenFrom(configDir string) (string, error) {
 	if f == nil {
 		return "", fmt.Errorf("nil fixture")
 	}
-	data, err := os.ReadFile(f.CredentialsPath())
+	data, err := os.ReadFile(credentialsPath(configDir))
 	if err != nil {
 		return "", fmt.Errorf("read credentials: %w", err)
 	}

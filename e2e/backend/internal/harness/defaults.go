@@ -61,6 +61,12 @@ const (
 	nxImageAIO = "fleetshift-poc:image:aio"
 	// credentialsName is the insecure-storage tokens filename under --config-dir.
 	credentialsName = "credentials.json"
+	// authConfigName is the OIDC client settings filename under --config-dir.
+	authConfigName = "auth.json"
+
+	// PersonaOps and PersonaDev are the bundled Dex sandbox personas.
+	PersonaOps = "ops"
+	PersonaDev = "dev"
 
 	readyTimeout             = 30 * time.Second
 	copyCATimeout            = 20 * time.Second
@@ -78,4 +84,9 @@ const (
 	grpcProbeTimeout        = 2 * time.Second
 	pollInterval            = 200 * time.Millisecond
 	engineSocketDialTimeout = 2 * time.Second
+	// pollLogInterval is how often identical wait-loop messages are logged.
+	pollLogInterval = 3 * time.Second
+	// commandHeartbeatInterval is how often a still-running quiet command
+	// (image build, and similar) repeats its progress line.
+	commandHeartbeatInterval = 15 * time.Second
 )

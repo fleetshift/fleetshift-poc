@@ -281,7 +281,8 @@ func dumpKindEvidence(containerName, engineSocket string) {
 }
 
 // removeLeftoverKindNodes deletes Kind node containers whose cluster name
-// matches this suite's prefix. Best-effort; ignores errors.
+// matches this suite's prefix. Called on Start (so stable shared names are
+// free) and Stop. Best-effort; ignores errors.
 func removeLeftoverKindNodes() {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	cmd := exec.CommandContext(ctx, "podman", "ps", "-a",
@@ -293,11 +294,19 @@ func removeLeftoverKindNodes() {
 	if err != nil {
 		return
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	var ids []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		id, ok := leftoverKindNodeID(line)
 		if !ok {
 			continue
 		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "e2e/backend: removing %d leftover kind node container(s); do not interrupt\n", len(ids))
+	for _, id := range ids {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		_ = exec.CommandContext(ctx, "podman", "rm", "-f", id).Run()
 		cancel()

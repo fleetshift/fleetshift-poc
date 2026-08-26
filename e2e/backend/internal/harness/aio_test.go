@@ -111,6 +111,18 @@ func TestUIPublish(t *testing.T) {
 	}
 }
 
+func TestHTTPSClient_Nil(t *testing.T) {
+	t.Parallel()
+	var f *Fixture
+	_, err := f.HTTPSClient()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "nil fixture") {
+		t.Fatalf("error = %v, want nil fixture", err)
+	}
+}
+
 func TestWaitReadyz_TrustedCAOKWrongCAFails(t *testing.T) {
 	caPEM, leaf := generateLoopbackCert(t)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

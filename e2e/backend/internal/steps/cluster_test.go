@@ -1,13 +1,27 @@
 package steps
 
 import (
+	"strings"
 	"testing"
 )
 
-func TestConfigMapDeploymentID(t *testing.T) {
+func TestUniqueID(t *testing.T) {
 	t.Parallel()
-	if got := ConfigMapDeploymentID("kind-e2e-abcd"); got != "cm-kind-e2e-abcd" {
-		t.Fatalf("got %q", got)
+	got := UniqueID(t, "cm")
+	if !strings.HasPrefix(got, "cm-") {
+		t.Fatalf("got %q, want prefix cm-", got)
+	}
+	if len(strings.TrimPrefix(got, "cm-")) != 8 {
+		t.Fatalf("got %q, want 8 hex chars after prefix", got)
+	}
+}
+
+func TestUniqueID_Distinct(t *testing.T) {
+	t.Parallel()
+	a := UniqueID(t, "e2e")
+	b := UniqueID(t, "e2e")
+	if a == b {
+		t.Fatalf("got duplicate %q", a)
 	}
 }
 
@@ -15,6 +29,27 @@ func TestKubernetesTargetID(t *testing.T) {
 	t.Parallel()
 	if got := kubernetesTargetID("kind-e2e-abcd"); got != "k8s-kind-e2e-abcd" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestKubernetesTargetIDs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{name: "none"},
+		{name: "one", in: []string{"kind-e2e-aaaa"}, want: "k8s-kind-e2e-aaaa"},
+		{name: "two", in: []string{"kind-e2e-aaaa", "kind-e2e-bbbb"}, want: "k8s-kind-e2e-aaaa,k8s-kind-e2e-bbbb"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := kubernetesTargetIDs(tt.in...); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
