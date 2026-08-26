@@ -1,7 +1,9 @@
 # Web e2e tests
 
 Playwright journeys against the packaged AIO image (HTTPS origin
-`https://fleetshift-sandbox.localhost:8085`, SPA under `/app`).
+`https://fleetshift-sandbox.localhost:8085`, SPA under `/app`). How to add
+UI or backend e2e tests, and how CI runs them:
+[docs/testing/end-to-end.md](../../docs/testing/end-to-end.md).
 
 ```bash
 npx nx test:e2e e2e-web

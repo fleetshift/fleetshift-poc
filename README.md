@@ -175,7 +175,8 @@ Frontend e2e expects the sandbox origin
 (`https://fleetshift-sandbox.localhost:8085`). Playwright flags after `--`,
 for example `npx nx test:e2e e2e-web -- --ui` — see
 [e2e/web/README.md](e2e/web/README.md). Backend e2e starts and stops the AIO
-itself.
+itself. How to add tests, Kind pool usage, and CI:
+[docs/testing/end-to-end.md](docs/testing/end-to-end.md).
 
 ### Generate and images
 
