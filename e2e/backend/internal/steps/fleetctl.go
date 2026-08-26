@@ -8,6 +8,15 @@ import (
 
 const fleetctlDetailLimit = 4096
 
+// rpcNotFound reports whether fleetctl failed with a gRPC NotFound.
+func rpcNotFound(res harness.FleetctlResult) bool {
+	if res.Err == nil {
+		return false
+	}
+	combined := strings.ToLower(res.Stderr + " " + res.Err.Error())
+	return strings.Contains(combined, "code = notfound") || strings.Contains(combined, "not found")
+}
+
 // fleetctlDetail is stderr then stdout for Gomega/t.Fatal messages.
 func fleetctlDetail(res harness.FleetctlResult) string {
 	var b strings.Builder

@@ -98,6 +98,9 @@ func (f *Fixture) start() error {
 	if err := ensureKindNetwork(); err != nil {
 		return err
 	}
+	// Shared Kind ids are stable (kind-e2e-a / kind-e2e-b). Leftover nodes
+	// from a crashed previous process would make fleetctl create collide.
+	removeLeftoverKindNodes()
 
 	name, err := uniqueContainerName()
 	if err != nil {
@@ -182,6 +185,7 @@ func (f *Fixture) Stop(failed bool) {
 		dumpKindEvidence(f.containerName, f.engineSocket)
 	}
 	if f.containerName != "" {
+		f.logf("stopping AIO container %s", f.containerName)
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		_ = exec.CommandContext(ctx, "podman", "rm", "-f", f.containerName).Run()
 		cancel()
@@ -194,7 +198,25 @@ func (f *Fixture) Stop(failed bool) {
 
 // CredentialsPath is the insecure-storage tokens file under --config-dir.
 func (f *Fixture) CredentialsPath() string {
-	return filepath.Join(f.configDir, credentialsName)
+	return credentialsPath(f.configDir)
+}
+
+// ConfigDir is the suite fleetctl --config-dir.
+func (f *Fixture) ConfigDir() string {
+	return f.configDir
+}
+
+// HTTPSClient returns an HTTP client that trusts the sandbox CA.
+func (f *Fixture) HTTPSClient() (*http.Client, error) {
+	if f == nil {
+		return nil, fmt.Errorf("nil fixture")
+	}
+	return tlsClient(f.caFile)
+}
+
+// credentialsPath is the insecure-storage tokens file under configDir.
+func credentialsPath(configDir string) string {
+	return filepath.Join(configDir, credentialsName)
 }
 
 // preflight checks PATH tools, Nx, PublicHost loopback DNS, and that UI/gRPC ports are free.
@@ -322,13 +344,16 @@ func (f *Fixture) buildAIOImage() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), imageBuildTimeout)
 	defer cancel()
-	f.logf("building AIO image")
+	f.logf("building AIO image (can take a while; do not interrupt)")
+	stopHB := startStderrHeartbeat("still building AIO image")
+	defer stopHB()
 	cmd := exec.CommandContext(ctx, "npx", "nx", "run", nxImageAIO)
 	cmd.Dir = f.repoRoot
 	cmd.Env = append(os.Environ(), "NX_DAEMON=false")
 	if err := f.runQuiet(cmd, "image-aio.log"); err != nil {
 		return fmt.Errorf("npx nx run %s: %w", nxImageAIO, err)
 	}
+	stopHB()
 	f.logf("AIO image ready")
 	return nil
 }
@@ -620,5 +645,5 @@ func runToStderr(name string, args ...string) {
 
 // logf writes an e2e/backend progress line to stderr.
 func (f *Fixture) logf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "e2e/backend: "+format+"\n", args...)
+	printStderrProgress(fmt.Sprintf(format, args...))
 }

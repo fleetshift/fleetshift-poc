@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,8 +19,9 @@ import (
 const (
 	kubernetesTargetPrefix = "k8s-"
 	kubernetesResourceType = "kubernetes"
-	configMapNamespace     = "default"
 	configMapName          = "test-config"
+	configMapFromKey       = "from"
+	configMapFromValue     = "fleetshift-e2e-backend"
 
 	clusterCommandTimeout = 10 * time.Second
 	clusterPollInterval   = 500 * time.Millisecond
@@ -42,9 +44,27 @@ type clusterView struct {
 	Conditions  map[string]clusterCondition `json:"conditions"`
 }
 
-// ConfigMapDeploymentID is the fleetctl deployment id for the ConfigMap sent to clusterName.
-func ConfigMapDeploymentID(clusterName string) string {
-	return "cm-" + clusterName
+// UniqueID returns prefix + "-" + 8 hex chars. Use for per-test deployment
+// ids and Kubernetes namespaces on the shared Kind pool (do not key those
+// off the cluster name).
+func UniqueID(t *testing.T, prefix string) string {
+	t.Helper()
+	if strings.TrimSpace(prefix) == "" {
+		t.Fatal("UniqueID prefix is required")
+	}
+	id := prefix + "-" + uniqueHex8(t)
+	t.Logf("%s", id)
+	return id
+}
+
+// uniqueHex8 returns 8 lowercase hex characters.
+func uniqueHex8(t *testing.T) string {
+	t.Helper()
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%x", b)
 }
 
 // kubernetesTargetID is the kubernetes target ID for clusterName (k8s-{id}).
@@ -52,36 +72,88 @@ func kubernetesTargetID(clusterName string) string {
 	return kubernetesTargetPrefix + clusterName
 }
 
-// CreateConfigMapDeployment submits fleetctl deployment create for an unsigned
-// ConfigMap onto the cluster's kubernetes target. It does not wait until Active.
-func CreateConfigMapDeployment(t *testing.T, f *harness.Fixture, clusterName string) {
+// kubernetesTargetIDs joins kubernetes target IDs for clusterNames.
+func kubernetesTargetIDs(clusterNames ...string) string {
+	ids := make([]string, len(clusterNames))
+	for i, n := range clusterNames {
+		ids[i] = kubernetesTargetID(n)
+	}
+	return strings.Join(ids, ",")
+}
+
+// CreateConfigMapDeploymentOn submits an unsigned ConfigMap in namespace onto
+// the kubernetes targets for clusterNames, using the fixture's ops --config-dir.
+// It does not wait until Active.
+func CreateConfigMapDeploymentOn(t *testing.T, f *harness.Fixture, id, namespace string, clusterNames ...string) {
 	t.Helper()
 	g := gomega.NewWithT(t)
 	g.Expect(f).NotTo(gomega.BeNil())
+	CreateConfigMapDeploymentAs(t, f, f.ConfigDir(), id, namespace, clusterNames...)
+}
+
+// CreateConfigMapDeploymentAs submits an unsigned ConfigMap in namespace onto
+// the kubernetes targets for clusterNames, using configDir as fleetctl --config-dir.
+// It does not wait until Active.
+func CreateConfigMapDeploymentAs(t *testing.T, f *harness.Fixture, configDir, id, namespace string, clusterNames ...string) {
+	t.Helper()
+	g := gomega.NewWithT(t)
+	g.Expect(f).NotTo(gomega.BeNil())
+	g.Expect(clusterNames).NotTo(gomega.BeEmpty())
 
 	manifest, err := json.Marshal(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
 		"metadata": map[string]string{
 			"name":      configMapName,
-			"namespace": configMapNamespace,
+			"namespace": namespace,
 		},
 		"data": map[string]string{
-			"from": "fleetshift-e2e-backend",
+			configMapFromKey: configMapFromValue,
 		},
 	})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	manifestPath := filepath.Join(t.TempDir(), "configmap.json")
+	createKubernetesDeployment(t, f, configDir, id, kubernetesTargetIDs(clusterNames...), manifest)
+}
+
+// CreateNamespaceDeploymentOn submits an unsigned Namespace onto the kubernetes
+// targets for clusterNames, using the fixture's ops --config-dir.
+// It does not wait until Active.
+func CreateNamespaceDeploymentOn(t *testing.T, f *harness.Fixture, id, namespace string, clusterNames ...string) {
+	t.Helper()
+	g := gomega.NewWithT(t)
+	g.Expect(f).NotTo(gomega.BeNil())
+	g.Expect(namespace).NotTo(gomega.BeEmpty())
+	g.Expect(clusterNames).NotTo(gomega.BeEmpty())
+
+	manifest, err := json.Marshal(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]string{
+			"name": namespace,
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	createKubernetesDeployment(t, f, f.ConfigDir(), id, kubernetesTargetIDs(clusterNames...), manifest)
+}
+
+// createKubernetesDeployment writes manifest to a temp file and runs
+// `deployment create` with static placement on targetIDs.
+func createKubernetesDeployment(t *testing.T, f *harness.Fixture, configDir, id, targetIDs string, manifest []byte) {
+	t.Helper()
+	g := gomega.NewWithT(t)
+	g.Expect(f).NotTo(gomega.BeNil())
+
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
 	g.Expect(os.WriteFile(manifestPath, manifest, 0o600)).To(gomega.Succeed())
 
 	ctx, cancel := context.WithTimeout(context.Background(), clusterCommandTimeout)
 	defer cancel()
-	res := f.Run(ctx, "deployment", "create",
-		"--id", ConfigMapDeploymentID(clusterName),
+	res := f.RunWithConfigDir(ctx, configDir, "deployment", "create",
+		"--id", id,
 		"--manifest-file", manifestPath,
 		"--resource-type", kubernetesResourceType,
 		"--placement-type", "static",
-		"--target-ids", kubernetesTargetID(clusterName),
+		"--target-ids", targetIDs,
 	)
 	g.Expect(res.Err).NotTo(gomega.HaveOccurred(), fleetctlDetail(res))
 }
@@ -140,7 +212,7 @@ func cleanupCluster(t *testing.T, f *harness.Fixture, resourceType, name string)
 	_ = f.Run(ctx, "resource", "delete", resourceType, name)
 }
 
-// waitForClusterGone polls until resource get fails and list does not contain the cluster.
+// waitForClusterGone polls until resource get is gRPC NotFound and list does not contain the cluster.
 func waitForClusterGone(t *testing.T, f *harness.Fixture, resourceType, name string, timeout time.Duration) {
 	t.Helper()
 	g := gomega.NewWithT(t)
@@ -164,7 +236,7 @@ func waitForClusterGone(t *testing.T, f *harness.Fixture, resourceType, name str
 			}
 		}
 		log.logf("cluster %s getOK=%t listed=%t", name, get.Err == nil, listed)
-		gm.Expect(get.Err).To(gomega.HaveOccurred())
+		gm.Expect(rpcNotFound(get)).To(gomega.BeTrue(), fleetctlDetail(get))
 		gm.Expect(names).NotTo(gomega.ContainElement(want))
 	}).WithTimeout(timeout).WithPolling(clusterPollInterval).Should(gomega.Succeed())
 }

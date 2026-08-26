@@ -1,43 +1,28 @@
 package steps
 
 import (
-	"fmt"
 	"testing"
-	"time"
+
+	"github.com/fleetshift/fleetshift-poc/e2e/backend/internal/harness"
 )
 
-// pollLogInterval is how often identical wait-loop messages are logged.
-const pollLogInterval = 3 * time.Second
-
-// pollLog writes throttled log lines during wait loops. Identical messages
-// are withheld until interval elapses; a different message is always logged.
+// pollLog wraps harness.PollLog so step wait loops can keep calling logf.
 type pollLog struct {
-	now      func() time.Time
-	interval time.Duration
-	lastAt   time.Time
-	lastMsg  string
-	print    func(string)
+	*harness.PollLog
 }
 
-// newPollLog returns a pollLog that writes to t.Log, throttling identical
-// messages to pollLogInterval.
 func newPollLog(t *testing.T) *pollLog {
 	t.Helper()
-	return &pollLog{
-		now:      time.Now,
-		interval: pollLogInterval,
-		print:    func(msg string) { t.Log(msg) },
-	}
+	return &pollLog{harness.NewPollLog(t)}
 }
 
-// logf writes a formatted wait-loop message, throttling identical repeats.
+func stderrPollLog() *pollLog {
+	return &pollLog{harness.StderrPollLog()}
+}
+
 func (p *pollLog) logf(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	now := p.now()
-	if p.lastMsg == msg && now.Sub(p.lastAt) < p.interval {
+	if p == nil || p.PollLog == nil {
 		return
 	}
-	p.lastMsg = msg
-	p.lastAt = now
-	p.print(msg)
+	p.Logf(format, args...)
 }

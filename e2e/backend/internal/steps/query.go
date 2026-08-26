@@ -358,18 +358,21 @@ func AssertKindClusterQueryMatchesGet(t *testing.T, f *harness.Fixture, clusterI
 	g.Expect(body.Conditions["Ready"].Status).To(gomega.Equal(got.Conditions["Ready"].Status))
 }
 
-// WaitForIndexedConfigMap polls resource query until default/test-config is
+// WaitForIndexedConfigMap polls resource query until namespace/test-config is
 // indexed as a kubernetes Object for this cluster.
-func WaitForIndexedConfigMap(t *testing.T, f *harness.Fixture, clusterID string) {
+func WaitForIndexedConfigMap(t *testing.T, f *harness.Fixture, clusterID, namespace string) {
 	t.Helper()
-	waitForQuery(t, f, inspectQuery(kubernetesObjectConfigMapFilter(clusterID, configMapNamespace, configMapName)), func(gm gomega.Gomega, hits []queryHit) {
+	g := gomega.NewWithT(t)
+	g.Expect(namespace).NotTo(gomega.BeEmpty())
+	waitForQuery(t, f, inspectQuery(kubernetesObjectConfigMapFilter(clusterID, namespace, configMapName)), func(gm gomega.Gomega, hits []queryHit) {
 		gm.Expect(hits).To(gomega.HaveLen(1),
-			"want ConfigMap %s/%s indexed once", configMapNamespace, configMapName)
+			"want ConfigMap %s/%s indexed once", namespace, configMapName)
 		gm.Expect(namesOutsideCluster(hits, clusterID)).To(gomega.BeEmpty())
 		obs, err := hits[0].observation()
 		gm.Expect(err).NotTo(gomega.HaveOccurred(), hits[0].Name)
 		gm.Expect(obs.Kind).To(gomega.Equal("ConfigMap"))
 		gm.Expect(obs.Metadata.Name).To(gomega.Equal(configMapName))
+		gm.Expect(obs.Metadata.Namespace).To(gomega.Equal(namespace))
 	})
 }
 

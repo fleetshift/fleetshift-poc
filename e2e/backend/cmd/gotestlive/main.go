@@ -132,7 +132,8 @@ func (r *renderer) writeHeader(w *bufio.Writer, test string) error {
 	return writeLine(w, iconSuite+" "+gotestdox.Prettify(parent))
 }
 
-// displayName is the testdox title for a test, without repeating the parent prefix.
+// displayName is the testdox sentence for a test, without repeating the parent
+// title already printed as the suite header.
 func displayName(test string) string {
 	full := gotestdox.Prettify(test)
 	parent, ok := parentName(test)
