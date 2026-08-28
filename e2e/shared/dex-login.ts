@@ -20,3 +20,16 @@ export async function fillDexLogin(
   // Dex renders a single submit button on the password screen.
   await page.getByRole("button").click();
 }
+
+/** Complete Dex login for a fleetctl --no-browser loopback callback. */
+export async function completeDexCliLogin(
+  page: Page,
+  persona: Persona,
+): Promise<void> {
+  await fillDexLogin(page, persona);
+  await page.waitForURL(
+    (callback) =>
+      callback.hostname === "127.0.0.1" && callback.pathname === "/callback",
+    { timeout: 10_000 },
+  );
+}

@@ -3,8 +3,8 @@ import { expect, type Page, test as setup } from "@playwright/test";
 import fs from "fs";
 import path from "path";
 
-import { fillDexLogin } from "./helpers/dex-login";
-import { type Persona, PERSONAS } from "./helpers/personas";
+import { fillDexLogin } from "../../shared/dex-login";
+import { type Persona, PERSONAS } from "../../shared/personas";
 
 const authDir = path.join(__dirname, "..", ".auth");
 

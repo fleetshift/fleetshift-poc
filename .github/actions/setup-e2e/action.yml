@@ -3,8 +3,9 @@ description: |
   Prepares a GitHub Actions job to use the AIO image built from this checkout.
 
   Two roles share one tree-keyed tar and must not race the cache. `aio-image`
-  is the only writer (`role: cache`). `e2e-ui` and `e2e-backend` both use
-  `role: e2e` after `needs: aio-image`. They do not share a running container.
+  is the only writer (`role: cache`). The `e2e-playwright` matrix and
+  `e2e-backend` use `role: e2e` after `needs: aio-image`. They do not share a
+  running container.
 
   The tar is `localhost/fleetshift-server`, `localhost/fleetshift-server-local`,
   `localhost/fleetshift-web`, and `quay.io/stolostron/fleetshift:latest`. Save
@@ -17,7 +18,7 @@ description: |
   `role`. Do not install those in the workflow.
 
   `e2e` also starts the user `podman.socket` and ensures the `kind` network
-  exists. The two test jobs still use separate AIO containers.
+  exists. Each test job still uses a separate AIO container.
 
 inputs:
   role:
@@ -30,11 +31,12 @@ inputs:
       tags, write the cache, upload the artifact. On a hit: restore the tar and
       stop (no Node, Go, or Playwright). Never podman-runs FleetShift.
 
-      e2e — `e2e-ui` and `e2e-backend`. Restore (or download) the tar, podman
-      load, install Go, Node, and Playwright, start user podman.socket and
-      ensure the kind network. Do not run nx image:aio. The UI workflow starts
-      the sandbox after this action; backend TestMain starts its own AIO and
-      skips the image build when FLEETSHIFT_E2E_AIO_PREBUILT=1.
+      e2e — the `e2e-playwright` matrix and `e2e-backend`. Restore (or download)
+      the tar, podman load, install Go, Node, and Playwright, start user
+      podman.socket and ensure the kind network. Set
+      FLEETSHIFT_E2E_AIO_PREBUILT=1 when invoking the UI and CLI targets so
+      their shared Node runner does not rebuild the restored image. Backend
+      TestMain uses the same flag for its own AIO.
     required: true
 
 runs:

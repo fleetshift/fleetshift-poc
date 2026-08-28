@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { fillDexLogin } from "./helpers/dex-login";
+import { completeDexCliLogin } from "../../shared/dex-login";
 import {
   DEVELOPER,
   OPERATOR,
   type Persona,
   type PersonaId,
-} from "./helpers/personas";
+} from "../../shared/personas";
 
 // Invoked only via playwright.cli-login.mts (AUTH_URL + PERSONA). Never part of
 // `nx test:e2e e2e-web`.
@@ -32,10 +32,5 @@ test("completes Fleetctl Dex login", async ({ page }) => {
   ).toBeTruthy();
 
   await page.goto(authURL!);
-  await fillDexLogin(page, personaFromEnv());
-
-  await page.waitForURL(
-    (url) => url.hostname === "127.0.0.1" && url.pathname === "/callback",
-    { timeout: 10_000 },
-  );
+  await completeDexCliLogin(page, personaFromEnv());
 });

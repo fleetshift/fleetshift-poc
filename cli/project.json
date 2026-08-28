@@ -5,6 +5,7 @@
   "tags": ["lang:go", "scope:cli"],
   "targets": {
     "build": {
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "command": "go build -o ../bin/fleetctl ./cmd/fleetctl",

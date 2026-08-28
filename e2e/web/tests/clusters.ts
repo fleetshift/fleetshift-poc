@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page } from "@playwright/test";
+
+import { uniqueKindClusterIdFromEnv } from "../../shared/kind-cluster-id";
 
 export const CLUSTERS_PATH = "/app/core/clusters";
 
@@ -12,7 +13,7 @@ const DEFAULT_POLL_TIMEOUT = 5 * 60 * 1000;
 
 /** Generates an RFC1123-safe cluster name unique across parallel Playwright projects. */
 export function uniqueClusterName(): string {
-  return `kind-e2e-${randomUUID()}`;
+  return uniqueKindClusterIdFromEnv();
 }
 
 /** DataView table row for a cluster, matched by its id link. */
@@ -91,7 +92,7 @@ export async function deleteClusterFromList(
   await expect(dialog).toBeHidden();
 }
 
-/** Polls the list (reloading for fresh data) until the cluster is gone. */
+/** Polls the live list until the cluster row is gone. No reload. */
 export async function waitForClusterGone(
   page: Page,
   name: string,

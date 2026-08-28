@@ -13,7 +13,7 @@
 export type PersonaId = "ops" | "dev";
 
 export interface Persona {
-  /** Stable id used to name saved auth artifacts (.auth/<id>.json). */
+  /** Stable id used to name saved auth artifacts. */
   id: PersonaId;
   email: string;
   password: string;

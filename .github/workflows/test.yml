@@ -89,6 +89,9 @@ jobs:
       - name: Unit tests (vitest)
         run: npx nx run common:test
 
+      - name: Unit tests for e2e-cli (vitest)
+        run: npx nx run e2e-cli:test
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
