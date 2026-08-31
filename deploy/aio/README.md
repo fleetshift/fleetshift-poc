@@ -20,8 +20,9 @@ via `Dockerfile.fleetshift`. To reassemble from already-built component tags:
 
 ```bash
 podman build -f Dockerfile.fleetshift \
-  --build-arg SERVER_IMAGE=fleetshift-server-local:latest \
-  --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest \
+  --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest \
+  --build-arg WEB_IMAGE=localhost/fleetshift-web:latest \
+  -t localhost/fleetshift:latest \
   -t quay.io/stolostron/fleetshift:latest .
 ```
 
@@ -32,7 +33,7 @@ edge at `https://fleetshift-sandbox.localhost:8085/idp` and fills AuthMethod/UI
 defaults for `serve`.
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   quay.io/stolostron/fleetshift:latest
@@ -134,7 +135,7 @@ and forwards the resolved serve argv.
 Minimal:
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
@@ -145,7 +146,7 @@ All OIDC overrides (values shown are packaging defaults except issuer/CA and the
 public-key claim alternative):
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
@@ -201,7 +202,7 @@ systemctl --user restart podman.socket
 ```
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   --privileged \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
@@ -219,7 +220,7 @@ addon). Set `OIDC_ISSUER_URL` so packaging skips Dex. Supply
 use shared renderer defaults:
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \

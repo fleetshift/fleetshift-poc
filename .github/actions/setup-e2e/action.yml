@@ -55,10 +55,8 @@ runs:
         path: ${{ runner.temp }}/aio-images.tar
         key: ${{ steps.aio-key.outputs.key }}
 
-    # server/go.mod is the repo toolchain pin (same file CodeQL uses).
-    # image:aio dependsOn server:build; backend tests use the same 1.25.x.
     - name: Set up Go
-      if: ${{ inputs.role == 'e2e' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
+      if: ${{ inputs.role == 'e2e' }}
       uses: actions/setup-go@v6
       with:
         go-version-file: server/go.mod
@@ -109,7 +107,6 @@ runs:
         NX_DAEMON: "false"
       run: |
         set -euo pipefail
-        touch .env
         echo "cache miss: building AIO image"
         npx nx run fleetshift-poc:image:aio
 
@@ -127,8 +124,7 @@ runs:
           fi
         done
 
-        # Four distinct images. Extra quay.io/stolostron/*-server names are
-        # aliases of localhost/*; without -m they become tags on the first image.
+        # Four distinct images. Without -m, extra tags collapse onto the first.
         echo "saving ${#required[@]} images to ${RUNNER_TEMP}/aio-images.tar"
         podman save --multi-image-archive -o "${RUNNER_TEMP}/aio-images.tar" "${required[@]}"
         ls -lh "${RUNNER_TEMP}/aio-images.tar"
