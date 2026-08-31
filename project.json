@@ -26,7 +26,7 @@
     "image:aio": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "podman build --pull=missing -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest --build-arg WEB_IMAGE=localhost/fleetshift-web:latest -t localhost/fleetshift:latest -t quay.io/stolostron/fleetshift:latest ."
+        "command": "podman build -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest --build-arg WEB_IMAGE=localhost/fleetshift-web:latest -t localhost/fleetshift:latest -t quay.io/stolostron/fleetshift:latest ."
       },
       "cache": false,
       "dependsOn": ["image:build"]
