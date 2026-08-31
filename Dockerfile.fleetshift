@@ -5,12 +5,13 @@
 #   task image:aio
 #
 # Or manually:
-#   podman build -t fleetshift-server -t quay.io/stolostron/fleetshift-server:latest .
-#   podman build -f Dockerfile.local -t quay.io/stolostron/fleetshift-server-local:latest .
-#   podman build -f fleetshift-ui/Dockerfile.web -t quay.io/stolostron/fleetshift-web:latest .
+#   podman build -t localhost/fleetshift-server:latest .
+#   podman build -f Dockerfile.local -t localhost/fleetshift-server-local:latest .
+#   podman build -f Dockerfile.web -t localhost/fleetshift-web:latest .
 #   podman build -f Dockerfile.fleetshift \
-#     --build-arg SERVER_IMAGE=quay.io/stolostron/fleetshift-server-local:latest \
-#     --build-arg WEB_IMAGE=quay.io/stolostron/fleetshift-web:latest \
+#     --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest \
+#     --build-arg WEB_IMAGE=localhost/fleetshift-web:latest \
+#     -t localhost/fleetshift:latest \
 #     -t quay.io/stolostron/fleetshift:latest .
 #
 # Base is fleetshift-server-local so the kind library can shell out to a

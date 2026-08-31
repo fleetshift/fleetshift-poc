@@ -20,7 +20,7 @@ Demo users (login is the email): `ops@fleetshift.local` / `fleetshift-ops` and
 No OIDC flags. Packaging starts Dex and fills AuthMethod/UI defaults.
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   quay.io/stolostron/fleetshift:latest
@@ -35,7 +35,7 @@ Linux rootless: `systemctl --user enable --now podman.socket` and
 `/var/run/docker.sock`).
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   --privileged \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
@@ -53,7 +53,7 @@ packaging turns `gcphcp` on. Register
 `/app/silent-renew.html` on that IdP.
 
 ```bash
-podman run -d --rm -it \
+podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \

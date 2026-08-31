@@ -14,22 +14,19 @@
     "image:build": {
       "executor": "nx:run-commands",
       "options": {
-        "envFile": ".env",
         "commands": [
-          "podman build -t localhost/fleetshift-server:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift-server:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}} .",
-          "podman build -f Dockerfile.local -t localhost/fleetshift-server-local:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift-server-local:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}} .",
-          "podman build -f Dockerfile.web -t localhost/fleetshift-web:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift-web:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}} ."
+          "podman build -t localhost/fleetshift-server:latest .",
+          "podman build -f Dockerfile.local -t localhost/fleetshift-server-local:latest .",
+          "podman build -f Dockerfile.web -t localhost/fleetshift-web:latest ."
         ],
         "parallel": false
       },
-      "cache": false,
-      "dependsOn": ["server:build"]
+      "cache": false
     },
     "image:aio": {
       "executor": "nx:run-commands",
       "options": {
-        "envFile": ".env",
-        "command": "podman build --pull=missing -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:${IMAGE_TAG:-latest} --build-arg WEB_IMAGE=localhost/fleetshift-web:${IMAGE_TAG:-latest} -t quay.io/stolostron/fleetshift:${IMAGE_TAG:-latest} ${DEV_REGISTRY:+-t ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}} ."
+        "command": "podman build --pull=missing -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest --build-arg WEB_IMAGE=localhost/fleetshift-web:latest -t localhost/fleetshift:latest -t quay.io/stolostron/fleetshift:latest ."
       },
       "cache": false,
       "dependsOn": ["image:build"]
@@ -37,12 +34,26 @@
     "image:push": {
       "executor": "nx:run-commands",
       "options": {
-        "envFile": ".env",
         "commands": [
           "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
+          "podman tag localhost/fleetshift-server:latest ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
           "podman push ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
+          "podman tag localhost/fleetshift-server-local:latest ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
           "podman push ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
+          "podman tag localhost/fleetshift-web:latest ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}",
           "podman push ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}"
+        ],
+        "parallel": false
+      },
+      "cache": false
+    },
+    "image:push:aio": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
+          "podman tag localhost/fleetshift:latest ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}"
         ],
         "parallel": false
       },
