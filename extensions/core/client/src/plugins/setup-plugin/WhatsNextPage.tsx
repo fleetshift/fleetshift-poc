@@ -5,7 +5,10 @@ import type {
   OnboardingActionFormProps,
 } from "@fleetshift/common";
 import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
-import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import {
+  useExtensions,
+  useResolvedExtensions,
+} from "@openshift/dynamic-plugin-sdk";
 import {
   Button,
   Content,
@@ -45,8 +48,9 @@ interface WhatsNextPageProps {
 }
 
 const WhatsNextPage = ({ onSetupNext, onSetupSkip }: WhatsNextPageProps) => {
+  const onboardingCandidates = useExtensions(isOnboardingAction);
   const [extensions, extensionsLoaded] =
-    useResolvedExtensions(isOnboardingAction);
+    useResolvedExtensions(onboardingCandidates);
   const {
     progress,
     loaded: progressLoaded,

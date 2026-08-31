@@ -1,6 +1,9 @@
 import type { ResourceResult, SearchResultResolve } from "@fleetshift/common";
 import { createResourceApi } from "@fleetshift/common";
-import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import {
+  useExtensions,
+  useResolvedExtensions,
+} from "@openshift/dynamic-plugin-sdk";
 import { Label } from "@patternfly/react-core";
 import {
   type ComponentType,
@@ -42,10 +45,11 @@ export function useInventorySearch(): {
   filterSearch: (celFilter: string) => Promise<SearchResultItem[]>;
   loaded: boolean;
 } {
+  const rendererExtensions = useExtensions<SearchResultRendererExtension>(
+    isSearchResultRendererExtension,
+  );
   const [extensions, loaded] =
-    useResolvedExtensions<SearchResultRendererExtension>(
-      isSearchResultRendererExtension,
-    );
+    useResolvedExtensions<SearchResultRendererExtension>(rendererExtensions);
 
   const rendererMap = useMemo(() => {
     const map = new Map<string, ResolvedRenderer>();
@@ -77,6 +81,7 @@ export function useInventorySearch(): {
           category: "resources",
           pathname: "",
           icon: "",
+          status: "",
         };
       }
 
@@ -92,6 +97,7 @@ export function useInventorySearch(): {
           category: "resources",
           pathname: "",
           icon: "",
+          status: "",
         };
       }
 
@@ -107,6 +113,7 @@ export function useInventorySearch(): {
         category: "resources",
         pathname: "",
         icon: "",
+        status: "",
         IconComponent: renderer.icon,
         pluginLink: {
           scope: rendered.scope,

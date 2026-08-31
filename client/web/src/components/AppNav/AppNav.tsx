@@ -5,7 +5,10 @@ import {
   orderByIds,
   useNavLayout,
 } from "@fleetshift/common";
-import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import {
+  useExtensions,
+  useResolvedExtensions,
+} from "@openshift/dynamic-plugin-sdk";
 import { Divider, Nav, NavList } from "@patternfly/react-core";
 import type { ComponentType } from "react";
 import { useMemo } from "react";
@@ -71,7 +74,8 @@ function tagEntries(
 const AppNav = () => {
   const { pluginPages, navLayout } = useAppConfig();
   const { override, legacyOrder, loaded } = useNavLayout();
-  const [moduleExtensions] = useResolvedExtensions(isModuleExtension);
+  const allModuleExtensions = useExtensions(isModuleExtension);
+  const [moduleExtensions] = useResolvedExtensions(allModuleExtensions);
 
   const iconMap = useMemo(() => {
     const map = new Map<string, ComponentType>();

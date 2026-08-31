@@ -2,7 +2,10 @@ import "./setup-checklist.scss";
 
 import { PluginLink } from "@fleetshift/common";
 import type { Extension } from "@openshift/dynamic-plugin-sdk";
-import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import {
+  useExtensions,
+  useResolvedExtensions,
+} from "@openshift/dynamic-plugin-sdk";
 import {
   Button,
   Card,
@@ -103,8 +106,9 @@ interface ChecklistItem {
 
 export default function SetupChecklist() {
   const { progress, loaded: progressLoaded } = useSetupProgressReadonly();
+  const onboardingCandidates = useExtensions(isOnboardingAction);
   const [extensions, extensionsLoaded] =
-    useResolvedExtensions(isOnboardingAction);
+    useResolvedExtensions(onboardingCandidates);
   const [dismissed, setDismissed] = useState(
     () => localStorage.getItem(DISMISS_KEY) === "true",
   );

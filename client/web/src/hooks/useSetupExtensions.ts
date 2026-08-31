@@ -1,5 +1,6 @@
 import {
   LoadedAndResolvedExtension,
+  useExtensions,
   usePluginInfo,
   useResolvedExtensions,
 } from "@openshift/dynamic-plugin-sdk";
@@ -40,7 +41,8 @@ function buildPreloadMap(
 }
 
 export function useSetupExtensions() {
-  const [extensions, loaded] = useResolvedExtensions(isSetupExtension);
+  const setupExtensions = useExtensions(isSetupExtension);
+  const [extensions, loaded] = useResolvedExtensions(setupExtensions);
   const pluginInfo = usePluginInfo();
 
   const [authExtensions, nonAuthExtensions] = useMemo(

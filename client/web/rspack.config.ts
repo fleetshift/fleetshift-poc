@@ -91,6 +91,7 @@ const config: Configuration = {
       shared: {
         react: { singleton: true, requiredVersion: "^19" },
         "react/jsx-runtime": { singleton: true, requiredVersion: "^19" },
+        "react/jsx-dev-runtime": { singleton: true, requiredVersion: "^19" },
         "react-dom": { singleton: true, requiredVersion: "^19" },
         "react-router-dom": { singleton: true, requiredVersion: "^7" },
         "@scalprum/core": { singleton: true },

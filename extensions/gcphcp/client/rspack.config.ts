@@ -44,6 +44,7 @@ const swcLoaderRule = {
 const sharedModules = {
   react: { singleton: true, requiredVersion: "*" },
   "react-dom": { singleton: true, requiredVersion: "*" },
+  "react/jsx-dev-runtime": { singleton: true, requiredVersion: "^19" },
   "@scalprum/core": { singleton: true, requiredVersion: "*" },
   "@scalprum/react-core": { singleton: true, requiredVersion: "*" },
   "@openshift/dynamic-plugin-sdk": {

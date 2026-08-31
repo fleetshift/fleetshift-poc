@@ -9,7 +9,7 @@
     "@dnd-kit/react": "^0.3.2",
     "@fleetshift/common": "*",
     "@module-federation/enhanced": "^2.0.1",
-    "@openshift/dynamic-plugin-sdk": "^8.0.0",
+    "@openshift/dynamic-plugin-sdk": "^9.1.0",
     "@orama/orama": "^3.1.18",
     "@patternfly/patternfly": "^6.5.1",
     "@patternfly/react-charts": "^8.5.1",

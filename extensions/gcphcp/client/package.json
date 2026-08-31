@@ -20,7 +20,7 @@
   "devDependencies": {
     "@fleetshift/build-utils": "*",
     "@module-federation/enhanced": "^2.8.1",
-    "@openshift/dynamic-plugin-sdk": "^8.0.0",
+    "@openshift/dynamic-plugin-sdk": "^9.1.0",
     "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",
     "@rspack/cli": "^2.0.8",
     "@rspack/core": "^2.0.8",
