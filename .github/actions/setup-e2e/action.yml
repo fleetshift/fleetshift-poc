@@ -26,7 +26,7 @@ inputs:
       the value; there are no separate go/playwright inputs.
 
       cache — `aio-image` job, cache writer. Restore the tar. On a miss: install
-      Go and Node, run `npx nx run fleetshift-poc:image:aio`, save the four
+      Go and Node, run `npx nx run image:aio`, save the four
       tags, write the cache, upload the artifact. On a hit: restore the tar and
       stop (no Node, Go, or Playwright). Never podman-runs FleetShift.
 
@@ -108,7 +108,7 @@ runs:
       run: |
         set -euo pipefail
         echo "cache miss: building AIO image"
-        npx nx run fleetshift-poc:image:aio
+        npx nx run image:aio
 
         required=(
           localhost/fleetshift-server:latest

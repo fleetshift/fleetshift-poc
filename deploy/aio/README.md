@@ -12,7 +12,7 @@ Packaging owns PID 1, peer Dex (default), sandbox PKI, and the ordinary
 ## Build
 
 ```bash
-task image:aio
+npx nx run image:aio
 ```
 
 That builds `Dockerfile` / `Dockerfile.local` / `Dockerfile.web`, then assembles

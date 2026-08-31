@@ -57,8 +57,8 @@ Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driv
 ## Style
 
 - TypeScript strict. `no-explicit-any` is enforced — use `unknown` + narrowing or define a type. In tests, `as unknown as X` is acceptable for stubs; in production code, prefer type guards over type assertions.
-- Import order: side-effect imports first, then node_modules, then local (relative). Enforced by `simple-import-sort`. Run `npx nx run ui:lint:fix` to auto-sort.
-- ESLint flat config + Prettier (double quotes, trailing commas). `npx nx run ui:lint`.
+- Import order: side-effect imports first, then node_modules, then local (relative). Enforced by `simple-import-sort`. Run `npx nx run web:lint:fix` to auto-sort.
+- ESLint flat config + Prettier (double quotes, trailing commas). `npx nx run web:lint`.
 - Never generate `.js`/`.d.ts` in `src/` — build artifacts go in `dist/`.
 
 ## SCSS class naming
@@ -130,8 +130,9 @@ npx nx run plugins:build   # MF remote plugins
 npx nx run web:build       # SPA shell
 npx nx run web:dev         # rebuild SPA into repo-root web/ (serve via AIO + LOCAL_WEB)
 npx nx run web:dev:watch   # watch-rebuild only (skip initial build)
-npx nx run fleetshift-poc:ui:lint   # eslint + stylelint
-npx nx run fleetshift-poc:ui:test   # vitest
+npx nx run web:lint                 # eslint
+npx nx run web:lint:css             # stylelint
+npx nx run common:test              # vitest
 ```
 
 ## Diagrams
@@ -149,4 +150,4 @@ npx nx run fleetshift-poc:ui:test   # vitest
 
 - Don't run builds to verify. Use LSP diagnostics + browser MCP.
 - App served on port 8085. `/app/debug` route for plugin/nav troubleshooting.
-- `npx nx run fleetshift-poc:ui:lint` + `npx nx run fleetshift-poc:ui:test` before done.
+- `npx nx run web:lint` + `npx nx run common:test` before done.

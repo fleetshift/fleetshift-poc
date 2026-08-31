@@ -210,7 +210,7 @@ STRESS_COMPLETION_DELAY_MAX=10m \
 STRESS_FAILURE_RATE=0.05 \
 STRESS_POSTGRES_MAX_CONNS=200 \
 STRESS_WORKFLOW_POLLERS=16 \
-task test:stress
+npx nx run server:test-stress
 ```
 
 ## Visualizing results

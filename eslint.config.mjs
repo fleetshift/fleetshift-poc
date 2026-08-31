@@ -58,9 +58,22 @@ export default [
     {
         files: [
             "**/*.ts",
-            "**/*.js"
+            "**/*.{js,mjs}",
         ],
-        // Override or add rules here
-        rules: {}
-    }
+        plugins: {
+            prettier: prettierPlugin,
+        },
+        rules: {
+            ...prettierConfig.rules,
+            "prettier/prettier": "error",
+            "no-unused-vars": [
+                "error",
+                {
+                    argsIgnorePattern: "^_",
+                    varsIgnorePattern: "^_",
+                    caughtErrorsIgnorePattern: "^_",
+                },
+            ],
+        },
+    },
 ];

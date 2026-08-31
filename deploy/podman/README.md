@@ -1,8 +1,7 @@
 # Local compose stack
 
 Compose launcher for the all-in-one image (`quay.io/stolostron/fleetshift`)
-under `deploy/podman`: podman + docker-compose via Taskfile
-(`task podman:*` / `task pd:*`). One container runs the TLS edge, API, baked-in
+under `deploy/podman`: podman + docker-compose via Nx (`pd:*` targets). One container runs the TLS edge, API, baked-in
 UI, and peer Dex.
 
 This is **not** a multi-service Keycloak/Postgres harness. Packaging internals
@@ -33,8 +32,8 @@ Create the kind network once: `podman network create kind`. Linux rootless:
 
 ```bash
 cp .env.template .env         # leave OIDC_ISSUER_URL unset for peer Dex
-task build:cli                # build fleetctl Go binaries
-task podman:dev               # build AIO from source and start
+  npx nx run cli:build          # build fleetctl Go binaries
+  npx nx run pd:dev             # build AIO from source and start
 ```
 
 Open https://fleetshift-sandbox.localhost:8085 and accept the certificate
@@ -45,11 +44,11 @@ If `/data` was persisted from a pre-HTTPS AIO run, the AuthMethod issuer is
 still `https://127.0.0.1:5556/dex`. Reset once:
 
 ```bash
-task pd:clean
-task podman:dev
+ npx nx run pd:clean
+ npx nx run pd:dev
 ```
 
-`start.sh` copies the sandbox CA to `deploy/podman/.certs/ca.crt` for fleetctl.
+`start.mjs` copies the sandbox CA to `deploy/podman/.certs/ca.crt` for fleetctl.
 Do not install that CA into the host or browser trust store.
 
 ```bash
@@ -71,7 +70,7 @@ needed. Do not commit a concrete CLS gateway URL.
 
 ## Tasks
 
-All tasks use the `podman:` namespace (alias `pd:`).
+All local deployment commands use Nx `pd:*` targets.
 
 | Task | Description |
 |------|-------------|
@@ -90,9 +89,9 @@ All tasks use the `podman:` namespace (alias `pd:`).
 
 ## Full Stack Dev Mode
 
-`task podman:dev` builds the AIO image from this repo (`task image:aio`) and
+`npx nx run pd:dev` builds the AIO image from this repo (`npx nx run image:aio`) and
 starts it. After changing Go or UI sources that are baked into the image, run
-`task podman:rebuild`.
+`npx nx run pd:rebuild`.
 
 ### Local Web Watch Mode
 
@@ -100,7 +99,7 @@ For faster frontend iteration, bind-mount host `web/` over the baked UI:
 
 ```bash
 # Terminal 1 — start the stack with local web assets
-task podman:dev LOCAL_WEB=true
+npx nx run pd:dev LOCAL_WEB=true
 
 # Terminal 2 — watch & rebuild merged UI assets into monorepo-root web/
 npx nx run web:dev
