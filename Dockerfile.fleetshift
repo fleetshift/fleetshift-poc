@@ -112,8 +112,8 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
 	CONTAINER_HOST=unix:///var/run/docker.sock
 
 # s6 is PID 1 (starts as container root to init/drop privileges).
+# Do not set CMD: s6-rc longruns own FleetShift and Dex. ENTRYPOINT already
+# clears inherited CMD from the server image.
 ENTRYPOINT ["/init"]
-# CMD unused: s6-rc longruns own FleetShift and Dex.
-CMD []
 
 EXPOSE 8085 50051
