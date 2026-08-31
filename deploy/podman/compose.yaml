@@ -2,8 +2,8 @@
 #   https://fleetshift-sandbox.localhost:8085  (TLS edge; Dex under /idp)
 # Published: 127.0.0.1:8085 (HTTPS), 127.0.0.1:50051 (gRPC).
 # OIDC_ISSUER_URL unset → peer Dex; set → that issuer (Dex parks).
-# sqlite only. Use task podman:* — not podman compose directly.
-# If /data still has issuer https://127.0.0.1:5556/dex, run task pd:clean.
+# sqlite only. Use Nx pd:* targets — not podman compose directly.
+# If /data still has issuer https://127.0.0.1:5556/dex, run npx nx run pd:clean.
 
 x-fleetshift-aio: &fleetshift-aio
   image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift:latest}

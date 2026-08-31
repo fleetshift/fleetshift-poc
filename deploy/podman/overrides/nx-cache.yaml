@@ -1,7 +1,7 @@
 # Adds MinIO + nx-cache-proxy for local Nx remote cache development.
 #
 # Usage:
-#   task podman:up -- -f overrides/nx-cache.yaml
+#   NX_CACHE=true npx nx run pd:up
 #
 # Nx configuration (set in .env or shell):
 #   NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://localhost:8420

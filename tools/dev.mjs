@@ -37,9 +37,9 @@ if (!watchOnly) {
   nx("plugins:build");
   nx("@fleetshift/gcphcp-plugin:build");
   nx("@fleetshift/kind-plugin:build");
-  nx("ui:generate-registry");
+  nx("web:generate-registry");
   nx("web:build");
-  nx("ui:merge-web");
+  nx("web:merge");
 }
 
 console.log("\nStarting watch mode...\n");

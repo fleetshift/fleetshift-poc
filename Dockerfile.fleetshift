@@ -2,7 +2,7 @@
 # Packaging (deploy/aio) owns s6 PID 1, peer Dex (default), PKI, and serve argv.
 #
 # From-source (monorepo; preferred):
-#   task image:aio
+#   npx nx run image:aio
 #
 # Or manually:
 #   podman build -t localhost/fleetshift-server:latest .
@@ -65,14 +65,14 @@ COPY --from=dex-bin /usr/local/bin/dex /usr/local/bin/dex
 COPY --from=aio-builder /bin/aio-init /usr/local/bin/aio-init
 COPY --from=aio-builder /bin/kind-loopback-forward /usr/local/bin/kind-loopback-forward
 COPY --from=aio-builder /bin/aio-proxy /usr/local/bin/aio-proxy
-COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
+COPY deploy/scripts/render-gcphcp-config.mjs /usr/local/bin/render-gcphcp-config.mjs
 COPY deploy/aio/s6/ /etc/s6-overlay/
 
 RUN set -eux; \
-	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy /usr/local/bin/render-gcphcp-config.sh \
+	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy /usr/local/bin/render-gcphcp-config.mjs \
 		/etc/s6-overlay/scripts/aio-init; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends curl ca-certificates xz-utils; \
+	apt-get install -y --no-install-recommends curl ca-certificates nodejs xz-utils; \
 	arch="$TARGETARCH"; \
 	if [ -z "$arch" ]; then arch="$(dpkg --print-architecture)"; fi; \
 	case "$arch" in \

@@ -16,7 +16,7 @@
         "{projectRoot}/tsconfig*.json"
       ],
       "outputs": ["{projectRoot}/dist"],
-      "dependsOn": ["fleetshift-poc:ui:generate-icons"]
+      "dependsOn": ["fleetshift-poc:web:generate-icons"]
     },
     "lint": {
       "executor": "@nx/eslint:lint",

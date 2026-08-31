@@ -1,4 +1,4 @@
-# Dev overlay. start.sh already builds the AIO image when DEV=true; this file
+# Dev overlay. start.mjs already builds the AIO image when DEV=true; this file
 # exists so COMPOSE_FILES layering stays valid.
 
 services:

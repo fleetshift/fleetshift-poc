@@ -5,7 +5,7 @@
 # publicly-trusted cert so NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://<route>
 # works with no local CA trust or TLS-skip flags, from both dev machines and CI.
 #
-# deploy.sh substitutes __PROXY_HOST__ (the Route host, cluster-specific) and
+# deploy.mjs substitutes __PROXY_HOST__ (the Route host, cluster-specific) and
 # __CERT_ISSUER__ (ClusterIssuer name, default `zerossl-prod`) before applying.
 # The Route references this secret via spec.tls.externalCertificate, so
 # cert-manager renewals propagate automatically (the router reads the Secret
