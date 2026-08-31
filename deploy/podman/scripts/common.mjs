@@ -11,11 +11,21 @@ export const deployDir = resolve(composeDir, "..");
 export const rootDir = resolve(deployDir, "..");
 
 // Nx forwards KEY=value arguments after the target command; expose them to scripts.
+const nxEnvironmentKeys = new Set([
+  "DEV",
+  "LOCAL_WEB",
+  "NX_CACHE",
+  "BUILD",
+  "PODMAN_SOCKET",
+  "DOCKER_HOST",
+  "FLEETSHIFT_SERVER_HTTP_PORT",
+  "OIDC_ISSUER_URL",
+]);
 export function importKeyValueArgs(args) {
   const positional = [];
   for (const arg of args) {
-    if (arg.includes("=")) {
-      const separator = arg.indexOf("=");
+    const separator = arg.indexOf("=");
+    if (separator > 0 && nxEnvironmentKeys.has(arg.slice(0, separator))) {
       process.env[arg.slice(0, separator)] = arg.slice(separator + 1);
     } else {
       positional.push(arg);

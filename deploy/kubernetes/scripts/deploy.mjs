@@ -6,7 +6,7 @@ import {
   importKeyValueArgs,
   isTruthy,
   loadDotenv,
-  requireOcLogin,
+  requireOcCluster,
 } from "../../scripts/common.mjs";
 
 importKeyValueArgs(process.argv.slice(2));
@@ -14,10 +14,10 @@ const k8sDir = resolve(import.meta.dirname, "..");
 const rootDir = resolve(k8sDir, "../..");
 if (!(await $`command -v oc`.nothrow()).ok)
   throw new Error("'oc' CLI not found.");
-await requireOcLogin();
 if (!existsSync(resolve(rootDir, ".env")))
   throw new Error(`${rootDir}/.env not found. Copy from .env.template.`);
 await loadDotenv(resolve(rootDir, ".env"));
+await requireOcCluster("OME_CLUSTER_API");
 
 // Generate deployment inputs before applying manifests; Kustomize consumes both files.
 const addons = isTruthy(process.env.GCPHCP_ENABLED)

@@ -16,6 +16,10 @@ const fresh = argv.includes("--fresh-cert");
 const domains = argv
   .flatMap((v, i) => (v === "--base-domain" ? [argv[i + 1]] : []))
   .filter(Boolean);
+if (domains.length && !process.env.CLUSTER_NAME && !arg("--cluster-name"))
+  throw new Error(
+    "CLUSTER_NAME or --cluster-name is required with --base-domain",
+  );
 const fail = (message) => {
   throw new Error(message);
 };
@@ -202,7 +206,7 @@ if (consoleId) {
   await $`oc create secret generic ocp-console-client-secret -n ${ns} --from-literal=clientSecret=${consoleSecret} --dry-run=client -o yaml | oc apply -f -`;
 }
 for (const d of domains)
-  await $`node ${resolve(import.meta.dirname, "add-base-domain.mjs")} --base-domain ${d} --cluster-name ${process.env.CLUSTER_NAME || ""}`.nothrow();
+  await $`node ${resolve(import.meta.dirname, "add-base-domain.mjs")} --base-domain ${d} --cluster-name ${process.env.CLUSTER_NAME || arg("--cluster-name")}`;
 console.log(
   `\n==========================================\n  Keycloak Deployment Complete\n==========================================\n\n  URL: https://${host}\n  FleetShift Realm Users:\n    ops-user / ${passwords.ops}\n    dev-user / ${passwords.dev}\n\n  Run 'npx nx run kc:add-user' to create personal dev accounts.\n==========================================`,
 );

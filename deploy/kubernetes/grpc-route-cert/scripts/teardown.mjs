@@ -100,8 +100,26 @@ for (const [kind, name] of [
   ["rolebinding", "fleetshift-grpc-route-cert-reader"],
 ])
   await $`oc delete ${kind} ${name} -n ${namespace} --ignore-not-found=true`;
-console.log(`==> Deleting ClusterIssuer ${issuerName}...`);
-await $`oc delete clusterissuer ${issuerName} --ignore-not-found=true`;
+const issuer = await $`oc get clusterissuer ${issuerName} -o json`.nothrow();
+if (issuer.ok) {
+  const owned =
+    JSON.parse(issuer.stdout).metadata?.labels?.[
+      "app.kubernetes.io/managed-by"
+    ] === "fleetshift-grpc-route-cert";
+  if (
+    owned ||
+    /^y$/i.test(
+      await question(
+        `ClusterIssuer ${issuerName} is not marked as FleetShift-owned. Delete it? (y/N): `,
+      ),
+    )
+  ) {
+    console.log(`==> Deleting ClusterIssuer ${issuerName}...`);
+    await $`oc delete clusterissuer ${issuerName}`;
+  } else {
+    console.log(`==> Preserving unowned ClusterIssuer ${issuerName}.`);
+  }
+}
 
 // cert-manager is shared; uninstall only after explicit confirmation.
 console.log(

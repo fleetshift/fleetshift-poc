@@ -66,6 +66,7 @@ const refreshed = JSON.parse(
     await $`curl -sk -X POST ${host}/realms/master/protocol/openid-connect/token -d ${`grant_type=password&client_id=admin-cli&username=${user}&password=${pass}`}`
   ).stdout,
 ).access_token;
+if (!refreshed) throw new Error("Failed to obtain refreshed admin token");
 const profileUrl = `${host}/admin/realms/fleetshift/users/profile`;
 const profile = JSON.parse(
   (await $`curl -sk ${profileUrl} -H ${`Authorization: Bearer ${refreshed}`}`)

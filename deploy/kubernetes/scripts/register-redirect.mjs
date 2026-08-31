@@ -10,8 +10,14 @@ const issuer = (
   await $`oc get configmap fleetshift-server-config -n fleetshift -o jsonpath={.data.OIDC_ISSUER_URL}`
 ).stdout.trim();
 const kc = issuer.replace(/\/realms\/.*$/, "");
+const form = new URLSearchParams({
+  grant_type: "password",
+  client_id: "admin-cli",
+  username: user,
+  password,
+});
 const token = (
-  await $`curl -sf -X POST ${kc}/realms/master/protocol/openid-connect/token -d ${`grant_type=password&client_id=admin-cli&username=${user}&password=${password}`}`
+  await $`curl -sf -X POST ${kc}/realms/master/protocol/openid-connect/token --data-urlencode ${`grant_type=${form.get("grant_type")}`} --data-urlencode ${`client_id=${form.get("client_id")}`} --data-urlencode ${`username=${form.get("username")}`} --data-urlencode ${`password=${form.get("password")}`}`
 ).stdout;
 const access = JSON.parse(token).access_token;
 const client = `${kc}/admin/realms/fleetshift/clients`;

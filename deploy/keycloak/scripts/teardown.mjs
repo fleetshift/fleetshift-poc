@@ -65,7 +65,25 @@ for (const [kind, name, ns] of [
   ["certificate", "keycloak-tls", namespace],
 ])
   await $`oc delete ${kind} ${name} -n ${ns} --ignore-not-found`;
-await $`oc delete clusterissuer letsencrypt-prod --ignore-not-found`;
+const issuer = await $`oc get clusterissuer letsencrypt-prod -o json`.nothrow();
+if (issuer.ok) {
+  const owned =
+    JSON.parse(issuer.stdout).metadata?.labels?.[
+      "app.kubernetes.io/managed-by"
+    ] === "fleetshift-keycloak";
+  if (
+    owned ||
+    /^y$/i.test(
+      await question(
+        "ClusterIssuer letsencrypt-prod is not marked as Keycloak-owned. Delete it? (y/N): ",
+      ),
+    )
+  ) {
+    await $`oc delete clusterissuer letsencrypt-prod`;
+  } else {
+    console.log("==> Preserving unowned ClusterIssuer letsencrypt-prod.");
+  }
+}
 
 console.log(`==> Deleting namespace ${namespace}...`);
 await $`oc delete namespace ${namespace} --ignore-not-found`;

@@ -3,9 +3,33 @@ import { $, argv, sleep } from "zx";
 import { resolve } from "node:path";
 import { requireOcLogin } from "../../../../deploy/scripts/common.mjs";
 
+const optionsWithValues = new Set([
+  "--namespace",
+  "--route-name",
+  "--issuer-name",
+  "--tls-secret-name",
+  "--route-host",
+  "--acme-email",
+]);
+for (let index = 0; index < argv.length; index++) {
+  if (
+    argv[index] === "--fresh-cert" ||
+    argv[index] === "--help" ||
+    argv[index] === "-h"
+  )
+    continue;
+  if (!optionsWithValues.has(argv[index]))
+    throw new Error(`Unknown argument: ${argv[index]}`);
+  const next = argv[++index];
+  if (!next || next.startsWith("-"))
+    throw new Error(`${argv[index - 1]} requires a value`);
+}
 const value = (flag, fallback) => {
   const index = argv.indexOf(flag);
-  return index < 0 ? fallback : argv[index + 1];
+  const result = index < 0 ? fallback : argv[index + 1];
+  if (index >= 0 && (!result || result.startsWith("-")))
+    throw new Error(`${flag} requires a value`);
+  return result;
 };
 if (argv.includes("--help") || argv.includes("-h")) {
   console.log(
