@@ -547,7 +547,12 @@ export default function ClusterDetailPage() {
         }
       />
 
-      <Tabs activeKey={activeTab} onSelect={(_e, key) => setActiveTab(key)}>
+      <Tabs
+        mountOnEnter
+        unmountOnExit
+        activeKey={activeTab}
+        onSelect={(_e, key) => setActiveTab(key)}
+      >
         {[
           <Tab
             key="overview"
