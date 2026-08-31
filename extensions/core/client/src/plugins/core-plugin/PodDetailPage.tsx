@@ -62,11 +62,22 @@ export default function PodDetailPage() {
     let stale = false;
     setLoading(true);
     setError(null);
+    const escapedCluster = clusterId
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
+    const escapedPodUid = podUid.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     k8sApi
-      .get(
-        `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/core~v1~pods/objects/${podUid}`,
-      )
-      .then((result) => {
+      .search({
+        filter: [
+          'resourceType == "kubernetes.fleetshift.io/Object"',
+          'resource.observation.kind == "Pod"',
+          `resource.observation.metadata.uid == "${escapedPodUid}"`,
+          `name.startsWith("//kubernetes.fleetshift.io/clusters/${escapedCluster}/")`,
+        ].join(" && "),
+        pageSize: 1,
+      })
+      .then((response) => {
+        const result = response.resources[0];
         if (stale) return;
         if (result) {
           setResource(result);
@@ -116,7 +127,7 @@ export default function PodDetailPage() {
   const restartCounts = (extracted?.restartCount as number[]) ?? [];
   const totalRestarts = restartCounts.reduce((sum, c) => sum + (c ?? 0), 0);
   const labels = resource.resource.labels ?? {};
-  const conditions = (resource.resource as Record<string, unknown>)
+  const conditions = (resource.resource as unknown as Record<string, unknown>)
     .conditions as
     | Record<string, { status: string; reason?: string; message?: string }>
     | undefined;

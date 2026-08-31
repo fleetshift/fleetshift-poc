@@ -1,4 +1,12 @@
-import { cpSync, rmSync, mkdirSync, readdirSync, existsSync } from "fs";
+import {
+  cpSync,
+  rmSync,
+  mkdirSync,
+  readdirSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
@@ -12,6 +20,38 @@ const pluginDistDirs = [
 ];
 const guiDist = resolve(root, "client/web/dist");
 const incremental = process.argv.includes("--incremental");
+const lockDir = resolve(root, ".nx/merge-web.lock");
+
+function acquireLock() {
+  mkdirSync(resolve(root, ".nx"), { recursive: true });
+  if (existsSync(lockDir)) {
+    try {
+      const pid = Number(readFileSync(resolve(lockDir, "pid"), "utf8"));
+      process.kill(pid, 0);
+      console.log("Another web merge is running; skipping this merge.");
+      process.exit(0);
+    } catch {
+      rmSync(lockDir, { recursive: true, force: true });
+    }
+  }
+  mkdirSync(lockDir);
+  writeFileSync(resolve(lockDir, "pid"), String(process.pid));
+  const release = () => rmSync(lockDir, { recursive: true, force: true });
+  process.on("exit", release);
+  process.on("SIGINT", () => {
+    release();
+    process.exit(130);
+  });
+}
+
+acquireLock();
+
+// Never clear the live output while shell build is incomplete.
+if (!existsSync(resolve(guiDist, "shell"))) {
+  throw new Error(
+    `GUI shell is missing at ${resolve(guiDist, "shell")}; keeping existing web/ assets`,
+  );
+}
 
 mkdirSync(webDir, { recursive: true });
 if (!incremental) {
@@ -36,10 +76,14 @@ for (const dist of pluginDistDirs) {
 
 if (hasAnyManifests) {
   // Generate registry into web/ directly (not dist/) to avoid re-triggering the watcher
-  execFileSync("node", [resolve(root, "tools/generate-plugin-registry.mjs"), webDir], {
-    cwd: root,
-    stdio: "inherit",
-  });
+  execFileSync(
+    "node",
+    [resolve(root, "tools/generate-plugin-registry.mjs"), webDir],
+    {
+      cwd: root,
+      stdio: "inherit",
+    },
+  );
 }
 
 // Copy GUI shell last so index.html is always present

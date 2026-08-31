@@ -52,7 +52,7 @@ export default function NamespaceDetailPage() {
     setError(null);
     k8sApi
       .get(
-        `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/core~v1~namespaces/objects/${nsUid}`,
+        `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/namespaces/objects/${nsUid}`,
       )
       .then((result) => {
         if (stale) return;
@@ -99,7 +99,7 @@ export default function NamespaceDetailPage() {
   const phase = (extracted?.phase as string) ?? "";
   const nsName = meta?.name ?? nsUid ?? "Unknown";
   const labels = resource.resource.labels ?? {};
-  const conditions = (resource.resource as Record<string, unknown>)
+  const conditions = (resource.resource as unknown as Record<string, unknown>)
     .conditions as
     | Record<string, { status: string; reason?: string; message?: string }>
     | undefined;
