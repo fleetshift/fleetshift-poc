@@ -179,6 +179,22 @@ describe("KindClusterPool lifecycle", () => {
     );
   });
 
+  it("releases the allocation lock after a failed action", async () => {
+    const directory = await tempDir();
+    await mkdir(directory, { mode: 0o700, recursive: true });
+    await writeFile(path.join(directory, "state.json"), "{", { mode: 0o600 });
+    await expect(pool(directory).reserve([READ_ONLY_ANY])).rejects.toThrow(
+      /malformed/,
+    );
+    await writeFile(
+      path.join(directory, "state.json"),
+      JSON.stringify({ records: [] }),
+      { mode: 0o600 },
+    );
+    const reservation = await pool(directory).reserve([READ_ONLY_ANY]);
+    expect(reservation.allocations[0]?.needsProvisioning).toBe(true);
+  });
+
   it("fails clearly when the allocation lock cannot be acquired", async () => {
     const directory = await tempDir();
     await mkdir(path.join(directory, "allocation-lock"), {

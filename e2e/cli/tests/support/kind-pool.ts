@@ -251,10 +251,20 @@ export class KindClusterPool {
         await delay(LOCK_RETRY_MS);
       }
     }
+    let actionError: unknown;
     try {
       return await action();
+    } catch (error) {
+      actionError = error;
+      throw error;
     } finally {
-      await rmdir(lockDir);
+      try {
+        await rmdir(lockDir);
+      } catch (releaseError) {
+        if (actionError === undefined && !isNotFound(releaseError)) {
+          throw releaseError;
+        }
+      }
     }
   }
 

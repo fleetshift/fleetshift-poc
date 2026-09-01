@@ -20,6 +20,12 @@ describe("uniqueKindClusterId", () => {
       uniqueKindClusterId("a".repeat(MAX_KIND_RESOURCE_ID_LENGTH)),
     ).toThrow(/too long/);
   });
+
+  it("rejects a prefix that is not RFC1123-safe", () => {
+    expect(() => uniqueKindClusterId("Kind-e2e-")).toThrow(/RFC1123-safe/);
+    expect(() => uniqueKindClusterId("kind_e2e-")).toThrow(/RFC1123-safe/);
+    expect(() => uniqueKindClusterId("-kind")).toThrow(/RFC1123-safe/);
+  });
 });
 
 describe("uniqueKindClusterIdFromEnv", () => {

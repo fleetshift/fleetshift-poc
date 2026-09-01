@@ -92,6 +92,7 @@ export class KindSteps {
     await mkdir(dir, { mode: 0o700 });
     const specFile = path.join(dir, "spec.json");
     await writeFile(specFile, JSON.stringify({ name: id }), { mode: 0o600 });
+    this.#cleanup?.add(() => this.#deleteBestEffort(id));
     const result = await this.#client.succeed([
       "resource",
       "create",
@@ -102,7 +103,6 @@ export class KindSteps {
       specFile,
     ]);
     expect(parseCluster(result.stdout).name).toBe(clusterResourceName(id));
-    this.#cleanup?.add(() => this.#deleteBestEffort(id));
   }
 
   async waitUntilReady(id: string): Promise<void> {
@@ -204,12 +204,13 @@ export class KindSteps {
           const response = await this.#kindAPI(id, "GET", NAMESPACE_PATH, {
             configDir,
           });
-          if (response.status !== 403) {
-            throw new Error(`Kind API status ${response.status}, want 403`);
-          }
           return response.status;
         },
-        { intervals: [POLL_INTERVAL_MS], timeout: OIDC_WAIT_TIMEOUT_MS },
+        {
+          intervals: [POLL_INTERVAL_MS],
+          message: `Kind API forbidden for ${id}`,
+          timeout: OIDC_WAIT_TIMEOUT_MS,
+        },
       )
       .toBe(403);
   }

@@ -14,6 +14,7 @@ const GRPC_TARGET = "127.0.0.1:50051";
 const KIND_CLUSTER_LABEL = "io.x-k8s.kind.cluster";
 const CA_IN_CONTAINER = "/data/sandbox/pki/ca.crt";
 const COMMAND_TIMEOUT_MS = 10_000;
+const SANDBOX_REMOVE_TIMEOUT_MS = 60_000;
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -309,7 +310,15 @@ function removeContainer(id) {
 }
 
 async function stopSandbox(sandbox) {
-  podman(["rm", "-f", sandbox.containerName], { allowFailure: true });
+  const removed = podman(["rm", "-f", sandbox.containerName], {
+    allowFailure: true,
+    timeout: SANDBOX_REMOVE_TIMEOUT_MS,
+  });
+  if (removed.status !== 0) {
+    console.error(
+      `failed to remove sandbox ${sandbox.containerName}${removed.output ? `\n${sanitize(removed.output)}` : ""}`,
+    );
+  }
   await Promise.all(
     ownedKindNodes(sandbox.kindPrefix).map(([id]) => removeContainer(id)),
   );

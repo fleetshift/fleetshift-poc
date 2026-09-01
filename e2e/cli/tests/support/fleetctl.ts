@@ -193,6 +193,9 @@ export class FleetctlClient {
         resolve(code ?? -1);
       });
     });
+    // Spawn failures reject `exit` and also close stdout, so `authURL` rejects
+    // first. Keep a handler on `exit` so that rejection is not unhandled.
+    void exit.catch(() => undefined);
     const authURL = new Promise<string>((resolve, reject) => {
       const lines = readline.createInterface({ input: child.stdout });
       let found = false;
