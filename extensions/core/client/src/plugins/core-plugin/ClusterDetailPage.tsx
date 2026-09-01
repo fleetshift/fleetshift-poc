@@ -1,6 +1,10 @@
 import "./ClusterDetailPage.scss";
 
-import type { ClusterDetailTabProps, ClusterResource, ResourceResult } from "@fleetshift/common";
+import type {
+  ClusterDetailTabProps,
+  ClusterResource,
+  ResourceResult,
+} from "@fleetshift/common";
 import {
   createApiClient,
   createResourceApi,
@@ -8,7 +12,11 @@ import {
   PluginLink,
   usePluginNavigate,
 } from "@fleetshift/common";
-import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import type { Extension } from "@openshift/dynamic-plugin-sdk";
+import {
+  useExtensions,
+  useResolvedExtensions,
+} from "@openshift/dynamic-plugin-sdk";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 import {
   Breadcrumb,
@@ -71,7 +79,9 @@ interface ResolvedTab {
 
 const CLUSTER_DETAIL_TAB_TYPE = "fleetshift.cluster-detail-tab";
 
-function isClusterDetailTabExtension(e: { type: string }): boolean {
+function isClusterDetailTabExtension(
+  e: Extension,
+): e is Extension<"fleetshift.cluster-detail-tab"> {
   return e.type === CLUSTER_DETAIL_TAB_TYPE;
 }
 
@@ -318,7 +328,8 @@ export default function ClusterDetailPage() {
   const [isResuming, setIsResuming] = useState(false);
   const requestIdRef = useRef(0);
 
-  const [tabExtensions] = useResolvedExtensions(isClusterDetailTabExtension);
+  const tabExtensionCandidates = useExtensions(isClusterDetailTabExtension);
+  const [tabExtensions] = useResolvedExtensions(tabExtensionCandidates);
   const resolvedTabs = useMemo<ResolvedTab[]>(() => {
     const tabs: ResolvedTab[] = [];
     for (const ext of tabExtensions) {
@@ -446,6 +457,19 @@ export default function ClusterDetailPage() {
   }
 
   const sl = stateLabel(state, result.resource.state);
+  const tabElements = resolvedTabs
+    .filter((tab) => !tab.service || tab.service === service)
+    .map((tab) => (
+      <Tab
+        key={tab.eventKey}
+        eventKey={tab.eventKey}
+        title={<TabTitleText>{tab.title}</TabTitleText>}
+      >
+        <div className="pf-v6-u-pt-md">
+          <tab.Component clusterId={clusterId} />
+        </div>
+      </Tab>
+    ));
 
   return (
     <div className="ome-core-detail-layout">
@@ -523,27 +547,24 @@ export default function ClusterDetailPage() {
         }
       />
 
-      <Tabs activeKey={activeTab} onSelect={(_e, key) => setActiveTab(key)}>
-        <Tab eventKey="overview" title={<TabTitleText>Overview</TabTitleText>}>
-          <div className="pf-v6-u-pt-md">
-            <OverviewTab result={result} service={service} />
-          </div>
-        </Tab>
-        {resolvedTabs
-          .filter((tab) => !tab.service || tab.service === service)
-          .map((tab) => (
-            <Tab
-              key={tab.eventKey}
-              eventKey={tab.eventKey}
-              title={<TabTitleText>{tab.title}</TabTitleText>}
-              mountOnEnter
-              unmountOnExit
-            >
-              <div className="pf-v6-u-pt-md">
-                <tab.Component clusterId={clusterId} />
-              </div>
-            </Tab>
-          ))}
+      <Tabs
+        mountOnEnter
+        unmountOnExit
+        activeKey={activeTab}
+        onSelect={(_e, key) => setActiveTab(key)}
+      >
+        {[
+          <Tab
+            key="overview"
+            eventKey="overview"
+            title={<TabTitleText>Overview</TabTitleText>}
+          >
+            <div className="pf-v6-u-pt-md">
+              <OverviewTab result={result} service={service} />
+            </div>
+          </Tab>,
+          ...tabElements,
+        ]}
       </Tabs>
 
       <Modal

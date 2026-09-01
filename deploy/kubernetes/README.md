@@ -20,9 +20,9 @@ Deploy FleetShift to an OpenShift cluster using Kustomize manifests. Everything 
 ## Quick Start
 
 ```bash
-task kubernetes:deploy          # deploy everything
-task kubernetes:status          # check pods, services, routes
-task kubernetes:teardown        # remove everything
+npx nx run k8s:deploy            # deploy everything
+npx nx run k8s:status            # check pods, services, routes
+npx nx run k8s:teardown          # remove everything
 ```
 
 The deploy script generates `config.env`, `secrets.env`, and `gcphcp.yaml`
@@ -53,7 +53,7 @@ All tasks use the `kubernetes:` namespace (alias `k8:`).
 
 The deploy script reads the root `.env` and generates three files consumed by
 Kustomize generators. Values already exported in the process environment take
-precedence over `.env` (so `GCPHCP_GATEWAY_URL=... task kubernetes:deploy` wins).
+precedence over `.env` (so `GCPHCP_GATEWAY_URL=... npx nx run k8s:deploy` wins).
 
 **`config.env`** (ConfigMap) — OIDC issuer URL, client IDs, audience, key
 enrollment settings, log level, resolved addon list, and optional
@@ -70,21 +70,21 @@ addon list stays `kubernetes`.
 
 Use the root `.env.template` for the authoritative input keys. The exact
 generated `config.env`, `secrets.env`, and `gcphcp.yaml` shapes are defined by
-`deploy/kubernetes/scripts/deploy.sh`.
+`deploy/kubernetes/scripts/deploy.mjs`.
 
 ## Image Management
 
 **Override for PR testing:**
 
 ```bash
-task kubernetes:set-image TAG=PR48-abc123    # point ImageStream to a PR image
-task kubernetes:reset-image                  # restore :latest with scheduled import
+npx nx run k8s:set-image -- TAG=PR48-abc123   # point ImageStream to a PR image
+npx nx run k8s:reset-image                    # restore :latest with scheduled import
 ```
 
 **Force reimport** (e.g. after pushing a new `:latest`):
 
 ```bash
-task kubernetes:import-images
+npx nx run k8s:import-images
 ```
 
 ImageStreams use `importPolicy.scheduled: true` for automatic periodic pulls. The `set-image` command replaces the tag spec (disabling scheduled import); `reset-image` restores it.
@@ -94,7 +94,7 @@ ImageStreams use `importPolicy.scheduled: true` for automatic periodic pulls. Th
 External gRPC access requires HTTP/2, which needs a trusted certificate on the Route. After deploying FleetShift, run the certificate workflow as a post-deploy step:
 
 ```bash
-task kubernetes:grpc-route-cert:deploy ACME_EMAIL=you@example.com
+npx nx run k8s:grpc-cert:deploy -- ACME_EMAIL=you@example.com
 ```
 
 See [grpc-route-cert/README.md](grpc-route-cert/README.md) for details.

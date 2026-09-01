@@ -64,11 +64,22 @@ export default function NodeDetailPage() {
     let stale = false;
     setLoading(true);
     setError(null);
+    const escapedCluster = clusterId
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
+    const escapedNodeUid = nodeUid.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     k8sApi
-      .get(
-        `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/core~v1~nodes/objects/${nodeUid}`,
-      )
-      .then((result) => {
+      .search({
+        filter: [
+          'resourceType == "kubernetes.fleetshift.io/Object"',
+          'resource.observation.kind == "Node"',
+          `resource.observation.metadata.uid == "${escapedNodeUid}"`,
+          `name.startsWith("//kubernetes.fleetshift.io/clusters/${escapedCluster}/")`,
+        ].join(" && "),
+        pageSize: 1,
+      })
+      .then((response) => {
+        const result = response.resources[0];
         if (stale) return;
         if (result) {
           setResource(result);
@@ -121,7 +132,7 @@ export default function NodeDetailPage() {
   const cpuAlloc = (extracted?.cpuAllocatable as string) ?? "—";
   const cpuCap = (extracted?.cpuCapacity as string) ?? "—";
   const labels = resource.resource.labels ?? {};
-  const conditions = (resource.resource as Record<string, unknown>)
+  const conditions = (resource.resource as unknown as Record<string, unknown>)
     .conditions as
     | Record<string, { status: string; reason?: string; message?: string }>
     | undefined;

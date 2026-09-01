@@ -34,7 +34,7 @@ export type FleetshiftExtension<
   properties: BaseExtensionProperties & TExtra;
 };
 
-export type ModuleGroupExtras = Record<string, never>;
+export type ModuleGroupExtras = Record<never, never>;
 
 export type ModuleExtras = {
   component: EncodedCodeRef;

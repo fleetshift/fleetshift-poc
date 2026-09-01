@@ -87,7 +87,7 @@ jobs:
         run: npx nx run common:build
 
       - name: Unit tests (vitest)
-        run: npx nx run ui:test
+        run: npx nx run common:test
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

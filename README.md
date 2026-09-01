@@ -64,7 +64,7 @@ podman run -d \
 Add the kind flags from above when you also want local clusters (keep
 `OIDC_ISSUER_URL`).
 
-Build the image from this repo with `task image:aio`. Env defaults, Dex-off,
+Build the image from this repo with `npx nx run image:aio`. Env defaults, Dex-off,
 fleetctl, and packaging internals:
 [deploy/aio/README.md](deploy/aio/README.md).
 
@@ -72,7 +72,7 @@ fleetctl, and packaging internals:
 
 | Path | What you launch | Guide |
 |------|-----------------|-------|
-| Local compose stack | All-in-one image via compose/Taskfile (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
+| Local compose stack | All-in-one image via compose/Nx (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
 | Keycloak (OpenShift) | External OIDC for cluster deploy or AIO compose (`OIDC_ISSUER_URL` in `.env`) | [deploy/keycloak/](deploy/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
@@ -83,7 +83,6 @@ fleetctl, and packaging internals:
 
 - **Go 1.22+**
 - **Node.js 20+** — for Nx and UI packages
-- **[Task](https://taskfile.dev/)** — `go install github.com/go-task/task/v3/cmd/task@latest`
 - **buf** — for protobuf generation (`brew install bufbuild/buf/buf`)
 - `.env` file — copy from `.env.template` (compose stack and Kubernetes only)
 
@@ -102,8 +101,7 @@ at the repo root handles everything — no separate install needed per package.
 ### Monorepo
 
 This workspace uses [Nx](https://nx.dev) for build orchestration — caching,
-dependency graph, affected detection, and parallel execution. Nx wraps the
-existing Taskfile commands, so both `task` and `nx` work.
+dependency graph, affected detection, and parallel execution.
 
 ```bash
 npx nx show projects        # list all projects
@@ -126,11 +124,6 @@ npx nx run plugins:build    # all MF remote plugins
 npx nx run web:build        # SPA shell
 npx nx run-many -t build    # build all (parallel, cached)
 
-# Or via Taskfile directly:
-task build:server
-task build:cli
-task build:aio
-task build:all
 ```
 
 Builds are cached — unchanged sources skip recompilation entirely.
@@ -183,19 +176,14 @@ itself. How to add tests, Kind pool usage, and CI:
 ```bash
 npx nx run proto:generate   # regenerate protobuf and gRPC stubs
 
-# Or via Taskfile:
-task protogen
-task image:build            # build server + web container images
-task image:aio              # build all-in-one image from local server-local + web
-task image:push             # push server, server-local, and web to DEV_REGISTRY (not the AIO image)
 ```
 
 ## Local compose stack
 
-The local harness (`task pd:*` / `task podman:*`) runs the all-in-one image via
+The local harness (`pd:*` Nx targets) runs the all-in-one image via
 compose and is documented in [deploy/podman/README.md](deploy/podman/README.md).
 Copy `.env.template` to `.env` first. Commands are also available through Nx;
-env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to Taskfile.
+env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to deployment scripts.
 
 Open https://fleetshift-sandbox.localhost:8085 after `pd:up` / `pd:dev`. If a
 persisted volume still has the old `https://127.0.0.1:5556/dex` issuer, run
@@ -210,15 +198,12 @@ npx nx run pd:clean                                  # stop + remove volumes
 npx nx run pd:status                                 # show container status
 npx nx run pd:logs                                   # tail all logs
 npx nx run pd:rebuild                                # rebuild and restart
-npx nx run pd:rebuild-web                            # rebuild AIO image (baked UI) and restart
 npx nx run pd:clock-drift                            # fix podman clock drift
 
-# Or via Taskfile directly:
-task pd:dev LOCAL_WEB=true
 ```
 
 Point at an external issuer by setting `OIDC_ISSUER_URL` in `.env` (peer Dex
 then parks) — see the OIDC scope caveat in `.env.template`.
 
-Keycloak OCP (`task kc:*`) and Kubernetes OCP (`task k8s:*`) commands remain
-Taskfile-only — they target remote clusters, not local compose.
+Keycloak OCP (`kc:*`), Kubernetes OCP (`k8s:*`), and MinIO (`minio:*`) targets
+use Nx and target remote clusters, not local compose.

@@ -1,5 +1,6 @@
 export function extractClusterId(resourceName: string): string {
-  return resourceName.replace(/^clusters\//, "");
+  const match = resourceName.match(/(?:^|\/)clusters\/([^/]+)/);
+  return match?.[1] ?? resourceName;
 }
 
 export interface ClusterCondition {

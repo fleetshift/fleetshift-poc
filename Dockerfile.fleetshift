@@ -2,7 +2,7 @@
 # Packaging (deploy/aio) owns s6 PID 1, peer Dex (default), PKI, and serve argv.
 #
 # From-source (monorepo; preferred):
-#   task image:aio
+#   npx nx run image:aio
 #
 # Or manually:
 #   podman build -t localhost/fleetshift-server:latest .

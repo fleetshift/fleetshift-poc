@@ -57,7 +57,7 @@ The architecture documentation lives in docs/design/ and is the primary source o
 - Keep design documentation up to date, but focused on the design and vision. _Do not overfit design documentation to the code, specific API, or current implementation_. It is a guide for how we intend the implementation to evolve, more than it is a description of its current state. We should update them when, during the course of implementation and planning, we realize that the design and vision itself should change, or has become out of alignment with what we are building in non-temporary ways. References to code or API are far from forbidden, but just used judiciously, to tie the desired design to the prototype.
 - Prefer modern stdlib abstractions and utilities where relevant (especially around crypto or low level encoding / decoding)
 - Follow test-driven development. When at all possible, write failing tests **first**, then write the code to make the test pass.
-- Prefer running tasks through Nx (`npx nx run <project>:<target>`, `npx nx run-many`, `npx nx affected`) for caching and dependency-aware execution. Build, test, proto, and image targets run direct commands (Go, buf, podman) — no Task CLI needed. Infra targets (`pd:*`, `kc:*`, `k8s:*`) still wrap Taskfile. Taskfile remains as a parallel interface (`task -l` for discovery).
+- Prefer running tasks through Nx (`npx nx run <project>:<target>`, `npx nx run-many`, `npx nx affected`) for caching and dependency-aware execution. Build, test, proto, image, and infrastructure targets run through Nx; deployment scripts provide platform-specific checks.
 - Please always run go fmt ./... after you're done with any Go code changes
 
 ## fleetshift-server

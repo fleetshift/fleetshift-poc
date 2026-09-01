@@ -33,7 +33,7 @@ Two bearer tokens control access:
 2. **Start MinIO + proxy:**
 
    ```sh
-   NX_CACHE=true task podman:up
+   NX_CACHE=true npx nx run pd:up
    ```
 
    This starts MinIO on `:9000` (console `:9001`), creates the `nx-cache` bucket, and runs the proxy on `:8420`. The `NX_CACHE=true` flag adds the `nx-cache.yaml` compose override.
@@ -88,7 +88,7 @@ podman build \
 
 - **cert-manager ClusterIssuer** — `deploy.sh` mints a publicly-trusted cert for
   the proxy Route (the Nx CLI rejects the cluster's self-signed ingress cert).
-  Defaults to `zerossl-prod`; override with `CERT_ISSUER=<name> task minio:deploy`.
+  Defaults to `zerossl-prod`; override with `CERT_ISSUER=<name> npx nx run minio:deploy`.
 - **Image pull secret** — the proxy image lives in a private quay.io repo, so the
   namespace needs a `quay-pull` secret linked to the `default` service account:
 
@@ -103,26 +103,26 @@ podman build \
   Desktop on macOS stores creds in the keychain, so its `config.json` won't work;
   the podman `auth.json` above does.)
 
-MinIO and the cache proxy run on the Keycloak OCP cluster. All `task minio:*` commands require an active `oc` session on that cluster:
+MinIO and the cache proxy run on the Keycloak OCP cluster. All `minio:*` Nx targets require an active `oc` session on that cluster:
 
 ```sh
 # 1. Log in to the Keycloak cluster and set KC_CLUSTER_API in .env
 oc login <keycloak-cluster-api-url>
 
 # 2. Deploy (generates random credentials + bearer tokens, stores in OCP secrets)
-task minio:deploy
+npx nx run minio:deploy
 
 # 3. Check status
-task minio:status
+npx nx run minio:status
 
 # 4. Get connection info — prints the NX_SELF_HOSTED_REMOTE_CACHE_* values to put in .env
-task minio:credentials
+npx nx run minio:credentials
 
 # 5. Tear down (interactive)
-task minio:teardown
+npx nx run minio:teardown
 ```
 
-To retrieve credentials later (e.g., on a new machine), log in to the cluster and run `task minio:credentials` — it reads from the existing OCP secrets.
+To retrieve credentials later (e.g., on a new machine), log in to the cluster and run `npx nx run minio:credentials` — it reads from the existing OCP secrets.
 
 ## Configuration reference
 

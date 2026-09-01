@@ -161,7 +161,7 @@ Generate a JSON manifest of available icons:
 ]
 ```
 
-Script reads `@patternfly/react-icons` package exports and writes `pf-icons.json`. Run as part of `npm run build:all` or as a standalone `npm run generate:icons`. The manifest is small (~30KB — names and keywords, no SVG data).
+Script reads `@patternfly/react-icons` package exports and writes `pf-icons.json`. Run `npx nx run web:generate-icons`. The manifest is small (~30KB — names and keywords, no SVG data).
 
 #### Search with Orama
 

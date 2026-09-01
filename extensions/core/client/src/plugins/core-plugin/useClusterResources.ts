@@ -64,8 +64,9 @@ export function useClusterResources(
       if (clusterId) {
         const escaped = clusterId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         parts.push(
-          `name.startsWith("//kubernetes.fleetshift.io/clusters/${escaped}/apiResources/${gvrKey}/")`,
+          `name.startsWith("//kubernetes.fleetshift.io/clusters/${escaped}/")`,
         );
+        if (kind) parts.push(`resource.observation.kind == "${kind}"`);
       } else if (kind) {
         parts.push(`resource.observation.kind == "${kind}"`);
       }

@@ -9,7 +9,10 @@ import {
   useExtensionInstall,
   useNavLayout,
 } from "@fleetshift/common";
-import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import {
+  useExtensions,
+  useResolvedExtensions,
+} from "@openshift/dynamic-plugin-sdk";
 import {
   createContext,
   ReactNode,
@@ -72,11 +75,12 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     isInstalled,
     state: installState,
   } = useExtensionInstall();
+
+  const allModuleExtensions = useExtensions(isModuleExtension);
   const [moduleExtensions, modulesLoaded] =
-    useResolvedExtensions(isModuleExtension);
-  const [cpExtensions, cpLoaded] = useResolvedExtensions(
-    isClusterProviderExtension,
-  );
+    useResolvedExtensions(allModuleExtensions);
+  const allCpExtensions = useExtensions(isClusterProviderExtension);
+  const [cpExtensions, cpLoaded] = useResolvedExtensions(allCpExtensions);
   const dbRef = useRef<SearchDB | null>(null);
   const componentMapRef = useRef(
     new Map<string, React.ComponentType<SearchResultProps>>(),
