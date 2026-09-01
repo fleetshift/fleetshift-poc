@@ -46,12 +46,12 @@ describe("buildTestEnvironment", () => {
 
 describe("kindNodeBelongsToRun", () => {
   it("is exact to the current run prefix", () => {
-    expect(
-      kindNodeBelongsToRun("fs--kind-e2e-abcd-a", "kind-e2e-abcd-"),
-    ).toBe(true);
-    expect(
-      kindNodeBelongsToRun("fs--kind-e2e-other-a", "kind-e2e-abcd-"),
-    ).toBe(false);
+    expect(kindNodeBelongsToRun("fs--kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
+      true,
+    );
+    expect(kindNodeBelongsToRun("fs--kind-e2e-other-a", "kind-e2e-abcd-")).toBe(
+      false,
+    );
     expect(kindNodeBelongsToRun("kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
       false,
     );

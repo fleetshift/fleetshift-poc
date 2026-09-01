@@ -56,10 +56,7 @@ export default [
         },
     },
     {
-        files: [
-            "**/*.ts",
-            "**/*.{js,mjs}",
-        ],
+        files: ["**/*.{js,mjs}"],
         plugins: {
             prettier: prettierPlugin,
         },

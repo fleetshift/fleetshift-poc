@@ -5,7 +5,6 @@ const baseURL =
 
 export default defineConfig({
   testDir: './tests',
-  testIgnore: /complete-cli-login\.spec\.ts/,
   outputDir: './test-results',
   // 'list' streams a line per test so CI shows live progress. The CI default
   // ('dot') emits newline-less dots that GitHub Actions buffers until the step

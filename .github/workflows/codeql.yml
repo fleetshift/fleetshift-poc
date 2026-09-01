@@ -10,17 +10,27 @@ on:
 
 jobs:
   analyze:
-    name: Analyze Go
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
       security-events: write
+      packages: read
       contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: manual
+          - language: javascript-typescript
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Set up Go
+        if: matrix.language == 'go'
         uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
@@ -30,20 +40,34 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: go
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # paths apply to JS/TS only. Go coverage comes from the build step below.
+          config: |
+            paths:
+              - client/web
+              - sdk/common
+              - sdk/build-utils
+              - extensions/core/client
+              - extensions/gcphcp/client
+              - extensions/kind/client
+              - e2e
+            paths-ignore:
+              - "**/node_modules"
+              - "**/dist"
+              - poc
 
-      - name: Build all modules
+      - name: Build all Go modules
+        if: matrix.language == 'go'
         run: |
-          for mod in server cli deploy/aio e2e/backend; do
-            if [ -d "$mod" ]; then
-              echo "Building $mod..."
-              (cd "$mod" && go build ./...) # The parentheses run this in a subshell
-            else
-              echo "Warning: Directory $mod not found, skipping."
-            fi
-          done
+          set -euo pipefail
+          while IFS= read -r mod; do
+            dir=$(dirname "$mod")
+            echo "Building $dir..."
+            (cd "$dir" && go build ./...)
+          done < <(find . -name go.mod -not -path '*/vendor/*' -not -path './poc/*' | sort)
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:go"
+          category: "/language:${{ matrix.language }}"

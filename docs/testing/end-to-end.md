@@ -8,11 +8,10 @@ Do not use this for unit tests, Playwright component tests (`*.ct.tsx`), or
 server `//go:build integration` tests. Those stay next to the code they
 cover. Write an e2e test when the claim is about the assembled product.
 
-| Suite   | Nx project    | Proves                                      | Who starts the AIO |
-| ------- | ------------- | ------------------------------------------- | ------------------ |
-| Backend | `e2e-backend` | fleetctl, gateway, Kind, delivery, indexing | `TestMain`         |
-| CLI     | `e2e-cli`     | TypeScript port of backend product journeys | shared Node runner |
-| UI      | `e2e-web`     | console journeys                            | shared Node runner |
+| Suite | Nx project | Proves                                      | Who starts the AIO |
+| ----- | ---------- | ------------------------------------------- | ------------------ |
+| CLI   | `e2e-cli`  | fleetctl, gateway, Kind, delivery, indexing | shared Node runner |
+| UI    | `e2e-web`  | console journeys                            | shared Node runner |
 
 Do not run these suites at once. They need the sandbox HTTPS and gRPC ports
 (8085 and 50051) and will refuse to start if either port is taken.
@@ -31,13 +30,12 @@ npx nx test:e2e e2e-web -- tests/login.spec.ts
 
 # CLI: builds fleetctl and the packaged AIO image
 npx nx test:e2e e2e-cli
-
-# Backend: starts and stops its own AIO (podman + a live engine socket)
-npx nx test:e2e e2e-backend
-npx nx test:e2e e2e-backend -- -run TestFanOut
+npx nx test:e2e e2e-cli -- tests/scenarios/gateway.spec.ts
 ```
 
-Flags after `--` go to Playwright or `go test`.
+Flags after `--` go to Playwright.
+
+Short CLI cheat sheet: [e2e/cli/README.md](../../e2e/cli/README.md).
 
 Short UI cheat sheet: [e2e/web/README.md](../../e2e/web/README.md).
 
@@ -56,8 +54,8 @@ The sandbox CA is private. Playwright uses `ignoreHTTPSErrors`; do not
 Dex personas are `ops` and `dev`. Emails, passwords, and masthead labels live
 in [`e2e/shared/personas.ts`](../../e2e/shared/personas.ts)
 (public sandbox fixtures). The console does not yet distinguish their roles;
-backend tests still use them for token isolation and Kind OIDC (ops can
-write; dev is forbidden on the cluster API).
+CLI tests still use them for token isolation and Kind OIDC (ops can write;
+dev is forbidden on the cluster API).
 
 ### Shared sandbox runner
 
@@ -73,117 +71,6 @@ remain after the command exits.
 Tests receive connection facts through `BASE_URL`, `FLEETSHIFT_GRPC_TARGET`,
 `FLEETSHIFT_CA_FILE`, `FLEETSHIFT_E2E_WORK_DIR`, and
 `FLEETSHIFT_KIND_PREFIX`; they do not manage the AIO lifecycle.
-
----
-
-## Backend
-
-```
-e2e/backend/
-  scenarios/           # //go:build e2e — product stories
-  internal/harness/    # AIO + host fleetctl
-  internal/steps/      # actions/asserts used by scenarios
-```
-
-`npx nx test:e2e e2e-backend` is the slow suite. It is not Nx-cached.
-Scenarios share one AIO and a Kind pool: do not call `t.Parallel()`.
-
-### What TestMain already did
-
-`scenarios.TestMain` starts the AIO, logs in as **ops**, runs tests, then
-stops the fixture. On success it deletes the shared Kind pool through
-fleetctl **after** `PASS` (that wait can look like a hang; the harness logs
-it). On failure it dumps AIO logs and Kind/podman evidence, then removes
-leftover suite Kind nodes.
-
-Do not log in as ops again into the suite `--config-dir`. Use
-`steps.LoginAsDev` for a second persona (separate config dir). Never log
-`credentials.json` or `AUTH_URL` query strings.
-
-### Shared Kind vs a private cluster
-
-Kind create is expensive. Workload tests borrow a process-wide pool; only a
-lifecycle test should create and delete its own cluster.
-
-| Helper                           | Use when                         |
-| -------------------------------- | -------------------------------- |
-| `steps.SharedKind(t, suite)`     | one target                       |
-| `steps.SharedKindPair(t, suite)` | fan-out or cross-cluster filters |
-| `steps.UniqueKindClusterID(t)`   | create → ready → delete          |
-
-`SharedKindPair`'s first id is the same cluster as `SharedKind`. The first
-caller creates the cluster(s) and waits until they are ready and OIDC works;
-later tests reuse them. `DeleteKindCluster` / `CleanupKindCluster` refuse
-the pool ids.
-
-Namespace and deployment ids must not be derived from the cluster name. Use
-`steps.UniqueID(t, prefix)` so tests can share the pool without colliding.
-
-### Scenarios vs steps vs harness
-
-- **scenarios** — readable stories. `//go:build e2e`, `steps.RunStep`, no
-  fleetctl/HTTP/kubectl in the test body. Copy the closest file under
-  `scenarios/`.
-- **steps** — one product action or assertion. Put new fleetctl verbs, waits,
-  and parsers here, with unit tests (no e2e build tag).
-- **harness** — fixture process (start/stop AIO, `Run`, `LoginAs`). Keep
-  product waits out of here.
-
-`RunStep` is a subtest. After a failure, later steps skip so testdox still
-lists the whole story. Names are phrases with spaces (no slashes).
-
-Create/submit helpers do **not** wait. Pair them with `WaitFor*` / `Assert*`.
-`t.Cleanup` deployments you create. `WaitForDeploymentActive` fails
-immediately on `FAILED` or a pause reason — use `WaitForDeploymentPaused`
-when you expect delivery-auth pause.
-
-Resource **query** `resourceType` values are API identities
-(`kind.fleetshift.io/Cluster`), not the fleetctl collection spelling used
-on create/get (`kind.fleetshift.v1/clusters`). See `internal/steps/query.go`.
-
-Prefer asserting through fleetctl JSON or the Kind API, not the UI.
-
-### Add a backend scenario
-
-```go
-//go:build e2e
-
-package scenarios
-
-import (
-	"testing"
-
-	"github.com/fleetshift/fleetshift-poc/e2e/backend/internal/steps"
-)
-
-func TestSomethingVisibleInTestdox(t *testing.T) {
-	ns := steps.UniqueID(t, "e2e")
-	nsID := steps.UniqueID(t, "ns")
-	t.Cleanup(func() {
-		steps.CleanupDeployment(t, suite, nsID)
-	})
-
-	var cluster string
-	steps.RunStep(t, "ensure a shared kind cluster", func(t *testing.T) {
-		cluster = steps.SharedKind(t, suite)
-	})
-	steps.RunStep(t, "deploy a namespace", func(t *testing.T) {
-		steps.CreateNamespaceDeploymentOn(t, suite, nsID, ns, cluster)
-	})
-	steps.RunStep(t, "wait until the namespace is active", func(t *testing.T) {
-		steps.WaitForDeploymentActive(t, suite, nsID)
-	})
-}
-```
-
-Local runs print live testdox steps. CI uses the GitHub Actions gotestsum
-format. JSON/JUnit land in `e2e/backend/tmp/` (gitignored).
-
-The Kind addon inside the AIO talks to the **host** engine through a mounted
-socket. If that path is wrong, cluster create fails with opaque podman
-errors after a long poll. The harness (and the UI CI job) smoke this before
-those tests. On failure, the dump compares host Kind nodes with the same
-list through the AIO mount.
 
 ---
 
@@ -252,15 +139,11 @@ on 5556.
 ```
 e2e/web/
   playwright.config.mts          # nx test:e2e e2e-web
-  playwright.cli-login.mts       # fleetctl login helper — not this suite
   tests/auth-setup.ts            # Dex login once per persona
   tests/fixtures.ts              # restores oidc sessionStorage
   tests/clusters.ts              # Kind create/delete list helpers
   tests/*.spec.ts
 ```
-
-`complete-cli-login.spec.ts` is ignored by the main config. The backend
-harness is the only supported caller. Do not put console assertions there.
 
 ### Auth for specs
 
@@ -296,7 +179,7 @@ Logged-out screens: `test.use({ storageState: { cookies: [], origins: [] } })`.
    purpose-named files next to the specs (see `tests/clusters.ts`).
 3. Kind create/delete is slow. Give that journey a wide `test.setTimeout`.
    Do not add another Kind lifecycle unless the UI path is different —
-   backend already covers delivery and indexing.
+   `e2e-cli` already covers delivery and indexing.
 4. Poll live data with `expect.poll` when the page already refreshes in
    place; a reload just replays the skeleton.
 5. CI runs Chromium only. Firefox and WebKit are local extras.
@@ -312,28 +195,27 @@ and `playwright-report/`. `.auth/` is gitignored.
 [`.github/actions/setup-e2e`](../../.github/actions/setup-e2e/).
 
 Unit/component CI (`.github/workflows/test.yml`) runs
-`npx nx test e2e-backend` and Playwright **component** tests. It does not
+`npx nx test e2e-cli` and Playwright **component** tests. It does not
 run these suites.
 
 ```
 aio-image          # role: cache — build or restore the AIO tar
- ├── e2e-playwright # role: e2e — UI and CLI matrix, one runner each
- └── e2e-backend   # role: e2e — legacy TestMain owns AIO
+ └── e2e-playwright # role: e2e — UI and CLI matrix, one runner each
 ```
 
-The Playwright matrix entries and backend job restore the same tree-keyed tar
-and run in parallel. They do not share a running container.
+The Playwright matrix entries restore the same tree-keyed tar and run in
+parallel. They do not share a running container.
 
 `setup-e2e` is the only place that should install Go, Node, or Playwright,
 load the image, start user `podman.socket`, and ensure the `kind` network.
 The `cache` role never starts FleetShift. The `e2e` role never rebuilds the
-image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`.
+image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`. Go is
+installed so the CLI suite can build fleetctl.
 
-**Do not** add `podman run`, log dump, or `podman rm` steps to `e2e-backend`.
-A second AIO fights over ports and the `kind` network alias; a dump after
-`Stop` sees an empty host; prefix-wide Kind cleanup can delete the other
-job's nodes. The shared runner starts unique UI and CLI sandboxes and uploads
-Playwright artifacts through their jobs. Backend uploads `e2e/backend/tmp/`.
+The shared runner starts unique UI and CLI sandboxes and uploads Playwright
+artifacts through their jobs. Do not add `podman run`, log dump, or
+`podman rm` workflow steps: a second AIO fights over ports and the `kind`
+network alias, and prefix-wide Kind cleanup can delete the other job's nodes.
 
 The image cache is a **multi-image** archive. Saving without that makes the
 AIO tag an alias of the server image; `setup-e2e` refuses to load that tar.

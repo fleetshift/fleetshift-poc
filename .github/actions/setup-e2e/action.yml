@@ -3,9 +3,9 @@ description: |
   Prepares a GitHub Actions job to use the AIO image built from this checkout.
 
   Two roles share one tree-keyed tar and must not race the cache. `aio-image`
-  is the only writer (`role: cache`). The `e2e-playwright` matrix and
-  `e2e-backend` use `role: e2e` after `needs: aio-image`. They do not share a
-  running container.
+  is the only writer (`role: cache`). The `e2e-playwright` matrix uses
+  `role: e2e` after `needs: aio-image`. Matrix entries do not share a running
+  container.
 
   The tar is `localhost/fleetshift-server`, `localhost/fleetshift-server-local`,
   `localhost/fleetshift-web`, and `quay.io/stolostron/fleetshift:latest`. Save
@@ -31,12 +31,11 @@ inputs:
       tags, write the cache, upload the artifact. On a hit: restore the tar and
       stop (no Node, Go, or Playwright). Never podman-runs FleetShift.
 
-      e2e — the `e2e-playwright` matrix and `e2e-backend`. Restore (or download)
-      the tar, podman load, install Go, Node, and Playwright, start user
-      podman.socket and ensure the kind network. Set
-      FLEETSHIFT_E2E_AIO_PREBUILT=1 when invoking the UI and CLI targets so
-      their shared Node runner does not rebuild the restored image. Backend
-      TestMain uses the same flag for its own AIO.
+      e2e — the `e2e-playwright` matrix. Restore (or download) the tar, podman
+      load, install Go, Node, and Playwright, start user podman.socket and
+      ensure the kind network. Set FLEETSHIFT_E2E_AIO_PREBUILT=1 when invoking
+      the UI and CLI targets so their shared Node runner does not rebuild the
+      restored image. Go is required so the CLI suite can build fleetctl.
     required: true
 
 runs:
@@ -189,9 +188,9 @@ runs:
           exit 1
         fi
 
-    # User podman.socket plus kind network. Shared by UI and backend so
-    # Kind docker-out-of-docker uses the same host recipe as local Linux.
+    # User podman.socket plus kind network. Shared by UI and CLI so Kind
+    # docker-out-of-docker uses the same host recipe as local Linux.
     - name: Prepare Kind host
       if: ${{ inputs.role == 'e2e' }}
       shell: bash
-      run: bash "${{ github.action_path }}/kind-host.sh"
+      run: node "${{ github.action_path }}/kind-host.mjs"

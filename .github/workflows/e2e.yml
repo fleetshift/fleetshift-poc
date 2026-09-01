@@ -9,8 +9,8 @@ on:
 jobs:
   # Single cache writer. Test jobs restore the same multi-image tar and do
   # not race this key. Kind host setup (user podman.socket, kind network) lives
-  # in setup-e2e for the Playwright matrix and e2e-backend. They do not share
-  # a container.
+  # in setup-e2e for the Playwright matrix. Matrix entries do not share a
+  # container.
   aio-image:
     name: AIO image
     runs-on: ubuntu-latest
@@ -73,46 +73,5 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_paths }}
-          if-no-files-found: warn
-          retention-days: 7
-
-  e2e-backend:
-    name: E2E (backend)
-    needs: [aio-image]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-
-    # Unlike the Playwright matrix entries, this job does not start, smoke,
-    # dump, or tear down an AIO in the workflow.
-    # TestMain / harness.Start runs the container, uid-1000 kind-engine smoke,
-    # and Stop(true) dumps logs then removes the AIO and leftover suite Kind
-    # nodes. Do not add those as workflow steps: a second AIO fights over
-    # 8085/50051 and alias=fleetshift, a dump after Stop sees an empty host,
-    # and prefix-wide Kind cleanup can delete another suite's nodes.
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up E2E
-        uses: ./.github/actions/setup-e2e
-        with:
-          role: e2e
-
-      - name: Run backend e2e tests
-        env:
-          GOTESTSUM_FORMAT: github-actions
-          NX_DAEMON: "false"
-          FLEETSHIFT_E2E_AIO_PREBUILT: "1"
-        run: npx nx test:e2e e2e-backend
-
-      - name: Upload test results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-backend-test-results
-          path: e2e/backend/tmp/
           if-no-files-found: warn
           retention-days: 7

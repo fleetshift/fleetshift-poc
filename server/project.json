@@ -21,7 +21,7 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.mjs\" ./...",
+        "command": "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 ./...",
         "cwd": "server"
       },
       "cache": false,
@@ -49,9 +49,9 @@
         "cwd": "server",
         "parallel": false,
         "commands": [
-          "node \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.mjs\" -tags integration -timeout 15m ./internal/addon/kind/",
-          "node \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.mjs\" -tags integration -timeout 15m ./internal/addon/kubernetes/",
-          "node \"${NX_WORKSPACE_ROOT}/scripts/gotestsum.mjs\" -race ./internal/addon/kubernetes/"
+          "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 -tags integration -timeout 15m ./internal/addon/kind/",
+          "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 -tags integration -timeout 15m ./internal/addon/kubernetes/",
+          "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 -race ./internal/addon/kubernetes/"
         ]
       },
       "cache": false

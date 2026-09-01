@@ -29,9 +29,6 @@ jobs:
             go-mod: cli
           - project: deploy-aio
             go-mod: deploy/aio
-            # These are e2e backend unit tests only
-          - project: e2e-backend
-            go-mod: e2e/backend
 
     steps:
       - name: Checkout

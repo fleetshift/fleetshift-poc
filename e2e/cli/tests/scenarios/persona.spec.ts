@@ -49,5 +49,10 @@ test(
       await deployments.waitUntilGone(configMapDeployment);
       await kind.waitUntilConfigMapGone(cluster.id, namespace);
     });
+    await test.step("remove namespace deployment and verify cleanup", async () => {
+      await deployments.delete(namespaceDeployment);
+      await deployments.waitUntilGone(namespaceDeployment);
+      await kind.waitUntilNamespaceGone(cluster.id, namespace);
+    });
   },
 );
