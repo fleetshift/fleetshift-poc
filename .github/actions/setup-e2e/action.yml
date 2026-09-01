@@ -1,6 +1,6 @@
 name: Set up FleetShift E2E
 description: |
-  Prepares a GitHub Actions job to use the AIO image built from this checkout.
+  Prepares a GitHub Actions job to use an AIO image.
 
   Two roles share one tree-keyed tar and must not race the cache. `aio-image`
   is the only writer (`role: cache`). The `e2e-playwright` matrix uses
@@ -14,11 +14,18 @@ description: |
   `e2e` jobs can download if same-run cache restore does not see the new key
   yet.
 
+  `published` does not touch that tar. It pulls
+  `quay.io/stolostron/fleetshift:latest` after
+  the user podman socket is up so the image is in the same store the tests use.
+  That is the already published Quay AIO, not the image from this checkout.
+  The caller runs a UI sanity (`chromium-sanity`), not the full UI e2e suite.
+  A failure is a live product incident (users run that tag), not a branch bug.
+
   Go (from `server/go.mod`), Node 24, and Playwright Chromium follow from
   `role`. Do not install those in the workflow.
 
-  `e2e` also starts the user `podman.socket` and ensures the `kind` network
-  exists. Each test job still uses a separate AIO container.
+  `e2e` and `published` also start the user `podman.socket` and ensure the
+  `kind` network exists. Each test job still uses a separate AIO container.
 
 inputs:
   role:
@@ -36,20 +43,39 @@ inputs:
       ensure the kind network. Set FLEETSHIFT_E2E_AIO_PREBUILT=1 when invoking
       the UI and CLI targets so their shared Node runner does not rebuild the
       restored image. Go is required so the CLI suite can build fleetctl.
+
+      published — pull quay.io/stolostron/fleetshift:latest, the already
+      published Quay AIO, never this checkout's image. Used by the published
+      sanity job (start / Dex login / console), not a full UI e2e re-run. A
+      failure means the live tag failed basic function (users are affected),
+      not that the current branch is. Install Node and Playwright, start user
+      podman.socket, ensure the kind network. Never restore or build the
+      checkout tar. Set FLEETSHIFT_E2E_AIO_PULL=1 and invoke e2e-web with
+      --project=chromium-sanity so the runner pulls that tag instead of
+      building.
     required: true
 
 runs:
   using: composite
   steps:
+    - name: Check role
+      if: ${{ inputs.role != 'cache' && inputs.role != 'e2e' && inputs.role != 'published' }}
+      shell: bash
+      run: |
+        echo "unknown setup-e2e role: ${{ inputs.role }}" >&2
+        exit 1
+
     # Hash the git tree so any tracked file that changes the image (or might)
     # busts the cache. OS/arch so an amd64 runner never loads an arm64 tar.
     - name: Compute AIO cache key
+      if: ${{ inputs.role != 'published' }}
       id: aio-key
       shell: bash
       run: |
         echo "key=aio-images-v3-${{ runner.os }}-${{ runner.arch }}-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
 
     - name: Restore AIO images
+      if: ${{ inputs.role != 'published' }}
       id: aio-image-cache
       uses: actions/cache/restore@v6
       with:
@@ -66,25 +92,25 @@ runs:
     # Node is required for nx (image:aio on cache miss, test:e2e) and Playwright.
     # The cache job skips this entirely on a tar cache hit.
     - name: Set up Node
-      if: ${{ inputs.role == 'e2e' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
+      if: ${{ inputs.role == 'e2e' || inputs.role == 'published' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
       uses: actions/setup-node@v7
       with:
         node-version: 24
         cache: npm
 
     - name: Install npm dependencies
-      if: ${{ inputs.role == 'e2e' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
+      if: ${{ inputs.role == 'e2e' || inputs.role == 'published' || (inputs.role == 'cache' && steps.aio-image-cache.outputs.cache-hit != 'true') }}
       shell: bash
       run: npm ci
 
     - name: Resolve Playwright version
-      if: ${{ inputs.role == 'e2e' }}
+      if: ${{ inputs.role == 'e2e' || inputs.role == 'published' }}
       id: pw
       shell: bash
       run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
     - name: Cache Playwright browsers
-      if: ${{ inputs.role == 'e2e' }}
+      if: ${{ inputs.role == 'e2e' || inputs.role == 'published' }}
       id: pw-cache
       uses: actions/cache@v6
       with:
@@ -92,7 +118,7 @@ runs:
         key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
     - name: Install Playwright browsers
-      if: ${{ inputs.role == 'e2e' }}
+      if: ${{ inputs.role == 'e2e' || inputs.role == 'published' }}
       shell: bash
       run: |
         if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
@@ -191,6 +217,23 @@ runs:
     # User podman.socket plus kind network. Shared by UI and CLI so Kind
     # docker-out-of-docker uses the same host recipe as local Linux.
     - name: Prepare Kind host
-      if: ${{ inputs.role == 'e2e' }}
+      if: ${{ inputs.role == 'e2e' || inputs.role == 'published' }}
       shell: bash
       run: node "${{ github.action_path }}/kind-host.mjs"
+
+    # After the user socket is up so the pulled image is in the store tests use.
+    - name: Pull published AIO image
+      if: ${{ inputs.role == 'published' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        img="quay.io/stolostron/fleetshift:latest"
+        echo "pulling $img"
+        podman pull "$img"
+        if ! podman image exists "$img"; then
+          echo "podman pull did not leave $img in the local store" >&2
+          podman images
+          exit 1
+        fi
+        podman image inspect -f 'Id={{.Id}}' "$img"
+        podman image inspect -f '{{range .RepoDigests}}digest={{.}} {{end}}' "$img"

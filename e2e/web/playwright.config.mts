@@ -38,6 +38,15 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], storageState: '.auth/ops.json', },
       dependencies: ['setup'],
     },
+    // Published AIO sanity (start, Dex login, masthead/Clusters). Not the
+    // full UI suite. e2e-published.yml uses this project so a file filter
+    // cannot skip setup (Playwright applies CLI paths to dependencies).
+    {
+      name: "chromium-sanity",
+      testMatch: /login\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], storageState: '.auth/ops.json', },
+      dependencies: ['setup'],
+    },
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"], storageState: '.auth/ops.json', },

@@ -14,6 +14,7 @@ const GRPC_TARGET = "127.0.0.1:50051";
 const KIND_CLUSTER_LABEL = "io.x-k8s.kind.cluster";
 const CA_IN_CONTAINER = "/data/sandbox/pki/ca.crt";
 const COMMAND_TIMEOUT_MS = 10_000;
+const IMAGE_PULL_TIMEOUT_MS = 10 * 60 * 1000;
 const SANDBOX_REMOVE_TIMEOUT_MS = 60_000;
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -47,12 +48,40 @@ export function usesPrebuiltImage(env) {
   return env.FLEETSHIFT_E2E_AIO_PREBUILT === "1";
 }
 
+export function usesPulledImage(env) {
+  return env.FLEETSHIFT_E2E_AIO_PULL === "1";
+}
+
 export function normalizeSocketPath(value) {
   const candidate = value.trim().replace(/^unix:\/\//, "");
   return candidate && !candidate.includes("://") ? candidate : "";
 }
 
+function pullImage() {
+  console.error(`pulling ${IMAGE}`);
+  const result = spawnSync("podman", ["pull", IMAGE], {
+    stdio: "inherit",
+    timeout: IMAGE_PULL_TIMEOUT_MS,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`podman pull ${IMAGE} failed`);
+  }
+  const id = podman(["image", "inspect", "-f", "{{.Id}}", IMAGE]).stdout;
+  const digests = podman(
+    ["image", "inspect", "-f", "{{range .RepoDigests}}{{.}} {{end}}", IMAGE],
+    { allowFailure: true },
+  ).stdout;
+  console.error(
+    `pulled ${IMAGE} id=${id}${digests ? ` digests=${digests}` : ""}`,
+  );
+}
+
 function prepareImage() {
+  if (usesPulledImage(process.env)) {
+    pullImage();
+    return;
+  }
   if (usesPrebuiltImage(process.env)) return;
   console.error(`building ${IMAGE}`);
   const result = spawnSync("npx", ["nx", "run", "fleetshift-poc:image:aio"], {

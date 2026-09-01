@@ -8,6 +8,7 @@ import {
   parseCommand,
   sanitize,
   usesPrebuiltImage,
+  usesPulledImage,
 } from "./run.mjs";
 
 describe("parseCommand", () => {
@@ -63,6 +64,16 @@ describe("usesPrebuiltImage", () => {
     expect(usesPrebuiltImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "1" })).toBe(true);
     expect(usesPrebuiltImage({})).toBe(false);
     expect(usesPrebuiltImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "0" })).toBe(false);
+    expect(usesPrebuiltImage({ FLEETSHIFT_E2E_AIO_PULL: "1" })).toBe(false);
+  });
+});
+
+describe("usesPulledImage", () => {
+  it("only an explicit pull flag pulls instead of building", () => {
+    expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PULL: "1" })).toBe(true);
+    expect(usesPulledImage({})).toBe(false);
+    expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PULL: "0" })).toBe(false);
+    expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "1" })).toBe(false);
   });
 });
 

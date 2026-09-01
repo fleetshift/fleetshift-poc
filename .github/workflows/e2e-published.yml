@@ -1,0 +1,83 @@
+name: Published Quay AIO sanity
+
+# Sanity only: pull already-published quay.io/stolostron/fleetshift:latest,
+# confirm it starts, Dex login works, and the console masthead/Clusters render.
+# Not a re-run of the full UI suite (Kind journey, a11y, etc.); that is e2e.yml
+# against this checkout's image.
+#
+# A failure is a live product incident: end users podman-run this tag. It does
+# not mean the current PR/branch is broken. Investigate :latest immediately.
+#
+# OpenShift CI tags :latest on merge and republishes it at
+# 02:30/08:30/14:30/20:30 UTC; this schedule is 30 minutes after those.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3,9,15,21 * * *"
+  workflow_dispatch:
+
+jobs:
+  e2e-published:
+    name: Published Quay AIO sanity (not this branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+      - name: This job is a published-image sanity, not this branch
+        run: |
+          cat <<'EOF'
+          This workflow pulls quay.io/stolostron/fleetshift:latest and runs a
+          UI sanity: the container starts, Dex login works, and the console
+          shows the signed-in persona and Clusters. It is not the full UI e2e
+          suite (no Kind create/delete). e2e.yml covers that on this checkout.
+
+          A failure means the ACTIVE published image failed basic function.
+          End users who podman-run quay.io/stolostron/fleetshift:latest are
+          affected. Investigate immediately; this is not a problem with the
+          current branch.
+          EOF
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up E2E
+        uses: ./.github/actions/setup-e2e
+        with:
+          role: published
+
+      - name: Run UI sanity against the published image
+        env:
+          FLEETSHIFT_E2E_AIO_PULL: "1"
+          NX_DAEMON: "false"
+        run: npx nx test:e2e e2e-web -- --project=chromium-sanity
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-published-test-results
+          path: |
+            e2e/web/test-results/
+            e2e/web/playwright-report/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Failure is published AIO sanity, not this branch
+        if: ${{ failure() }}
+        run: |
+          cat <<'EOF'
+          Sanity failed against quay.io/stolostron/fleetshift:latest (already
+          published). The image did not start, Dex login failed, or the console
+          did not show a logged-in session. That is not a verdict on this branch.
+
+          Investigate ASAP: users podman-run this tag. Confirm
+          `podman run quay.io/stolostron/fleetshift:latest`, check OpenShift CI
+          image-mirror / republish jobs, and restore a working :latest.
+          See docs/testing/end-to-end.md (GitHub Actions).
+          EOF

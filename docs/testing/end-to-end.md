@@ -65,6 +65,13 @@ readiness, runs Playwright, prints sanitized diagnostics on failure, and always
 removes the AIO plus Kind nodes carrying that run's unique cluster prefix. CI
 sets `FLEETSHIFT_E2E_AIO_PREBUILT=1` after restoring the image; the runner then
 requires that image without rebuilding it.
+
+The published-image workflow sets `FLEETSHIFT_E2E_AIO_PULL=1` so the runner
+pulls `quay.io/stolostron/fleetshift:latest` instead of building, then runs a
+**sanity** (start, Dex login, console masthead/Clusters) — not the full UI
+suite. That path tests the **already published** Quay AIO, not
+the image that would be built from the current branch. After pull or restore,
+`podman run` uses `--pull=never`.
 Set `FLEETSHIFT_E2E_KEEP=1` only for local debugging when the sandbox should
 remain after the command exits.
 
@@ -182,7 +189,10 @@ Logged-out screens: `test.use({ storageState: { cookies: [], origins: [] } })`.
    `e2e-cli` already covers delivery and indexing.
 4. Poll live data with `expect.poll` when the page already refreshes in
    place; a reload just replays the skeleton.
-5. CI runs Chromium only. Firefox and WebKit are local extras.
+5. CI this-checkout e2e (`e2e.yml`) runs Chromium only, including Kind.
+   Published Quay sanity (`e2e-published.yml`) uses project `chromium-sanity`
+   (`tests/login.spec.ts` plus Dex `auth-setup`). Firefox and WebKit are
+   local extras.
 
 Traces, screenshots, and video on failure go under `e2e/web/test-results/`
 and `playwright-report/`. `.auth/` is gitignored.
@@ -191,26 +201,61 @@ and `playwright-report/`. `.auth/` is gitignored.
 
 ## GitHub Actions
 
+Two workflows run against an AIO. They are not interchangeable: one runs the
+full UI/CLI e2e on **this checkout's** image; the other runs a **sanity** on
+the **already published** Quay AIO that end users `podman run`.
+
 [`.github/workflows/e2e.yml`](../../.github/workflows/e2e.yml) plus
-[`.github/actions/setup-e2e`](../../.github/actions/setup-e2e/).
+[`.github/actions/setup-e2e`](../../.github/actions/setup-e2e/) test **this
+checkout's** AIO image (Nx `image:aio`). A failure there is a problem with
+the current branch.
+
+[`.github/workflows/e2e-published.yml`](../../.github/workflows/e2e-published.yml)
+pulls **`quay.io/stolostron/fleetshift:latest`** from Quay and runs a UI
+**sanity** only (`chromium-sanity`: container starts, Dex login, masthead and
+Clusters). It is not a re-run of the full UI suite (no Kind journey, a11y, or
+other specs); `e2e.yml` covers those on this checkout. It does **not**
+build or use the AIO from the current branch, PR, or commit. A failure does
+**not** mean the current branch is broken. It means the **active, already
+published** AIO on Quay failed basic function (will not start, or
+login/console fails). That is what users get from the README `podman run`
+command. Treat it as a live product incident and investigate immediately:
+confirm `podman run quay.io/stolostron/fleetshift:latest`, check OpenShift CI
+image mirror/republish jobs, and restore a working `:latest`.
 
 Unit/component CI (`.github/workflows/test.yml`) runs
 `npx nx test e2e-cli` and Playwright **component** tests. It does not
 run these suites.
 
 ```
-aio-image          # role: cache — build or restore the AIO tar
+aio-image          # role: cache — build or restore this-checkout AIO tar
  └── e2e-playwright # role: e2e — UI and CLI matrix, one runner each
+
+e2e-published      # role: published — pull quay:latest, UI sanity only
 ```
+
+| Workflow | Image under test | What it runs | A failure means |
+| --- | --- | --- | --- |
+| `e2e.yml` | This checkout, built by Nx | Full UI + CLI e2e (including Kind) | The current branch's AIO is broken |
+| `e2e-published.yml` | `quay.io/stolostron/fleetshift:latest` already on Quay | Sanity only: start, Dex login, console | The live published AIO failed basic function; users are affected now |
+
+`e2e-published.yml` runs on pull requests, pushes to `main`, a cron 30 minutes
+after OpenShift CI republishes `:latest` (03:00/09:00/15:00/21:00 UTC), and
+`workflow_dispatch`. On a PR the red check is still about Quay `:latest`, not
+the PR's Dockerfiles. Do not "fix" it by changing unrelated PR code; fix or
+republish the published image.
 
 The Playwright matrix entries restore the same tree-keyed tar and run in
 parallel. They do not share a running container.
 
 `setup-e2e` is the only place that should install Go, Node, or Playwright,
-load the image, start user `podman.socket`, and ensure the `kind` network.
-The `cache` role never starts FleetShift. The `e2e` role never rebuilds the
-image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`. Go is
-installed so the CLI suite can build fleetctl.
+load or pull the image, start user `podman.socket`, and ensure the `kind`
+network. The `cache` role never starts FleetShift. The `e2e` role never
+rebuilds the image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`.
+The `published` role never restores the checkout tar; it pulls the published
+tag. The test job sets `FLEETSHIFT_E2E_AIO_PULL=1` and runs Playwright
+`chromium-sanity` only (not the full UI project). Go is installed on
+`e2e` so the CLI suite can build fleetctl, not on `published`.
 
 The shared runner starts unique UI and CLI sandboxes and uploads Playwright
 artifacts through their jobs. Do not add `podman run`, log dump, or
