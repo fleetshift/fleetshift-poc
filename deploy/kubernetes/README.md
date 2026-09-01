@@ -62,7 +62,7 @@ enrollment settings, log level, resolved addon list, and optional
 **`secrets.env`** (Secret) — PostgreSQL user, password, database name, and `DATABASE_URL`.
 
 **`gcphcp.yaml`** (Secret) — rendered from the `GCPHCP_*` values via the shared
-`deploy/scripts/render-gcphcp-config.mjs`. When `GCPHCP_ENABLED=true`, only
+`deploy/scripts/render-gcphcp-config.sh`. When `GCPHCP_ENABLED=true`, only
 `GCPHCP_GATEWAY_URL` is required; the seven optional settings use renderer
 defaults when empty. The file is stored as a Kubernetes Secret rather than a
 ConfigMap. When `false`, the generated file is a disabled placeholder and the

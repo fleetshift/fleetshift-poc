@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultGCPHCPRenderer  = "/usr/local/bin/render-gcphcp-config.mjs"
+	defaultGCPHCPRenderer  = "/usr/local/bin/render-gcphcp-config.sh"
 	defaultGCPHCPConfigOut = "/data/gcphcp.yaml"
 )
 

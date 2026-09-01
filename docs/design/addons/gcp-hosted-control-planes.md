@@ -195,7 +195,7 @@ backend service. Target config is strictly infrastructure wiring: identity feder
 (`gcp_project`, `region`).
 
 Operators may supply the YAML file directly (`--gcphcp-config` / `GCPHCP_CONFIG`) or render it
-from environment variables through the shared `deploy/scripts/render-gcphcp-config.mjs` path used by
+from environment variables through the shared `deploy/scripts/render-gcphcp-config.sh` path used by
 developer deployments and the all-in-one image. Environment-driven rendering is a supported
 operator configuration path: `GCPHCP_GATEWAY_URL` is required, and the remaining target/gateway
 fields may use the approved shared POC defaults when left unset. The concrete gateway URL remains
