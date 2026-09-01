@@ -44,6 +44,16 @@ export function kindNodeBelongsToRun(hostClusterName, kindPrefix) {
   return hostClusterName.startsWith(`fs--${kindPrefix}`);
 }
 
+// Parse podman ps --format stdout, not the combined `output` diagnostics string.
+export function parseOwnedKindNodes(stdout, kindPrefix) {
+  return stdout
+    .split("\n")
+    .map((line) => line.split("\t", 2).map((part) => part.trim()))
+    .filter(
+      ([id, cluster]) => id && kindNodeBelongsToRun(cluster ?? "", kindPrefix),
+    );
+}
+
 export function usesPrebuiltImage(env) {
   return env.FLEETSHIFT_E2E_AIO_PREBUILT === "1";
 }
@@ -202,12 +212,7 @@ function ownedKindNodes(kindPrefix) {
     { allowFailure: true },
   );
   if (result.status !== 0) return [];
-  return result.output
-    .split("\n")
-    .map((line) => line.split("\t", 2).map((part) => part.trim()))
-    .filter(
-      ([id, cluster]) => id && kindNodeBelongsToRun(cluster ?? "", kindPrefix),
-    );
+  return parseOwnedKindNodes(result.stdout, kindPrefix);
 }
 
 async function createSandbox() {

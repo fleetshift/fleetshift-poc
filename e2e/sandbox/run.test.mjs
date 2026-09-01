@@ -6,6 +6,7 @@ import {
   kindNodeBelongsToRun,
   normalizeSocketPath,
   parseCommand,
+  parseOwnedKindNodes,
   sanitize,
   usesPrebuiltImage,
   usesPulledImage,
@@ -56,6 +57,30 @@ describe("kindNodeBelongsToRun", () => {
     expect(kindNodeBelongsToRun("kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
       false,
     );
+  });
+});
+
+describe("parseOwnedKindNodes", () => {
+  const prefix = "kind-e2e-abcd-";
+  const stdout = "abc123\tfs--kind-e2e-abcd-n1";
+
+  it("parses id and cluster rows that belong to this run", () => {
+    expect(parseOwnedKindNodes(stdout, prefix)).toEqual([
+      ["abc123", "fs--kind-e2e-abcd-n1"],
+    ]);
+    expect(parseOwnedKindNodes("", prefix)).toEqual([]);
+    expect(
+      parseOwnedKindNodes("deadbeef\tfs--kind-e2e-other-n1", prefix),
+    ).toEqual([]);
+  });
+
+  it("ignores diagnostic lines that are not id/cluster rows", () => {
+    expect(
+      parseOwnedKindNodes(
+        `${stdout}\ntime=".." level=warning msg="busy"`,
+        prefix,
+      ),
+    ).toEqual([["abc123", "fs--kind-e2e-abcd-n1"]]);
   });
 });
 

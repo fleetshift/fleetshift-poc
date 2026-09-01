@@ -14,7 +14,8 @@ interface HTTPSRequestOptions {
   timeoutMs?: number;
 }
 
-const BODY_LIMIT = 1024 * 1024;
+/** Maximum response body `requestHTTPS` accepts; larger responses are rejected. */
+export const BODY_LIMIT = 1024 * 1024;
 
 export async function requestHTTPS(
   url: string,
@@ -29,28 +30,37 @@ export async function requestHTTPS(
       rejectUnauthorized: true,
       timeout: options.timeoutMs ?? 15_000,
     });
-    request.once("timeout", () =>
-      request.destroy(new Error("HTTPS request timed out")),
-    );
-    request.once("error", reject);
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      request.destroy();
+      reject(error);
+    };
+    request.once("timeout", () => fail(new Error("HTTPS request timed out")));
+    request.once("error", fail);
     request.once("response", (response) => {
       const chunks: Buffer[] = [];
       let size = 0;
       response.on("data", (chunk: Buffer) => {
-        if (size >= BODY_LIMIT) return;
-        const remaining = BODY_LIMIT - size;
-        const kept =
-          chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
-        chunks.push(kept);
-        size += kept.length;
+        if (settled) return;
+        size += chunk.length;
+        if (size > BODY_LIMIT) {
+          response.destroy();
+          fail(new Error(`HTTPS response exceeded ${BODY_LIMIT} bytes`));
+          return;
+        }
+        chunks.push(chunk);
       });
-      response.once("end", () =>
+      response.once("end", () => {
+        if (settled) return;
+        settled = true;
         resolve({
           body: Buffer.concat(chunks),
           status: response.statusCode ?? 0,
-        }),
-      );
-      response.once("error", reject);
+        });
+      });
+      response.once("error", fail);
     });
     if (options.body !== undefined) request.write(options.body);
     request.end();
