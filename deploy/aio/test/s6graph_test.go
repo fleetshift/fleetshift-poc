@@ -1,4 +1,4 @@
-package aio_test
+package test
 
 import (
 	"os"
@@ -7,8 +7,16 @@ import (
 	"testing"
 )
 
-func TestS6ProxyGraph(t *testing.T) {
-	root := "."
+// TestS6ServiceGraph locks the s6-rc graph and run-script contracts under
+// deploy/aio/s6. A failure is this image's packaging, not openshift/release.
+//
+// It requires aio-proxy / aio-init / dex / fleetshift dependency files and
+// the user bundle, then checks: aio-proxy runs as 1002:1002 (not FleetShift
+// 1000); fleetshift drops to 1000, sources public.env, probes Dex with the
+// sandbox CA, bypasses HTTP_PROXY for PUBLIC_HOST, does not use curl -k,
+// and exits non-zero if discovery is not ready.
+func TestS6ServiceGraph(t *testing.T) {
+	root := findAIORoot(t)
 	for _, rel := range []string{
 		"s6/s6-rc.d/aio-proxy/type",
 		"s6/s6-rc.d/aio-proxy/run",
@@ -29,7 +37,7 @@ func TestS6ProxyGraph(t *testing.T) {
 		}
 	}
 
-	run, err := os.ReadFile("s6/s6-rc.d/aio-proxy/run")
+	run, err := os.ReadFile(filepath.Join(root, "s6/s6-rc.d/aio-proxy/run"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +52,7 @@ func TestS6ProxyGraph(t *testing.T) {
 		t.Fatalf("aio-proxy run script missing binary:\n%s", body)
 	}
 
-	fsRun, err := os.ReadFile("s6/s6-rc.d/fleetshift/run")
+	fsRun, err := os.ReadFile(filepath.Join(root, "s6/s6-rc.d/fleetshift/run"))
 	if err != nil {
 		t.Fatal(err)
 	}

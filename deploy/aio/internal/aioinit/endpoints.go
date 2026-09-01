@@ -25,6 +25,7 @@ const (
 	PublicEnvPath = "/run/fleetshift/public.env"
 )
 
+// publicOrigin is the browser-facing https URL for PublicHost:gatewayPort.
 func publicOrigin() string {
 	return "https://" + net.JoinHostPort(PublicHost, gatewayPort)
 }

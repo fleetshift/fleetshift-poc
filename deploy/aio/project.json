@@ -36,7 +36,8 @@
       "inputs": [
         "{projectRoot}/**/*.go",
         "{projectRoot}/go.mod",
-        "{projectRoot}/go.sum"
+        "{projectRoot}/go.sum",
+        "{workspaceRoot}/Dockerfile.fleetshift"
       ]
     }
   }

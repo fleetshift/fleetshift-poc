@@ -9,7 +9,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
 )
 
-func TestApplyServeDefaultsAndArgs(t *testing.T) {
+// TestServeArgs_PeerDexDefaultsForbidSandboxFlags checks Dex-on packaging
+// argv (issuer, audience, UI client, registry, CA) and that serve is not
+// given --sandbox or --bootstrap-auth-method.
+func TestServeArgs_PeerDexDefaultsForbidSandboxFlags(t *testing.T) {
 	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
 		Endpoints: aioinit.FixedEndpoints,
 		Issuer:    aioinit.PeerDexIssuer,
