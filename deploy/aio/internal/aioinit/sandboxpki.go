@@ -265,7 +265,7 @@ func parseCA(certPEM, keyPEM []byte) (*x509.Certificate, *ecdsa.PrivateKey, erro
 	return cert, key, nil
 }
 
-// ecdsaKeyMatchesCert reports whether keyPEM is an EC private key for cert.
+// ecdsaKeyMatchesCert returns nil when keyPEM is the EC private key for cert.
 func ecdsaKeyMatchesCert(keyPEM []byte, cert *x509.Certificate) error {
 	kb, _ := pem.Decode(keyPEM)
 	if kb == nil {
@@ -278,7 +278,7 @@ func ecdsaKeyMatchesCert(keyPEM []byte, cert *x509.Certificate) error {
 	return ecdsaPublicKeysEqual(&key.PublicKey, cert.PublicKey)
 }
 
-// ecdsaPublicKeysEqual reports whether pub matches want (cert public key).
+// ecdsaPublicKeysEqual returns nil when pub equals want (the cert public key).
 func ecdsaPublicKeysEqual(pub *ecdsa.PublicKey, want any) error {
 	certPub, ok := want.(*ecdsa.PublicKey)
 	if !ok {

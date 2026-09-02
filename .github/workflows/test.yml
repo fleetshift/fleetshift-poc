@@ -29,9 +29,6 @@ jobs:
             go-mod: cli
           - project: deploy-aio
             go-mod: deploy/aio
-            # These are e2e backend unit tests only
-          - project: e2e-backend
-            go-mod: e2e/backend
 
     steps:
       - name: Checkout
@@ -88,6 +85,9 @@ jobs:
 
       - name: Unit tests (vitest)
         run: npx nx run common:test
+
+      - name: Unit tests for e2e-cli (vitest)
+        run: npx nx run e2e-cli:test
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

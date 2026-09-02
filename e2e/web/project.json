@@ -7,10 +7,12 @@
   "targets": {
     "test:e2e": {
       "executor": "nx:run-commands",
+      "parallelism": false,
       "options": {
-        "command": "playwright test",
+        "command": "node ../sandbox/run.mjs -- playwright test",
         "cwd": "e2e/web"
-      }
+      },
+      "cache": false
     }
   }
 }

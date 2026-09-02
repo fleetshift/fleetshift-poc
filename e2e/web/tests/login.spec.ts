@@ -1,5 +1,5 @@
+import { DEVELOPER, OPERATOR } from "../../shared/personas";
 import { expect, test } from "./fixtures";
-import { DEVELOPER, OPERATOR } from "./helpers/personas";
 
 // OME-257: prove the packaged image reaches a working, logged-in console for
 // both sandbox personas. The real authorization-code + PKCE login through the

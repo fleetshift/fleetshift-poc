@@ -183,7 +183,8 @@ func parsePublicOrigin(raw string) (origin, host string, err error) {
 	return u.Scheme + "://" + u.Host, u.Host, nil
 }
 
-// checkUpstream reports whether u is an http(s) URL with a host and no userinfo.
+// checkUpstream returns an error unless u is a non-nil http(s) URL with a
+// host and no userinfo.
 func checkUpstream(name string, u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("%s upstream is required", name)

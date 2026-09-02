@@ -1,0 +1,44 @@
+{
+  "name": "e2e-cli",
+  "root": "e2e/cli",
+  "sourceRoot": "e2e/cli/tests",
+  "projectType": "library",
+  "tags": ["scope:cli", "scope:e2e", "type:e2e"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run --config vitest.config.ts",
+        "cwd": "e2e/cli"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.ts",
+        "{workspaceRoot}/e2e/shared/**/*.ts",
+        "{workspaceRoot}/e2e/sandbox/**/*.mjs",
+        "{projectRoot}/vitest.config.ts"
+      ]
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint \"e2e/cli/**/*.ts\" \"e2e/shared/**/*.ts\" \"e2e/sandbox/**/*.mjs\""
+      },
+      "inputs": [
+        "{projectRoot}/**/*.ts",
+        "{workspaceRoot}/e2e/shared/**/*.ts",
+        "{workspaceRoot}/e2e/sandbox/**/*.mjs",
+        "{workspaceRoot}/eslint.config.mjs"
+      ]
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "options": {
+        "command": "node ../sandbox/run.mjs -- playwright test",
+        "cwd": "e2e/cli"
+      },
+      "dependsOn": ["cli:build"],
+      "cache": false
+    }
+  }
+}

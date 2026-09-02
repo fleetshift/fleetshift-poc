@@ -9,7 +9,8 @@ on:
 jobs:
   # Single cache writer. Test jobs restore the same multi-image tar and do
   # not race this key. Kind host setup (user podman.socket, kind network) lives
-  # in setup-e2e for e2e-ui and e2e-backend. They do not share a container.
+  # in setup-e2e for the Playwright matrix. Matrix entries do not share a
+  # container.
   aio-image:
     name: AIO image
     runs-on: ubuntu-latest
@@ -26,126 +27,30 @@ jobs:
         with:
           role: cache
 
-  e2e-ui:
-    name: E2E (UI)
-    needs: [aio-image]
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up E2E
-        uses: ./.github/actions/setup-e2e
-        with:
-          role: e2e
-
-      # Run the single AIO container (API + baked-in UI + peer Dex sandbox).
-      # Dex-on (ops@/dev@) is the image default when OIDC_ISSUER_URL is unset.
-      # Only 8085 is published: the browser reaches Dex under /idp through the
-      # HTTPS edge. Dex 5556 and FleetShift HTTP 8086 stay unpublished.
-      # PODMAN_SOCKET comes from setup-e2e (user podman.socket).
-      - name: Run sandbox
-        run: |
-          : "${PODMAN_SOCKET:?PODMAN_SOCKET is not set; setup-e2e should have started user podman.socket}"
-          podman run -d --pull=never --name fleetshift \
-            --privileged \
-            --network kind:alias=fleetshift \
-            -p 127.0.0.1:8085:8085 \
-            -v "${PODMAN_SOCKET}:/var/run/docker.sock" \
-            -v /tmp:/tmp \
-            quay.io/stolostron/fleetshift:latest
-
-      - name: Wait for sandbox to be ready
-        run: |
-          set -euo pipefail
-          origin="https://fleetshift-sandbox.localhost:8085"
-          # Pin AAAA-capable .localhost names to the IPv4 publish.
-          resolve=(--resolve fleetshift-sandbox.localhost:8085:127.0.0.1)
-          echo "Waiting for HTTPS origin to be ready..."
-          # aio-proxy Host-allowlists fleetshift-sandbox.localhost (421 otherwise).
-          # -k is readiness-only; Playwright uses ignoreHTTPSErrors for the private CA.
-          ready=0
-          for _ in $(seq 1 60); do
-            if ! podman inspect -f '{{.State.Running}}' fleetshift 2>/dev/null | grep -qx true; then
-              echo "fleetshift container is not running; see 'Dump server logs on failure'" >&2
-              exit 1
-            fi
-            if curl -skfS --connect-timeout 2 --max-time 5 "${resolve[@]}" "${origin}/readyz"; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ready" -ne 1 ]; then
-            echo "sandbox did not become ready at ${origin}/readyz; see 'Dump server logs on failure'" >&2
-            exit 1
-          fi
-          if podman port fleetshift | grep -q 5556; then
-            echo "Dex port 5556 must not be published" >&2
-            podman port fleetshift
-            exit 1
-          fi
-          echo "BASE_URL=${origin}" >> "$GITHUB_ENV"
-
-      # Prove the in-container kind engine path works before the slow lifecycle
-      # test spends 5 minutes polling. This is the exact command the kind addon
-      # shells out to; if it errors here we see podman's real stderr in seconds
-      # instead of an opaque "exit status 125" from the server log.
-      - name: Smoke-test in-container kind engine access
-        run: |
-          podman exec fleetshift sh -lc '
-            echo "CONTAINER_HOST=$CONTAINER_HOST"
-            ls -l /var/run/docker.sock
-            kind version
-            podman info --format "{{.Host.RemoteSocket.Path}} exists={{.Host.RemoteSocket.Exists}}"
-            podman ps -a --filter label=io.x-k8s.kind.cluster
-          '
-
-      - name: Run e2e tests
-        run: npx nx test:e2e e2e-web -- --project=chromium
-
-      - name: Upload test results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-test-results
-          path: |
-            e2e/web/test-results/
-            e2e/web/playwright-report/
-          retention-days: 7
-
-      - name: Dump server logs on failure
-        if: failure()
-        run: |
-          echo "===== user podman.socket ====="
-          systemctl --user status podman.socket || true
-          echo "===== podman inspect ====="
-          podman inspect --format 'running={{.State.Running}} status={{.State.Status}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}} error={{.State.Error}}' fleetshift || true
-          echo "===== fleetshift container log ====="
-          podman logs fleetshift || true
-
-      - name: Cleanup FleetShift
-        if: always()
-        run: podman rm -f fleetshift || true
-
-  e2e-backend:
-    name: E2E (backend)
+  e2e-playwright:
+    name: E2E (${{ matrix.name }})
     needs: [aio-image]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
 
-    # Unlike e2e-ui, this job does not start, smoke, dump, or tear down an AIO.
-    # TestMain / harness.Start runs the container, uid-1000 kind-engine smoke,
-    # and Stop(true) dumps logs then removes the AIO and leftover suite Kind
-    # nodes. Do not add those as workflow steps: a second AIO fights over
-    # 8085/50051 and alias=fleetshift, a dump after Stop sees an empty host,
-    # and prefix-wide Kind cleanup can delete another suite's nodes.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: UI
+            project: e2e-web
+            arguments: "-- --project=chromium"
+            artifact_name: e2e-test-results
+            artifact_paths: |
+              e2e/web/test-results/
+              e2e/web/playwright-report/
+          - name: CLI
+            project: e2e-cli
+            arguments: ""
+            artifact_name: e2e-cli-test-results
+            artifact_paths: e2e/cli/test-results/
 
     steps:
       - name: Checkout
@@ -156,18 +61,17 @@ jobs:
         with:
           role: e2e
 
-      - name: Run backend e2e tests
+      - name: Run ${{ matrix.name }} e2e tests
         env:
-          GOTESTSUM_FORMAT: github-actions
-          NX_DAEMON: "false"
           FLEETSHIFT_E2E_AIO_PREBUILT: "1"
-        run: npx nx test:e2e e2e-backend
+          NX_DAEMON: "false"
+        run: npx nx test:e2e ${{ matrix.project }} ${{ matrix.arguments }}
 
       - name: Upload test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-backend-test-results
-          path: e2e/backend/tmp/
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
           if-no-files-found: warn
           retention-days: 7

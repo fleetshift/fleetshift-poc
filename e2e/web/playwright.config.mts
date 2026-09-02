@@ -5,7 +5,6 @@ const baseURL =
 
 export default defineConfig({
   testDir: './tests',
-  testIgnore: /complete-cli-login\.spec\.ts/,
   outputDir: './test-results',
   // 'list' streams a line per test so CI shows live progress. The CI default
   // ('dot') emits newline-less dots that GitHub Actions buffers until the step
@@ -36,6 +35,15 @@ export default defineConfig({
     {
       name: "chromium",
       // Default persona; specs select another via test.use({ storageState }).
+      use: { ...devices["Desktop Chrome"], storageState: '.auth/ops.json', },
+      dependencies: ['setup'],
+    },
+    // Published AIO sanity (start, Dex login, masthead/Clusters). Not the
+    // full UI suite. e2e-published.yml uses this project so a file filter
+    // cannot skip setup (Playwright applies CLI paths to dependencies).
+    {
+      name: "chromium-sanity",
+      testMatch: /login\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], storageState: '.auth/ops.json', },
       dependencies: ['setup'],
     },
