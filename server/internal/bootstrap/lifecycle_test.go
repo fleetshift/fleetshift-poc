@@ -912,3 +912,40 @@ func (r *trackingRegistry) RegisterResumeManagedResource(spec *domain.ResumeMana
 	r.note()
 	return r.inner.RegisterResumeManagedResource(spec)
 }
+
+func TestLifecycle_CloseCallsAddonHookAfterAppCancel(t *testing.T) {
+	// Verify that Close invokes addon Close hooks only after appCtx has been
+	// cancelled. This is the structural guarantee: appCancel() fires before any
+	// hook runs, so addons can rely on observing context cancellation.
+
+	var hookCalled, appCtxWasCancelled bool
+	srv := startTestServer(t,
+		WithAddonAssembly(func(ctx context.Context, deps AddonDeps) ([]AddonSpec, error) {
+			// Capture the app context and return a spec with a Close hook that
+			// checks whether it was cancelled when invoked.
+			appCtx := deps.AppCtx
+			return []AddonSpec{{
+				Descriptor: domain.AddonDescriptor{ID: "order-test", Name: "order-test"},
+				Connect:    application.ConnectInput{},
+				Close: func(ctx context.Context) error {
+					hookCalled = true
+					appCtxWasCancelled = appCtx.Err() != nil
+					return nil
+				},
+			}}, nil
+		}),
+	)
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Close(closeCtx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if !hookCalled {
+		t.Fatal("addon Close hook was never called")
+	}
+	if !appCtxWasCancelled {
+		t.Fatal("addon Close hook observed appCtx not cancelled; Close should call appCancel() before invoking hooks")
+	}
+}
