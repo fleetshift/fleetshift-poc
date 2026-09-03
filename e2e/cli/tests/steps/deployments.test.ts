@@ -5,6 +5,7 @@ import {
   deploymentTerminalFailure,
   parseDeployment,
   parseDeploymentList,
+  placementArgs,
 } from "./deployments";
 
 describe("deploymentTerminalFailure", () => {
@@ -60,7 +61,11 @@ describe("deployment JSON parsing", () => {
     expect(
       parseDeploymentList('[{"name":"deployments/a","state":"STATE_ACTIVE"}]'),
     ).toEqual([
-      { name: "deployments/a", pauseReason: "", state: "STATE_ACTIVE" },
+      {
+        name: "deployments/a",
+        pauseReason: "",
+        state: "STATE_ACTIVE",
+      },
     ]);
   });
 
@@ -68,5 +73,20 @@ describe("deployment JSON parsing", () => {
     expect(() => parseDeployment("[")).toThrow(/invalid JSON/);
     expect(() => parseDeploymentList("{")).toThrow(/invalid JSON/);
     expect(() => parseDeploymentList("{}")).toThrow(/invalid JSON/);
+  });
+});
+
+describe("placementArgs", () => {
+  it("prefixes static targets as kubernetes delivery IDs", () => {
+    expect(placementArgs(["a", "b"])).toEqual([
+      "--placement-type",
+      "static",
+      "--target-ids",
+      "k8s-a,k8s-b",
+    ]);
+  });
+
+  it("rejects static placement without targets", () => {
+    expect(() => placementArgs([])).toThrow(/target IDs/);
   });
 });

@@ -11,6 +11,7 @@ import {
   type KindClusterRequest,
   pooledKindClusterIdPrefix,
 } from "./kind-pool";
+import { type KindClusterCreateSpec } from "./kind-spec";
 
 const READ_ONLY_ANY: KindClusterRequest = {
   access: "read-only",
@@ -22,6 +23,19 @@ const READ_ONLY_CLEAN: KindClusterRequest = {
 };
 const MODIFIABLE_ANY: KindClusterRequest = {
   access: "modifiable",
+  state: "any",
+};
+const MULTI_NODE: KindClusterCreateSpec = {
+  nodes: [{ role: "control-plane" }, { role: "worker" }],
+};
+const READ_ONLY_MULTI_NODE: KindClusterRequest = {
+  access: "read-only",
+  spec: MULTI_NODE,
+  state: "any",
+};
+const READ_ONLY_DEFAULT_SPEC: KindClusterRequest = {
+  access: "read-only",
+  spec: {},
   state: "any",
 };
 
@@ -143,6 +157,35 @@ describe("KindClusterPool lifecycle", () => {
     );
   });
 
+  it("reuses a specialized cluster for the same spec and for omitted spec", async () => {
+    const clusters = pool(await tempDir());
+    const created = await clusters.reserve([READ_ONLY_MULTI_NODE]);
+    expect(created.allocations[0]?.needsProvisioning).toBe(true);
+    await clusters.activate(created);
+    await clusters.release(created, "reusable");
+
+    const sameSpec = await clusters.reserve([READ_ONLY_MULTI_NODE]);
+    expect(sameSpec.allocations[0]).toEqual({
+      cluster: created.allocations[0]?.cluster,
+      needsProvisioning: false,
+      request: READ_ONLY_MULTI_NODE,
+    });
+    await clusters.release(sameSpec, "reusable");
+
+    const unconstrained = await clusters.reserve([READ_ONLY_ANY]);
+    expect(unconstrained.allocations[0]?.cluster).toEqual(
+      created.allocations[0]?.cluster,
+    );
+    expect(unconstrained.allocations[0]?.needsProvisioning).toBe(false);
+    await clusters.release(unconstrained, "reusable");
+
+    const pinnedDefault = await clusters.reserve([READ_ONLY_DEFAULT_SPEC]);
+    expect(pinnedDefault.allocations[0]?.needsProvisioning).toBe(true);
+    expect(pinnedDefault.allocations[0]?.cluster.id).not.toBe(
+      created.allocations[0]?.cluster.id,
+    );
+  });
+
   it("ignores empty reservations and does not publish clusters", async () => {
     const clusters = pool(await tempDir());
     const empty = await clusters.reserve([]);
@@ -168,6 +211,10 @@ describe("KindClusterPool lifecycle", () => {
       name: "non-string leaseId",
       body: '{"records":[{"id":"c","condition":"clean","leaseId":1}]}',
     },
+    {
+      name: "invalid spec",
+      body: '{"records":[{"id":"c","condition":"clean","spec":{"nodes":[{"role":"ingress"}]}}]}',
+    },
   ])("fails clearly when pool state is malformed ($name)", async ({ body }) => {
     const directory = await tempDir();
     await mkdir(directory, { mode: 0o700, recursive: true });
@@ -177,6 +224,24 @@ describe("KindClusterPool lifecycle", () => {
     await expect(pool(directory).reserve([READ_ONLY_ANY])).rejects.toThrow(
       /malformed/,
     );
+  });
+
+  it("treats a missing spec field on disk as default", async () => {
+    const directory = await tempDir();
+    await mkdir(directory, { mode: 0o700, recursive: true });
+    await writeFile(
+      path.join(directory, "state.json"),
+      JSON.stringify({
+        records: [{ condition: "clean", id: "kind-e2e-test-pool-legacy" }],
+      }),
+      { mode: 0o600 },
+    );
+    const reused = await pool(directory).reserve([READ_ONLY_DEFAULT_SPEC]);
+    expect(reused.allocations[0]).toEqual({
+      cluster: { id: "kind-e2e-test-pool-legacy" },
+      needsProvisioning: false,
+      request: READ_ONLY_DEFAULT_SPEC,
+    });
   });
 
   it("releases the allocation lock after a failed action", async () => {

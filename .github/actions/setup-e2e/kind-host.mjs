@@ -3,6 +3,8 @@
 import { appendFile } from "node:fs/promises";
 import { $, sleep } from "zx";
 
+import { ensureCiKeyringLimits } from "../../../e2e/sandbox/keyring-host.mjs";
+
 $.verbose = true;
 
 const uid = (await $`id -u`).stdout.trim();
@@ -60,6 +62,16 @@ if (!ready) {
 
 if (!(await $`podman network exists kind`.nothrow()).ok) {
   await $`podman network create kind`;
+}
+
+try {
+  ensureCiKeyringLimits({
+    error: (message) => console.error(message),
+    log: (message) => console.log(message),
+  });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
 }
 
 if (process.env.GITHUB_ENV) {

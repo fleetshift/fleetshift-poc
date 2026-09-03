@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { expect } from "@playwright/test";
 
+import { type Persona } from "../../../shared/personas";
+import { isUnauthenticated } from "../support/command";
 import { type FleetctlClient } from "../support/fleetctl";
 import { type Sandbox } from "../support/sandbox";
 
@@ -53,15 +55,44 @@ export class LoginSteps {
     await this.#client.succeed(["deployment", "list"], { configDir });
   }
 
+  async logout(configDir: string): Promise<void> {
+    await this.#client.succeed(["auth", "logout"], { configDir });
+  }
+
+  async relogin(persona: Persona, configDir: string): Promise<void> {
+    await this.#client.login(persona, configDir);
+  }
+
+  async credentialsCleared(configDir: string): Promise<void> {
+    await stat(path.join(configDir, "auth.json"));
+    await expect(
+      stat(path.join(configDir, "credentials.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  }
+
+  async inspectTokenRejected(configDir: string): Promise<void> {
+    const result = await this.#client.run(["auth", "inspect-token"], {
+      configDir,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stderr}\n${result.stdout}`.toLowerCase()).toMatch(
+      /load tokens|auth login/,
+    );
+  }
+
+  async listDeploymentsUnauthenticated(configDir: string): Promise<void> {
+    const result = await this.#client.run(["deployment", "list"], {
+      configDir,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(isUnauthenticated(`${result.stderr}\n${result.stdout}`)).toBe(true);
+  }
+
   async credentialsAreIsolated(): Promise<void> {
     await stat(path.join(this.#client.configDir, "credentials.json"));
     const empty = await mkdtemp(
       path.join(this.#sandbox.workDir, "empty-config-"),
     );
-    const result = await this.#client.run(["deployment", "list"], {
-      configDir: empty,
-    });
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toLowerCase()).toContain("unauthenticated");
+    await this.listDeploymentsUnauthenticated(empty);
   }
 }

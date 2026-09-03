@@ -2,6 +2,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  indexedConfigMapFilter,
+  kindClusterIdentityFilter,
+  kindNodeInClusterFilter,
   kubernetesObjectInCluster,
   kubernetesObjectKindFilter,
   kubernetesObjectsInClusterFilter,
@@ -16,6 +19,22 @@ describe("resource query scoping", () => {
     );
     expect(kubernetesObjectKindFilter("a", "Node")).toContain(
       'resource.observation.kind == "Node"',
+    );
+  });
+
+  it("builds exact ConfigMap, Kind Cluster, and Kind Node filters", () => {
+    expect(indexedConfigMapFilter("a", "ns-1")).toContain(
+      'resource.observation.metadata.namespace == "ns-1"',
+    );
+    expect(indexedConfigMapFilter("a", "ns-1", "custom")).toContain(
+      'resource.observation.metadata.name == "custom"',
+    );
+    expect(kindClusterIdentityFilter("kind-e2e")).toContain(
+      'resource.name == "clusters/kind-e2e"',
+    );
+    expect(kindClusterIdentityFilter("kind-e2e")).not.toContain("ACTIVE");
+    expect(kindNodeInClusterFilter("kind-e2e")).toContain(
+      'resource.observation.cluster == "clusters/kind-e2e"',
     );
   });
 

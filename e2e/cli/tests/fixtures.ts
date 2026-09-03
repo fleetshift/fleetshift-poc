@@ -14,6 +14,7 @@ import { GatewaySteps } from "./steps/gateway";
 import { KindSteps } from "./steps/kind";
 import { LoginSteps } from "./steps/login";
 import { QuerySteps } from "./steps/query";
+import { ResourceDiscoverySteps } from "./steps/resources";
 import { CleanupStack } from "./support/cleanup";
 import { FleetctlClient } from "./support/fleetctl";
 import {
@@ -39,7 +40,7 @@ interface Suite {
   sandbox: Sandbox;
 }
 
-interface KindResources {
+interface KindClusterLease {
   cleanup: CleanupStack;
   clusters: readonly KindCluster[];
 }
@@ -51,12 +52,13 @@ interface Cli {
   login: LoginSteps;
   loginAs: (persona: Persona) => Promise<string>;
   query: QuerySteps;
+  resources: ResourceDiscoverySteps;
 }
 
 type TestArgs = {
   cli: Cli;
   kindClusters: readonly KindCluster[];
-  kindResources: KindResources;
+  kindClusterLease: KindClusterLease;
 };
 
 type KindClusterTestBody = (
@@ -118,7 +120,7 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
     { scope: "worker", timeout: 25 * 60_000 },
   ],
 
-  kindResources: [
+  kindClusterLease: [
     async ({ suite }, use, testInfo) => {
       const requests = readKindClusterRequests(testInfo.annotations);
       const cleanup = new CleanupStack();
@@ -130,8 +132,8 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
           (allocation) => allocation.needsProvisioning,
         );
         await Promise.all(
-          pending.map(async ({ cluster }) => {
-            await suite.kind.create(cluster.id);
+          pending.map(async ({ cluster, request }) => {
+            await suite.kind.create(cluster.id, request.spec ?? {});
             await suite.kind.waitUntilReady(cluster.id);
             await suite.kind.waitUntilAPIAcceptsToken(cluster.id);
           }),
@@ -172,25 +174,30 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
       }
       if (testError) throw testError;
     },
-    { auto: true, timeout: 15 * 60_000 },
+    { auto: true, timeout: 25 * 60_000 },
   ],
 
-  kindClusters: async ({ kindResources }, use) => {
-    await use(kindResources.clusters);
+  kindClusters: async ({ kindClusterLease }, use) => {
+    await use(kindClusterLease.clusters);
   },
 
-  cli: async ({ suite, kindResources }, use) => {
+  cli: async ({ suite, kindClusterLease }, use) => {
     await use({
       deployments: new DeploymentSteps(
         suite.fleetctl,
         suite.sandbox,
-        kindResources.cleanup,
+        kindClusterLease.cleanup,
       ),
       gateway: suite.gateway,
-      kind: new KindSteps(suite.fleetctl, suite.sandbox, kindResources.cleanup),
+      kind: new KindSteps(
+        suite.fleetctl,
+        suite.sandbox,
+        kindClusterLease.cleanup,
+      ),
       login: suite.login,
       loginAs: suite.loginAs,
       query: suite.query,
+      resources: new ResourceDiscoverySteps(suite.fleetctl),
     });
   },
 });

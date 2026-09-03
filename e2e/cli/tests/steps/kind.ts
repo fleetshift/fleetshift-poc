@@ -14,22 +14,35 @@ import {
   kindAPIRequest,
   kindNodeIDs,
   kubectlOnKind,
+  pauseKindNodes,
+  unpauseKindNodes,
 } from "../support/kind-host";
 import { isPooledKindClusterId } from "../support/kind-pool";
+import { type KindClusterCreateSpec } from "../support/kind-spec";
 import { type Sandbox } from "../support/sandbox";
 import { CONFIG_MAP_DATA, CONFIG_MAP_NAME } from "./deployments";
 
 export const KIND_CLUSTER_TYPE = "kind.fleetshift.v1/clusters";
-const CLUSTER_WAIT_TIMEOUT_MS = 10 * 60_000;
+const CLUSTER_WAIT_TIMEOUT_MS = 5 * 60_000;
 const OBJECT_WAIT_TIMEOUT_MS = 2 * 60_000;
-const OIDC_WAIT_TIMEOUT_MS = 2 * 60_000;
+const KIND_API_WAIT_TIMEOUT_MS = 2 * 60_000;
 const POLL_INTERVAL_MS = 2_000;
 const NAMESPACE_PATH = "/api/v1/namespaces";
+const CONTROL_PLANE_ROLE_LABELS = new Set([
+  "node-role.kubernetes.io/control-plane",
+  "node-role.kubernetes.io/master",
+]);
+
+export interface KubernetesNode {
+  name: string;
+  role: "control-plane" | "worker";
+}
 
 interface ClusterView {
   conditions: Record<string, { status?: string }>;
   name: string;
   pauseReason: string;
+  spec: Record<string, unknown>;
   state: string;
 }
 
@@ -44,6 +57,7 @@ function clusterView(
     conditions: value?.conditions ?? {},
     name: value?.name ?? "",
     pauseReason: value?.pauseReason ?? "",
+    spec: value?.spec ?? {},
     state: value?.state ?? "",
   };
 }
@@ -68,8 +82,42 @@ export function parseConfigMapData(raw: string): Record<string, string> {
   return value?.data ?? {};
 }
 
+export function kubernetesNodeRole(
+  labels: Record<string, string> | null | undefined,
+): KubernetesNode["role"] {
+  const keys = Object.keys(labels ?? {});
+  if (keys.some((key) => CONTROL_PLANE_ROLE_LABELS.has(key))) {
+    return "control-plane";
+  }
+  return "worker";
+}
+
+export function parseKubernetesNodes(raw: string): KubernetesNode[] {
+  const value = parseJSON<{
+    items?: Array<{
+      metadata?: { labels?: Record<string, string>; name?: string };
+    } | null>;
+  } | null>(raw);
+  const items = Array.isArray(value?.items) ? value.items : [];
+  return items.flatMap((item) => {
+    const name = item?.metadata?.name ?? "";
+    if (!name) return [];
+    return [{ name, role: kubernetesNodeRole(item?.metadata?.labels) }];
+  });
+}
+
 export function uniqueKindClusterId(): string {
   return uniqueKindClusterIdFromEnv();
+}
+
+function kubectlMissing(result: {
+  exitCode: number;
+  stderr: string;
+  stdout: string;
+}): boolean {
+  return (
+    result.exitCode !== 0 && isNotFound(`${result.stdout}${result.stderr}`)
+  );
 }
 
 export class KindSteps {
@@ -87,11 +135,13 @@ export class KindSteps {
     this.#cleanup = cleanup;
   }
 
-  async create(id: string): Promise<void> {
+  async create(id: string, spec: KindClusterCreateSpec = {}): Promise<void> {
     const dir = path.join(this.#sandbox.workDir, `kind-spec-${randomUUID()}`);
     await mkdir(dir, { mode: 0o700 });
     const specFile = path.join(dir, "spec.json");
-    await writeFile(specFile, JSON.stringify({ name: id }), { mode: 0o600 });
+    await writeFile(specFile, JSON.stringify({ name: id, ...spec }), {
+      mode: 0o600,
+    });
     this.#cleanup?.add(() => this.#deleteBestEffort(id));
     const result = await this.#client.succeed([
       "resource",
@@ -155,12 +205,15 @@ export class KindSteps {
           const response = await this.#kindAPI(id, "GET", NAMESPACE_PATH);
           return response.status;
         },
-        { intervals: [POLL_INTERVAL_MS], timeout: OIDC_WAIT_TIMEOUT_MS },
+        { intervals: [POLL_INTERVAL_MS], timeout: KIND_API_WAIT_TIMEOUT_MS },
       )
       .toBe(200);
   }
 
-  async createNamespaceViaOIDC(id: string, namespace: string): Promise<void> {
+  async createNamespaceViaKindAPI(
+    id: string,
+    namespace: string,
+  ): Promise<void> {
     await expect
       .poll(
         async () => {
@@ -173,12 +226,12 @@ export class KindSteps {
           });
           return [201, 409].includes(response.status);
         },
-        { intervals: [POLL_INTERVAL_MS], timeout: OIDC_WAIT_TIMEOUT_MS },
+        { intervals: [POLL_INTERVAL_MS], timeout: KIND_API_WAIT_TIMEOUT_MS },
       )
       .toBe(true);
   }
 
-  async waitUntilNamespaceExistsViaOIDC(
+  async waitUntilNamespaceExistsViaKindAPI(
     id: string,
     namespace: string,
   ): Promise<void> {
@@ -192,7 +245,7 @@ export class KindSteps {
           );
           return response.status;
         },
-        { intervals: [POLL_INTERVAL_MS], timeout: OIDC_WAIT_TIMEOUT_MS },
+        { intervals: [POLL_INTERVAL_MS], timeout: KIND_API_WAIT_TIMEOUT_MS },
       )
       .toBe(200);
   }
@@ -209,7 +262,7 @@ export class KindSteps {
         {
           intervals: [POLL_INTERVAL_MS],
           message: `Kind API forbidden for ${id}`,
-          timeout: OIDC_WAIT_TIMEOUT_MS,
+          timeout: KIND_API_WAIT_TIMEOUT_MS,
         },
       )
       .toBe(403);
@@ -265,23 +318,44 @@ export class KindSteps {
       .toMatchObject({ cluster: id, data: CONFIG_MAP_DATA });
   }
 
+  async expectConfigMapAbsent(
+    id: string,
+    namespace: string,
+    name: string,
+  ): Promise<void> {
+    const result = await kubectlOnKind(hostKindClusterName(id), [
+      "get",
+      "configmap",
+      name,
+      "-n",
+      namespace,
+    ]);
+    expect(
+      kubectlMissing(result),
+      `ConfigMap ${name} in ${namespace} on ${id} should be absent`,
+    ).toBe(true);
+  }
+
   async waitUntilNamespaceGone(id: string, namespace: string): Promise<void> {
     await this.#waitUntilObjectGone(id, ["get", "namespace", namespace]);
   }
 
-  async waitUntilConfigMapGone(id: string, namespace: string): Promise<void> {
-    await this.#waitUntilObjectGone(id, [
-      "get",
-      "configmap",
-      CONFIG_MAP_NAME,
-      "-n",
-      namespace,
-    ]);
+  async waitUntilConfigMapGone(
+    id: string,
+    namespace: string,
+    timeoutMs = OBJECT_WAIT_TIMEOUT_MS,
+  ): Promise<void> {
+    await this.#waitUntilObjectGone(
+      id,
+      ["get", "configmap", CONFIG_MAP_NAME, "-n", namespace],
+      timeoutMs,
+    );
   }
 
   async #waitUntilObjectGone(
     id: string,
     args: readonly string[],
+    timeoutMs = OBJECT_WAIT_TIMEOUT_MS,
   ): Promise<void> {
     await expect
       .poll(
@@ -289,18 +363,78 @@ export class KindSteps {
           const result = await kubectlOnKind(hostKindClusterName(id), args);
           return {
             cluster: id,
-            gone:
-              result.exitCode !== 0 &&
-              `${result.stdout}${result.stderr}`.includes("NotFound"),
+            gone: kubectlMissing(result),
           };
         },
         {
           intervals: [POLL_INTERVAL_MS],
           message: `${args.join(" ")} gone on ${id}`,
-          timeout: OBJECT_WAIT_TIMEOUT_MS,
+          timeout: timeoutMs,
         },
       )
       .toEqual({ cluster: id, gone: true });
+  }
+
+  async expectSpec(id: string, spec: KindClusterCreateSpec): Promise<void> {
+    const get = await this.#client.succeed([
+      "resource",
+      "get",
+      KIND_CLUSTER_TYPE,
+      id,
+    ]);
+    expect(parseCluster(get.stdout).spec).toMatchObject({ ...spec });
+    const list = await this.#client.succeed([
+      "resource",
+      "list",
+      KIND_CLUSTER_TYPE,
+    ]);
+    const listed = parseClusterList(list.stdout).find(
+      (cluster) => cluster.name === clusterResourceName(id),
+    );
+    expect(listed?.spec).toMatchObject({ ...spec });
+  }
+
+  async waitUntilNodeRoles(
+    id: string,
+    expected: { controlPlane: number; worker: number },
+  ): Promise<KubernetesNode[]> {
+    let nodes: KubernetesNode[] = [];
+    await expect
+      .poll(
+        async () => {
+          const result = await kubectlOnKind(hostKindClusterName(id), [
+            "get",
+            "nodes",
+            "-o",
+            "json",
+          ]);
+          if (result.exitCode !== 0) {
+            return { controlPlane: 0, worker: 0 };
+          }
+          nodes = parseKubernetesNodes(result.stdout);
+          return {
+            controlPlane: nodes.filter((node) => node.role === "control-plane")
+              .length,
+            worker: nodes.filter((node) => node.role === "worker").length,
+          };
+        },
+        {
+          intervals: [POLL_INTERVAL_MS],
+          message: `Kubernetes node roles on ${id}`,
+          timeout: CLUSTER_WAIT_TIMEOUT_MS,
+        },
+      )
+      .toEqual(expected);
+    return nodes;
+  }
+
+  async pauseHostCluster(id: string): Promise<void> {
+    this.#cleanup?.add(() => this.unpauseHostCluster(id));
+    await pauseKindNodes(hostKindClusterName(id));
+  }
+
+  async unpauseHostCluster(id: string): Promise<void> {
+    await unpauseKindNodes(hostKindClusterName(id));
   }
 
   async delete(id: string): Promise<void> {

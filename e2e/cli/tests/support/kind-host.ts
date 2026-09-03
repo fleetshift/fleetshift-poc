@@ -64,6 +64,33 @@ export async function kindNodeIDs(hostName: string): Promise<string[]> {
   return containerIDs(["--filter", `label=${KIND_CLUSTER_LABEL}=${hostName}`]);
 }
 
+export function isAlreadyUnpaused(stderr: string): boolean {
+  return stderr.toLowerCase().includes("not paused");
+}
+
+export async function pauseKindNodes(hostName: string): Promise<void> {
+  const ids = await kindNodeIDs(hostName);
+  if (ids.length === 0) {
+    throw new Error(`no Kind node containers for ${hostName}`);
+  }
+  for (const id of ids) {
+    requireCommandSuccess(
+      "podman pause",
+      await runCommand("podman", ["pause", id]),
+    );
+  }
+}
+
+export async function unpauseKindNodes(hostName: string): Promise<void> {
+  const ids = await kindNodeIDs(hostName);
+  for (const id of ids) {
+    const result = await runCommand("podman", ["unpause", id]);
+    if (result.exitCode === 0 && !result.timedOut) continue;
+    if (!result.timedOut && isAlreadyUnpaused(result.stderr)) continue;
+    throw commandFailure("podman unpause", result);
+  }
+}
+
 async function kindControlPlaneID(hostName: string): Promise<string> {
   const ids = await containerIDs([
     "--filter",
