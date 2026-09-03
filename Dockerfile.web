@@ -52,7 +52,9 @@ ARG NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=""
 ENV NX_SELF_HOSTED_REMOTE_CACHE_SERVER=${NX_SELF_HOSTED_REMOTE_CACHE_SERVER} \
     NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN}
 
-# Install + build in one RUN so node_modules cache mount is available throughout
+# Install + build in one RUN so node_modules cache mount is available throughout.
+# Raise nofile so rspack cannot EMFILE on the default 1024 cap. podman build
+# --ulimit nofile=65536:65536 must match so this ulimit can raise.
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/build/node_modules \
     npm install --include-workspace-root \
@@ -62,6 +64,7 @@ RUN --mount=type=cache,target=/root/.npm \
     -w @fleetshift/mock-ui-plugins \
     -w @fleetshift/gcphcp-plugin \
     -w @fleetshift/kind-plugin \
+    && ulimit -n 65536 \
     && NX=./node_modules/.bin/nx \
     && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
     && $NX run-many --target=build --projects=plugins,@fleetshift/gcphcp-plugin,@fleetshift/kind-plugin \

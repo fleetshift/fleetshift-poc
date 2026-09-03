@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOW_LOW_KEYRING_ENV,
   KEYRING_DOCS_PATH,
+  MACHINE_KEYRING_SEPARATOR,
   REQUIRED_MAXBYTES,
   REQUIRED_MAXKEYS,
   SYSCTL_D_BASENAME,
@@ -20,6 +21,7 @@ import {
   keyUsersLine,
   keyringSysctlDefinitions,
   laterConflictingKeyringDefinitions,
+  machineKeyringRemoteCommand,
   parseSysctlValue,
   preflightKeyring,
   sysctlDBasenameSortsLater,
@@ -130,6 +132,59 @@ function nativeResponses(limits = DEFAULT_LIMITS) {
     },
   };
 }
+
+const MACHINE_KEYRING_STDOUT = `200\n${MACHINE_KEYRING_SEPARATOR}\n20000\n${MACHINE_KEYRING_SEPARATOR}\n  1000:     4 3/3 2/200 400/20000\n`;
+
+function machineInspectResponses(ssh = {}) {
+  return {
+    platform: "darwin",
+    uid: 501,
+    responses: {
+      "podman info --format json": {
+        status: 0,
+        stderr: "",
+        stdout: podmanInfo(true),
+      },
+      "podman machine list --format json": {
+        status: 0,
+        stderr: "",
+        stdout: JSON.stringify([
+          {
+            Default: true,
+            Name: "podman-machine-default",
+            Running: true,
+          },
+        ]),
+      },
+      "podman system connection list --format json": {
+        status: 0,
+        stderr: "",
+        stdout: JSON.stringify([
+          {
+            Default: true,
+            Name: "podman-machine-default",
+            URI: "ssh://core@127.0.0.1:1234/run/user/1000/podman/podman.sock",
+          },
+        ]),
+      },
+      [`podman machine ssh podman-machine-default -- ${machineKeyringRemoteCommand()}`]:
+        {
+          status: 0,
+          stderr: "",
+          stdout: MACHINE_KEYRING_STDOUT,
+          ...ssh,
+        },
+    },
+  };
+}
+
+describe("machineKeyringRemoteCommand", () => {
+  it("does not use #, which podman machine ssh's joined remote shell treats as a comment", () => {
+    const remote = machineKeyringRemoteCommand();
+    expect(remote).not.toMatch(/#/);
+    expect(remote.split(MACHINE_KEYRING_SEPARATOR)).toHaveLength(3);
+  });
+});
 
 describe("parseSysctlValue", () => {
   it("parses /proc and sysctl output", () => {
@@ -507,51 +562,43 @@ describe("inspectKeyring", () => {
   });
 
   it("inspects a Podman machine through podman machine ssh", () => {
-    const io = testIO({
-      platform: "darwin",
-      uid: 501,
-      responses: {
-        "podman info --format json": {
-          status: 0,
-          stderr: "",
-          stdout: podmanInfo(true),
-        },
-        "podman machine list --format json": {
-          status: 0,
-          stderr: "",
-          stdout: JSON.stringify([
-            {
-              Default: true,
-              Name: "podman-machine-default",
-              Running: true,
-            },
-          ]),
-        },
-        "podman system connection list --format json": {
-          status: 0,
-          stderr: "",
-          stdout: JSON.stringify([
-            {
-              Default: true,
-              Name: "podman-machine-default",
-              URI: "ssh://core@127.0.0.1:1234/run/user/1000/podman/podman.sock",
-            },
-          ]),
-        },
-        "podman machine ssh podman-machine-default -- sh -c cat /proc/sys/kernel/keys/maxkeys; echo ###FLEETSHIFT-E2E-KEYRING###; cat /proc/sys/kernel/keys/maxbytes; echo ###FLEETSHIFT-E2E-KEYRING###; cat /proc/key-users":
-          {
-            status: 0,
-            stderr: "",
-            stdout:
-              "200\n###FLEETSHIFT-E2E-KEYRING###\n20000\n###FLEETSHIFT-E2E-KEYRING###\n  1000:     4 3/3 2/200 400/20000\n",
-          },
-      },
-    });
+    const io = testIO(machineInspectResponses());
     const result = inspectKeyring(io);
     expect(result.host.kind).toBe("podman-machine");
     expect(result.limits).toEqual(DEFAULT_LIMITS);
     expect(io.commands.filter((parts) => parts.includes("ssh"))).toHaveLength(
       1,
+    );
+  });
+
+  it("passes a single remote command without # so podman machine ssh cannot treat it as a comment", () => {
+    const io = testIO(machineInspectResponses());
+    inspectKeyring(io);
+    const ssh = io.commands.find((parts) => parts.includes("ssh"));
+    const remote = ssh.slice(ssh.indexOf("--") + 1);
+    expect(remote).toEqual([machineKeyringRemoteCommand()]);
+    expect(remote[0]).not.toMatch(/#/);
+  });
+
+  it("reads keyring sysctls after a podman machine ssh banner", () => {
+    const io = testIO(
+      machineInspectResponses({
+        stdout: `Connecting to vm podman-machine-default. To close connection, use \`~.\` or \`exit\`\n${MACHINE_KEYRING_STDOUT}`,
+      }),
+    );
+    expect(inspectKeyring(io).limits).toEqual(DEFAULT_LIMITS);
+  });
+
+  it("includes captured ssh output when keyring separators are missing", () => {
+    const io = testIO(
+      machineInspectResponses({
+        stdout: "Connecting to vm podman-machine-default\n",
+      }),
+    );
+    expect(() => inspectKeyring(io)).toThrow(/unexpected keyring output/);
+    expect(() => inspectKeyring(io)).toThrow(/missing keyring separators/);
+    expect(() => inspectKeyring(io)).toThrow(
+      /stdout: Connecting to vm podman-machine-default/,
     );
   });
 

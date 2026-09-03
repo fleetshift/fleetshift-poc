@@ -8,13 +8,13 @@ export const ALLOW_LOW_KEYRING_ENV = "FLEETSHIFT_E2E_ALLOW_LOW_KEYRING";
 export const KEYRING_DOCS_PATH = "docs/testing/end-to-end.md";
 export const SYSCTL_D_BASENAME = "zz-fleetshift-e2e-keys.conf";
 export const SYSCTL_D_FILE = `/etc/sysctl.d/${SYSCTL_D_BASENAME}`;
+export const MACHINE_KEYRING_SEPARATOR = "FLEETSHIFT-E2E-KEYRING";
 
 const MAXKEYS_SYSCTL = "kernel.keys.maxkeys";
 const MAXBYTES_SYSCTL = "kernel.keys.maxbytes";
 const PROC_MAXKEYS = "/proc/sys/kernel/keys/maxkeys";
 const PROC_MAXBYTES = "/proc/sys/kernel/keys/maxbytes";
 const PROC_KEY_USERS = "/proc/key-users";
-const MACHINE_KEYRING_SEPARATOR = "###FLEETSHIFT-E2E-KEYRING###";
 
 /** Parse a /proc sysctl file or `sysctl` assignment into a non-negative integer. */
 export function parseSysctlValue(raw) {
@@ -268,6 +268,22 @@ function machineSsh(machineName, command) {
   return `podman machine ssh ${machineName} -- ${command}`;
 }
 
+/**
+ * Remote script for `podman machine ssh`.
+ * Passed as one argv after `--` because Podman joins args with spaces and the
+ * remote shell then parses `#` as a comment. A `sh -c` plus `###...###`
+ * separator therefore prints no separators and looks like empty keyring output.
+ */
+export function machineKeyringRemoteCommand() {
+  return [
+    `cat ${PROC_MAXKEYS}`,
+    `echo ${MACHINE_KEYRING_SEPARATOR}`,
+    `cat ${PROC_MAXBYTES}`,
+    `echo ${MACHINE_KEYRING_SEPARATOR}`,
+    `cat ${PROC_KEY_USERS}`,
+  ].join("; ");
+}
+
 function podmanMachineCommands(machineName) {
   const sysctlMaxkeys = `sudo sysctl -w ${MAXKEYS_SYSCTL}=${REQUIRED_MAXKEYS}`;
   const sysctlMaxbytes = `sudo sysctl -w ${MAXBYTES_SYSCTL}=${REQUIRED_MAXBYTES}`;
@@ -462,43 +478,62 @@ function readProc(io, path) {
   }
 }
 
+function clipCommandOutput(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return "(empty)";
+  return trimmed.length > 2048 ? `${trimmed.slice(0, 2048)}…` : trimmed;
+}
+
+function formatCommandOutput(result) {
+  return `: stdout: ${clipCommandOutput(result.stdout)}; stderr: ${clipCommandOutput(result.stderr)}`;
+}
+
+function lastNonEmptyLine(raw) {
+  const lines = String(raw ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.at(-1) ?? "";
+}
+
+function parseMachineKeyringOutput(stdout) {
+  const parts = String(stdout)
+    .split(MACHINE_KEYRING_SEPARATOR)
+    .map((part) => part.trim());
+  if (parts.length < 3) {
+    throw new Error("missing keyring separators");
+  }
+  return {
+    keyUsers: parts.slice(2).join(MACHINE_KEYRING_SEPARATOR),
+    limits: {
+      maxbytes: parseSysctlValue(lastNonEmptyLine(parts[1])),
+      maxkeys: parseSysctlValue(lastNonEmptyLine(parts[0])),
+    },
+  };
+}
+
 function machineReadKeyring(io, machineName) {
-  const script = [
-    `cat ${PROC_MAXKEYS}`,
-    `echo ${MACHINE_KEYRING_SEPARATOR}`,
-    `cat ${PROC_MAXBYTES}`,
-    `echo ${MACHINE_KEYRING_SEPARATOR}`,
-    `cat ${PROC_KEY_USERS}`,
-  ].join("; ");
   const result = runPodman(io, [
     "machine",
     "ssh",
     machineName,
     "--",
-    "sh",
-    "-c",
-    script,
+    machineKeyringRemoteCommand(),
   ]);
   if (result.status !== 0) {
     throw new Error(
-      `podman machine ssh ${machineName} failed to read keyring limits${result.stderr ? `: ${result.stderr}` : ""}`,
+      `podman machine ssh ${machineName} failed to read keyring limits${formatCommandOutput(result)}`,
     );
   }
-  const parts = String(result.stdout)
-    .split(MACHINE_KEYRING_SEPARATOR)
-    .map((part) => part.trim());
-  if (parts.length < 3) {
+  try {
+    return parseMachineKeyringOutput(result.stdout);
+  } catch (error) {
     throw new Error(
-      `podman machine ssh ${machineName} returned unexpected keyring output`,
+      `podman machine ssh ${machineName} returned unexpected keyring output: ${
+        error instanceof Error ? error.message : error
+      }${formatCommandOutput(result)}`,
     );
   }
-  return {
-    keyUsers: parts.slice(2).join(MACHINE_KEYRING_SEPARATOR),
-    limits: {
-      maxbytes: parseSysctlValue(parts[1]),
-      maxkeys: parseSysctlValue(parts[0]),
-    },
-  };
 }
 
 function readLimits(host, io) {
