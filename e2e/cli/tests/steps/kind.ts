@@ -468,8 +468,8 @@ export class KindSteps {
   /**
    * Best-effort delete of a pool cluster created during reserve but never
    * activated. Unlike delete(), pooled IDs are allowed because the pool does
-   * not yet own the record. Host nodes are still reaped by sandbox teardown
-   * if orchestration has not finished.
+   * not yet own the record. Waits until the resource and host nodes are gone
+   * so a later provision cannot overlap leftover Kind nodes.
    */
   async deleteUnactivatedPoolCluster(id: string): Promise<void> {
     if (!this.#isPooledId(id)) {
@@ -481,10 +481,13 @@ export class KindSteps {
       KIND_CLUSTER_TYPE,
       id,
     ]);
-    if (result.exitCode === 0 || isNotFound(result.stderr)) return;
-    throw new Error(
-      `failed to delete unactivated pool cluster ${id}${result.stderr.trim() ? `: ${result.stderr.trim()}` : ""}`,
-    );
+    if (result.exitCode !== 0 && !isNotFound(result.stderr)) {
+      throw new Error(
+        `failed to delete unactivated pool cluster ${id}${result.stderr.trim() ? `: ${result.stderr.trim()}` : ""}`,
+      );
+    }
+    await this.waitUntilGone(id);
+    await this.waitUntilHostClusterGone(id);
   }
 
   async #deleteBestEffort(id: string): Promise<void> {
