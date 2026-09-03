@@ -1,6 +1,6 @@
-// Package testserver is a frozen fixture for existing fleetshift-cli
-// unit/contract tests that call Start. Do not add new callers, prefer
-// adding new e2e tests.
+// Package testserver provides a fully wired in-process FleetShift gRPC
+// server for integration testing. The server uses SQLite in-memory storage
+// and the in-memory workflow engine, making tests fast and deterministic.
 package testserver
 
 import (
