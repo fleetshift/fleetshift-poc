@@ -56,6 +56,8 @@ func Start(t *testing.T) string {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "fleetshift.db")
+	// TODO: shared-cache in-memory SQLite once bootstrap keeps an OpenMemory
+	// sentinel. See docs/fleetshift/e2e-testing/2026-09-03-testserver-in-memory-sqlite.md.
 
 	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
