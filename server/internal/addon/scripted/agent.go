@@ -27,6 +27,10 @@ type Agent struct {
 	// Tests inject a fake; production uses sleepCancellable.
 	sleep func(ctx context.Context, d time.Duration) error
 
+	// delayRecorder captures resolved delays for overhead measurement.
+	// The stress harness provides a real implementation; production passes NopDelayRecorder.
+	delayRecorder DelayRecorder
+
 	mu      sync.Mutex
 	slots   map[slotKey]*dispatchSlot
 	wg      sync.WaitGroup
@@ -54,6 +58,12 @@ func WithSleep(fn func(context.Context, time.Duration) error) AgentOption {
 	return func(a *Agent) { a.sleep = fn }
 }
 
+// WithDelayRecorder injects a DelayRecorder for capturing resolved delays.
+// The default is NopDelayRecorder.
+func WithDelayRecorder(recorder DelayRecorder) AgentOption {
+	return func(a *Agent) { a.delayRecorder = recorder }
+}
+
 // NewAgent creates a scripted delivery agent. The codec must be
 // pre-compiled (NewCodec). The appCtx is the application-owned context
 // used to cancel in-flight work during shutdown.
@@ -67,13 +77,14 @@ func NewAgent(
 	opts ...AgentOption,
 ) *Agent {
 	a := &Agent{
-		reporter:  reporter,
-		inventory: inventory,
-		codec:     codec,
-		planner:   planner,
-		appCtx:    appCtx,
-		log:       log,
-		slots:     make(map[slotKey]*dispatchSlot),
+		reporter:      reporter,
+		inventory:     inventory,
+		codec:         codec,
+		planner:       planner,
+		appCtx:        appCtx,
+		log:           log,
+		delayRecorder: NopDelayRecorder{},
+		slots:         make(map[slotKey]*dispatchSlot),
 	}
 	// Set default sleep function (must be done before applying options).
 	a.sleep = a.sleepCancellable
@@ -143,9 +154,9 @@ func (a *Agent) dispatch(
 	generation domain.Generation,
 	operation Operation,
 ) error {
-	// Validate target.
-	if target.ID() != TargetID {
-		return fmt.Errorf("scripted: unexpected target %q, want %q", target.ID(), TargetID)
+	// Validate target type (target ID can vary depending on deployment context).
+	if target.Type() != TargetType {
+		return fmt.Errorf("scripted: unexpected target type %q, want %q", target.Type(), TargetType)
 	}
 
 	// Require exactly one manifest of the managed type.
@@ -222,6 +233,21 @@ func (a *Agent) dispatch(
 	}
 	ackDecision := a.planner.Decide(opSpec.Acknowledgement, ackKey)
 
+	// Plan completion to capture its latency for delay recording.
+	compKey := AttemptKey{
+		InstanceKey: managedResourceInstanceKey(uid),
+		Generation:  gen,
+		Operation:   operation,
+		Phase:       PhaseCompletion,
+	}
+	compDecision := a.planner.Decide(opSpec.Completion, compKey)
+
+	// Record resolved delays before sleeping.
+	a.delayRecorder.RecordDelay(deliveryID, DelayRecord{
+		AckLatency:        ackDecision.Latency,
+		CompletionLatency: compDecision.Latency,
+	})
+
 	// Wait for ack latency.
 	if err := a.sleepCancellable(ctx, ackDecision.Latency); err != nil {
 		a.releaseSlot(key)
@@ -249,7 +275,8 @@ func (a *Agent) dispatch(
 	}
 
 	// Start async completion. The wg slot was reserved above.
-	go a.runCompletion(deliveryID, generation, uid, envelope.Name, gen, operation, opSpec, spec.Inventory, key)
+	// Note: compDecision was already computed above for delay recording.
+	go a.runCompletion(deliveryID, generation, uid, envelope.Name, gen, operation, opSpec, spec.Inventory, compDecision, key)
 
 	return nil
 }
@@ -263,21 +290,13 @@ func (a *Agent) runCompletion(
 	operation Operation,
 	opSpec OperationSpec,
 	inv InventoryProjection,
+	compDecision PhaseDecision,
 	key slotKey,
 ) {
 	defer a.wg.Done()
 	defer a.releaseSlot(key)
 
 	ctx := a.appCtx
-
-	// Plan completion.
-	compKey := AttemptKey{
-		InstanceKey: managedResourceInstanceKey(uid),
-		Generation:  gen,
-		Operation:   operation,
-		Phase:       PhaseCompletion,
-	}
-	compDecision := a.planner.Decide(opSpec.Completion, compKey)
 
 	// Wait for completion latency.
 	if err := a.sleepCancellable(ctx, compDecision.Latency); err != nil {
@@ -324,6 +343,11 @@ func (a *Agent) projectInventoryWithRetry(
 	name domain.ResourceName,
 	inv InventoryProjection,
 ) error {
+	// If no inventory service, skip projection (e.g., in test harness with nil inventory).
+	if a.inventory == nil {
+		return nil
+	}
+
 	report := domain.InventoryDeltaReport{
 		ResourceType:  ResourceType,
 		Name:          name,

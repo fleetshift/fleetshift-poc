@@ -224,7 +224,7 @@ func reportStressResults(
 	t *testing.T,
 	cfg stressConfig,
 	observer *stressObserver,
-	agent *delayedDeliveryAgent,
+	delayRecorder *scriptedDelayRecorder,
 	store domain.Store,
 	stats workloadStats,
 	poolStats *poolStatsTimeSeries,
@@ -250,7 +250,7 @@ func reportStressResults(
 	}
 
 	// 4. Overhead = observed latency - agent delay
-	ackOverheads, completionOverheads := observer.overheads(agent)
+	ackOverheads, completionOverheads := observer.overheads(delayRecorder)
 	if len(ackOverheads) > 0 {
 		printDurationReport(t, "Ack Overhead (AckLatency − AgentAckDelay)", durationDistribution(ackOverheads))
 	}
@@ -300,7 +300,7 @@ func reportStressResults(
 		t.Logf("Convergence errors: %d (async convergence loops that failed)", ce)
 	}
 
-	dumpResults(t, cfg, observer, agent, views, stats, convergedCount, laggedCount, poolStats)
+	dumpResults(t, cfg, observer, delayRecorder, views, stats, convergedCount, laggedCount, poolStats)
 }
 
 // reportRunsPerFulfillment logs a distribution of how many completed
@@ -448,9 +448,11 @@ type stressResultsJSON struct {
 // buildDeliveryDetails joins observer delivery metrics with agent delay
 // records and mutation timestamps to produce per-delivery JSON details.
 // Acquires observer.deliveryMu internally.
-func buildDeliveryDetails(observer *stressObserver, agent *delayedDeliveryAgent) []deliveryDetail {
+func buildDeliveryDetails(observer *stressObserver, delayRecorder *scriptedDelayRecorder) []deliveryDetail {
 	observer.deliveryMu.Lock()
 	defer observer.deliveryMu.Unlock()
+
+	delays := delayRecorder.getDelays()
 
 	details := make([]deliveryDetail, 0, len(observer.deliveries))
 	for did, m := range observer.deliveries {
@@ -466,10 +468,9 @@ func buildDeliveryDetails(observer *stressObserver, agent *delayedDeliveryAgent)
 		if !m.dispatchedAt.IsZero() && !m.completedAt.IsZero() {
 			dd.CompLatencyMs = float64(m.completedAt.Sub(m.dispatchedAt)) / float64(time.Millisecond)
 		}
-		if v, ok := agent.delays.Load(did); ok {
-			rec := v.(agentDelayRecord)
-			dd.AgentAckDelayMs = float64(rec.ackDelay) / float64(time.Millisecond)
-			dd.AgentCompDelayMs = float64(rec.completionDelay) / float64(time.Millisecond)
+		if rec, ok := delays[did]; ok {
+			dd.AgentAckDelayMs = float64(rec.AckLatency) / float64(time.Millisecond)
+			dd.AgentCompDelayMs = float64(rec.CompletionLatency) / float64(time.Millisecond)
 			if dd.AckLatencyMs > 0 {
 				dd.AckOverheadMs = dd.AckLatencyMs - dd.AgentAckDelayMs
 			}
@@ -493,7 +494,7 @@ func buildDeliveryDetails(observer *stressObserver, agent *delayedDeliveryAgent)
 
 func dumpResults(
 	t *testing.T, cfg stressConfig,
-	observer *stressObserver, agent *delayedDeliveryAgent,
+	observer *stressObserver, delayRecorder *scriptedDelayRecorder,
 	views []domain.DeploymentView, stats workloadStats,
 	convergedCount, laggedCount int,
 	poolStats *poolStatsTimeSeries,
@@ -535,7 +536,7 @@ func dumpResults(
 	out.Latencies.Ack = durationDistribution(observer.ackLatencies()).toMillisJSON()
 	out.Latencies.Completion = durationDistribution(observer.completionLatencies()).toMillisJSON()
 
-	ackOH, compOH := observer.overheads(agent)
+	ackOH, compOH := observer.overheads(delayRecorder)
 	out.Latencies.AckOverhead = durationDistribution(ackOH).toMillisJSON()
 	out.Latencies.CompOverhead = durationDistribution(compOH).toMillisJSON()
 	out.Latencies.MutationToDispatch = durationDistribution(observer.mutationToDispatchedLatencies()).toMillisJSON()
@@ -560,7 +561,7 @@ func dumpResults(
 
 	// Per-delivery details (joins delivery metrics, agent delays,
 	// and mutation timestamps under observer.deliveryMu).
-	out.Deliveries = buildDeliveryDetails(observer, agent)
+	out.Deliveries = buildDeliveryDetails(observer, delayRecorder)
 
 	// Connection pool time series — copy the slices under the lock so
 	// json.MarshalIndent serialises a stable snapshot, not the
