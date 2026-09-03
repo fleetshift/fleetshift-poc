@@ -174,16 +174,16 @@ the body runs:
 
 | Declaration | Use when |
 | --- | --- |
-| `[{ access: "read-only", state: "any" }]` | query-only work; any topology |
-| `[{ access: "modifiable", state: "any" }]` | delivery, persona, or Kind API writes; any topology |
-| `[{ access: "read-only", state: "any", spec: { nodes: [...] } }]` | need that create spec |
-| `[{ access: "read-only", state: "any", spec: {} }]` | need the default create spec |
+| `[{ access: "read-only", spec: "any", state: "any" }]` | query-only work; any topology |
+| `[{ access: "modifiable", spec: "any", state: "any" }]` | delivery, persona, or Kind API writes; any topology |
+| `[{ access: "read-only", spec: { nodes: [...] }, state: "any" }]` | need that create spec |
+| `[{ access: "read-only", spec: {}, state: "any" }]` | need the default create spec |
 | two modifiable requests | fan-out |
 | `[]` | gateway, login, bootstrap, or a private Kind lifecycle |
 
-Omitted `spec` is unconstrained: the fixture may lease any already-provisioned
-topology, and a newly created cluster still uses the default empty spec. Set
-`spec` to pin a create spec (`{}` pins default). `state: "clean"` is only for
+`spec` is required. `"any"` is unconstrained: the fixture may lease any
+already-provisioned topology, and a newly created cluster uses the default
+empty spec. `spec: {}` pins that default topology. `state: "clean"` is only for
 assertions that need a baseline cluster. Pool identity is
 `kind-e2e-<run-id>-pool-<id>`; private lifecycle IDs stay outside that prefix.
 Continue using unique namespace and deployment IDs — the pool does not isolate
@@ -200,7 +200,7 @@ import { test } from "../fixtures";
 
 test(
   "resource query returns Kubernetes objects",
-  { kindClusters: [{ access: "read-only", state: "any" }] },
+  { kindClusters: [{ access: "read-only", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     await cli.query.indexedKubernetesObjectsExist(cluster.id);
   },

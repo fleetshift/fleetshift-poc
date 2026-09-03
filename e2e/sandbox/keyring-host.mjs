@@ -248,10 +248,6 @@ function formatCurrentValues(limits) {
   ].join("\n");
 }
 
-function persistentSysctlBody() {
-  return `${MAXKEYS_SYSCTL} = ${REQUIRED_MAXKEYS}\n${MAXBYTES_SYSCTL} = ${REQUIRED_MAXBYTES}\n`;
-}
-
 function nativeLinuxCommands() {
   return [
     "Temporary (until reboot):",
@@ -259,9 +255,7 @@ function nativeLinuxCommands() {
     `  sudo sysctl -w ${MAXBYTES_SYSCTL}=${REQUIRED_MAXBYTES}`,
     "",
     `Persistent (late-sorting ${SYSCTL_D_BASENAME}; sysctl.d is lexicographic, so 99-keys.conf would override a 99-... file):`,
-    `  sudo tee ${SYSCTL_D_FILE} <<'EOF'`,
-    persistentSysctlBody().trimEnd(),
-    "  EOF",
+    `  printf '%s\\n' '${MAXKEYS_SYSCTL} = ${REQUIRED_MAXKEYS}' '${MAXBYTES_SYSCTL} = ${REQUIRED_MAXBYTES}' | sudo tee ${SYSCTL_D_FILE} >/dev/null`,
     `  sudo sysctl -p ${SYSCTL_D_FILE}`,
     `  sysctl -n ${MAXKEYS_SYSCTL}`,
     `  sysctl -n ${MAXBYTES_SYSCTL}`,

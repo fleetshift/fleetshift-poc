@@ -214,18 +214,13 @@ export class DeploymentSteps {
   }
 
   async waitUntilRemainsCreating(id: string): Promise<void> {
-    await this.#holdUntil(async () => {
+    await holdValue(async () => {
       const result = await this.#client.succeed(["deployment", "get", id]);
       const deployment = parseDeployment(result.stdout);
       expect(deployment.name).toBe(deploymentName(id));
-      if (deployment.state === "STATE_ACTIVE") {
+      if (deployment.state !== "STATE_CREATING") {
         throw new Error(
-          `deployment ${deployment.name} became STATE_ACTIVE; expected to keep retrying in STATE_CREATING`,
-        );
-      }
-      if (deployment.state === "STATE_FAILED") {
-        throw new Error(
-          `deployment ${deployment.name} became STATE_FAILED; expected to keep retrying in STATE_CREATING`,
+          `deployment ${deployment.name} became ${deployment.state}; expected to keep retrying in STATE_CREATING`,
         );
       }
       return deployment.state;
@@ -259,11 +254,11 @@ export class DeploymentSteps {
   }
 
   async waitUntilRemainsListed(id: string): Promise<void> {
-    await this.#holdUntil(async () => {
+    await holdValue(async () => {
       const presence = await this.#deploymentPresence(id);
-      if (!presence.listed && presence.notFound) {
+      if (!presence.listed) {
         throw new Error(
-          `deployment ${presence.name} disappeared; expected it to remain listed`,
+          `deployment ${presence.name} is not listed; expected it to remain listed`,
         );
       }
       return "listed";
@@ -288,20 +283,25 @@ export class DeploymentSteps {
       notFound: get.exitCode !== 0 && isNotFound(get.stderr),
     };
   }
+}
 
-  async #holdUntil<T>(sample: () => Promise<T>, expected: T): Promise<void> {
-    const deadline = Date.now() + REMAINS_HOLD_MS;
-    await expect
-      .poll(
-        async () => {
-          const value = await sample();
-          return Date.now() >= deadline ? value : "waiting";
-        },
-        {
-          intervals: [POLL_INTERVAL_MS],
-          timeout: REMAINS_HOLD_MS + WAIT_TIMEOUT_MS,
-        },
-      )
-      .toEqual(expected);
+/** Every sample must equal expected for holdMs. The first mismatch fails immediately. */
+export async function holdValue<T>(
+  sample: () => Promise<T>,
+  expected: T,
+  options: { holdMs?: number; intervalMs?: number } = {},
+): Promise<void> {
+  const holdMs = options.holdMs ?? REMAINS_HOLD_MS;
+  const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
+  const deadline = Date.now() + holdMs;
+  for (;;) {
+    const value = await sample();
+    if (value !== expected) {
+      throw new Error(`expected ${String(expected)}, got ${String(value)}`);
+    }
+    if (Date.now() >= deadline) return;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, intervalMs);
+    });
   }
 }

@@ -27,6 +27,15 @@ export function kindClusterSpecsEqual(
   return kindClusterSpecKey(left) === kindClusterSpecKey(right);
 }
 
+/** Create-spec fields from a cluster view spec, ignoring extras such as name. */
+export function kindClusterCreateSpecFromView(
+  spec: Record<string, unknown>,
+): KindClusterCreateSpec {
+  return parseKindClusterCreateSpec(
+    spec.nodes === undefined ? {} : { nodes: spec.nodes },
+  );
+}
+
 export function parseKindClusterCreateSpec(
   value: unknown,
 ): KindClusterCreateSpec {

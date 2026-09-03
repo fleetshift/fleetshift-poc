@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deploymentTerminalFailure,
+  holdValue,
   parseDeployment,
   parseDeploymentList,
   placementArgs,
@@ -88,5 +89,25 @@ describe("placementArgs", () => {
 
   it("rejects static placement without targets", () => {
     expect(() => placementArgs([])).toThrow(/target IDs/);
+  });
+});
+
+describe("holdValue", () => {
+  it("returns when every sample matches for the hold interval", async () => {
+    await holdValue(async () => "listed", "listed", {
+      holdMs: 20,
+      intervalMs: 5,
+    });
+  });
+
+  it("fails on the first mismatch instead of waiting for the last sample", async () => {
+    let n = 0;
+    await expect(
+      holdValue(async () => (++n === 2 ? "gone" : "listed"), "listed", {
+        holdMs: 1_000,
+        intervalMs: 1,
+      }),
+    ).rejects.toThrow(/got gone/);
+    expect(n).toBe(2);
   });
 });

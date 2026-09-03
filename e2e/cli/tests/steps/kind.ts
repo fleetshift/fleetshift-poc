@@ -18,7 +18,12 @@ import {
   unpauseKindNodes,
 } from "../support/kind-host";
 import { isPooledKindClusterId } from "../support/kind-pool";
-import { type KindClusterCreateSpec } from "../support/kind-spec";
+import {
+  type KindClusterCreateSpec,
+  kindClusterCreateSpecFromView,
+  kindClusterSpecKey,
+  kindClusterSpecsEqual,
+} from "../support/kind-spec";
 import { type Sandbox } from "../support/sandbox";
 import { CONFIG_MAP_DATA, CONFIG_MAP_NAME } from "./deployments";
 
@@ -382,7 +387,7 @@ export class KindSteps {
       KIND_CLUSTER_TYPE,
       id,
     ]);
-    expect(parseCluster(get.stdout).spec).toMatchObject({ ...spec });
+    this.#expectCreateSpec(parseCluster(get.stdout).spec, spec, "get");
     const list = await this.#client.succeed([
       "resource",
       "list",
@@ -391,7 +396,23 @@ export class KindSteps {
     const listed = parseClusterList(list.stdout).find(
       (cluster) => cluster.name === clusterResourceName(id),
     );
-    expect(listed?.spec).toMatchObject({ ...spec });
+    expect(
+      listed,
+      `${clusterResourceName(id)} missing from list`,
+    ).toBeDefined();
+    this.#expectCreateSpec(listed?.spec ?? {}, spec, "list");
+  }
+
+  #expectCreateSpec(
+    actual: Record<string, unknown>,
+    expected: KindClusterCreateSpec,
+    via: string,
+  ): void {
+    const got = kindClusterCreateSpecFromView(actual);
+    expect(
+      kindClusterSpecsEqual(got, expected),
+      `${via} spec ${kindClusterSpecKey(got)} should equal ${kindClusterSpecKey(expected)}`,
+    ).toBe(true);
   }
 
   async waitUntilNodeRoles(
@@ -442,6 +463,28 @@ export class KindSteps {
       throw new Error(`refusing to delete shared Kind cluster ${id}`);
     }
     await this.#client.succeed(["resource", "delete", KIND_CLUSTER_TYPE, id]);
+  }
+
+  /**
+   * Best-effort delete of a pool cluster created during reserve but never
+   * activated. Unlike delete(), pooled IDs are allowed because the pool does
+   * not yet own the record. Host nodes are still reaped by sandbox teardown
+   * if orchestration has not finished.
+   */
+  async deleteUnactivatedPoolCluster(id: string): Promise<void> {
+    if (!this.#isPooledId(id)) {
+      throw new Error(`refusing to abandon non-pool Kind cluster ${id}`);
+    }
+    const result = await this.#client.run([
+      "resource",
+      "delete",
+      KIND_CLUSTER_TYPE,
+      id,
+    ]);
+    if (result.exitCode === 0 || isNotFound(result.stderr)) return;
+    throw new Error(
+      `failed to delete unactivated pool cluster ${id}${result.stderr.trim() ? `: ${result.stderr.trim()}` : ""}`,
+    );
   }
 
   async #deleteBestEffort(id: string): Promise<void> {

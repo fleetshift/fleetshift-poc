@@ -300,6 +300,10 @@ describe("formatKeyringGuidance", () => {
     expect(text).toContain("sudo sysctl -w kernel.keys.maxbytes=200000");
     expect(text).toContain(SYSCTL_D_FILE);
     expect(text).toContain(`sudo tee ${SYSCTL_D_FILE}`);
+    expect(text).toContain(
+      `printf '%s\\n' 'kernel.keys.maxkeys = ${REQUIRED_MAXKEYS}' 'kernel.keys.maxbytes = ${REQUIRED_MAXBYTES}' | sudo tee ${SYSCTL_D_FILE} >/dev/null`,
+    );
+    expect(text).not.toMatch(/<<['"]EOF['"]/);
     expect(text).toContain(`sudo sysctl -p ${SYSCTL_D_FILE}`);
     expect(text).toContain("sysctl -n kernel.keys.maxkeys");
     expect(text).toContain("sysctl -n kernel.keys.maxbytes");

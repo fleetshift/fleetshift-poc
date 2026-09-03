@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isDefaultKindClusterSpec,
+  kindClusterCreateSpecFromView,
   kindClusterSpecKey,
   kindClusterSpecsEqual,
   parseKindClusterCreateSpec,
@@ -23,6 +24,25 @@ describe("kind cluster spec identity", () => {
   it("treats an empty nodes list as distinct from default", () => {
     expect(isDefaultKindClusterSpec({ nodes: [] })).toBe(false);
     expect(kindClusterSpecsEqual({}, { nodes: [] })).toBe(false);
+  });
+
+  it("reads create spec from a cluster view and ignores extra fields", () => {
+    expect(kindClusterCreateSpecFromView({ name: "clusters/a" })).toEqual({});
+    expect(
+      kindClusterCreateSpecFromView({
+        name: "clusters/a",
+        nodes: [{ role: "control-plane" }, { role: "worker" }],
+      }),
+    ).toEqual(MULTI_NODE);
+    expect(
+      kindClusterSpecsEqual(
+        kindClusterCreateSpecFromView({
+          name: "clusters/a",
+          nodes: [{ role: "worker" }],
+        }),
+        {},
+      ),
+    ).toBe(false);
   });
 
   it("ignores property insertion order when comparing nodes", () => {
