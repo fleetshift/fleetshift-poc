@@ -13,6 +13,7 @@ const PAGINATION_PAGE_SIZE = 10;
 const PAGINATION_ORDER = "resource_type,name";
 const MAX_PAGES = 100;
 const WAIT_TIMEOUT_MS = 2 * 60_000;
+const INDEXED_KIND_CLUSTER_GONE_TIMEOUT_MS = 1 * 60_000;
 const POLL_INTERVAL_MS = 2_000;
 const KIND_NODE_PREFIX = "//kind.fleetshift.io/nodes/";
 
@@ -112,15 +113,23 @@ export function kubernetesObjectKindFilter(
   return `${kubernetesObjectsInClusterFilter(clusterId)} && resource.observation.kind == ${JSON.stringify(kind)}`;
 }
 
-function configMapFilter(clusterId: string, namespace: string): string {
-  return `${kubernetesObjectKindFilter(clusterId, "ConfigMap")} && resource.observation.metadata.namespace == ${JSON.stringify(namespace)} && resource.observation.metadata.name == ${JSON.stringify(CONFIG_MAP_NAME)}`;
+export function indexedConfigMapFilter(
+  clusterId: string,
+  namespace: string,
+  name = CONFIG_MAP_NAME,
+): string {
+  return `${kubernetesObjectKindFilter(clusterId, "ConfigMap")} && resource.observation.metadata.namespace == ${JSON.stringify(namespace)} && resource.observation.metadata.name == ${JSON.stringify(name)}`;
+}
+
+export function kindClusterIdentityFilter(clusterId: string): string {
+  return `resourceType == ${JSON.stringify(KIND_CLUSTER_QUERY_TYPE)} && resource.name == ${JSON.stringify(clusterResourceName(clusterId))}`;
 }
 
 function kindClusterReadyFilter(clusterId: string): string {
-  return `resourceType == ${JSON.stringify(KIND_CLUSTER_QUERY_TYPE)} && resource.name == ${JSON.stringify(clusterResourceName(clusterId))} && resource.state == "ACTIVE" && resource.conditions["Ready"].status == "True"`;
+  return `${kindClusterIdentityFilter(clusterId)} && resource.state == "ACTIVE" && resource.conditions["Ready"].status == "True"`;
 }
 
-function kindNodeInClusterFilter(clusterId: string): string {
+export function kindNodeInClusterFilter(clusterId: string): string {
   return `resourceType == ${JSON.stringify(KIND_NODE_QUERY_TYPE)} && resource.observation.cluster == ${JSON.stringify(clusterResourceName(clusterId))}`;
 }
 
@@ -152,6 +161,34 @@ function namesOutsideCluster(
     .map(({ name }) => name);
 }
 
+function kindNodeNames(hits: readonly QueryHit[]): string[] {
+  return hits.map(({ name }) => name.slice(KIND_NODE_PREFIX.length)).sort();
+}
+
+function kubernetesNodeNames(hits: readonly QueryHit[]): string[] {
+  return hits.map((hit) => observation(hit).metadata.name).sort();
+}
+
+function kindNodeScope(hits: readonly QueryHit[], clusterId: string) {
+  return {
+    allScoped: hits.every(
+      (hit) =>
+        hit.resourceType === KIND_NODE_QUERY_TYPE &&
+        hit.name.startsWith(KIND_NODE_PREFIX) &&
+        observation(hit).cluster === clusterResourceName(clusterId),
+    ),
+  };
+}
+
+function kubernetesNodeScope(hits: readonly QueryHit[], clusterId: string) {
+  return {
+    allNodes: hits.every((hit) => observation(hit).kind === "Node"),
+    outside: namesOutsideCluster(hits, clusterId),
+  };
+}
+
+type NodeCountExpectation = { count: number } | { hasNodes: true };
+
 export class QuerySteps {
   readonly #client: FleetctlClient;
 
@@ -168,6 +205,7 @@ export class QuerySteps {
     request: QueryRequest,
     summarize: (hits: readonly QueryHit[]) => T,
     expected: T,
+    timeoutMs = WAIT_TIMEOUT_MS,
   ): Promise<QueryHit[]> {
     let hits: QueryHit[] = [];
     await expect
@@ -176,7 +214,7 @@ export class QuerySteps {
           hits = (await this.#query(request)).resources;
           return summarize(hits);
         },
-        { intervals: [POLL_INTERVAL_MS], timeout: WAIT_TIMEOUT_MS },
+        { intervals: [POLL_INTERVAL_MS], timeout: timeoutMs },
       )
       .toEqual(expected);
     return hits;
@@ -251,7 +289,7 @@ export class QuerySteps {
   ): Promise<void> {
     await this.#waitForSummary(
       {
-        filter: configMapFilter(clusterId, namespace),
+        filter: indexedConfigMapFilter(clusterId, namespace),
         pageSize: INSPECT_PAGE_SIZE,
       },
       (hits) => ({
@@ -344,40 +382,125 @@ export class QuerySteps {
   }
 
   async bothNodeTypesAreIndexed(clusterId: string): Promise<void> {
-    const kindHits = await this.#waitForSummary(
+    const kindHits = await this.#kindNodeHits(clusterId, { hasNodes: true });
+    const kubernetesHits = await this.#kubernetesNodeHits(clusterId, {
+      hasNodes: true,
+    });
+    expect(kubernetesNodeNames(kubernetesHits)).toEqual(
+      kindNodeNames(kindHits),
+    );
+  }
+
+  async indexedConfigMapGone(
+    clusterId: string,
+    namespace: string,
+  ): Promise<void> {
+    await this.#waitForSummary(
+      {
+        filter: indexedConfigMapFilter(clusterId, namespace),
+        pageSize: INSPECT_PAGE_SIZE,
+      },
+      (hits) => ({
+        names: hits.map((hit) => observation(hit).metadata.name),
+        outside: namesOutsideCluster(hits, clusterId),
+      }),
+      { names: [], outside: [] },
+    );
+  }
+
+  async indexedKindClusterExists(clusterId: string): Promise<void> {
+    await this.#waitForSummary(
+      {
+        filter: kindClusterIdentityFilter(clusterId),
+        pageSize: INSPECT_PAGE_SIZE,
+      },
+      (hits) => ({
+        count: hits.filter(
+          (hit) => hit.resourceType === KIND_CLUSTER_QUERY_TYPE,
+        ).length,
+      }),
+      { count: 1 },
+    );
+  }
+
+  async indexedKindClusterGone(clusterId: string): Promise<void> {
+    await this.#waitForSummary(
+      {
+        filter: kindClusterIdentityFilter(clusterId),
+        pageSize: INSPECT_PAGE_SIZE,
+      },
+      (hits) => hits.map(({ name }) => name),
+      [],
+      INDEXED_KIND_CLUSTER_GONE_TIMEOUT_MS,
+    );
+  }
+
+  async nodeIdentitiesMatch(
+    clusterId: string,
+    expectedNames: readonly string[],
+  ): Promise<void> {
+    const expected = [...expectedNames].sort();
+    const [kindNames, kubernetesNames] = await Promise.all([
+      this.#kindNodeIdentities(clusterId, expected.length),
+      this.#kubernetesNodeIdentities(clusterId, expected.length),
+    ]);
+    expect(kindNames).toEqual(expected);
+    expect(kubernetesNames).toEqual(expected);
+  }
+
+  async #kindNodeHits(
+    clusterId: string,
+    expected: NodeCountExpectation,
+  ): Promise<QueryHit[]> {
+    return this.#waitForSummary(
       {
         filter: kindNodeInClusterFilter(clusterId),
         pageSize: INSPECT_PAGE_SIZE,
       },
       (hits) => ({
-        allScoped: hits.every(
-          (hit) =>
-            hit.resourceType === KIND_NODE_QUERY_TYPE &&
-            hit.name.startsWith(KIND_NODE_PREFIX) &&
-            observation(hit).cluster === clusterResourceName(clusterId),
-        ),
-        hasNodes: hits.length > 0,
+        ...kindNodeScope(hits, clusterId),
+        ...("count" in expected
+          ? { count: hits.length }
+          : { hasNodes: hits.length > 0 }),
       }),
-      { allScoped: true, hasNodes: true },
+      { allScoped: true, ...expected },
     );
-    const kubernetesHits = await this.#waitForSummary(
+  }
+
+  async #kubernetesNodeHits(
+    clusterId: string,
+    expected: NodeCountExpectation,
+  ): Promise<QueryHit[]> {
+    return this.#waitForSummary(
       {
         filter: kubernetesObjectKindFilter(clusterId, "Node"),
         pageSize: INSPECT_PAGE_SIZE,
       },
       (hits) => ({
-        allNodes: hits.every((hit) => observation(hit).kind === "Node"),
-        hasNodes: hits.length > 0,
-        outside: namesOutsideCluster(hits, clusterId),
+        ...kubernetesNodeScope(hits, clusterId),
+        ...("count" in expected
+          ? { count: hits.length }
+          : { hasNodes: hits.length > 0 }),
       }),
-      { allNodes: true, hasNodes: true, outside: [] },
+      { allNodes: true, outside: [], ...expected },
     );
-    const kindNames = kindHits
-      .map(({ name }) => name.slice(KIND_NODE_PREFIX.length))
-      .sort();
-    const kubernetesNames = kubernetesHits
-      .map((hit) => observation(hit).metadata.name)
-      .sort();
-    expect(kubernetesNames).toEqual(kindNames);
+  }
+
+  async #kindNodeIdentities(
+    clusterId: string,
+    expectedCount: number,
+  ): Promise<string[]> {
+    return kindNodeNames(
+      await this.#kindNodeHits(clusterId, { count: expectedCount }),
+    );
+  }
+
+  async #kubernetesNodeIdentities(
+    clusterId: string,
+    expectedCount: number,
+  ): Promise<string[]> {
+    return kubernetesNodeNames(
+      await this.#kubernetesNodeHits(clusterId, { count: expectedCount }),
+    );
   }
 }

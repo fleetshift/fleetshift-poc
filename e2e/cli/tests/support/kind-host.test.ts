@@ -1,7 +1,7 @@
 /* eslint-disable playwright/no-standalone-expect -- Vitest test callbacks are not Playwright tests. */
 import { describe, expect, it } from "vitest";
 
-import { parsePodmanPort } from "./kind-host";
+import { isAlreadyUnpaused, parsePodmanPort } from "./kind-host";
 
 describe("parsePodmanPort", () => {
   it("prefers IPv4 and normalizes unspecified binds", () => {
@@ -24,5 +24,12 @@ describe("parsePodmanPort", () => {
 
   it("rejects output without a port", () => {
     expect(() => parsePodmanPort("not a port")).toThrow("podman port");
+  });
+});
+
+describe("isAlreadyUnpaused", () => {
+  it("recognizes podman unpause when the container is already running", () => {
+    expect(isAlreadyUnpaused("Error: this container is not paused")).toBe(true);
+    expect(isAlreadyUnpaused("cannot pause: already paused")).toBe(false);
   });
 });

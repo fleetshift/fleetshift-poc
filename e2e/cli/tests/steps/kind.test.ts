@@ -2,9 +2,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  kubernetesNodeRole,
   parseCluster,
   parseClusterList,
   parseConfigMapData,
+  parseKubernetesNodes,
   parseMetadataName,
 } from "./kind";
 
@@ -17,6 +19,7 @@ describe("kind JSON parsing", () => {
       conditions: { Ready: { status: "True", message: "ignored" } },
       name: "clusters/kind-e2e-abcd",
       pauseReason: "token expired",
+      spec: {},
       state: "ACTIVE",
     });
   });
@@ -26,6 +29,7 @@ describe("kind JSON parsing", () => {
       conditions: {},
       name: "",
       pauseReason: "",
+      spec: {},
       state: "",
     });
     expect(parseMetadataName("{}")).toBe("");
@@ -42,6 +46,7 @@ describe("kind JSON parsing", () => {
         conditions: { Ready: { status: "False" } },
         name: "clusters/a",
         pauseReason: "waiting",
+        spec: {},
         state: "CREATING",
       },
     ]);
@@ -59,5 +64,49 @@ describe("kind JSON parsing", () => {
     expect(() => parseClusterList("{}")).toThrow(/invalid JSON/);
     expect(() => parseMetadataName("{")).toThrow(/invalid JSON/);
     expect(() => parseConfigMapData("{")).toThrow(/invalid JSON/);
+  });
+});
+
+describe("Kubernetes node parsing", () => {
+  it("classifies control-plane and worker roles from labels", () => {
+    expect(
+      kubernetesNodeRole({ "node-role.kubernetes.io/control-plane": "" }),
+    ).toBe("control-plane");
+    expect(kubernetesNodeRole({ "node-role.kubernetes.io/master": "" })).toBe(
+      "control-plane",
+    );
+    expect(kubernetesNodeRole({ "node-role.kubernetes.io/worker": "" })).toBe(
+      "worker",
+    );
+    expect(kubernetesNodeRole({})).toBe("worker");
+  });
+
+  it("reads node names and roles from a Node list", () => {
+    expect(
+      parseKubernetesNodes(`{
+        "items": [
+          {
+            "metadata": {
+              "name": "fs--a-control-plane",
+              "labels": { "node-role.kubernetes.io/control-plane": "" }
+            }
+          },
+          { "metadata": { "name": "fs--a-worker", "labels": {} } }
+        ]
+      }`),
+    ).toEqual([
+      { name: "fs--a-control-plane", role: "control-plane" },
+      { name: "fs--a-worker", role: "worker" },
+    ]);
+  });
+
+  it("preserves a nested Kind node specification on resource get JSON", () => {
+    expect(
+      parseCluster(
+        '{"name":"clusters/a","state":"ACTIVE","spec":{"nodes":[{"role":"control-plane"},{"role":"worker"}]}}',
+      ).spec,
+    ).toEqual({
+      nodes: [{ role: "control-plane" }, { role: "worker" }],
+    });
   });
 });

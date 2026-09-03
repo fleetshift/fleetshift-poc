@@ -48,6 +48,73 @@ Short UI cheat sheet: [e2e/web/README.md](../../e2e/web/README.md).
   host engine. Override with `PODMAN_SOCKET` if needed. On macOS, a live
   Docker-compatible socket or `podman machine` is enough.
 
+### Kernel keyring quotas (rootless Podman)
+
+Rootless Kind node containers consume kernel keys from the Podman user's
+per-user quota. Kernel defaults (`kernel.keys.maxkeys=200` and
+`kernel.keys.maxbytes=20000`) typically support only about 7–8 simultaneous
+Kind node containers. Exhaustion looks like filesystem failure but is not:
+
+```text
+crun: join keyctl: Disk quota exceeded
+```
+
+E2E requires `maxkeys >= 2000` and `maxbytes >= 200000`. CI raises these on
+the ephemeral runner. Locally, the sandbox runner checks before it builds the
+image and does not change your machine.
+
+Native Linux, temporary (until reboot):
+
+```bash
+sudo sysctl -w kernel.keys.maxkeys=2000
+sudo sysctl -w kernel.keys.maxbytes=200000
+```
+
+Native Linux, persistent. Use a late-sorting `zz-` filename: sysctl.d
+applies files in lexicographic order, so a pre-existing `99-keys.conf` is
+applied after an earlier `99-...` file and restores the kernel defaults.
+
+```bash
+sudo tee /etc/sysctl.d/zz-fleetshift-e2e-keys.conf <<'EOF'
+kernel.keys.maxkeys = 2000
+kernel.keys.maxbytes = 200000
+EOF
+sudo sysctl -p /etc/sysctl.d/zz-fleetshift-e2e-keys.conf
+sysctl -n kernel.keys.maxkeys
+sysctl -n kernel.keys.maxbytes
+```
+
+On a shared Linux system, ask an administrator rather than changing
+system-wide limits casually.
+
+Podman machine (macOS or Linux), temporary. Substitute a custom machine name
+for `podman-machine-default` when needed:
+
+```bash
+podman machine ssh -- sudo sysctl -w kernel.keys.maxkeys=2000
+podman machine ssh -- sudo sysctl -w kernel.keys.maxbytes=200000
+podman machine ssh <machine-name> -- sudo sysctl -w kernel.keys.maxkeys=2000
+podman machine ssh <machine-name> -- sudo sysctl -w kernel.keys.maxbytes=200000
+```
+
+Persistent inside the VM (survives machine restart, not deletion or reset).
+Use the same late-sorting `zz-` filename:
+
+```bash
+printf '%s\n' 'kernel.keys.maxkeys = 2000' 'kernel.keys.maxbytes = 200000' \
+  | podman machine ssh -- sudo tee /etc/sysctl.d/zz-fleetshift-e2e-keys.conf >/dev/null
+podman machine ssh -- sudo sysctl -p /etc/sysctl.d/zz-fleetshift-e2e-keys.conf
+podman machine ssh -- sysctl -n kernel.keys.maxkeys
+podman machine ssh -- sysctl -n kernel.keys.maxbytes
+```
+
+To continue anyway on a local machine (ignored in CI; you may still hit
+`Disk quota exceeded` once Kind nodes fill the quota):
+
+```bash
+FLEETSHIFT_E2E_ALLOW_LOW_KEYRING=1 npx nx test:e2e e2e-cli
+```
+
 The sandbox CA is private. Playwright uses `ignoreHTTPSErrors`; do not
 `update-ca-trust` on the host.
 
@@ -83,6 +150,9 @@ Tests receive connection facts through `BASE_URL`, `FLEETSHIFT_GRPC_TARGET`,
 
 ## CLI
 
+Invoke, fast checks, and the secrets rule:
+[e2e/cli/README.md](../../e2e/cli/README.md).
+
 ```
 e2e/cli/
   playwright.config.ts   # five workers, no retries
@@ -104,15 +174,20 @@ the body runs:
 
 | Declaration | Use when |
 | --- | --- |
-| `[{ access: "read-only", state: "any" }]` | query-only work |
-| `[{ access: "modifiable", state: "any" }]` | delivery, persona, or Kind API writes |
+| `[{ access: "read-only", spec: "any", state: "any" }]` | query-only work; any topology |
+| `[{ access: "modifiable", spec: "any", state: "any" }]` | delivery, persona, or Kind API writes; any topology |
+| `[{ access: "read-only", spec: { nodes: [...] }, state: "any" }]` | need that create spec |
+| `[{ access: "read-only", spec: {}, state: "any" }]` | need the default create spec |
 | two modifiable requests | fan-out |
 | `[]` | gateway, login, bootstrap, or a private Kind lifecycle |
 
-`state: "clean"` is only for assertions that need a baseline cluster. Pool
-identity is `kind-e2e-<run-id>-pool-<id>`; private lifecycle IDs stay outside
-that prefix. Continue using unique namespace and deployment IDs — the pool
-does not isolate test data.
+`spec` is required. `"any"` is unconstrained: the fixture may lease any
+already-provisioned topology, and a newly created cluster uses the default
+empty spec. `spec: {}` pins that default topology. `state: "clean"` is only for
+assertions that need a baseline cluster. Pool identity is
+`kind-e2e-<run-id>-pool-<id>`; private lifecycle IDs stay outside that prefix.
+Continue using unique namespace and deployment IDs — the pool does not isolate
+test data.
 
 Failed tests discard their leased records for the rest of the run. Final
 sandbox teardown still removes every Kind node with the run prefix.
@@ -125,7 +200,7 @@ import { test } from "../fixtures";
 
 test(
   "resource query returns Kubernetes objects",
-  { kindClusters: [{ access: "read-only", state: "any" }] },
+  { kindClusters: [{ access: "read-only", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     await cli.query.indexedKubernetesObjectsExist(cluster.id);
   },

@@ -8,6 +8,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  formatKeyringDiagnostics,
+  inspectKeyring,
+  preflightKeyring,
+} from "./keyring-host.mjs";
+
 const IMAGE = "quay.io/stolostron/fleetshift:latest";
 const UI_ORIGIN = "https://fleetshift-sandbox.localhost:8085";
 const GRPC_TARGET = "127.0.0.1:50051";
@@ -302,8 +308,10 @@ async function startSandbox(sandbox, signal) {
 }
 
 function dumpDiagnostics(sandbox) {
+  const captured = [];
   const show = (label, args) => {
     const output = podman(args, { allowFailure: true }).output;
+    captured.push(output);
     console.error(
       `===== ${label} =====\n${sanitize(output).slice(0, 64 * 1024) || "(no output)"}`,
     );
@@ -328,6 +336,18 @@ function dumpDiagnostics(sandbox) {
   console.error(
     `===== host Kind nodes for ${sandbox.runId} =====\n${nodes.map(([id, cluster]) => `${id}\t${cluster}`).join("\n") || "(no nodes)"}`,
   );
+  try {
+    console.error(
+      formatKeyringDiagnostics({
+        ...inspectKeyring(),
+        captured: captured.join("\n"),
+      }),
+    );
+  } catch (error) {
+    console.error(
+      `===== kernel keyring =====\n${error instanceof Error ? error.message : error}`,
+    );
+  }
 }
 
 function removeContainer(id) {
@@ -371,6 +391,7 @@ function runCommand({ command, args }, env, signal) {
 
 async function main() {
   const command = parseCommand(process.argv.slice(2));
+  preflightKeyring();
   prepareImage();
   const sandbox = await createSandbox();
   const controller = new AbortController();

@@ -1,11 +1,16 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testserver"
 )
@@ -81,11 +86,8 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 		t.Fatalf("expected deleted resource in output, got:\n%s", out)
 	}
 
-	// Verify it's gone.
-	_, err := runCLIErr(t, "--server", addr, "resource", svcFlag, svcName, "get", "clusters", "test-cluster")
-	if err == nil {
-		t.Fatal("get after delete should fail")
-	}
+	// Delete returns the DELETING snapshot; the row is removed asynchronously.
+	awaitCLINotFound(t, "--server", addr, "resource", svcFlag, svcName, "get", "clusters", "test-cluster")
 }
 
 func TestResource_QualifiedTypeCRUD(t *testing.T) {
@@ -123,11 +125,8 @@ func TestResource_QualifiedTypeCRUD(t *testing.T) {
 		t.Fatalf("expected deleted resource in output, got:\n%s", out)
 	}
 
-	// Verify it's gone.
-	_, err := runCLIErr(t, "--server", addr, "resource", "get", qualifiedType, "qualified-cluster")
-	if err == nil {
-		t.Fatal("get after delete should fail")
-	}
+	// Delete returns the DELETING snapshot; the row is removed asynchronously.
+	awaitCLINotFound(t, "--server", addr, "resource", "get", qualifiedType, "qualified-cluster")
 }
 
 func TestResource_GetTableOutput(t *testing.T) {
@@ -188,6 +187,29 @@ func TestResource_ListTableOutput(t *testing.T) {
 	}
 	if !strings.Contains(out, "clusters/tbl-list-cluster") {
 		t.Fatalf("expected resource name in list output, got:\n%s", out)
+	}
+}
+
+// awaitCLINotFound polls a CLI invocation until it returns gRPC NotFound.
+// Managed-resource delete returns while the row is still DELETING; cleanup
+// hard-deletes it after orchestration signals completion. Fifteen seconds
+// matches the server ServiceTimeout for a full create→delete→gone lifecycle.
+func awaitCLINotFound(t *testing.T, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	for {
+		out, err := runCLIContext(t, ctx, args...)
+		if status.Code(err) == codes.NotFound {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for NotFound from fleetctl %s\nlast error: %v\nlast output: %s",
+				strings.Join(args, " "), err, out)
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 

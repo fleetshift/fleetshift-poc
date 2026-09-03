@@ -5,8 +5,8 @@ test(
   "resource query scopes, paginates, and returns both node types",
   {
     kindClusters: [
-      { access: "read-only", state: "any" },
-      { access: "read-only", state: "any" },
+      { access: "read-only", spec: "any", state: "any" },
+      { access: "read-only", spec: "any", state: "any" },
     ],
   },
   async ({ cli, kindClusters: [first, second] }) => {

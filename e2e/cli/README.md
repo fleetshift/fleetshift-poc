@@ -5,6 +5,10 @@ Kind lifecycle and delivery, and resource queries. Playwright is the test
 runner and supplies the browser used to complete Fleetctl's authorization-code
 login; these are CLI tests rather than UI tests.
 
+Shared prerequisites, kernel keyring quotas, the sandbox runner, Kind
+declarations, and CI:
+[end-to-end.md](../../docs/testing/end-to-end.md).
+
 ## Run locally
 
 Install workspace dependencies and Playwright Chromium, and ensure the user
@@ -30,20 +34,18 @@ npx nx test:e2e e2e-cli -- tests/scenarios/gateway.spec.ts
 npx nx test:e2e e2e-cli -- --grep "ops login"
 ```
 
-The suite uses five workers and no retries. The AIO owns fixed ports and is
-shared. Each worker gets its own Fleetctl config directory so credentials do
-not collide; Kind cluster identity is run-wide. Tests declare Kind needs up
-front with `kindClusters` on the exported `test` helper: `read-only` or
-`modifiable` access, `clean` or `any` starting state, and how many clusters.
-The fixture leases compatible ready clusters from a shared pool (or creates
-capacity when none match) and returns them as `kindClusters`. Tests that
-create a private cluster, or that do not use Kind, declare `kindClusters: []`.
-Do not acquire pool clusters from the test body. The sandbox fixture owns
-connection facts plus worker-specific paths. `e2e/sandbox/run.mjs` owns
-startup, failure diagnostics, and exact-run teardown; do not start another AIO
-on ports 8085 or 50051 while it runs. Set `FLEETSHIFT_E2E_KEEP=1` to retain its
-container, Kind nodes, pool state, and temporary directory for local
-debugging.
+Five workers, no retries, one shared AIO. Each worker gets its own Fleetctl
+config directory. Declare Kind needs with `kindClusters` on the exported
+`test` helper; do not acquire pool clusters from the test body. Table and
+pool rules:
+[Kind cluster declarations](../../docs/testing/end-to-end.md#kind-cluster-declarations).
+Do not start another AIO on ports 8085 or 50051 while the runner is up. Set
+`FLEETSHIFT_E2E_KEEP=1` to retain the sandbox for local debugging.
+
+Rootless Kind needs raised kernel keyring quotas. The runner checks before
+the image build and does not change your machine. Remediation and the local
+override:
+[Kernel keyring quotas](../../docs/testing/end-to-end.md#kernel-keyring-quotas-rootless-podman).
 
 ## Fast checks
 

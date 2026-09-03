@@ -11,7 +11,9 @@ import { parseJSON } from "../support/json";
 import { type Sandbox } from "../support/sandbox";
 
 const WAIT_TIMEOUT_MS = 2 * 60_000;
+export const RECOVERY_WAIT_TIMEOUT_MS = 3 * 60_000;
 const POLL_INTERVAL_MS = 2_000;
+const REMAINS_HOLD_MS = 15_000;
 const KUBERNETES_RESOURCE_TYPE = "kubernetes";
 export const CONFIG_MAP_NAME = "test-config";
 export const CONFIG_MAP_DATA = { from: "fleetshift-e2e-cli" } as const;
@@ -59,6 +61,18 @@ export function deploymentTerminalFailure(dep: DeploymentView): string | null {
 export function uniqueId(prefix: string): string {
   if (!prefix.trim()) throw new Error("unique ID prefix is required");
   return `${prefix}-${randomUUID().replaceAll("-", "").slice(0, 8)}`;
+}
+
+export function placementArgs(targets: readonly string[]): string[] {
+  if (targets.length === 0) {
+    throw new Error("static placement requires target IDs");
+  }
+  return [
+    "--placement-type",
+    "static",
+    "--target-ids",
+    targets.map((target) => `k8s-${target}`).join(","),
+  ];
 }
 
 export class DeploymentSteps {
@@ -140,16 +154,15 @@ export class DeploymentSteps {
     namespace: string;
     targets: readonly string[];
   }): Promise<void> {
-    await this.#create(
-      options.id,
-      options.targets,
-      {
+    await this.createManifest({
+      id: options.id,
+      manifest: {
         apiVersion: "v1",
         kind: "Namespace",
         metadata: { name: options.namespace },
       },
-      this.#client.configDir,
-    );
+      targets: options.targets,
+    });
   }
 
   async createConfigMap(options: {
@@ -158,48 +171,60 @@ export class DeploymentSteps {
     namespace: string;
     targets: readonly string[];
   }): Promise<void> {
-    await this.#create(
-      options.id,
-      options.targets,
-      {
+    await this.createManifest({
+      configDir: options.configDir,
+      id: options.id,
+      manifest: {
         apiVersion: "v1",
         data: CONFIG_MAP_DATA,
         kind: "ConfigMap",
         metadata: { name: CONFIG_MAP_NAME, namespace: options.namespace },
       },
-      options.configDir ?? this.#client.configDir,
-    );
+      targets: options.targets,
+    });
   }
 
-  async #create(
-    id: string,
-    targets: readonly string[],
-    manifest: object,
-    configDir: string,
-  ): Promise<void> {
-    expect(targets.length).toBeGreaterThan(0);
+  async createManifest(options: {
+    configDir?: string;
+    id: string;
+    manifest: object;
+    targets: readonly string[];
+  }): Promise<void> {
     const dir = path.join(this.#sandbox.workDir, `manifest-${randomUUID()}`);
     await mkdir(dir, { mode: 0o700 });
     const manifestFile = path.join(dir, "manifest.json");
-    await writeFile(manifestFile, JSON.stringify(manifest), { mode: 0o600 });
+    await writeFile(manifestFile, JSON.stringify(options.manifest), {
+      mode: 0o600,
+    });
     await this.#client.succeed(
       [
         "deployment",
         "create",
         "--id",
-        id,
+        options.id,
         "--manifest-file",
         manifestFile,
         "--resource-type",
         KUBERNETES_RESOURCE_TYPE,
-        "--placement-type",
-        "static",
-        "--target-ids",
-        targets.map((target) => `k8s-${target}`).join(","),
+        ...placementArgs(options.targets),
       ],
-      { configDir },
+      { configDir: options.configDir ?? this.#client.configDir },
     );
-    this.#cleanup.add(() => this.#deleteBestEffort(id));
+    this.#cleanup.add(() => this.#deleteBestEffort(options.id));
+  }
+
+  async waitUntilRemainsCreating(id: string): Promise<void> {
+    await holdValue(async () => {
+      const result = await this.#client.succeed(["deployment", "get", id]);
+      const deployment = parseDeployment(result.stdout);
+      expect(deployment.name).toBe(deploymentName(id));
+      if (deployment.state !== "STATE_CREATING") {
+        throw new Error(
+          `deployment ${deployment.name} became ${deployment.state}; expected to keep retrying in STATE_CREATING`,
+        );
+      }
+      return deployment.state;
+    }, "STATE_CREATING");
   }
 
   async resume(id: string): Promise<void> {
@@ -218,26 +243,65 @@ export class DeploymentSteps {
     );
   }
 
-  async waitUntilGone(id: string): Promise<void> {
+  async waitUntilGone(id: string, timeoutMs = WAIT_TIMEOUT_MS): Promise<void> {
     const wanted = deploymentName(id);
     await expect
-      .poll(
-        async () => {
-          const [get, list] = await Promise.all([
-            this.#client.run(["deployment", "get", id]),
-            this.#client.succeed(["deployment", "list"]),
-          ]);
-          const names = parseDeploymentList(list.stdout).map(
-            ({ name }) => name,
-          );
-          return {
-            listed: names.includes(wanted),
-            name: wanted,
-            notFound: get.exitCode !== 0 && isNotFound(get.stderr),
-          };
-        },
-        { intervals: [POLL_INTERVAL_MS], timeout: WAIT_TIMEOUT_MS },
-      )
+      .poll(() => this.#deploymentPresence(id), {
+        intervals: [POLL_INTERVAL_MS],
+        timeout: timeoutMs,
+      })
       .toEqual({ listed: false, name: wanted, notFound: true });
+  }
+
+  async waitUntilRemainsListed(id: string): Promise<void> {
+    await holdValue(async () => {
+      const presence = await this.#deploymentPresence(id);
+      if (!presence.listed) {
+        throw new Error(
+          `deployment ${presence.name} is not listed; expected it to remain listed`,
+        );
+      }
+      return "listed";
+    }, "listed");
+  }
+
+  async #deploymentPresence(id: string): Promise<{
+    listed: boolean;
+    name: string;
+    notFound: boolean;
+  }> {
+    const wanted = deploymentName(id);
+    const [get, list] = await Promise.all([
+      this.#client.run(["deployment", "get", id]),
+      this.#client.succeed(["deployment", "list"]),
+    ]);
+    return {
+      listed: parseDeploymentList(list.stdout).some(
+        ({ name }) => name === wanted,
+      ),
+      name: wanted,
+      notFound: get.exitCode !== 0 && isNotFound(get.stderr),
+    };
+  }
+}
+
+/** Every sample must equal expected for holdMs. The first mismatch fails immediately. */
+export async function holdValue<T>(
+  sample: () => Promise<T>,
+  expected: T,
+  options: { holdMs?: number; intervalMs?: number } = {},
+): Promise<void> {
+  const holdMs = options.holdMs ?? REMAINS_HOLD_MS;
+  const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
+  const deadline = Date.now() + holdMs;
+  for (;;) {
+    const value = await sample();
+    if (value !== expected) {
+      throw new Error(`expected ${String(expected)}, got ${String(value)}`);
+    }
+    if (Date.now() >= deadline) return;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, intervalMs);
+    });
   }
 }

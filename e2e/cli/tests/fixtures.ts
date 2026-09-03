@@ -14,6 +14,7 @@ import { GatewaySteps } from "./steps/gateway";
 import { KindSteps } from "./steps/kind";
 import { LoginSteps } from "./steps/login";
 import { QuerySteps } from "./steps/query";
+import { ResourceDiscoverySteps } from "./steps/resources";
 import { CleanupStack } from "./support/cleanup";
 import { FleetctlClient } from "./support/fleetctl";
 import {
@@ -24,6 +25,7 @@ import {
 import {
   type KindCluster,
   KindClusterPool,
+  type KindClusterRequest,
   pooledKindClusterIdPrefix,
 } from "./support/kind-pool";
 import { readSandboxEnvironment, type Sandbox } from "./support/sandbox";
@@ -39,7 +41,7 @@ interface Suite {
   sandbox: Sandbox;
 }
 
-interface KindResources {
+interface KindClusterLease {
   cleanup: CleanupStack;
   clusters: readonly KindCluster[];
 }
@@ -51,12 +53,13 @@ interface Cli {
   login: LoginSteps;
   loginAs: (persona: Persona) => Promise<string>;
   query: QuerySteps;
+  resources: ResourceDiscoverySteps;
 }
 
 type TestArgs = {
   cli: Cli;
   kindClusters: readonly KindCluster[];
-  kindResources: KindResources;
+  kindClusterLease: KindClusterLease;
 };
 
 type KindClusterTestBody = (
@@ -118,7 +121,7 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
     { scope: "worker", timeout: 25 * 60_000 },
   ],
 
-  kindResources: [
+  kindClusterLease: [
     async ({ suite }, use, testInfo) => {
       const requests = readKindClusterRequests(testInfo.annotations);
       const cleanup = new CleanupStack();
@@ -129,13 +132,7 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
         const pending = reservation.allocations.filter(
           (allocation) => allocation.needsProvisioning,
         );
-        await Promise.all(
-          pending.map(async ({ cluster }) => {
-            await suite.kind.create(cluster.id);
-            await suite.kind.waitUntilReady(cluster.id);
-            await suite.kind.waitUntilAPIAcceptsToken(cluster.id);
-          }),
-        );
+        await provisionPending(suite.kind, pending);
         const clusters = await suite.kindPool.activate(reservation);
         claimed = true;
         await use({ cleanup, clusters });
@@ -172,28 +169,69 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
       }
       if (testError) throw testError;
     },
-    { auto: true, timeout: 15 * 60_000 },
+    { auto: true, timeout: 25 * 60_000 },
   ],
 
-  kindClusters: async ({ kindResources }, use) => {
-    await use(kindResources.clusters);
+  kindClusters: async ({ kindClusterLease }, use) => {
+    await use(kindClusterLease.clusters);
   },
 
-  cli: async ({ suite, kindResources }, use) => {
+  cli: async ({ suite, kindClusterLease }, use) => {
     await use({
       deployments: new DeploymentSteps(
         suite.fleetctl,
         suite.sandbox,
-        kindResources.cleanup,
+        kindClusterLease.cleanup,
       ),
       gateway: suite.gateway,
-      kind: new KindSteps(suite.fleetctl, suite.sandbox, kindResources.cleanup),
+      kind: new KindSteps(
+        suite.fleetctl,
+        suite.sandbox,
+        kindClusterLease.cleanup,
+      ),
       login: suite.login,
       loginAs: suite.loginAs,
       query: suite.query,
+      resources: new ResourceDiscoverySteps(suite.fleetctl),
     });
   },
 });
+
+async function provisionPending(
+  kind: KindSteps,
+  pending: readonly {
+    cluster: KindCluster;
+    request: KindClusterRequest;
+  }[],
+): Promise<void> {
+  if (pending.length === 0) return;
+  const created = new Set<string>();
+  const results = await Promise.allSettled(
+    pending.map(async ({ cluster, request }) => {
+      const spec = request.spec === "any" ? {} : request.spec;
+      await kind.create(cluster.id, spec);
+      created.add(cluster.id);
+      await kind.waitUntilReady(cluster.id);
+      await kind.waitUntilAPIAcceptsToken(cluster.id);
+    }),
+  );
+  const failures = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  if (failures.length === 0) return;
+  const abandonErrors: unknown[] = [];
+  await Promise.allSettled(
+    [...created].map(async (id) => {
+      try {
+        await kind.deleteUnactivatedPoolCluster(id);
+      } catch (error) {
+        abandonErrors.push(error);
+      }
+    }),
+  );
+  const errors = [...failures, ...abandonErrors];
+  throw errors.length === 1 ? errors[0] : new AggregateError(errors);
+}
 
 function wrapDeclare(declare: PlaywrightDeclare): KindClusterTestCallable {
   return (title, details, body) => {

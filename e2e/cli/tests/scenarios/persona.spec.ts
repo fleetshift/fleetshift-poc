@@ -5,7 +5,7 @@ import { uniqueId } from "../steps/deployments";
 
 test(
   "developer delivery pauses until ops resumes it",
-  { kindClusters: [{ access: "modifiable", state: "any" }] },
+  { kindClusters: [{ access: "modifiable", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     const { deployments, kind, login, loginAs } = cli;
     const namespace = uniqueId("e2e");

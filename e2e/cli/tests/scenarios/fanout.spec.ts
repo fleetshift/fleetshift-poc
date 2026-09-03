@@ -6,8 +6,8 @@ test(
   "delivery fans out to two clusters",
   {
     kindClusters: [
-      { access: "modifiable", state: "any" },
-      { access: "modifiable", state: "any" },
+      { access: "modifiable", spec: "any", state: "any" },
+      { access: "modifiable", spec: "any", state: "any" },
     ],
   },
   async ({ cli, kindClusters: [first, second] }) => {

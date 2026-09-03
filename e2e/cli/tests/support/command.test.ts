@@ -3,13 +3,25 @@ import { execPath } from "node:process";
 
 import { describe, expect, it } from "vitest";
 
-import { isNotFound, runCommand } from "./command";
+import { isNotFound, isUnauthenticated, runCommand } from "./command";
 
 describe("isNotFound", () => {
   it("recognizes gRPC and kubectl not-found phrasing", () => {
     expect(isNotFound("rpc error: code = NotFound desc = missing")).toBe(true);
     expect(isNotFound("Error from server (NotFound): namespaces")).toBe(true);
     expect(isNotFound("rpc error: code = PermissionDenied")).toBe(false);
+  });
+});
+
+describe("isUnauthenticated", () => {
+  it("recognizes gRPC unauthenticated phrasing", () => {
+    expect(
+      isUnauthenticated(
+        "rpc error: code = Unauthenticated desc = unauthenticated",
+      ),
+    ).toBe(true);
+    expect(isUnauthenticated("Error: unauthenticated")).toBe(true);
+    expect(isUnauthenticated("rpc error: code = PermissionDenied")).toBe(false);
   });
 });
 

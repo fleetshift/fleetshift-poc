@@ -3,15 +3,29 @@ import { mkdir, readFile, rename, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { uniqueKindClusterId } from "../../../shared/kind-cluster-id";
+import {
+  isDefaultKindClusterSpec,
+  type KindClusterCreateSpec,
+  kindClusterSpecKey,
+  parseKindClusterCreateSpec,
+} from "./kind-spec";
 
 export type KindClusterAccess = "read-only" | "modifiable";
 export type KindClusterStateRequirement = "clean" | "any";
 export type KindClusterCondition = "clean" | "modified";
 export type KindClusterReleaseOutcome = "unused" | "reusable" | "discarded";
 
+/**
+ * `"any"` accepts any existing cluster topology. If provisioning is
+ * necessary, `"any"` creates the default `{}` topology. `{}` explicitly
+ * pins the default topology.
+ */
+export type KindClusterSpecRequirement = KindClusterCreateSpec | "any";
+
 export interface KindClusterRequest {
   readonly access: KindClusterAccess;
   readonly state: KindClusterStateRequirement;
+  readonly spec: KindClusterSpecRequirement;
 }
 
 export interface KindCluster {
@@ -30,12 +44,14 @@ export interface KindClusterReservation {
 export interface AvailableKindCluster {
   readonly id: string;
   readonly condition: KindClusterCondition;
+  readonly spec: KindClusterCreateSpec;
 }
 
 interface PoolRecord {
   id: string;
   condition: KindClusterCondition;
   leaseId?: string;
+  spec: KindClusterCreateSpec;
 }
 
 interface PoolState {
@@ -65,6 +81,13 @@ export function nextKindClusterCondition(
   return request.access === "modifiable" ? "modified" : current;
 }
 
+/**
+ * Assigns available clusters to requests without reordering the request
+ * list. Pinned-spec slots are filled before `"any"` slots so a mixed
+ * reservation cannot spend the only matching topology on an unconstrained
+ * request. `"any"` matches any topology and prefers non-default clusters
+ * when condition is equal.
+ */
 export function matchKindClusterRequests(
   available: readonly AvailableKindCluster[],
   requests: readonly KindClusterRequest[],
@@ -84,16 +107,53 @@ export function matchKindClusterRequests(
     return cluster?.id;
   };
 
+  const takePinned = (
+    request: KindClusterRequest,
+    condition: KindClusterCondition,
+  ): string | undefined => {
+    if (request.spec === "any") return undefined;
+    const key = kindClusterSpecKey(request.spec);
+    return take(
+      (cluster) =>
+        cluster.condition === condition &&
+        kindClusterSpecKey(cluster.spec) === key,
+    );
+  };
+
+  const takeUnconstrained = (
+    condition: KindClusterCondition,
+  ): string | undefined =>
+    take(
+      (cluster) =>
+        cluster.condition === condition &&
+        !isDefaultKindClusterSpec(cluster.spec),
+    ) ??
+    take(
+      (cluster) =>
+        cluster.condition === condition &&
+        isDefaultKindClusterSpec(cluster.spec),
+    );
+
   for (const [index, request] of requests.entries()) {
-    if (request.state === "clean") {
-      assigned[index] = take((cluster) => cluster.condition === "clean");
+    if (request.spec !== "any" && request.state === "clean") {
+      assigned[index] = takePinned(request, "clean");
     }
   }
   for (const [index, request] of requests.entries()) {
-    if (request.state === "any") {
+    if (request.spec !== "any" && request.state === "any") {
       assigned[index] =
-        take((cluster) => cluster.condition === "modified") ??
-        take((cluster) => cluster.condition === "clean");
+        takePinned(request, "modified") ?? takePinned(request, "clean");
+    }
+  }
+  for (const [index, request] of requests.entries()) {
+    if (request.spec === "any" && request.state === "clean") {
+      assigned[index] = takeUnconstrained("clean");
+    }
+  }
+  for (const [index, request] of requests.entries()) {
+    if (request.spec === "any" && request.state === "any") {
+      assigned[index] =
+        takeUnconstrained("modified") ?? takeUnconstrained("clean");
     }
   }
   return assigned;
@@ -123,9 +183,13 @@ export class KindClusterPool {
     }
     return this.#withLock(async () => {
       const state = await this.#load();
-      const available = state.records.filter(
-        (record) => record.leaseId == null,
-      );
+      const available = state.records
+        .filter((record) => record.leaseId == null)
+        .map((record): AvailableKindCluster => ({
+          condition: record.condition,
+          id: record.id,
+          spec: record.spec,
+        }));
       const assigned = matchKindClusterRequests(available, requests);
       const generated = new Set<string>();
       const allocations = requests.map((request, index) => {
@@ -176,6 +240,8 @@ export class KindClusterPool {
             condition: "clean",
             id: allocation.cluster.id,
             leaseId: reservation.leaseId,
+            spec:
+              allocation.request.spec === "any" ? {} : allocation.request.spec,
           });
         }
         await this.#save(state);
@@ -316,6 +382,7 @@ function parsePoolRecord(value: unknown): PoolRecord {
     condition?: unknown;
     id?: unknown;
     leaseId?: unknown;
+    spec?: unknown;
   };
   if (typeof record.id !== "string" || record.id.trim() === "") {
     throw new Error("kind pool state is malformed");
@@ -326,9 +393,18 @@ function parsePoolRecord(value: unknown): PoolRecord {
   if (record.leaseId != null && typeof record.leaseId !== "string") {
     throw new Error("kind pool state is malformed");
   }
+  let spec: KindClusterCreateSpec = {};
+  if (record.spec !== undefined) {
+    try {
+      spec = parseKindClusterCreateSpec(record.spec);
+    } catch {
+      throw new Error("kind pool state is malformed");
+    }
+  }
   const parsed: PoolRecord = {
     condition: record.condition,
     id: record.id,
+    spec,
   };
   if (typeof record.leaseId === "string") parsed.leaseId = record.leaseId;
   return parsed;

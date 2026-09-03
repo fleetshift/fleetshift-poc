@@ -1,6 +1,6 @@
-// Package testserver is a frozen fixture for existing fleetshift-cli
-// unit/contract tests that call Start. Do not add new callers, prefer
-// adding new e2e tests.
+// Package testserver provides a fully wired in-process FleetShift gRPC
+// server for integration testing. The server uses SQLite in-memory storage
+// and the in-memory workflow engine, making tests fast and deterministic.
 package testserver
 
 import (
@@ -56,6 +56,8 @@ func Start(t *testing.T) string {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "fleetshift.db")
+	// TODO: shared-cache in-memory SQLite once bootstrap keeps an OpenMemory
+	// sentinel. See docs/fleetshift/e2e-testing/2026-09-03-testserver-in-memory-sqlite.md.
 
 	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",

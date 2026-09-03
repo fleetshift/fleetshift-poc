@@ -67,6 +67,14 @@ export function isNotFound(stderr: string): boolean {
   return detail.includes("notfound") || detail.includes("not found");
 }
 
+export function isUnauthenticated(output: string): boolean {
+  const detail = output.toLowerCase();
+  return (
+    detail.includes("unauthenticated") ||
+    detail.includes("code = unauthenticated")
+  );
+}
+
 export function requireCommandSuccess(
   label: string,
   result: CommandResult,

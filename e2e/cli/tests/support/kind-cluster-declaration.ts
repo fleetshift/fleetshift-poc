@@ -5,6 +5,7 @@ import {
   type KindClusterRequest,
   type KindClusterStateRequirement,
 } from "./kind-pool";
+import { parseKindClusterCreateSpec } from "./kind-spec";
 
 export const KIND_CLUSTERS_ANNOTATION_TYPE = "fleetshift.kindClusters";
 
@@ -71,11 +72,33 @@ function parseKindClusterRequest(value: unknown): KindClusterRequest {
   if (typeof value !== "object" || value === null) {
     throw new Error("kindClusters declaration is malformed");
   }
-  const request = value as { access?: unknown; state?: unknown };
+  const request = value as {
+    access?: unknown;
+    spec?: unknown;
+    state?: unknown;
+  };
   if (!isAccess(request.access) || !isState(request.state)) {
     throw new Error("kindClusters declaration is malformed");
   }
-  return { access: request.access, state: request.state };
+  if (
+    !("spec" in request) ||
+    request.spec === undefined ||
+    request.spec === null
+  ) {
+    throw new Error("kindClusters declaration is malformed");
+  }
+  if (request.spec === "any") {
+    return { access: request.access, spec: "any", state: request.state };
+  }
+  try {
+    return {
+      access: request.access,
+      spec: parseKindClusterCreateSpec(request.spec),
+      state: request.state,
+    };
+  } catch {
+    throw new Error("kindClusters declaration is malformed");
+  }
 }
 
 function isAccess(value: unknown): value is KindClusterAccess {
