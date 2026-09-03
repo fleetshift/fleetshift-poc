@@ -133,7 +133,8 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
         );
         await Promise.all(
           pending.map(async ({ cluster, request }) => {
-            await suite.kind.create(cluster.id, request.spec ?? {});
+            const spec = request.spec === "any" ? {} : request.spec;
+            await suite.kind.create(cluster.id, spec);
             await suite.kind.waitUntilReady(cluster.id);
             await suite.kind.waitUntilAPIAcceptsToken(cluster.id);
           }),

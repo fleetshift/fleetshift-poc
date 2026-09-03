@@ -8,8 +8,12 @@ import {
 } from "./kind-cluster-declaration";
 
 const REQUESTS = [
-  { access: "read-only" as const, state: "any" as const },
-  { access: "modifiable" as const, state: "clean" as const },
+  { access: "read-only" as const, spec: "any" as const, state: "any" as const },
+  {
+    access: "modifiable" as const,
+    spec: "any" as const,
+    state: "clean" as const,
+  },
 ];
 
 describe("kindClusters annotation codec", () => {
@@ -63,6 +67,31 @@ describe("kindClusters annotation codec", () => {
     expect(() =>
       readKindClusterRequests([
         {
+          description: '[{"access":"read-only","state":"any"}]',
+          type: KIND_CLUSTERS_ANNOTATION_TYPE,
+        },
+      ]),
+    ).toThrow(/malformed/);
+    expect(() =>
+      readKindClusterRequests([
+        {
+          description:
+            '[{"access":"read-only","spec":"wildcard","state":"any"}]',
+          type: KIND_CLUSTERS_ANNOTATION_TYPE,
+        },
+      ]),
+    ).toThrow(/malformed/);
+    expect(() =>
+      readKindClusterRequests([
+        {
+          description: '[{"access":"read-only","spec":null,"state":"any"}]',
+          type: KIND_CLUSTERS_ANNOTATION_TYPE,
+        },
+      ]),
+    ).toThrow(/malformed/);
+    expect(() =>
+      readKindClusterRequests([
+        {
           description:
             '[{"access":"read-only","state":"any","spec":{"nodes":[{"role":"ingress"}]}}]',
           type: KIND_CLUSTERS_ANNOTATION_TYPE,
@@ -71,9 +100,13 @@ describe("kindClusters annotation codec", () => {
     ).toThrow(/malformed/);
   });
 
-  it("round-trips an omitted spec as unconstrained and {} as pinned default", () => {
+  it("round-trips any spec, {} as pinned default, and a multi-node spec", () => {
     const unconstrained = [
-      { access: "read-only" as const, state: "any" as const },
+      {
+        access: "read-only" as const,
+        spec: "any" as const,
+        state: "any" as const,
+      },
     ];
     const pinnedDefault = [
       { access: "read-only" as const, spec: {}, state: "any" as const },

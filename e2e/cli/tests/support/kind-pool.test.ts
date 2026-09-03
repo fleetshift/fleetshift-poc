@@ -15,14 +15,17 @@ import { type KindClusterCreateSpec } from "./kind-spec";
 
 const READ_ONLY_ANY: KindClusterRequest = {
   access: "read-only",
+  spec: "any",
   state: "any",
 };
 const READ_ONLY_CLEAN: KindClusterRequest = {
   access: "read-only",
+  spec: "any",
   state: "clean",
 };
 const MODIFIABLE_ANY: KindClusterRequest = {
   access: "modifiable",
+  spec: "any",
   state: "any",
 };
 const MULTI_NODE: KindClusterCreateSpec = {
@@ -157,7 +160,7 @@ describe("KindClusterPool lifecycle", () => {
     );
   });
 
-  it("reuses a specialized cluster for the same spec and for omitted spec", async () => {
+  it("reuses a specialized cluster for the same spec and for any spec", async () => {
     const clusters = pool(await tempDir());
     const created = await clusters.reserve([READ_ONLY_MULTI_NODE]);
     expect(created.allocations[0]?.needsProvisioning).toBe(true);

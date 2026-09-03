@@ -30,7 +30,7 @@ test(
 
 test(
   "ops token can write directly to the Kind API",
-  { kindClusters: [{ access: "modifiable", state: "any" }] },
+  { kindClusters: [{ access: "modifiable", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     const { kind } = cli;
     const namespace = uniqueId("oidc");
@@ -44,7 +44,7 @@ test(
 
 test(
   "Kind delivery completes a round trip",
-  { kindClusters: [{ access: "modifiable", state: "any" }] },
+  { kindClusters: [{ access: "modifiable", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     const { deployments, kind, query } = cli;
     const namespace = uniqueId("e2e");
@@ -115,7 +115,7 @@ test(
 
 test(
   "deletion converges after a temporary target outage",
-  { kindClusters: [{ access: "modifiable", state: "any" }] },
+  { kindClusters: [{ access: "modifiable", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     const { deployments, kind } = cli;
     const namespace = uniqueId("e2e");

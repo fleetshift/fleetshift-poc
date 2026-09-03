@@ -4,7 +4,7 @@ import { uniqueId } from "../steps/deployments";
 
 test(
   "rejected Kubernetes apply stays creating and the deployment can be deleted",
-  { kindClusters: [{ access: "modifiable", state: "any" }] },
+  { kindClusters: [{ access: "modifiable", spec: "any", state: "any" }] },
   async ({ cli, kindClusters: [cluster] }) => {
     const { deployments, kind } = cli;
     const id = uniqueId("fail");

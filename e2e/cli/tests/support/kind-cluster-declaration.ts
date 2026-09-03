@@ -80,8 +80,15 @@ function parseKindClusterRequest(value: unknown): KindClusterRequest {
   if (!isAccess(request.access) || !isState(request.state)) {
     throw new Error("kindClusters declaration is malformed");
   }
-  if (!("spec" in request) || request.spec === undefined) {
-    return { access: request.access, state: request.state };
+  if (
+    !("spec" in request) ||
+    request.spec === undefined ||
+    request.spec === null
+  ) {
+    throw new Error("kindClusters declaration is malformed");
+  }
+  if (request.spec === "any") {
+    return { access: request.access, spec: "any", state: request.state };
   }
   try {
     return {

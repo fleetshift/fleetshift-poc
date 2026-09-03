@@ -15,15 +15,17 @@ export type KindClusterStateRequirement = "clean" | "any";
 export type KindClusterCondition = "clean" | "modified";
 export type KindClusterReleaseOutcome = "unused" | "reusable" | "discarded";
 
+/**
+ * `"any"` accepts any existing cluster topology. If provisioning is
+ * necessary, `"any"` creates the default `{}` topology. `{}` explicitly
+ * pins the default topology.
+ */
+export type KindClusterSpecRequirement = KindClusterCreateSpec | "any";
+
 export interface KindClusterRequest {
   readonly access: KindClusterAccess;
   readonly state: KindClusterStateRequirement;
-  /**
-   * When omitted, any already-provisioned spec may be leased; a newly
-   * created cluster uses the default empty spec. When present, only a
-   * cluster created with this spec is a match (`{}` pins default).
-   */
-  readonly spec?: KindClusterCreateSpec;
+  readonly spec: KindClusterSpecRequirement;
 }
 
 export interface KindCluster {
@@ -81,10 +83,10 @@ export function nextKindClusterCondition(
 
 /**
  * Assigns available clusters to requests without reordering the request
- * list. Specific-spec slots are filled before omitted-spec slots so a mixed
+ * list. Pinned-spec slots are filled before `"any"` slots so a mixed
  * reservation cannot spend the only matching topology on an unconstrained
- * request. Omitted spec matches any topology and prefers non-default
- * clusters when condition is equal.
+ * request. `"any"` matches any topology and prefers non-default clusters
+ * when condition is equal.
  */
 export function matchKindClusterRequests(
   available: readonly AvailableKindCluster[],
@@ -109,7 +111,7 @@ export function matchKindClusterRequests(
     request: KindClusterRequest,
     condition: KindClusterCondition,
   ): string | undefined => {
-    if (request.spec === undefined) return undefined;
+    if (request.spec === "any") return undefined;
     const key = kindClusterSpecKey(request.spec);
     return take(
       (cluster) =>
@@ -133,23 +135,23 @@ export function matchKindClusterRequests(
     );
 
   for (const [index, request] of requests.entries()) {
-    if (request.spec !== undefined && request.state === "clean") {
+    if (request.spec !== "any" && request.state === "clean") {
       assigned[index] = takePinned(request, "clean");
     }
   }
   for (const [index, request] of requests.entries()) {
-    if (request.spec !== undefined && request.state === "any") {
+    if (request.spec !== "any" && request.state === "any") {
       assigned[index] =
         takePinned(request, "modified") ?? takePinned(request, "clean");
     }
   }
   for (const [index, request] of requests.entries()) {
-    if (request.spec === undefined && request.state === "clean") {
+    if (request.spec === "any" && request.state === "clean") {
       assigned[index] = takeUnconstrained("clean");
     }
   }
   for (const [index, request] of requests.entries()) {
-    if (request.spec === undefined && request.state === "any") {
+    if (request.spec === "any" && request.state === "any") {
       assigned[index] =
         takeUnconstrained("modified") ?? takeUnconstrained("clean");
     }
@@ -238,7 +240,8 @@ export class KindClusterPool {
             condition: "clean",
             id: allocation.cluster.id,
             leaseId: reservation.leaseId,
-            spec: allocation.request.spec ?? {},
+            spec:
+              allocation.request.spec === "any" ? {} : allocation.request.spec,
           });
         }
         await this.#save(state);
