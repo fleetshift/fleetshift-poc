@@ -8,7 +8,7 @@
         "commands": [
           "podman build -t localhost/fleetshift-server:latest .",
           "podman build -f Dockerfile.local -t localhost/fleetshift-server-local:latest .",
-          "podman build -f Dockerfile.web -t localhost/fleetshift-web:latest ."
+          "podman build --ulimit nofile=65536:65536 -f Dockerfile.web -t localhost/fleetshift-web:latest ."
         ],
         "parallel": false
       },

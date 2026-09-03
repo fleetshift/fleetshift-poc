@@ -55,8 +55,11 @@ export async function loadPfIcon(name: string): Promise<ComponentType | null> {
   if (pending) return pending;
 
   const file = iconNameToFile(name);
+  // One async chunk for the whole icon context. `pf-icon-[request]` emits
+  // ~2885 files and EMFILEs rspack under the image builder's default nofile.
   const promise = import(
-    /* webpackChunkName: "pf-icon-[request]" */
+    /* webpackChunkName: "pf-icons" */
+    /* webpackMode: "lazy-once" */
     `@patternfly/react-icons/dist/esm/icons/${file}.js`
   )
     .then((mod: Record<string, unknown>) => {
