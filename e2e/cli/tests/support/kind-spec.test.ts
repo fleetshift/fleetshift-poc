@@ -57,6 +57,35 @@ describe("kind cluster spec identity", () => {
     );
   });
 
+  it("treats an empty node image as omitted (Kind default)", () => {
+    expect(
+      kindClusterSpecsEqual(MULTI_NODE, {
+        nodes: [
+          { role: "control-plane", image: "" },
+          { role: "worker", image: "" },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      kindClusterSpecsEqual(
+        kindClusterCreateSpecFromView({
+          name: "clusters/a",
+          nodes: [
+            { role: "control-plane", image: "" },
+            { role: "worker", image: "" },
+          ],
+        }),
+        MULTI_NODE,
+      ),
+    ).toBe(true);
+    expect(
+      kindClusterSpecsEqual(
+        { nodes: [{ role: "worker", image: "kindest/node:v1.31.0" }] },
+        { nodes: [{ role: "worker" }] },
+      ),
+    ).toBe(false);
+  });
+
   it("treats node order as significant", () => {
     expect(
       kindClusterSpecsEqual(MULTI_NODE, {
@@ -72,7 +101,7 @@ describe("kind cluster spec parsing", () => {
     expect(
       parseKindClusterCreateSpec({
         nodes: [
-          { role: "control-plane" },
+          { role: "control-plane", image: "" },
           { image: "kindest/node:v1.31.0", role: "worker" },
         ],
       }),

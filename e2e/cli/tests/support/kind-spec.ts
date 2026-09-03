@@ -70,7 +70,9 @@ function parseKindNodeSpec(value: unknown): KindNodeSpec {
     throw new Error("kind cluster spec is malformed");
   }
   const node: KindNodeSpec = { role: value.role };
-  if (typeof value.image === "string") node.image = value.image;
+  if (typeof value.image === "string" && value.image !== "") {
+    node.image = value.image;
+  }
   return node;
 }
 
@@ -83,7 +85,7 @@ function canonicalizeKindClusterSpec(
 
 function canonicalizeKindNodeSpec(node: KindNodeSpec): Record<string, unknown> {
   const canonical: Record<string, unknown> = { role: node.role };
-  if (node.image !== undefined) canonical.image = node.image;
+  if (node.image) canonical.image = node.image;
   return canonical;
 }
 
