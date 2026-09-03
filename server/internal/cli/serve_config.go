@@ -53,6 +53,9 @@ func loadServeConfig(f *serveFlags, sel serveSelections) (bootstrap.Config, erro
 		OIDCRegistryID:                f.oidcRegistryID,
 		OIDCRegistrySubjectExpression: f.oidcRegistrySubjectExpression,
 		OIDCPublicKeyClaimExpression:  f.oidcPublicKeyClaimExpression,
+		OIDCEmailDomain:               f.oidcEmailDomain,
+		OIDCAdditionalIssuer:          f.oidcAdditionalIssuer,
+		OIDCAdditionalEmailDomain:     f.oidcAdditionalEmailDomain,
 		Addons:                        f.addons,
 		GCPHCPConfigPath:              resolveGCPHCPConfigPath(f.gcphcpConfig),
 	})

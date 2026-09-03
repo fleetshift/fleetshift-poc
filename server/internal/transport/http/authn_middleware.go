@@ -84,7 +84,8 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 			}
 			subject = &claims
 			matchedAudience = []domain.Audience{m.OIDC().Audience}
-			break
+			continue
+			// break
 		}
 
 		if subject == nil {

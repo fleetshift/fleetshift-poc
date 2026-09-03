@@ -30,6 +30,7 @@ import FleetSearch from "../components/Search/FleetSearch";
 import { SearchProvider } from "../components/Search/SearchProvider";
 import ThemeDropdown from "../components/Themes/ThemeDropdown";
 import { useAuth } from "../contexts/AuthContext";
+import { uiConfigStore } from "../utils/uiConfig";
 
 const AppMasthead = () => {
   const { user, logout } = useAuth();
@@ -89,6 +90,14 @@ const AppMasthead = () => {
                     </DropdownItem>
                     <Divider />
                     <DropdownItem onClick={logout}>Log out</DropdownItem>
+                    <DropdownItem
+                      onClick={() => {
+                        uiConfigStore.updateState("SELECT_IDP", null);
+                        logout();
+                      }}
+                    >
+                      Switch IDP
+                    </DropdownItem>
                   </DropdownList>
                 </Dropdown>
               </ToolbarItem>

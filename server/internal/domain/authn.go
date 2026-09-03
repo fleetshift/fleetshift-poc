@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"crypto"
+	"strings"
 	"time"
 )
 
@@ -38,11 +39,16 @@ type AuthMethod struct {
 // creation paths; use [AuthMethodFromSnapshot] only for reconstituting
 // from persistence.
 func NewOIDCAuthMethod(id AuthMethodID, config *OIDCConfig) AuthMethod {
-	return AuthMethod{
-		id:         id,
-		authType:   AuthMethodTypeOIDC,
-		oidcConfig: config,
+	return NewOIDCAuthMethodForDomain(id, config, "")
+}
+
+// NewOIDCAuthMethodForDomain creates an OIDC auth method with an email domain
+// used for tenant/auth-method selection.
+func NewOIDCAuthMethodForDomain(id AuthMethodID, config *OIDCConfig, emailDomain string) AuthMethod {
+	if config != nil {
+		config.EmailDomain = strings.TrimPrefix(strings.TrimSpace(emailDomain), "@")
 	}
+	return AuthMethod{id: id, authType: AuthMethodTypeOIDC, oidcConfig: config}
 }
 
 // Validate checks that exactly one protocol config is set for the given type.
@@ -67,6 +73,14 @@ func (m AuthMethod) Type() AuthMethodType { return m.authType }
 // OIDC returns the OIDC configuration, if any.
 func (m AuthMethod) OIDC() *OIDCConfig { return m.oidcConfig }
 
+// EmailDomain returns domain used to associate users with this method.
+func (m AuthMethod) EmailDomain() string {
+	if m.oidcConfig == nil {
+		return ""
+	}
+	return m.oidcConfig.EmailDomain
+}
+
 // IssuerURL identifies an OIDC issuer.
 type IssuerURL string
 
@@ -80,6 +94,7 @@ type EndpointURL string
 type OIDCConfig struct {
 	IssuerURL                IssuerURL
 	Audience                 Audience
+	EmailDomain              string      // email domain used for auth-method selection
 	JWKSURI                  EndpointURL // resolved from discovery
 	AuthorizationEndpoint    EndpointURL // resolved from discovery
 	TokenEndpoint            EndpointURL // resolved from discovery

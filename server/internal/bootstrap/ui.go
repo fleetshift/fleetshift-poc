@@ -49,31 +49,46 @@ type authMethodLister interface {
 }
 
 // uiAuthFunc builds the /api/ui/config AuthSnapshot callback from persisted
-// AuthMethods. Zero methods → unconfigured; one OIDC method with issuer and
-// authorization endpoint → configured; any other shape is unavailable.
-func uiAuthFunc(methods authMethodLister) func(context.Context) (authority, authorizationEndpoint string, configured bool, err error) {
-	return func(ctx context.Context) (string, string, bool, error) {
+// AuthMethods. The default method is preferred so additional API-only IdPs do
+// not change the browser's login authority.
+func uiAuthMethodsFunc(methods authMethodLister, externalScope string) func(context.Context) ([]transporthttp.OIDCAuthMethodConfig, error) {
+	return func(ctx context.Context) ([]transporthttp.OIDCAuthMethodConfig, error) {
 		list, err := methods.List(ctx)
 		if err != nil {
-			return "", "", false, err
+			return nil, err
 		}
-		if len(list) == 0 {
-			return "", "", false, nil
+		out := make([]transporthttp.OIDCAuthMethodConfig, 0, len(list))
+		ordered := make([]domain.AuthMethod, 0, len(list))
+		for _, m := range list {
+			if m.ID() == domain.DefaultAuthMethodID {
+				ordered = append(ordered, m)
+			}
 		}
-		if len(list) != 1 {
-			return "", "", false, fmt.Errorf("expected at most one auth method for UI config, found %d", len(list))
+		for _, m := range list {
+			if m.ID() != domain.DefaultAuthMethodID {
+				ordered = append(ordered, m)
+			}
 		}
-		m := list[0]
-		if m.Type() != domain.AuthMethodTypeOIDC || m.OIDC() == nil {
-			return "", "", false, fmt.Errorf("active auth method is not OIDC")
+		for _, m := range ordered {
+			if m.Type() != domain.AuthMethodTypeOIDC || m.OIDC() == nil {
+				continue
+			}
+			oidc := m.OIDC()
+			if oidc.IssuerURL == "" || oidc.AuthorizationEndpoint == "" {
+				return nil, fmt.Errorf("OIDC auth method missing issuer or authorization endpoint")
+			}
+			scope := externalScope
+			if m.ID() == domain.DefaultAuthMethodID {
+				scope = "openid profile email groups audience:server:client_id:fleetshift"
+			}
+			out = append(out, transporthttp.OIDCAuthMethodConfig{
+				Name: string(m.ID()), Authority: string(oidc.IssuerURL),
+				AuthorizationEndpoint: string(oidc.AuthorizationEndpoint),
+				Audience:              string(oidc.Audience), EmailDomain: m.EmailDomain(),
+				Scope: scope,
+			})
 		}
-		oidc := m.OIDC()
-		issuer := string(oidc.IssuerURL)
-		authz := string(oidc.AuthorizationEndpoint)
-		if issuer == "" || authz == "" {
-			return "", "", false, fmt.Errorf("OIDC auth method missing issuer or authorization endpoint")
-		}
-		return issuer, authz, true, nil
+		return out, nil
 	}
 }
 
@@ -121,13 +136,13 @@ func registerUIHTTP(topMux *http.ServeMux, deps uiHTTPDeps) error {
 		return fmt.Errorf("derive UI origin: %w", err)
 	}
 	uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
-		WebDir:         deps.cfg.WebDir,
-		UIOrigin:       uiOrigin,
-		OIDCUIClientID: deps.cfg.OIDCUIClientID,
-		OIDCUIScope:    deps.cfg.OIDCUIScope,
-		Logger:         deps.logger,
-		AuthMiddleware: httpAuthn.Wrap,
-		AuthSnapshot:   uiAuthFunc(deps.authMethods),
+		WebDir:              deps.cfg.WebDir,
+		UIOrigin:            uiOrigin,
+		OIDCUIClientID:      deps.cfg.OIDCUIClientID,
+		OIDCUIScope:         deps.cfg.OIDCUIScope,
+		Logger:              deps.logger,
+		AuthMiddleware:      httpAuthn.Wrap,
+		AuthMethodsSnapshot: uiAuthMethodsFunc(deps.authMethods, deps.cfg.OIDCUIScope),
 	})
 	topMux.Handle("/api/ui/", uiMux)
 	if deps.cfg.WebDir != "" {

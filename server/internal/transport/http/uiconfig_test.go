@@ -288,10 +288,11 @@ func TestHandleConfig_Unconfigured(t *testing.T) {
 	if resp["authConfigured"] != false {
 		t.Fatalf("authConfigured = %v, want false", resp["authConfigured"])
 	}
-	oidc, ok := resp["oidc"].(map[string]any)
+	oidcList, ok := resp["oidc"].([]any)
 	if !ok {
 		t.Fatalf("oidc type = %T", resp["oidc"])
 	}
+	oidc := oidcList[0].(map[string]any)
 	if oidc["authority"] != "" ||
 		oidc["clientId"] != "fleetshift-ui" ||
 		oidc["scope"] != "openid profile email groups audience:server:client_id:fleetshift" {
@@ -336,7 +337,7 @@ func TestHandleConfig_ConfiguredOIDC(t *testing.T) {
 	if resp["authConfigured"] != true {
 		t.Fatalf("authConfigured = %v, want true", resp["authConfigured"])
 	}
-	oidc := resp["oidc"].(map[string]any)
+	oidc := resp["oidc"].([]any)[0].(map[string]any)
 	if oidc["authority"] != "https://127.0.0.1:5556/dex" ||
 		oidc["authorizationEndpoint"] != "https://127.0.0.1:5556/dex/auth" ||
 		oidc["clientId"] != "fleetshift-ui" ||
@@ -390,7 +391,7 @@ func TestHandleConfig_EmptyClientIDAndScopePassThrough(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	oidc := resp["oidc"].(map[string]any)
+	oidc := resp["oidc"].([]any)[0].(map[string]any)
 	if oidc["clientId"] != "" || oidc["scope"] != "" {
 		t.Fatalf("server must not invent clientId/scope defaults; oidc=%#v", oidc)
 	}

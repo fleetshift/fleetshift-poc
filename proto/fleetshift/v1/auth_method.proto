@@ -24,6 +24,10 @@ message AuthMethod {
   // OIDC-specific configuration. Set when type is TYPE_OIDC.
   OIDCConfig oidc_config = 3;
 
+  // Email domain used to associate a signed-in user with this auth method.
+  // Store without the leading '@' (for example, "redhat.com").
+  string email_domain = 4;
+
   // The type of authentication method.
   enum Type {
     // Default value. Not used.

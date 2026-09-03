@@ -29,12 +29,10 @@ type UIConfigOptions struct {
 	// Global bootstrap routes (/api/ui/config, /api/ui/plugin-registry)
 	// are never wrapped.
 	AuthMiddleware func(http.Handler) http.Handler
-	// AuthSnapshot returns the live browser OIDC snapshot from AuthMethod
-	// state. configured=false is unconfigured (empty authority/endpoint).
-	// err or configured=true with a partial tuple yields 503. When nil,
-	// authConfigured is omitted (frontend treats that as false).
-	// authorizationEndpoint is the IdP authorize URL from validated discovery.
+	// AuthSnapshot returns the legacy selected browser OIDC method.
 	AuthSnapshot func(ctx context.Context) (authority, authorizationEndpoint string, configured bool, err error)
+	// AuthMethodsSnapshot returns all browser-visible OIDC methods.
+	AuthMethodsSnapshot func(ctx context.Context) ([]OIDCAuthMethodConfig, error)
 }
 
 type pluginManifest struct {
@@ -112,16 +110,24 @@ type oidcConfig struct {
 	ClientID              string `json:"clientId"`
 	Scope                 string `json:"scope"`
 	AuthorizationEndpoint string `json:"authorizationEndpoint,omitempty"`
+	EmailDomain           string `json:"emailDomain,omitempty"`
+}
+
+// OIDCAuthMethodConfig is one browser-visible configured OIDC method.
+type OIDCAuthMethodConfig struct {
+	Name                  string
+	Authority             string
+	AuthorizationEndpoint string
+	Audience              string
+	EmailDomain           string
+	Scope                 string
 }
 
 // handleConfig serves GET /api/ui/config: oidc, authConfigured, optional
 // uiOrigin, and plugin bootstrap fields when WebDir is set.
 func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		oidc := oidcConfig{
-			ClientID: opts.OIDCUIClientID,
-			Scope:    opts.OIDCUIScope,
-		}
+		oidc := []oidcConfig{}
 
 		resp := map[string]any{
 			"oidc": oidc,
@@ -130,8 +136,8 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 			resp["uiOrigin"] = opts.UIOrigin
 		}
 
-		if opts.AuthSnapshot != nil {
-			authority, authorizationEndpoint, configured, err := opts.AuthSnapshot(r.Context())
+		if opts.AuthMethodsSnapshot != nil {
+			methods, err := opts.AuthMethodsSnapshot(r.Context())
 			if err != nil {
 				if opts.Logger != nil {
 					opts.Logger.ErrorContext(r.Context(), "ui config auth snapshot failed", "error", err)
@@ -139,18 +145,40 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 				http.Error(w, "ui config unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			if configured {
-				if authority == "" || authorizationEndpoint == "" {
-					if opts.Logger != nil {
-						opts.Logger.ErrorContext(r.Context(), "ui config auth snapshot incomplete")
+			if len(methods) > 0 {
+				oidc = make([]oidcConfig, 0, len(methods))
+				for _, method := range methods {
+					if method.Authority == "" || method.AuthorizationEndpoint == "" {
+						http.Error(w, "ui config unavailable", http.StatusServiceUnavailable)
+						return
 					}
-					http.Error(w, "ui config unavailable", http.StatusServiceUnavailable)
-					return
+					emailDomain := method.EmailDomain
+					if emailDomain != "" {
+						emailDomain = "@" + emailDomain
+					}
+					oidc = append(oidc, oidcConfig{
+						Authority:             method.Authority,
+						ClientID:              opts.OIDCUIClientID,
+						Scope:                 method.Scope,
+						AuthorizationEndpoint: method.AuthorizationEndpoint,
+						EmailDomain:           emailDomain,
+					})
 				}
-				oidc.Authority = authority
-				oidc.AuthorizationEndpoint = authorizationEndpoint
 			}
 			resp["oidc"] = oidc
+			resp["authConfigured"] = len(methods) > 0
+		} else if opts.AuthSnapshot != nil {
+			authority, authorizationEndpoint, configured, err := opts.AuthSnapshot(r.Context())
+			if err != nil {
+				http.Error(w, "ui config unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if configured {
+				oidc = append(oidc, oidcConfig{
+					Authority: authority, ClientID: opts.OIDCUIClientID,
+					Scope: opts.OIDCUIScope, AuthorizationEndpoint: authorizationEndpoint,
+				})
+			}
 			resp["authConfigured"] = configured
 		}
 
