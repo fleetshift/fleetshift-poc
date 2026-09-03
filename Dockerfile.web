@@ -52,7 +52,9 @@ ARG NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=""
 ENV NX_SELF_HOSTED_REMOTE_CACHE_SERVER=${NX_SELF_HOSTED_REMOTE_CACHE_SERVER} \
     NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN}
 
-# Install + build in one RUN so node_modules cache mount is available throughout
+# Install + build in one RUN so node_modules cache mount is available throughout.
+# plugins:build:ci compiles each MF remote sequentially so rspack does not
+# EMFILE on PF icon chunks under this image's default nofile limit.
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/build/node_modules \
     npm install --include-workspace-root \
@@ -64,7 +66,8 @@ RUN --mount=type=cache,target=/root/.npm \
     -w @fleetshift/kind-plugin \
     && NX=./node_modules/.bin/nx \
     && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
-    && $NX run-many --target=build --projects=plugins,@fleetshift/gcphcp-plugin,@fleetshift/kind-plugin \
+    && $NX run plugins:build:ci \
+    && $NX run-many --target=build --projects=@fleetshift/gcphcp-plugin,@fleetshift/kind-plugin \
     && node tools/generate-plugin-registry.mjs \
     && $NX run web:build \
     && node tools/merge-web.mjs
