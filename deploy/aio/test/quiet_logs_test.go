@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-// TestAIOWelcomeScript locks the readiness-gated welcome oneshot: it polls
-// the public /readyz URL with the sandbox CA, suppresses curl noise, prints
-// Dex-on credentials or Dex-off IdP text, and fails once on timeout.
+// TestAIOWelcomeScript locks the welcome oneshot contracts that the s6 graph
+// test does not cover: public /readyz with the sandbox CA (no curl -k),
+// HTTP_PROXY bypass, quiet curl, Dex-on credentials vs Dex-off IdP text, and
+// a single failure on timeout. Poll duration is a tuning knob, not asserted.
 func TestAIOWelcomeScript(t *testing.T) {
 	root := findAIORoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "s6/scripts/aio-welcome"))
@@ -24,9 +25,7 @@ func TestAIOWelcomeScript(t *testing.T) {
 		"${PUBLIC_ORIGIN}/readyz",
 		"--cacert /data/sandbox/pki/ca.crt",
 		`--noproxy "${PUBLIC_HOST}"`,
-		"--max-time 2",
 		">/dev/null 2>&1",
-		`[ "$i" -lt 120 ]`,
 		"public readiness timed out",
 		"/run/fleetshift/dex.enabled",
 		"ops@fleetshift.local",
