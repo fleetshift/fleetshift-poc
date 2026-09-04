@@ -37,6 +37,9 @@ type serveFlags struct {
 	oidcRegistryID                string
 	oidcRegistrySubjectExpression string
 	oidcPublicKeyClaimExpression  string
+	oidcEmailDomain               string
+	oidcAdditionalIssuer          string
+	oidcAdditionalEmailDomain     string
 	addons                        string
 	gcphcpConfig                  string
 }
@@ -71,6 +74,9 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.oidcRegistryID, "oidc-registry-id", os.Getenv("OIDC_REGISTRY_ID"), "external key registry ID (requires --oidc-registry-subject-expression)")
 	cmd.Flags().StringVar(&f.oidcRegistrySubjectExpression, "oidc-registry-subject-expression", os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION"), "CEL expression mapping ID token claims to a registry subject")
 	cmd.Flags().StringVar(&f.oidcPublicKeyClaimExpression, "oidc-public-key-claim-expression", os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION"), "CEL expression extracting signer SPKI from ID token claims (mutually exclusive with registry mapping)")
+	cmd.Flags().StringVar(&f.oidcEmailDomain, "oidc-email-domain", os.Getenv("OIDC_EMAIL_DOMAIN"), "email domain associated with initial AuthMethod")
+	cmd.Flags().StringVar(&f.oidcAdditionalIssuer, "oidc-additional-issuer", os.Getenv("OIDC_ADDITIONAL_ISSUER_URL"), "additional OIDC issuer installed during empty-store bootstrap")
+	cmd.Flags().StringVar(&f.oidcAdditionalEmailDomain, "oidc-additional-email-domain", os.Getenv("OIDC_ADDITIONAL_EMAIL_DOMAIN"), "email domain associated with additional OIDC AuthMethod")
 	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
 	return cmd
