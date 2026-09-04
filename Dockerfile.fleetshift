@@ -69,8 +69,7 @@ COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.
 COPY deploy/aio/s6/ /etc/s6-overlay/
 
 RUN set -eux; \
-	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy /usr/local/bin/render-gcphcp-config.sh \
-		/etc/s6-overlay/scripts/aio-init; \
+	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy /usr/local/bin/render-gcphcp-config.sh; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends curl ca-certificates xz-utils; \
 	arch="$TARGETARCH"; \
@@ -110,11 +109,12 @@ RUN set -eux; \
 # Override when mounting the engine socket elsewhere. Missing sockets are ignored.
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
 	S6_KEEP_ENV=1 \
+	LOG_LEVEL=error \
 	CONTAINER_HOST=unix:///var/run/docker.sock
 
-# s6 is PID 1 (starts as container root to init/drop privileges).
+# aio-entrypoint maps LOG_LEVEL to S6_VERBOSITY and execs /init so s6 is PID 1.
 # Do not set CMD: s6-rc longruns own FleetShift and Dex. ENTRYPOINT already
 # clears inherited CMD from the server image.
-ENTRYPOINT ["/init"]
+ENTRYPOINT ["/etc/s6-overlay/scripts/aio-entrypoint"]
 
 EXPOSE 8085 50051

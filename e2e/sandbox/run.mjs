@@ -68,6 +68,39 @@ export function usesPulledImage(env) {
   return env.FLEETSHIFT_E2E_AIO_PULL === "1";
 }
 
+// E2E defaults to debug so CI logs and dumpDiagnostics include FleetShift,
+// Dex, and s6 output. The image ENV is error. An explicit LOG_LEVEL wins.
+export function sandboxLogLevel(env = process.env) {
+  const raw = typeof env.LOG_LEVEL === "string" ? env.LOG_LEVEL.trim() : "";
+  return raw || "debug";
+}
+
+export function sandboxRunArgs(sandbox, socket, env = process.env) {
+  return [
+    "run",
+    "-d",
+    "--pull=never",
+    "--privileged",
+    "--name",
+    sandbox.containerName,
+    "--label",
+    `fleetshift.e2e.run=${sandbox.runId}`,
+    "--network",
+    "kind:alias=fleetshift",
+    "-p",
+    "127.0.0.1:8085:8085",
+    "-p",
+    "127.0.0.1:50051:50051",
+    "-e",
+    `LOG_LEVEL=${sandboxLogLevel(env)}`,
+    "-v",
+    `${socket}:/var/run/docker.sock`,
+    "-v",
+    "/tmp:/tmp",
+    IMAGE,
+  ];
+}
+
 export function normalizeSocketPath(value) {
   const candidate = value.trim().replace(/^unix:\/\//, "");
   return candidate && !candidate.includes("://") ? candidate : "";
@@ -245,30 +278,7 @@ async function startSandbox(sandbox, signal) {
   }
   const socket = await engineSocket();
   signal.throwIfAborted();
-  podman(
-    [
-      "run",
-      "-d",
-      "--pull=never",
-      "--privileged",
-      "--name",
-      sandbox.containerName,
-      "--label",
-      `fleetshift.e2e.run=${sandbox.runId}`,
-      "--network",
-      "kind:alias=fleetshift",
-      "-p",
-      "127.0.0.1:8085:8085",
-      "-p",
-      "127.0.0.1:50051:50051",
-      "-v",
-      `${socket}:/var/run/docker.sock`,
-      "-v",
-      "/tmp:/tmp",
-      IMAGE,
-    ],
-    { timeout: 30_000 },
-  );
+  podman(sandboxRunArgs(sandbox, socket), { timeout: 30_000 });
   await poll(
     "AIO exec readiness",
     30_000,

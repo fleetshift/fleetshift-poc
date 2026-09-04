@@ -55,6 +55,11 @@ func run() error {
 	issuerEnv := strings.TrimSpace(os.Getenv("OIDC_ISSUER_URL"))
 	dexOn := issuerEnv == ""
 
+	logLevel, err := aioinit.ResolveLogLevel(os.Getenv("LOG_LEVEL"))
+	if err != nil {
+		return err
+	}
+
 	in := aioinit.ServeConfig{
 		Endpoints:          endpoints,
 		UIClientID:         strings.TrimSpace(os.Getenv("OIDC_UI_CLIENT_ID")),
@@ -64,7 +69,7 @@ func run() error {
 		RegistryID:         strings.TrimSpace(os.Getenv("OIDC_REGISTRY_ID")),
 		RegistryExpr:       strings.TrimSpace(os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION")),
 		PublicKeyExpr:      strings.TrimSpace(os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION")),
-		LogLevel:           strings.TrimSpace(os.Getenv("FLEETSHIFT_LOG_LEVEL")),
+		LogLevel:           logLevel,
 		Addons:             gcp.Addons,
 		GCPHCPConfig:       gcp.GCPHCPConfig,
 	}
@@ -81,6 +86,7 @@ func run() error {
 		if err := aioinit.InstallDexConfig(aioinit.DexRenderInput{
 			Issuer:    aioinit.PeerDexIssuer,
 			Endpoints: endpoints,
+			LogLevel:  logLevel,
 		}, aioinit.DefaultDexPaths(), dexUID, dexGID); err != nil {
 			return fmt.Errorf("dex config: %w", err)
 		}
@@ -109,7 +115,6 @@ func run() error {
 	if err := aioinit.ConfigureKindEnv(aioinit.KindEnvPath, dexOn); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "aio-init: dexOn=%v issuer=%s\n", dexOn, in.Issuer)
 	return nil
 }
 

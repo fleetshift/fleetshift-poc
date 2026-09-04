@@ -10,11 +10,12 @@ import (
 // TestS6ServiceGraph locks the s6-rc graph and run-script contracts under
 // deploy/aio/s6. A failure is this image's packaging, not openshift/release.
 //
-// It requires aio-proxy / aio-init / dex / fleetshift dependency files and
-// the user bundle, then checks: aio-proxy runs as 1002:1002 (not FleetShift
-// 1000); fleetshift drops to 1000, sources public.env, probes Dex with the
-// sandbox CA, bypasses HTTP_PROXY for PUBLIC_HOST, does not use curl -k,
-// and exits non-zero if discovery is not ready.
+// It requires aio-proxy / aio-init / dex / fleetshift / aio-welcome
+// dependency files and the user bundle, then checks: aio-proxy runs as
+// 1002:1002 (not FleetShift 1000); fleetshift drops to 1000, sources
+// public.env, probes Dex with the sandbox CA, bypasses HTTP_PROXY for
+// PUBLIC_HOST, does not use curl -k, and exits non-zero if discovery is
+// not ready; aio-welcome is a oneshot that depends on fleetshift.
 func TestS6ServiceGraph(t *testing.T) {
 	root := findAIORoot(t)
 	for _, rel := range []string{
@@ -30,6 +31,12 @@ func TestS6ServiceGraph(t *testing.T) {
 		"s6/user-bundles.d/user/contents.d/aio-proxy",
 		"s6/user-bundles.d/user/contents.d/dex",
 		"s6/user-bundles.d/user/contents.d/fleetshift",
+		"s6/s6-rc.d/aio-welcome/type",
+		"s6/s6-rc.d/aio-welcome/up",
+		"s6/s6-rc.d/aio-welcome/dependencies.d/fleetshift",
+		"s6/s6-rc.d/aio-welcome/dependencies.d/base",
+		"s6/scripts/aio-welcome",
+		"s6/user-bundles.d/user/contents.d/aio-welcome",
 	} {
 		path := filepath.Join(root, rel)
 		if _, err := os.Stat(path); err != nil {
@@ -80,5 +87,39 @@ func TestS6ServiceGraph(t *testing.T) {
 	}
 	if !strings.Contains(fsBody, "exit 1") {
 		t.Fatal("fleetshift run must fail if Dex discovery is not ready")
+	}
+
+	welcomeType, err := os.ReadFile(filepath.Join(root, "s6/s6-rc.d/aio-welcome/type"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(welcomeType)) != "oneshot" {
+		t.Fatalf("aio-welcome type = %q, want oneshot", welcomeType)
+	}
+	welcomeUp, err := os.ReadFile(filepath.Join(root, "s6/s6-rc.d/aio-welcome/up"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(welcomeUp), "/etc/s6-overlay/scripts/aio-welcome") {
+		t.Fatalf("aio-welcome up must invoke the AIO welcome script:\n%s", welcomeUp)
+	}
+
+	// Overlay scripts and longrun run files are git 0755; COPY preserves that
+	// mode, so Dockerfile.fleetshift does not chmod them.
+	for _, rel := range []string{
+		"s6/scripts/aio-init",
+		"s6/scripts/aio-entrypoint",
+		"s6/scripts/aio-welcome",
+		"s6/s6-rc.d/aio-proxy/run",
+		"s6/s6-rc.d/dex/run",
+		"s6/s6-rc.d/fleetshift/run",
+	} {
+		info, err := os.Stat(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode()&0o111 == 0 {
+			t.Fatalf("%s must be executable (COPY preserves git mode)", rel)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package aioinit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,8 +29,8 @@ const (
 
 	defaultServeDB     = "/data/fleetshift.db"
 	defaultServeWebDir = "/srv/web"
-	// defaultServeLogLevel is used when FLEETSHIFT_LOG_LEVEL is unset.
-	defaultServeLogLevel = "debug"
+	// defaultServeLogLevel is the packaging default when a logger level is omitted.
+	defaultServeLogLevel = "error"
 
 	// ServeExecPath is where aio-init writes the executable serve wrapper.
 	ServeExecPath = "/run/fleetshift/exec-serve"
@@ -90,6 +91,22 @@ func ApplyServeDefaults(in ServeConfig) ServeConfig {
 		in.LogLevel = defaultServeLogLevel
 	}
 	return in
+}
+
+// ResolveLogLevel maps a LOG_LEVEL string to a FleetShift and Dex logger level.
+// Empty or whitespace becomes "error". Allowed values are debug, info, warn,
+// and error; any other value returns an error.
+func ResolveLogLevel(raw string) (string, error) {
+	level := strings.TrimSpace(raw)
+	if level == "" {
+		return defaultServeLogLevel, nil
+	}
+	switch level {
+	case "debug", "info", "warn", "error":
+		return level, nil
+	default:
+		return "", fmt.Errorf("invalid LOG_LEVEL: %s (valid: debug, info, warn, error)", level)
+	}
 }
 
 // uiScopeForIssuer is the omitted-OIDC_UI_SCOPE packaging value for issuer.

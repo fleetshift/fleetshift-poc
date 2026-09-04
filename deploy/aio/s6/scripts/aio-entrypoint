@@ -1,0 +1,17 @@
+#!/bin/sh
+# Map LOG_LEVEL to s6 verbosity, then exec /init so s6 remains PID 1.
+set -eu
+
+LOG_LEVEL=${LOG_LEVEL:-error}
+case "$LOG_LEVEL" in
+  error) S6_VERBOSITY=0 ;;
+  warn)  S6_VERBOSITY=1 ;;
+  info)  S6_VERBOSITY=2 ;;
+  debug) S6_VERBOSITY=3 ;;
+  *)
+    echo "aio-entrypoint: invalid LOG_LEVEL: $LOG_LEVEL (valid: debug, info, warn, error)" >&2
+    exit 64
+    ;;
+esac
+export LOG_LEVEL S6_VERBOSITY
+exec /init
