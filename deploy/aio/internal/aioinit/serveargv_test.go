@@ -30,6 +30,7 @@ func TestServeArgs_PeerDexDefaultsForbidSandboxFlags(t *testing.T) {
 		"--oidc-registry-id\x00github.com",
 		"--oidc-registry-subject-expression\x00claims.preferred_username",
 		"--oidc-ca-file\x00/data/sandbox/pki/ca.crt",
+		"--log-level\x00error",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q in %v", want, args)
@@ -91,19 +92,76 @@ func TestApplyServeDefaults_PublicKeySkipsRegistryDefaults(t *testing.T) {
 	}
 }
 
-func TestApplyServeDefaults_LogLevelOverride(t *testing.T) {
-	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
-		Endpoints: aioinit.FixedEndpoints,
-		Issuer:    aioinit.PeerDexIssuer,
-		LogLevel:  "info",
-	})
-	if in.LogLevel != "info" {
-		t.Fatalf("LogLevel = %q, want info", in.LogLevel)
+func TestResolveLogLevel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{name: "unset", raw: "", want: "error"},
+		{name: "whitespace", raw: "  \t", want: "error"},
+		{name: "error", raw: "error", want: "error"},
+		{name: "warn", raw: "warn", want: "warn"},
+		{name: "info", raw: "info", want: "info"},
+		{name: "debug", raw: "debug", want: "debug"},
+		{name: "trimmed debug", raw: "  debug  ", want: "debug"},
+		{name: "invalid", raw: "verbose", wantErr: "verbose"},
+		{name: "uppercase", raw: "ERROR", wantErr: "ERROR"},
 	}
-	args := aioinit.ServeArgs(in)
-	joined := strings.Join(args, "\x00")
-	if !strings.Contains(joined, "--log-level\x00info") {
-		t.Fatalf("args missing info log level: %v", args)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := aioinit.ResolveLogLevel(tc.raw)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ResolveLogLevel(%q) = %q, want error identifying %q", tc.raw, got, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %q, want it to identify %q", err, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), "invalid LOG_LEVEL") {
+					t.Fatalf("error %q, want invalid LOG_LEVEL", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveLogLevel(%q): %v", tc.raw, err)
+			}
+			if got != tc.want {
+				t.Fatalf("ResolveLogLevel(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyServeDefaults_LogLevel(t *testing.T) {
+	cases := []struct {
+		name  string
+		level string
+		want  string
+	}{
+		{name: "omitted", want: "error"},
+		{name: "override", level: "info", want: "info"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
+				Endpoints: aioinit.FixedEndpoints,
+				Issuer:    aioinit.PeerDexIssuer,
+				LogLevel:  tc.level,
+			})
+			if in.LogLevel != tc.want {
+				t.Fatalf("LogLevel = %q, want %q", in.LogLevel, tc.want)
+			}
+			args := aioinit.ServeArgs(in)
+			joined := strings.Join(args, "\x00")
+			want := "--log-level\x00" + tc.want
+			if !strings.Contains(joined, want) {
+				t.Fatalf("args missing %q: %v", want, args)
+			}
+		})
 	}
 }
 

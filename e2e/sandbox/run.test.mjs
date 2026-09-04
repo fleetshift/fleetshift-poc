@@ -7,6 +7,8 @@ import {
   normalizeSocketPath,
   parseCommand,
   parseOwnedKindNodes,
+  sandboxLogLevel,
+  sandboxRunArgs,
   sanitize,
   usesPrebuiltImage,
   usesPulledImage,
@@ -99,6 +101,34 @@ describe("usesPulledImage", () => {
     expect(usesPulledImage({})).toBe(false);
     expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PULL: "0" })).toBe(false);
     expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "1" })).toBe(false);
+  });
+});
+
+describe("sandboxLogLevel", () => {
+  it("defaults to debug so e2e and CI get diagnostic AIO logs", () => {
+    expect(sandboxLogLevel({})).toBe("debug");
+    expect(sandboxLogLevel({ LOG_LEVEL: "" })).toBe("debug");
+    expect(sandboxLogLevel({ LOG_LEVEL: "  " })).toBe("debug");
+  });
+
+  it("forwards an explicit LOG_LEVEL", () => {
+    expect(sandboxLogLevel({ LOG_LEVEL: "debug" })).toBe("debug");
+    expect(sandboxLogLevel({ LOG_LEVEL: "info" })).toBe("info");
+    expect(sandboxLogLevel({ LOG_LEVEL: "  warn  " })).toBe("warn");
+  });
+});
+
+describe("sandboxRunArgs", () => {
+  it("passes LOG_LEVEL into the AIO container", () => {
+    const args = sandboxRunArgs(
+      { containerName: "fleetshift-e2e-abcd", runId: "abcd" },
+      "/run/podman.sock",
+      { LOG_LEVEL: "debug" },
+    );
+    const envIdx = args.indexOf("-e");
+    expect(envIdx).toBeGreaterThan(-1);
+    expect(args[envIdx + 1]).toBe("LOG_LEVEL=debug");
+    expect(args.at(-1)).toBe("quay.io/stolostron/fleetshift:latest");
   });
 });
 

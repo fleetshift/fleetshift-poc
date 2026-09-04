@@ -138,9 +138,11 @@ pulls `quay.io/stolostron/fleetshift:latest` instead of building, then runs a
 **sanity** (start, Dex login, console masthead/Clusters) — not the full UI
 suite. That path tests the **already published** Quay AIO, not
 the image that would be built from the current branch. After pull or restore,
-`podman run` uses `--pull=never`.
-Set `FLEETSHIFT_E2E_KEEP=1` only for local debugging when the sandbox should
-remain after the command exits.
+`podman run` uses `--pull=never` and `-e LOG_LEVEL=debug` (the image default
+is `error`) so FleetShift, Dex, and s6 diagnostics reach CI logs and the
+failure dump. `LOG_LEVEL` in the GitHub job env is forwarded; unset local
+runs still use debug. Set `FLEETSHIFT_E2E_KEEP=1` only for local debugging
+when the sandbox should remain after the command exits.
 
 Tests receive connection facts through `BASE_URL`, `FLEETSHIFT_GRPC_TARGET`,
 `FLEETSHIFT_CA_FILE`, `FLEETSHIFT_E2E_WORK_DIR`, and
@@ -329,7 +331,8 @@ network. The `cache` role never starts FleetShift. The `e2e` role never
 rebuilds the image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`.
 The `published` role never restores the checkout tar; it pulls the published
 tag. The test job sets `FLEETSHIFT_E2E_AIO_PULL=1` and runs Playwright
-`chromium-sanity` only (not the full UI project). Go is installed on
+`chromium-sanity` only (not the full UI project). Both e2e jobs set
+`LOG_LEVEL=debug` so the sandbox runner forwards it into the AIO. Go is installed on
 `e2e` so the CLI suite can build fleetctl, not on `published`.
 
 The shared runner starts unique UI and CLI sandboxes and uploads Playwright

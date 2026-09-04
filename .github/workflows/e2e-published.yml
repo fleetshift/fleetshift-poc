@@ -54,6 +54,7 @@ jobs:
       - name: Run UI sanity against the published image
         env:
           FLEETSHIFT_E2E_AIO_PULL: "1"
+          LOG_LEVEL: debug
           NX_DAEMON: "false"
         run: npx nx test:e2e e2e-web -- --project=chromium-sanity
 

@@ -64,6 +64,7 @@ jobs:
       - name: Run ${{ matrix.name }} e2e tests
         env:
           FLEETSHIFT_E2E_AIO_PREBUILT: "1"
+          LOG_LEVEL: debug
           NX_DAEMON: "false"
         run: npx nx test:e2e ${{ matrix.project }} ${{ matrix.arguments }}
 

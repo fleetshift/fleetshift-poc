@@ -2,6 +2,7 @@ package aioproxy_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -12,6 +13,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,6 +95,33 @@ func TestProxy_New_RejectsBadConfig(t *testing.T) {
 			want: "scheme must be http or https",
 		},
 		{
+			name: "origin query",
+			cfg: aioproxy.Config{
+				PublicOrigin:  publicOrigin + "?x=1",
+				DexURL:        dex,
+				FleetShiftURL: fleetshift,
+			},
+			want: "query or fragment",
+		},
+		{
+			name: "origin fragment",
+			cfg: aioproxy.Config{
+				PublicOrigin:  publicOrigin + "#x",
+				DexURL:        dex,
+				FleetShiftURL: fleetshift,
+			},
+			want: "query or fragment",
+		},
+		{
+			name: "origin host",
+			cfg: aioproxy.Config{
+				PublicOrigin:  "https://",
+				DexURL:        dex,
+				FleetShiftURL: fleetshift,
+			},
+			want: "host is required",
+		},
+		{
 			name: "nil dex",
 			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, FleetShiftURL: fleetshift},
 			want: "dex upstream is required",
@@ -118,6 +148,15 @@ func TestProxy_New_RejectsBadConfig(t *testing.T) {
 				FleetShiftURL: fleetshift,
 			},
 			want: "scheme must be http or https",
+		},
+		{
+			name: "dex host",
+			cfg: aioproxy.Config{
+				PublicOrigin:  publicOrigin,
+				DexURL:        mustURL(t, "http://"),
+				FleetShiftURL: fleetshift,
+			},
+			want: "host is required",
 		},
 	}
 	for _, tt := range tests {
@@ -318,6 +357,50 @@ func TestProxy_UpstreamDown502(t *testing.T) {
 	}
 }
 
+func TestProxy_ConnectionRefusedNotLogged(t *testing.T) {
+	buf := captureLogs(t)
+
+	p := newTestProxy(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
+	for _, path := range []string{"/readyz", "/idp/.well-known/openid-configuration"} {
+		rr := doProxy(t, p, http.MethodGet, path, nil, nil)
+		if rr.Code != http.StatusBadGateway {
+			t.Fatalf("%s status = %d, want 502", path, rr.Code)
+		}
+	}
+	if got := buf.String(); got != "" {
+		t.Fatalf("connection refused logged: %q", got)
+	}
+}
+
+func TestProxy_LogsUnexpectedUpstreamError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+
+	buf := captureLogs(t)
+
+	upstream := "http://" + ln.Addr().String()
+	p := newTestProxy(t, upstream, upstream)
+	rr := doProxy(t, p, http.MethodGet, "/", nil, nil)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if !strings.Contains(buf.String(), "aio-proxy: upstream error") {
+		t.Fatalf("expected upstream error log, got %q", buf.String())
+	}
+}
+
 func TestProxy_StreamsResponse(t *testing.T) {
 	firstSent := make(chan struct{})
 	releaseSecond := make(chan struct{})
@@ -450,6 +533,21 @@ func TestProxy_WebSocketOrigin(t *testing.T) {
 	})
 }
 
+func TestProxy_UpgradeWithoutConnectionIsNotWebSocket(t *testing.T) {
+	dex, fleetshift := recordingUpstreams(t)
+	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	rr := doProxy(t, p, http.MethodGet, "/api/ui/events/ws", nil, map[string]string{
+		"Upgrade": "websocket",
+		"Origin":  "https://evil.example",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (origin check applies only to websocket upgrades)", rr.Code)
+	}
+	if got := rr.Header().Get("X-Upstream"); got != "fleetshift" {
+		t.Fatalf("X-Upstream = %q, want fleetshift", got)
+	}
+}
+
 func TestProxy_IgnoresHTTPProxyEnv(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("http_proxy", "http://127.0.0.1:1")
@@ -467,41 +565,21 @@ func TestProxy_IgnoresHTTPProxyEnv(t *testing.T) {
 	}
 }
 
+func TestProxy_ListenAndServeRequiresAddr(t *testing.T) {
+	p := newTestProxy(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
+	err := p.ListenAndServe(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "listen address is required") {
+		t.Fatalf("ListenAndServe() = %v, want listen address is required", err)
+	}
+}
+
 func TestProxy_ListenAndServeTLS(t *testing.T) {
-	dir := t.TempDir()
-	certFile, keyFile := writeGatewayCert(t, dir)
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "ok")
-	}))
-	t.Cleanup(fleetshift.Close)
-	dex := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	t.Cleanup(dex.Close)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-
-	p, err := aioproxy.New(aioproxy.Config{
-		ListenAddr:    addr,
-		CertFile:      certFile,
-		KeyFile:       keyFile,
-		PublicOrigin:  publicOrigin,
-		DexURL:        mustURL(t, dex.URL),
-		FleetShiftURL: mustURL(t, fleetshift.URL),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	errc := make(chan error, 1)
-	go func() { errc <- p.ListenAndServe(ctx) }()
-	t.Cleanup(func() {
-		cancel()
-		<-errc
-	})
+	addr, certFile := startTLSProxy(t,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		}),
+	)
 
 	caPool := x509.NewCertPool()
 	pemBytes, err := os.ReadFile(certFile)
@@ -545,6 +623,101 @@ func TestProxy_ListenAndServeTLS(t *testing.T) {
 	}
 }
 
+func TestProxy_TLSHandshakeErrorLog(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = old
+		_ = w.Close()
+	})
+
+	var logged struct {
+		mu sync.Mutex
+		b  bytes.Buffer
+	}
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		_, _ = io.Copy(lockedWriter{mu: &logged.mu, w: &logged.b}, r)
+	}()
+
+	nop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	addr, _ := startTLSProxy(t, nop, nop)
+
+	untrusted := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{ServerName: "fleetshift-sandbox.localhost"},
+		},
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequest(http.MethodGet, "https://"+addr+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = canonicalHost
+		_, err = untrusted.Do(req)
+		if err != nil && !strings.Contains(err.Error(), "connection refused") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("untrusted handshake: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	plain, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = plain.Write([]byte("GET / HTTP/1.0\r\n\r\n"))
+	_ = plain.Close()
+
+	deadline = time.Now().Add(2 * time.Second)
+	var out string
+	for {
+		logged.mu.Lock()
+		out = logged.b.String()
+		logged.mu.Unlock()
+		if strings.Contains(out, "http: TLS handshake error") {
+			break
+		}
+		if time.Now().After(deadline) {
+			os.Stderr = old
+			_ = w.Close()
+			<-copied
+			t.Fatalf("expected non-cert TLS handshake error to log, got %q", out)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	os.Stderr = old
+	_ = w.Close()
+	<-copied
+
+	logged.mu.Lock()
+	out = logged.b.String()
+	logged.mu.Unlock()
+	if strings.Contains(out, "unknown certificate") {
+		t.Fatalf("untrusted certificate handshake logged:\n%s", out)
+	}
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (w lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
+}
+
 func recordingUpstreams(t *testing.T) (dex, fleetshift *httptest.Server) {
 	t.Helper()
 	handler := func(name string) http.Handler {
@@ -561,6 +734,14 @@ func recordingUpstreams(t *testing.T) (dex, fleetshift *httptest.Server) {
 	return dex, fleetshift
 }
 
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	return &buf
+}
+
 func newTestProxy(t *testing.T, dexURL, fleetshiftURL string) *aioproxy.Proxy {
 	t.Helper()
 	p, err := aioproxy.New(aioproxy.Config{
@@ -572,6 +753,42 @@ func newTestProxy(t *testing.T, dexURL, fleetshiftURL string) *aioproxy.Proxy {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func startTLSProxy(t *testing.T, dex, fleetshift http.Handler) (addr, certFile string) {
+	t.Helper()
+	certFile, keyFile := writeGatewayCert(t, t.TempDir())
+	dexSrv := httptest.NewServer(dex)
+	t.Cleanup(dexSrv.Close)
+	fsSrv := httptest.NewServer(fleetshift)
+	t.Cleanup(fsSrv.Close)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr = ln.Addr().String()
+	_ = ln.Close()
+
+	p, err := aioproxy.New(aioproxy.Config{
+		ListenAddr:    addr,
+		CertFile:      certFile,
+		KeyFile:       keyFile,
+		PublicOrigin:  publicOrigin,
+		DexURL:        mustURL(t, dexSrv.URL),
+		FleetShiftURL: mustURL(t, fsSrv.URL),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() { errc <- p.ListenAndServe(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-errc
+	})
+	return addr, certFile
 }
 
 type reqOption func(*http.Request)

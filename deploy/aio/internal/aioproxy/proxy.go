@@ -5,13 +5,17 @@ package aioproxy
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -95,6 +99,7 @@ func New(cfg Config) (*Proxy, error) {
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+		ErrorLog:          log.New(untrustedCertFilter{w: os.Stderr}, "", log.LstdFlags),
 	}
 	return p, nil
 }
@@ -221,7 +226,11 @@ func newUpstream(target *url.URL, transport http.RoundTripper) *httputil.Reverse
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("aio-proxy: upstream error method=%s path=%s: %v", r.Method, r.URL.Path, err)
+			// Readiness probes hit the edge before Dex and FleetShift bind. Skipping
+			// ECONNREFUSED logs to reduce log noise.
+			if !errors.Is(err, syscall.ECONNREFUSED) {
+				log.Printf("aio-proxy: upstream error method=%s path=%s: %v", r.Method, r.URL.Path, err)
+			}
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
 	}
@@ -247,4 +256,26 @@ func isWebSocket(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// untrustedCertFilter drops http.Server ErrorLog lines for an untrusted
+// certificate or CA and forwards every other line to w.
+type untrustedCertFilter struct {
+	w io.Writer
+}
+
+// Write drops untrusted-certificate handshake logs and forwards all other
+// bytes to the wrapped writer. Dropped writes still report len(p) so the
+// stdlib logger does not treat them as short writes.
+func (f untrustedCertFilter) Write(p []byte) (int, error) {
+	if isUntrustedCertificateLog(string(p)) {
+		return len(p), nil
+	}
+	return f.w.Write(p)
+}
+
+// isUntrustedCertificateLog reports whether s is a crypto/tls client alert
+// for an untrusted certificate or CA.
+func isUntrustedCertificateLog(s string) bool {
+	return strings.Contains(s, "tls: unknown certificate")
 }

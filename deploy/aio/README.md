@@ -30,17 +30,24 @@ podman build -f Dockerfile.fleetshift \
 
 Bare run needs **no** OIDC flags. Packaging starts peer Dex behind the AIO TLS
 edge at `https://fleetshift-sandbox.localhost:8085/idp` and fills AuthMethod/UI
-defaults for `serve`.
+defaults for `serve`. Foreground is the demo-friendly launch: startup stays
+quiet until the public endpoint is ready, then prints a welcome block with the
+URL and demo credentials. Press Ctrl+C to stop.
 
 ```bash
-podman run -d \
+podman run \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
   quay.io/stolostron/fleetshift:latest
 ```
 
+Detached is the same image with `-d`; `podman logs` still shows the welcome
+block after readiness (no terminal color codes).
+
 Open https://fleetshift-sandbox.localhost:8085 — the exact path `/` redirects
-to `/app/`.
+to `/app/`. The welcome banner is printed only after `https://fleetshift-sandbox.localhost:8085/readyz`
+returns success. Demo credentials appear only with built-in Dex. Errors still
+stream beneath the banner if something fails later.
 
 Routing on this origin is prefix-based, not a catch-all into the SPA:
 
@@ -109,7 +116,7 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Registry subject | `OIDC_REGISTRY_SUBJECT_EXPRESSION` | `claims.preferred_username`, unless a public-key claim is set |
 | Public-key claim | `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` | unset (registry mapping is used instead) |
 | OIDC CA | `OIDC_CA_FILE` | sandbox CA on Dex-on. Dex-off: unset unless discovery/TLS needs non-system trust |
-| Log level | `FLEETSHIFT_LOG_LEVEL` | `debug` |
+| Log level | `LOG_LEVEL` | `error`. One control for FleetShift, peer Dex, and s6 lifecycle verbosity (`debug`, `info`, `warn`, `error`) |
 | Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (`gcphcp` is appended when gateway/config is set) |
 | Container socket | `CONTAINER_HOST` | image default `unix:///var/run/docker.sock`. Override only if the mount path differs |
 | Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | Dex-on + live socket: `fleetshift:8085`. Set empty to disable. Not written on Dex-off |
@@ -117,6 +124,18 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 If you override registry ID or subject expression, set both. Registry mapping and
 `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive (`fleetshift serve`
 enforces this).
+
+`LOG_LEVEL` is the only AIO logging control. It is passed to FleetShift
+(`--log-level`), rendered into peer Dex's logger, and mapped to s6-overlay
+verbosity. Restore diagnostic output without rebuilding:
+
+```bash
+podman run \
+  -e LOG_LEVEL=debug \
+  -p 127.0.0.1:8085:8085 \
+  -p 127.0.0.1:50051:50051 \
+  quay.io/stolostron/fleetshift:latest
+```
 
 ## External issuer (Dex-off)
 
@@ -130,7 +149,9 @@ instead of Dex cross-client audience scopes that Keycloak rejects as
 `invalid_scope`. Pass `OIDC_CA_FILE` only when discovery/TLS needs non-system
 trust. Issuer URL shape, CA readability/PEM, and registry/claim pairing are
 validated by `fleetshift serve`. Packaging fills omitted AuthMethod/UI defaults
-and forwards the resolved serve argv.
+and forwards the resolved serve argv. The welcome banner still waits for public
+`/readyz`, then shows the FleetShift URL and external-IdP text without demo
+Dex credentials.
 
 Minimal:
 
@@ -267,8 +288,8 @@ satisfied (`fleetshift-cli` only).
 
 Dex image digest and s6-overlay version/checksums are `ARG` defaults in
 [`Dockerfile.fleetshift`](../../Dockerfile.fleetshift). The build pulls Dex by
-digest and verifies s6 tarball SHA-256 after download. Image inspection should
-show `/init` as PID 1.
+digest and verifies s6 tarball SHA-256 after download. The image entrypoint is
+the AIO log-level wrapper, which `exec`s `/init` so s6 remains PID 1.
 
 ### Layout
 
@@ -281,13 +302,17 @@ show `/init` as PID 1.
 | `internal/aioproxy` | Reverse-proxy implementation used by `aio-proxy` |
 | `internal/loopbackforward` | Proxy implementation used by `kind-loopback-forward` |
 | `s6/` | s6-overlay v3 service defs (copied to `/etc/s6-overlay/`) |
+| `s6/scripts/aio-entrypoint` | Maps `LOG_LEVEL` to `S6_VERBOSITY` and execs `/init` |
+| `s6/scripts/aio-welcome` | Polls public `/readyz`, then prints the sandbox welcome |
 
 s6 services follow the [s6-overlay README](https://github.com/just-containers/s6-overlay/blob/v3.2.3.2/README.md)
 source format:
 
-- definitions under `s6-rc.d/{aio-init,aio-proxy,dex,fleetshift}/`
+- definitions under `s6-rc.d/{aio-init,aio-proxy,dex,fleetshift,aio-welcome}/`
 - membership via `user-bundles.d/user/contents.d/`
 - oneshot `aio-init` script at `scripts/aio-init` (referenced from `up`)
+- oneshot `aio-welcome` script at `scripts/aio-welcome` (depends on `fleetshift`;
+  polls public `/readyz` before printing)
 - longruns depend on `base` (`dex` and `aio-proxy` → `aio-init`, `fleetshift` → `aio-init`+`dex`+`aio-proxy`)
 
 ### Branches
