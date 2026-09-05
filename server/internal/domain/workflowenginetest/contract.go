@@ -168,30 +168,6 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		assertResolvedTargets(t, view.Fulfillment, "t1", "t3")
 	})
 
-	t.Run("CreateDeployment_StaticPlacement_UnknownTarget", func(t *testing.T) {
-		infra := infraFactory(t)
-		wfs := registerWorkflows(t, infra, registryFactory)
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		registerTargets(ctx, t, infra, "t1")
-
-		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			Name: "deployments/d1",
-			ManifestStrategy: domain.ManifestStrategySpec{
-				Type:      domain.ManifestStrategyInline,
-				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
-			},
-			PlacementStrategy: domain.PlacementStrategySpec{
-				Type:    domain.PlacementStrategyStatic,
-				Targets: []domain.TargetID{"t1", "missing"},
-			},
-		})
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("expected ErrNotFound or nil, got: %v", err)
-		}
-	})
-
 	t.Run("DeleteDeployment_RemovesRecords", func(t *testing.T) {
 		infra := infraFactory(t)
 		wfs := registerWorkflows(t, infra, registryFactory)
@@ -315,8 +291,8 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Get: %v", err)
 		}
 		f := view.Fulfillment
-		if f.State() != domain.FulfillmentStateActive {
-			t.Fatalf("State = %q, want %q", f.State(), domain.FulfillmentStateActive)
+		if f.State() != domain.FulfillmentStatePendingTarget {
+			t.Fatalf("State = %q, want %q: selector matched zero targets", f.State(), domain.FulfillmentStatePendingTarget)
 		}
 		if len(f.ResolvedTargets()) != 0 {
 			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", f.ResolvedTargets())

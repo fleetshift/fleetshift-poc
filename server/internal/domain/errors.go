@@ -92,3 +92,21 @@ func IsAuthExpired(err error) bool {
 	}
 	return err != nil && strings.Contains(err.Error(), ErrAuthExpired.Error())
 }
+
+// ErrPendingTarget is the sentinel for errors that indicate no target
+// currently accepts the fulfillment. Exported so workflow engine
+// adapters can classify it as non-retryable without importing the
+// orchestration package.
+var ErrPendingTarget = errors.New("no target accepted any manifest")
+
+// IsPendingTarget reports whether err indicates that placement resolved
+// zero compatible targets. Like [IsTerminal], it checks the Go error
+// chain first, then falls back to string matching so the
+// classification survives serialization across workflow engine
+// boundaries.
+func IsPendingTarget(err error) bool {
+	if errors.Is(err, ErrPendingTarget) {
+		return true
+	}
+	return err != nil && strings.Contains(err.Error(), ErrPendingTarget.Error())
+}

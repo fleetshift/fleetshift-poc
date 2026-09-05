@@ -49,7 +49,8 @@ export type DeploymentState =
   | "STATE_ACTIVE"
   | "STATE_DELETING"
   | "STATE_FAILED"
-  | "STATE_PAUSED_AUTH";
+  | "STATE_PAUSED_AUTH"
+  | "STATE_PENDING_TARGET";
 
 export interface Manifest {
   manifestType: string;

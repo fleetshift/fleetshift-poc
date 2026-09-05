@@ -75,7 +75,8 @@ export type DeploymentState =
   | "STATE_CREATING"
   | "STATE_ACTIVE"
   | "STATE_DELETING"
-  | "STATE_FAILED";
+  | "STATE_FAILED"
+  | "STATE_PENDING_TARGET";
 
 export type ManifestStrategyType = "TYPE_UNSPECIFIED" | "TYPE_INLINE";
 

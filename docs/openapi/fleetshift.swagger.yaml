@@ -4,10 +4,20 @@ info:
   version: version not set
 tags:
   - name: AuthMethodService
+    description: AuthMethodService manages authentication methods.
   - name: DeploymentService
+    description: DeploymentService manages deployment resources.
   - name: FleetletService
+    description: |-
+      FleetletService is the platform-side API that fleetlets connect to.
+      Authentication is per-fleetlet at the transport level; the platform
+      identifies the caller from gRPC metadata on stream creation.
   - name: ResourceQueryService
+    description: |-
+      ResourceQueryService provides fleet-wide queries over managed
+      extension resources.
   - name: SignerEnrollmentService
+    description: SignerEnrollmentService manages user signer enrollments.
 consumes:
   - application/json
 produces:
@@ -538,6 +548,7 @@ definitions:
       - STATE_ACTIVE
       - STATE_DELETING
       - STATE_FAILED
+      - STATE_PENDING_TARGET
     default: STATE_UNSPECIFIED
     description: |-
       Lifecycle state of a deployment.
@@ -547,6 +558,9 @@ definitions:
        - STATE_ACTIVE: Reconciled and operational.
        - STATE_DELETING: Removal is in progress.
        - STATE_FAILED: Orchestration failed permanently.
+       - STATE_PENDING_TARGET: No resolved target accepts the deployment's manifest type.
+      The fulfillment is waiting for a compatible target to appear
+      (e.g. through dynamic placement re-evaluation).
   v1FederatedIdentity:
     type: object
     properties:

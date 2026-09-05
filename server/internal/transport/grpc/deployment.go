@@ -311,6 +311,8 @@ func fulfillmentStateToProto(s domain.FulfillmentState) pb.Deployment_State {
 		return pb.Deployment_STATE_DELETING
 	case domain.FulfillmentStateFailed:
 		return pb.Deployment_STATE_FAILED
+	case domain.FulfillmentStatePendingTarget:
+		return pb.Deployment_STATE_PENDING_TARGET
 	default:
 		return pb.Deployment_STATE_UNSPECIFIED
 	}

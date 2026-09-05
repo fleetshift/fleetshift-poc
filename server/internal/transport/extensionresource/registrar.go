@@ -488,6 +488,8 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 		return 3
 	case domain.FulfillmentStateFailed:
 		return 4
+	case domain.FulfillmentStatePendingTarget:
+		return 6
 	default:
 		return 0
 	}
