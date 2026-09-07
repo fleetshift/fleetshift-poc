@@ -178,17 +178,21 @@ func TestAgent_Deliver_AckFailureThenSuccess(t *testing.T) {
 		Raw:          raw,
 	}}
 
-	// First attempt: ack should fail -- Deliver returns an error.
+	// First attempt: ack should fail asynchronously.
+	// Deliver returns immediately (interface contract) and reports the failure async.
 	err := agent.Deliver(context.Background(), scriptedTarget(), "d1", manifests, domain.DeliveryAuth{}, nil, 1)
-	if err == nil {
-		t.Fatal("expected ack failure error, got nil")
+	if err != nil {
+		t.Fatalf("first Deliver: %v", err)
 	}
 
-	// No event or result should have been reported.
+	// Wait for ack failure result (async).
 	select {
-	case event := <-reporter.ackCh:
-		t.Fatalf("unexpected event after ack failure: %v", event)
-	default:
+	case result := <-reporter.done:
+		if result.State != domain.DeliveryStateFailed {
+			t.Errorf("first result state = %v, want failed", result.State)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack failure result")
 	}
 
 	// Second attempt with a new delivery ID (platform retry): ack should succeed.
@@ -197,11 +201,11 @@ func TestAgent_Deliver_AckFailureThenSuccess(t *testing.T) {
 		t.Fatalf("second Deliver: %v", err)
 	}
 
-	// Should get the ack event now.
+	// Should get the ack success event.
 	select {
 	case event := <-reporter.ackCh:
 		if event.Kind != domain.DeliveryEventProgress {
-			t.Errorf("event kind = %v, want progress", event.Kind)
+			t.Errorf("second ack event kind = %v, want progress", event.Kind)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for ack event")
@@ -317,11 +321,24 @@ func TestAgent_Deliver_WithLatency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	ackElapsed := time.Since(start)
+	deliverElapsed := time.Since(start)
 
-	// Ack latency should be at least 50ms.
-	if ackElapsed < 40*time.Millisecond {
-		t.Errorf("ack returned too quickly: %v", ackElapsed)
+	// Deliver should return quickly (async ack/completion).
+	if deliverElapsed > 100*time.Millisecond {
+		t.Errorf("Deliver took too long: %v", deliverElapsed)
+	}
+
+	// Wait for ack event with latency.
+	ackStart := time.Now()
+	select {
+	case <-reporter.ackCh:
+		ackLatency := time.Since(ackStart)
+		// Ack should have been delayed by ~50ms in the async goroutine.
+		if ackLatency < 40*time.Millisecond {
+			t.Errorf("ack event arrived too quickly: %v", ackLatency)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack event")
 	}
 
 	// Wait for completion result.

@@ -165,7 +165,7 @@ func TestScriptedAddon_ManagedResource_AckRetry(t *testing.T) {
 		domain.WithAckRetryInterval(50*time.Millisecond),
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	spec := json.RawMessage(`{

@@ -228,7 +228,7 @@ func (a *Agent) dispatch(
 	a.slots[key] = slot
 	a.mu.Unlock()
 
-	// Plan acknowledgement.
+	// Plan acknowledgement and completion to capture their latencies for delay recording.
 	ackKey := AttemptKey{
 		InstanceKey: managedResourceInstanceKey(uid),
 		Generation:  gen,
@@ -237,18 +237,65 @@ func (a *Agent) dispatch(
 	}
 	ackDecision := a.planner.Decide(opSpec.Acknowledgement, ackKey)
 
-	// Wait for ack latency.
+	compKey := AttemptKey{
+		InstanceKey: managedResourceInstanceKey(uid),
+		Generation:  gen,
+		Operation:   operation,
+		Phase:       PhaseCompletion,
+	}
+	compDecision := a.planner.Decide(opSpec.Completion, compKey)
+
+	// Record resolved delays before launching async work.
+	a.delayRecorder.RecordDelay(deliveryID, DelayRecord{
+		AckLatency:        ackDecision.Latency,
+		CompletionLatency: compDecision.Latency,
+	})
+
+	// Start async ack and completion goroutine. The wg slot was reserved above.
+	// This allows Deliver to return immediately, matching the DeliveryAgent interface
+	// contract that Deliver returns on dispatch (infrastructure-level), not on ack outcome.
+	go a.runAckAndCompletion(deliveryID, generation, uid, envelope.Name, gen, operation, opSpec, spec.Inventory, ackDecision, compDecision, key)
+
+	return nil
+}
+
+func (a *Agent) runAckAndCompletion(
+	deliveryID domain.DeliveryID,
+	generation domain.Generation,
+	uid domain.ExtensionResourceUID,
+	name domain.ResourceName,
+	gen int64,
+	operation Operation,
+	opSpec OperationSpec,
+	inv InventoryProjection,
+	ackDecision PhaseDecision,
+	compDecision PhaseDecision,
+	key slotKey,
+) {
+	defer a.wg.Done()
+	defer a.releaseSlot(key)
+
+	ctx := a.appCtx
+
+	// Phase 1: Acknowledge -- sleep for ack latency, then report ack event.
+	// This runs asynchronously so Deliver() returns immediately to the caller,
+	// matching the DeliveryAgent interface contract.
 	if err := a.sleepCancellable(ctx, ackDecision.Latency); err != nil {
-		a.releaseSlot(key)
-		a.wg.Done()
-		return fmt.Errorf("scripted: ack wait cancelled: %w", err)
+		return // cancelled -- agent is shutting down
 	}
 
 	// Apply ack outcome.
 	if ackDecision.Outcome == OutcomeFailure {
-		a.releaseSlot(key)
-		a.wg.Done()
-		return fmt.Errorf("scripted %s acknowledgement failed", operation)
+		// Ack failed -- report failure without proceeding to completion.
+		// Return nil to allow the orchestration to retry with a fresh attempt.
+		failMsg := fmt.Sprintf("scripted %s acknowledgement failed", operation)
+		if err := a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: failMsg,
+		}); err != nil {
+			a.log.Warn("scripted: report ack failure", "deliveryID", deliveryID, "error", err)
+		}
+		return
 	}
 
 	// Report acknowledgement progress event.
@@ -258,50 +305,11 @@ func (a *Agent) dispatch(
 		Kind:      domain.DeliveryEventProgress,
 		Message:   ackMsg,
 	}); err != nil {
-		a.releaseSlot(key)
-		a.wg.Done()
-		return fmt.Errorf("scripted: report ack event: %w", err)
+		a.log.Warn("scripted: report ack event", "deliveryID", deliveryID, "error", err)
+		return
 	}
 
-	// Plan completion to capture its latency for delay recording.
-	compKey := AttemptKey{
-		InstanceKey: managedResourceInstanceKey(uid),
-		Generation:  gen,
-		Operation:   operation,
-		Phase:       PhaseCompletion,
-	}
-	compDecision := a.planner.Decide(opSpec.Completion, compKey)
-
-	// Record resolved delays before sleeping.
-	a.delayRecorder.RecordDelay(deliveryID, DelayRecord{
-		AckLatency:        ackDecision.Latency,
-		CompletionLatency: compDecision.Latency,
-	})
-	// Start async completion. The wg slot was reserved above.
-	// Note: compDecision was already computed above for delay recording.
-	go a.runCompletion(deliveryID, generation, uid, envelope.Name, gen, operation, opSpec, spec.Inventory, compDecision, key)
-
-	return nil
-}
-
-func (a *Agent) runCompletion(
-	deliveryID domain.DeliveryID,
-	generation domain.Generation,
-	uid domain.ExtensionResourceUID,
-	name domain.ResourceName,
-	gen int64,
-	operation Operation,
-	opSpec OperationSpec,
-	inv InventoryProjection,
-	compDecision PhaseDecision,
-	key slotKey,
-) {
-	defer a.wg.Done()
-	defer a.releaseSlot(key)
-
-	ctx := a.appCtx
-
-	// Wait for completion latency.
+	// Phase 2: Completion -- sleep for completion latency, then report result.
 	if err := a.sleepCancellable(ctx, compDecision.Latency); err != nil {
 		return // cancelled -- agent is shutting down
 	}
