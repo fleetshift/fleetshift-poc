@@ -1742,12 +1742,6 @@ func TestAddonManager_ConnectCompensatesOnSchemaFailure(t *testing.T) {
 		},
 	}
 
-	// Set the activator to succeed on first call (Cluster) but fail
-	// on second call (Database).
-	callCount := 0
-	env.activator.mu.Lock()
-	env.activator.mu.Unlock()
-
 	// Use a custom activator that fails on the second activation.
 	failActivator := &failOnNthActivator{
 		inner: env.activator,
@@ -1761,8 +1755,6 @@ func TestAddonManager_ConnectCompensatesOnSchemaFailure(t *testing.T) {
 	if err := mgr.Enable(ctx, desc); err != nil {
 		t.Fatal(err)
 	}
-	_ = callCount // suppress unused warning
-
 	err := mgr.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
 		Schemas: []domain.ExtensionResourceSchema{clusterS, databaseS},
 	})
@@ -1866,6 +1858,71 @@ func TestAddonManager_ConnectCompensationPreservesPreexistingRows(t *testing.T) 
 	// touch it).
 	_, typeErr := typeSvc2.Get(ctx, "test.fleetshift.io/Cluster")
 	if typeErr != nil {
+		t.Fatalf("preexisting type def should be preserved: %v", typeErr)
+	}
+}
+
+// TestAddonManager_ConnectDisconnectReconnectPreservesSchema verifies
+// that a successful Connect → Disconnect → failed reconnect does not
+// deactivate schema activations that were live before the reconnect.
+func TestAddonManager_ConnectDisconnectReconnectPreservesSchema(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+	ctx := context.Background()
+
+	router := delivery.NewRoutingDeliveryService()
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	act := &recordingActivator{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router: router, TypeSvc: typeSvc, Activator: act,
+	})
+
+	desc := clusterMgmtDescriptor()
+	if err := mgr.Enable(ctx, desc); err != nil {
+		t.Fatal(err)
+	}
+
+	target := domain.NewTargetInfo("kind-local", kindaddon.TargetType, "Local Kind",
+		domain.TargetStateReady, nil, nil, []domain.ManifestType{"clusters"})
+
+	// Step 1: successful Connect — schema activated + target created.
+	if err := mgr.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
+		Targets: []domain.TargetInfo{target},
+	}); err != nil {
+		t.Fatalf("first Connect: %v", err)
+	}
+
+	if act.deactivatedCount() != 0 {
+		t.Fatalf("expected 0 deactivations after first Connect, got %d", act.deactivatedCount())
+	}
+
+	// Step 2: Disconnect — agent removed, schemas remain registered.
+	if err := mgr.Disconnect(ctx, "test.fleetshift.io"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	// Step 3: reconnect with same schema but a drifted target (name
+	// changed) so connectTargets fails with drift error.
+	driftedTarget := domain.NewTargetInfo("kind-local", kindaddon.TargetType, "CHANGED NAME",
+		domain.TargetStateReady, nil, nil, []domain.ManifestType{"clusters"})
+	err := mgr.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
+		Targets: []domain.TargetInfo{driftedTarget},
+	})
+	if err == nil {
+		t.Fatal("expected reconnect to fail due to target drift")
+	}
+
+	// The preexisting schema activation must NOT have been
+	// deactivated by rollback — it belonged to the first Connect,
+	// not this failed one.
+	if act.deactivatedCount() != 0 {
+		t.Fatalf("expected 0 deactivations (preexisting schema must survive rollback), got %d", act.deactivatedCount())
+	}
+
+	// Type def should also survive.
+	if _, typeErr := typeSvc.Get(ctx, "test.fleetshift.io/Cluster"); typeErr != nil {
 		t.Fatalf("preexisting type def should be preserved: %v", typeErr)
 	}
 }

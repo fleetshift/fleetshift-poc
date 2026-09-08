@@ -115,7 +115,9 @@ func (s *TargetService) Deregister(ctx context.Context, id domain.TargetID) erro
 	defer tx.Rollback()
 
 	if err := tx.Targets().Delete(ctx, id); err != nil {
-		return fmt.Errorf("delete target %q: %w", id, err)
+		if !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("delete target %q: %w", id, err)
+		}
 	}
 	invID := domain.InventoryItemID("target:" + string(id))
 	if err := tx.Inventory().Delete(ctx, invID); err != nil {

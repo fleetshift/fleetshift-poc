@@ -651,14 +651,20 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 		return err
 	}
 
+	prev, hadPrev := rec.registeredSchemas[schema.ResourceType]
 	// If the activation ID changed (e.g. the gRPC service name
 	// changed due to a package rename), deactivate the old one so
 	// its gRPC/HTTP routes don't leak.
-	if reg, ok := rec.registeredSchemas[schema.ResourceType]; ok && reg.activation != nil && *reg.activation != id {
-		m.activator.Deactivate(*reg.activation)
+	if hadPrev && prev.activation != nil && *prev.activation != id {
+		m.activator.Deactivate(*prev.activation)
 	}
 	rec.registeredSchemas[schema.ResourceType] = registeredSchema{activation: &id}
-	comp.activatedSchemas = append(comp.activatedSchemas, schemaActivation{rt: schema.ResourceType, id: id})
+	// Only record the activation for rollback if it is genuinely new
+	// to this Connect call. Pre-existing activations (from a prior
+	// Connect that was not disconnected) must survive rollback.
+	if !hadPrev || prev.activation == nil || *prev.activation != id {
+		comp.activatedSchemas = append(comp.activatedSchemas, schemaActivation{rt: schema.ResourceType, id: id})
+	}
 
 	return nil
 }

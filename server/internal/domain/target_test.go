@@ -188,6 +188,17 @@ func TestVerifyTargetMatch_ManifestTypeDrift(t *testing.T) {
 	}
 }
 
+func TestVerifyTargetMatch_LabelsDrift(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady,
+		map[string]string{"env": "prod"}, nil, nil)
+	b := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady,
+		map[string]string{"env": "stage"}, nil, nil)
+	err := domain.VerifyTargetMatch(a, b)
+	if err == nil {
+		t.Fatal("expected error on labels drift")
+	}
+}
+
 func TestVerifyTargetMatch_PropertiesDrift(t *testing.T) {
 	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil,
 		map[string]string{"region": "us"}, nil)
