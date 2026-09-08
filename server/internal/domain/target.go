@@ -1,6 +1,10 @@
 package domain
 
-import "maps"
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
 
 // TargetState indicates where a target is in its lifecycle.
 type TargetState string
@@ -138,4 +142,68 @@ func ResolvedTargetInfos(resolved []PlacementTarget, pool []TargetInfo) []Target
 		}
 	}
 	return out
+}
+
+// VerifyTargetMatch compares the semantic fields of two [TargetInfo]
+// values and returns an error wrapping [ErrInvalidArgument] if any
+// differ. Server-generated timestamps and revision fields are ignored.
+// The comparison covers type, name, state, accepted manifest types,
+// labels, and properties — everything a reconnecting addon's target
+// declaration carries.
+func VerifyTargetMatch(expected, existing TargetInfo) error {
+	if existing.targetType != expected.targetType {
+		return fmt.Errorf(
+			"%w: target %q type drift: existing %q, new %q",
+			ErrInvalidArgument, expected.id, existing.targetType, expected.targetType,
+		)
+	}
+	if existing.name != expected.name {
+		return fmt.Errorf(
+			"%w: target %q name collision: existing %q, new %q",
+			ErrInvalidArgument, expected.id, existing.name, expected.name,
+		)
+	}
+	if existing.state != expected.state {
+		return fmt.Errorf(
+			"%w: target %q state drift: existing %q, new %q",
+			ErrInvalidArgument, expected.id, existing.state, expected.state,
+		)
+	}
+	if !manifestTypesEqual(existing.acceptedManifestTypes, expected.acceptedManifestTypes) {
+		return fmt.Errorf(
+			"%w: target %q accepted manifest types drift: existing %v, new %v",
+			ErrInvalidArgument, expected.id, existing.acceptedManifestTypes, expected.acceptedManifestTypes,
+		)
+	}
+	if !mapsEqualOrBothEmpty(existing.properties, expected.properties) {
+		return fmt.Errorf(
+			"%w: target %q properties drift: existing %v, new %v",
+			ErrInvalidArgument, expected.id, existing.properties, expected.properties,
+		)
+	}
+	if !mapsEqualOrBothEmpty(existing.labels, expected.labels) {
+		return fmt.Errorf(
+			"%w: target %q labels drift: existing %v, new %v",
+			ErrInvalidArgument, expected.id, existing.labels, expected.labels,
+		)
+	}
+	return nil
+}
+
+// manifestTypesEqual compares two ManifestType slices, treating order as
+// significant. Both nil and empty are considered equal.
+func manifestTypesEqual(a, b []ManifestType) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return slices.Equal(a, b)
+}
+
+// mapsEqualOrBothEmpty compares two string maps, treating nil and empty
+// as equivalent.
+func mapsEqualOrBothEmpty(a, b map[string]string) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return maps.Equal(a, b)
 }

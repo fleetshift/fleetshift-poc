@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -120,5 +121,80 @@ func TestResolvedTargetInfos_OmitsMissingFromPool(t *testing.T) {
 	}
 	if got[0].ID() != "t1" {
 		t.Errorf("got[0].ID = %s, want t1", got[0].ID())
+	}
+}
+
+// --- VerifyTargetMatch tests (OME-291) ---
+
+func TestVerifyTargetMatch_ExactMatch(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "Cluster A", domain.TargetStateReady,
+		map[string]string{"env": "prod"}, map[string]string{"region": "us"},
+		[]domain.ManifestType{"clusters", "trust"})
+	b := domain.NewTargetInfo("t1", "kind", "Cluster A", domain.TargetStateReady,
+		map[string]string{"env": "prod"}, map[string]string{"region": "us"},
+		[]domain.ManifestType{"clusters", "trust"})
+	if err := domain.VerifyTargetMatch(a, b); err != nil {
+		t.Fatalf("exact match should succeed: %v", err)
+	}
+}
+
+func TestVerifyTargetMatch_NilAndEmptyEquivalent(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil, nil, nil)
+	b := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady,
+		map[string]string{}, map[string]string{}, []domain.ManifestType{})
+	if err := domain.VerifyTargetMatch(a, b); err != nil {
+		t.Fatalf("nil vs empty should be equivalent: %v", err)
+	}
+}
+
+func TestVerifyTargetMatch_TypeDrift(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil, nil, nil)
+	b := domain.NewTargetInfo("t1", "kubernetes", "n", domain.TargetStateReady, nil, nil, nil)
+	err := domain.VerifyTargetMatch(a, b)
+	if err == nil {
+		t.Fatal("expected error on type drift")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+func TestVerifyTargetMatch_NameDrift(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "Name A", domain.TargetStateReady, nil, nil, nil)
+	b := domain.NewTargetInfo("t1", "kind", "Name B", domain.TargetStateReady, nil, nil, nil)
+	err := domain.VerifyTargetMatch(a, b)
+	if err == nil {
+		t.Fatal("expected error on name drift")
+	}
+}
+
+func TestVerifyTargetMatch_StateDrift(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil, nil, nil)
+	b := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateInitializing, nil, nil, nil)
+	err := domain.VerifyTargetMatch(a, b)
+	if err == nil {
+		t.Fatal("expected error on state drift")
+	}
+}
+
+func TestVerifyTargetMatch_ManifestTypeDrift(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil, nil,
+		[]domain.ManifestType{"clusters"})
+	b := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil, nil,
+		[]domain.ManifestType{"databases"})
+	err := domain.VerifyTargetMatch(a, b)
+	if err == nil {
+		t.Fatal("expected error on manifest type drift")
+	}
+}
+
+func TestVerifyTargetMatch_PropertiesDrift(t *testing.T) {
+	a := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil,
+		map[string]string{"region": "us"}, nil)
+	b := domain.NewTargetInfo("t1", "kind", "n", domain.TargetStateReady, nil,
+		map[string]string{"region": "eu"}, nil)
+	err := domain.VerifyTargetMatch(a, b)
+	if err == nil {
+		t.Fatal("expected error on properties drift")
 	}
 }

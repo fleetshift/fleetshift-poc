@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
@@ -455,12 +456,19 @@ func TestAddonManager_ConnectDuplicateTargetIsIdempotent(t *testing.T) {
 		t.Fatalf("Enable: %v", err)
 	}
 
-	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-		ID:                    "kind-local",
-		Type:                  kindaddon.TargetType,
-		Name:                  "Local Kind Provider",
-		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
-	})
+	// Use NewTargetInfo (not FromSnapshot) to ensure InventoryItemID
+	// is derived and State is explicit. The repository defaults empty
+	// state to "ready", so the reconnecting target must also declare
+	// TargetStateReady to pass verification.
+	target := domain.NewTargetInfo(
+		"kind-local",
+		kindaddon.TargetType,
+		"Local Kind Provider",
+		domain.TargetStateReady,
+		nil,
+		nil,
+		[]domain.ManifestType{"clusters"},
+	)
 
 	if err := env.targetSvc.Register(ctx, target); err != nil {
 		t.Fatalf("pre-register target: %v", err)
@@ -473,7 +481,7 @@ func TestAddonManager_ConnectDuplicateTargetIsIdempotent(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("Connect should silently skip existing target: %v", err)
+		t.Fatalf("Connect should verify and accept existing target: %v", err)
 	}
 }
 
@@ -1369,6 +1377,517 @@ func TestAddonManager_ConnectRejectsServiceNameMismatch(t *testing.T) {
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
 	}
+}
+
+// --- Create-or-verify target tests (OME-291) ---
+
+// scriptedLocalTarget returns the canonical scripted-local target shape
+// used in production bootstrap.
+func scriptedLocalTarget() domain.TargetInfo {
+	return domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:                    "scripted-local",
+		Type:                  "scripted",
+		Name:                  "Local Scripted Provider",
+		State:                 domain.TargetStateReady,
+		AcceptedManifestTypes: []domain.ManifestType{"managed.api.scripted.resource"},
+	})
+}
+
+func TestAddonManager_ConnectTargetFreshAtomicCreation(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	desc := kindaddon.Descriptor()
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	target := domain.NewTargetInfo(
+		"kind-local",
+		kindaddon.TargetType,
+		"Local Kind Provider",
+		domain.TargetStateReady,
+		nil,
+		nil,
+		[]domain.ManifestType{"clusters", domain.TrustBundleManifestType},
+	)
+	err := env.mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
+		Agent:   &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{target},
+	})
+	if err != nil {
+		t.Fatalf("Connect with fresh target: %v", err)
+	}
+
+	// Verify target + inventory item exist.
+	got, err := env.targetSvc.Get(ctx, "kind-local")
+	if err != nil {
+		t.Fatalf("Get target: %v", err)
+	}
+	if got.Name() != "Local Kind Provider" {
+		t.Errorf("target name = %q, want %q", got.Name(), "Local Kind Provider")
+	}
+}
+
+func TestAddonManager_ConnectTargetExactRestartIdempotent(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	buildManager := func() *addonManagerEnv {
+		router := delivery.NewRoutingDeliveryService()
+		typeSvc := application.NewExtensionResourceTypeService(store)
+		targetSvc := &application.TargetService{Store: store}
+		activator := &recordingActivator{}
+		mgr := application.NewAddonManager(application.AddonManagerDeps{
+			Router:    router,
+			TypeSvc:   typeSvc,
+			Activator: activator,
+		})
+		return &addonManagerEnv{
+			mgr: mgr, activator: activator, router: router,
+			typeSvc: typeSvc, targetSvc: targetSvc,
+		}
+	}
+	ctx := context.Background()
+
+	target := scriptedLocalTarget()
+
+	// --- first pod: creates target + inventory ---
+	env1 := buildManager()
+	if err := env1.targetSvc.Register(ctx, target); err != nil {
+		t.Fatalf("pre-register target: %v", err)
+	}
+
+	// --- second pod: reconnects with same target ---
+	env2 := buildManager()
+	if err := env2.mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatalf("Enable (pod 2): %v", err)
+	}
+	err := env2.mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
+		Agent:   &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{target},
+	})
+	if err != nil {
+		t.Fatalf("Connect should succeed on exact restart: %v", err)
+	}
+}
+
+func TestAddonManager_ConnectTargetMissingInventoryItemFatal(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	// Create target row directly WITHOUT inventory item.
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := domain.NewTargetInfo("orphan-target", "kind", "Orphan", domain.TargetStateReady, nil, nil, nil)
+	if err := tx.Targets().Create(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	router := delivery.NewRoutingDeliveryService()
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	activator := &recordingActivator{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router: router, TypeSvc: typeSvc, Activator: activator,
+	})
+	ctx := context.Background()
+	if err := mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatal(err)
+	}
+
+	err = mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
+		Agent: &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{
+			domain.NewTargetInfo("orphan-target", "kind", "Orphan", domain.TargetStateReady, nil, nil, nil),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fatal error when inventory item is missing")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+func TestAddonManager_ConnectTargetMissingTargetRowFatal(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	// Create inventory item directly WITHOUT target row.
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invID := domain.InventoryItemID("target:orphan-inv")
+	if err := tx.Inventory().Create(context.Background(), domain.NewInventoryItem(
+		invID, "kind", "Orphan", nil, nil, nil, syncedTime,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	router := delivery.NewRoutingDeliveryService()
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	activator := &recordingActivator{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router: router, TypeSvc: typeSvc, Activator: activator,
+	})
+	ctx := context.Background()
+	if err := mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatal(err)
+	}
+
+	err = mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
+		Agent: &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{
+			domain.NewTargetInfo("orphan-inv", "kind", "Orphan", domain.TargetStateReady, nil, nil, nil),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fatal error when target row is missing")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+// syncedTime is a fixed time used in test setup helpers.
+var syncedTime = func() time.Time {
+	t, _ := time.Parse(time.RFC3339, "2026-01-01T00:00:00Z")
+	return t
+}()
+
+func TestAddonManager_ConnectTargetMismatchedFieldFatal(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	// Pre-register target with one name.
+	original := domain.NewTargetInfo(
+		"kind-local", kindaddon.TargetType, "Original Name",
+		domain.TargetStateReady, nil, nil,
+		[]domain.ManifestType{"clusters"},
+	)
+	if err := env.targetSvc.Register(ctx, original); err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	if err := env.mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Connect with different name → should fail.
+	err := env.mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
+		Agent: &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{
+			domain.NewTargetInfo("kind-local", kindaddon.TargetType, "Different Name",
+				domain.TargetStateReady, nil, nil,
+				[]domain.ManifestType{"clusters"}),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error on target field mismatch")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+func TestAddonManager_ConnectTargetNameCollisionFatal(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	// Pre-register target with certain properties.
+	original := domain.NewTargetInfo(
+		"kind-local", kindaddon.TargetType, "Local Kind Provider",
+		domain.TargetStateReady, nil,
+		map[string]string{"region": "us-east"},
+		[]domain.ManifestType{"clusters"},
+	)
+	if err := env.targetSvc.Register(ctx, original); err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	if err := env.mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Connect with same ID and name but different properties → drift.
+	err := env.mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
+		Agent: &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{
+			domain.NewTargetInfo("kind-local", kindaddon.TargetType, "Local Kind Provider",
+				domain.TargetStateReady, nil,
+				map[string]string{"region": "eu-west"},
+				[]domain.ManifestType{"clusters"}),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error on target properties drift")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+// --- Connect compensation tests (OME-291) ---
+
+func TestAddonManager_ConnectCompensatesOnTargetFailure(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	// Pre-create an orphan target row (without inventory) so the
+	// second target in the Connect input will fail verification.
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := domain.NewTargetInfo("orphan", "kind", "Orphan", domain.TargetStateReady, nil, nil, nil)
+	if err := tx.Targets().Create(context.Background(), orphan); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	router := delivery.NewRoutingDeliveryService()
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	targetSvc := &application.TargetService{Store: store}
+	activator := &recordingActivator{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router: router, TypeSvc: typeSvc, Activator: activator,
+	})
+	ctx := context.Background()
+
+	if err := mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatal(err)
+	}
+
+	schema := clusterSchema()
+	err = mgr.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{schema},
+		Targets: []domain.TargetInfo{
+			// First target: fresh, will succeed.
+			domain.NewTargetInfo("good-target", "kind", "Good",
+				domain.TargetStateReady, nil, nil, []domain.ManifestType{"clusters"}),
+			// Second target: orphan (no inventory), will fail.
+			domain.NewTargetInfo("orphan", "kind", "Orphan",
+				domain.TargetStateReady, nil, nil, nil),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Connect to fail on orphan target")
+	}
+
+	// Compensation should have removed the schema activation and type
+	// def created during this call.
+	if activator.deactivatedCount() != 1 {
+		t.Errorf("deactivated count = %d, want 1 (compensation)", activator.deactivatedCount())
+	}
+	_, typeErr := typeSvc.Get(ctx, "test.fleetshift.io/Cluster")
+	if typeErr == nil {
+		t.Error("type def should have been deleted by compensation")
+	}
+
+	// The good target that was created before the failure should have
+	// been deregistered by compensation.
+	_, goodErr := targetSvc.Get(ctx, "good-target")
+	if goodErr == nil {
+		t.Error("good-target should have been deregistered by compensation")
+	}
+
+	// Addon should still be in enabled state, not connected.
+	addon, _ := mgr.Get("test.fleetshift.io")
+	if addon.State != domain.AddonStateEnabled {
+		t.Errorf("state = %d, want %d (enabled, not connected)", addon.State, domain.AddonStateEnabled)
+	}
+}
+
+func TestAddonManager_ConnectCompensatesOnSchemaFailure(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	// Addon with two managed resource types.
+	desc := domain.AddonDescriptor{
+		ID:   "test.fleetshift.io",
+		Name: "Multi Resource Addon",
+		Capabilities: []domain.Capability{
+			domain.ManagedResourceCapability{ResourceType: "test.fleetshift.io/Cluster"},
+			domain.ManagedResourceCapability{ResourceType: "test.fleetshift.io/Database"},
+		},
+	}
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the activator fail on the second schema.
+	clusterS := clusterSchema()
+	databaseS := domain.ExtensionResourceSchema{
+		ResourceType: "test.fleetshift.io/Database",
+		ProtoPackage: "test.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "databases",
+		Singular:     "Database",
+		Plural:       "Databases",
+		ProtoFiles:   map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
+		Management: &domain.ManagementSchema{
+			SpecMessage: "fake.DatabaseSpec",
+			Relation:    domain.NewRegisteredSelfTarget("kind-local", "api.fake.database"),
+		},
+	}
+
+	// Set the activator to succeed on first call (Cluster) but fail
+	// on second call (Database).
+	callCount := 0
+	env.activator.mu.Lock()
+	env.activator.mu.Unlock()
+
+	// Use a custom activator that fails on the second activation.
+	failActivator := &failOnNthActivator{
+		inner: env.activator,
+		failN: 2,
+	}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:    env.router,
+		TypeSvc:   env.typeSvc,
+		Activator: failActivator,
+	})
+	if err := mgr.Enable(ctx, desc); err != nil {
+		t.Fatal(err)
+	}
+	_ = callCount // suppress unused warning
+
+	err := mgr.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{clusterS, databaseS},
+	})
+	if err == nil {
+		t.Fatal("expected Connect to fail on second schema activation")
+	}
+
+	// Compensation should have removed the first schema's type def
+	// and deactivated its activation.
+	_, typeErr := env.typeSvc.Get(ctx, "test.fleetshift.io/Cluster")
+	if typeErr == nil {
+		t.Error("Cluster type def should have been deleted by compensation")
+	}
+
+	// Database type def was created but activation failed, so it
+	// should also be cleaned up.
+	_, dbTypeErr := env.typeSvc.Get(ctx, "test.fleetshift.io/Database")
+	if dbTypeErr == nil {
+		t.Error("Database type def should have been deleted by compensation")
+	}
+
+	// Addon should still be enabled, not connected.
+	addon, _ := mgr.Get("test.fleetshift.io")
+	if addon.State != domain.AddonStateEnabled {
+		t.Errorf("state = %d, want %d (enabled)", addon.State, domain.AddonStateEnabled)
+	}
+}
+
+func TestAddonManager_ConnectCompensationPreservesPreexistingRows(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	ctx := context.Background()
+
+	// --- first pod: creates target + schema successfully ---
+	router1 := delivery.NewRoutingDeliveryService()
+	typeSvc1 := application.NewExtensionResourceTypeService(store)
+	act1 := &recordingActivator{}
+	mgr1 := application.NewAddonManager(application.AddonManagerDeps{
+		Router: router1, TypeSvc: typeSvc1, Activator: act1,
+	})
+	if err := mgr1.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatal(err)
+	}
+	target := domain.NewTargetInfo("kind-local", kindaddon.TargetType, "Local Kind",
+		domain.TargetStateReady, nil, nil, []domain.ManifestType{"clusters"})
+	if err := mgr1.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
+		Targets: []domain.TargetInfo{target},
+	}); err != nil {
+		t.Fatalf("first Connect: %v", err)
+	}
+
+	// Create an orphan target row (no inventory) so Connect fails
+	// during the second target's verification.
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := domain.NewTargetInfo("orphan", "kind", "Orphan", domain.TargetStateReady, nil, nil, nil)
+	if err := tx.Targets().Create(ctx, orphan); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// --- second pod: reconnects but second target verification
+	//     fails because orphan has no inventory item ---
+	router2 := delivery.NewRoutingDeliveryService()
+	typeSvc2 := application.NewExtensionResourceTypeService(store)
+	targetSvc2 := &application.TargetService{Store: store}
+	act2 := &recordingActivator{}
+	mgr2 := application.NewAddonManager(application.AddonManagerDeps{
+		Router: router2, TypeSvc: typeSvc2, Activator: act2,
+	})
+	if err := mgr2.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatal(err)
+	}
+
+	err = mgr2.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
+		Targets: []domain.TargetInfo{
+			target,
+			// Orphan target (no inventory) → fatal.
+			domain.NewTargetInfo("orphan", "kind", "Orphan", domain.TargetStateReady, nil, nil, nil),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+
+	// Preexisting target from pod 1 should still be intact.
+	_, goodErr := targetSvc2.Get(ctx, "kind-local")
+	if goodErr != nil {
+		t.Fatalf("preexisting target should be preserved: %v", goodErr)
+	}
+
+	// Preexisting type def from pod 1 should still be intact (schema
+	// was reconciled, not freshly created, so compensation doesn't
+	// touch it).
+	_, typeErr := typeSvc2.Get(ctx, "test.fleetshift.io/Cluster")
+	if typeErr != nil {
+		t.Fatalf("preexisting type def should be preserved: %v", typeErr)
+	}
+}
+
+// failOnNthActivator delegates to an inner activator but returns an
+// error on the Nth Activate call (1-indexed).
+type failOnNthActivator struct {
+	inner *recordingActivator
+	failN int
+	count int
+}
+
+func (f *failOnNthActivator) Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (application.SchemaActivationID, error) {
+	f.count++
+	if f.count == f.failN {
+		return "", fmt.Errorf("injected activation failure")
+	}
+	return f.inner.Activate(ctx, schema)
+}
+
+func (f *failOnNthActivator) Deactivate(id application.SchemaActivationID) {
+	f.inner.Deactivate(id)
 }
 
 func TestAddonManager_DisableDeactivatesInventoryOnlyTypeDef(t *testing.T) {

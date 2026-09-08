@@ -153,7 +153,7 @@ type ConnectInput struct {
 
 	// Targets are the delivery targets this addon serves. Registered
 	// atomically with the agent so the routing table and target store
-	// are consistent. Existing targets are silently skipped.
+	// are consistent. Existing targets are verified to match.
 	Targets []domain.TargetInfo
 
 	// Schemas are the extension resource schemas for addons that declare
@@ -174,6 +174,12 @@ type ConnectInput struct {
 // addon's declared capabilities: Management requires a
 // [domain.ManagedResourceCapability], Inventory requires a
 // [domain.InventoryResourceCapability].
+//
+// Connect tracks mutations and compensates on failure: if a later step
+// fails, earlier side effects (schemas, agent registration, targets)
+// are undone in reverse order. Preexisting rows that matched the new
+// input exactly are preserved — compensation only removes state
+// created by the current call.
 func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in ConnectInput) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -186,19 +192,31 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 		return fmt.Errorf("%w: addon %q is in state %d, expected enabled", domain.ErrInvalidArgument, addonID, rec.addon.State)
 	}
 
-	// TODO: Connect is not transactional — partial failures leave
-	// inconsistent state (e.g. schemas activated but agent not
-	// registered). Add compensation/rollback so a failed step
-	// undoes earlier side effects.
-	if err := m.connectSchemas(ctx, rec, in.Schemas); err != nil {
+	// Preflight: validate all inputs before any mutation so validation
+	// errors never leave partial state behind.
+	for _, schema := range in.Schemas {
+		if err := validateResourceTypeOwnership(rec.addon.ID, schema.ResourceType); err != nil {
+			return err
+		}
+		if err := validateSchemaCapabilities(rec, schema); err != nil {
+			return err
+		}
+	}
+
+	var comp connectCompensation
+
+	if err := m.connectSchemas(ctx, rec, in.Schemas, &comp); err != nil {
+		comp.rollback(ctx, m, rec)
 		return err
 	}
 
-	if err := m.connectDeliveryAgent(rec, in.Agent); err != nil {
+	if err := m.connectDeliveryAgent(rec, in.Agent, &comp); err != nil {
+		comp.rollback(ctx, m, rec)
 		return err
 	}
 
-	if err := m.connectTargets(ctx, rec, in.Targets); err != nil {
+	if err := m.connectTargets(ctx, rec, in.Targets, &comp); err != nil {
+		comp.rollback(ctx, m, rec)
 		return err
 	}
 
@@ -208,15 +226,86 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 	return nil
 }
 
+// connectCompensation tracks mutations performed by a single [Connect]
+// call so they can be undone on failure without touching preexisting
+// state.
+type connectCompensation struct {
+	// createdTypeDefs are resource types whose type definitions were
+	// freshly created (not reconciled) by this Connect call.
+	createdTypeDefs []domain.ResourceType
+
+	// activatedSchemas are (resource type, activation ID) pairs for
+	// schema activations performed by this Connect call.
+	activatedSchemas []schemaActivation
+
+	// addedRegistrations are resource types that were added to
+	// rec.registeredSchemas by this Connect call (not previously
+	// present).
+	addedRegistrations []domain.ResourceType
+
+	// agentRegistrations are target types whose delivery agent was
+	// registered in the router by this Connect call.
+	agentRegistrations []domain.TargetType
+
+	// createdTargets are target IDs that were freshly registered (not
+	// verified) by this Connect call.
+	createdTargets []domain.TargetID
+}
+
+type schemaActivation struct {
+	rt domain.ResourceType
+	id SchemaActivationID
+}
+
+// rollback undoes the mutations tracked by this compensation in reverse
+// order. It is best-effort — individual undo errors are swallowed
+// because the caller already has a primary error to return.
+func (c *connectCompensation) rollback(ctx context.Context, m *AddonManager, rec *addonRecord) {
+	// Reverse: targets → agent → schemas.
+
+	// Undo target registrations.
+	if len(c.createdTargets) > 0 {
+		targetSvc := &TargetService{Store: m.typeSvc.Store()}
+		for i := len(c.createdTargets) - 1; i >= 0; i-- {
+			_ = targetSvc.Deregister(ctx, c.createdTargets[i])
+		}
+	}
+
+	// Undo agent registration.
+	for _, tt := range c.agentRegistrations {
+		m.router.Deregister(tt)
+	}
+	if len(c.agentRegistrations) > 0 {
+		rec.agent = nil
+	}
+
+	// Undo schema activations.
+	for i := len(c.activatedSchemas) - 1; i >= 0; i-- {
+		m.activator.Deactivate(c.activatedSchemas[i].id)
+	}
+
+	// Remove schema registrations that this call added.
+	for _, rt := range c.addedRegistrations {
+		delete(rec.registeredSchemas, rt)
+	}
+
+	// Delete type defs that this call created.
+	for i := len(c.createdTypeDefs) - 1; i >= 0; i-- {
+		_ = m.typeSvc.Delete(ctx, c.createdTypeDefs[i])
+	}
+}
+
 // connectSchemas reconciles the addon's registered schemas against the
 // new input:
 //  1. Tears down schemas that are no longer provided (stale).
-//  2. Validates each schema section against the addon's declared
-//     capabilities.
-//  3. Registers the schema (creates the type definition).
-//  4. For schemas with Management and/or Inventory, calls
+//  2. Registers the schema (creates the type definition).
+//  3. For schemas with Management and/or Inventory, calls
 //     [SchemaActivator.Activate] to compile the transport API surface.
-func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, schemas []domain.ExtensionResourceSchema) error {
+//
+// Validation (ownership, capabilities) is performed by the caller's
+// preflight loop before any mutation begins. Mutations are tracked in
+// comp so they can be compensated on failure.
+func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, schemas []domain.ExtensionResourceSchema, comp *connectCompensation) error {
 	newTypes := make(map[domain.ResourceType]struct{}, len(schemas))
 	for _, s := range schemas {
 		newTypes[s.ResourceType] = struct{}{}
@@ -230,17 +319,11 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 
 	// TODO: handle duplicate resource types
 	for _, schema := range schemas {
-		if err := validateResourceTypeOwnership(rec.addon.ID, schema.ResourceType); err != nil {
-			return err
-		}
-		if err := validateSchemaCapabilities(rec, schema); err != nil {
-			return err
-		}
-		if err := m.registerSchema(ctx, rec, schema); err != nil {
+		if err := m.registerSchema(ctx, rec, schema, comp); err != nil {
 			return fmt.Errorf("register schema for %q: %w", schema.ResourceType, err)
 		}
 		if schema.Management != nil || schema.Inventory != nil {
-			if err := m.activateSchema(ctx, rec, schema); err != nil {
+			if err := m.activateSchema(ctx, rec, schema, comp); err != nil {
 				return fmt.Errorf("activate schema for %q: %w", schema.ResourceType, err)
 			}
 		}
@@ -261,27 +344,29 @@ func (m *AddonManager) teardownSchema(ctx context.Context, rec *addonRecord, rt 
 	}
 }
 
-func (m *AddonManager) connectDeliveryAgent(rec *addonRecord, agent domain.DeliveryAgent) error {
+func (m *AddonManager) connectDeliveryAgent(rec *addonRecord, agent domain.DeliveryAgent, comp *connectCompensation) error {
 	if agent == nil {
 		return nil
 	}
 	for _, cap := range rec.addon.Capabilities {
 		if dc, ok := cap.(domain.DeliveryCapability); ok {
 			m.router.Register(dc.TargetType, agent)
+			comp.agentRegistrations = append(comp.agentRegistrations, dc.TargetType)
 			rec.agent = agent
 		}
 	}
 	return nil
 }
 
-func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, targets []domain.TargetInfo) error {
+func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, targets []domain.TargetInfo, comp *connectCompensation) error {
 	targetSvc := &TargetService{Store: m.typeSvc.Store()}
 	for _, t := range targets {
-		if err := targetSvc.Register(ctx, t); err != nil {
-			if errors.Is(err, domain.ErrAlreadyExists) {
-				continue
-			}
+		created, err := targetSvc.RegisterOrVerify(ctx, t)
+		if err != nil {
 			return fmt.Errorf("register target %q: %w", t.ID(), err)
+		}
+		if created {
+			comp.createdTargets = append(comp.createdTargets, t.ID())
 		}
 	}
 	return nil
@@ -440,7 +525,7 @@ func hasCapabilityFor[C resourceCapability](rec *addonRecord, rt domain.Resource
 // capability or changing an existing management relation is rejected.
 // It is called for every schema (managed, inventory, or both) before
 // any transport activation.
-func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
+func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema, comp *connectCompensation) error {
 	newVer := domain.APIVersion(schema.Version)
 	newCol := domain.CollectionID(schema.CollectionID)
 
@@ -473,12 +558,15 @@ func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, sch
 		if err := m.reconcileExistingTypeCapabilities(ctx, schema, newVer, newCol, newRelation); err != nil {
 			return err
 		}
+	} else {
+		comp.createdTypeDefs = append(comp.createdTypeDefs, schema.ResourceType)
 	}
 	if rec.registeredSchemas == nil {
 		rec.registeredSchemas = make(map[domain.ResourceType]registeredSchema)
 	}
 	if _, ok := rec.registeredSchemas[schema.ResourceType]; !ok {
 		rec.registeredSchemas[schema.ResourceType] = registeredSchema{}
+		comp.addedRegistrations = append(comp.addedRegistrations, schema.ResourceType)
 	}
 	return nil
 }
@@ -557,7 +645,7 @@ func (m *AddonManager) reconcileExistingTypeCapabilities(
 // activateSchema delegates to the SchemaActivator and records the
 // resulting activation ID. Called for schemas with Management and/or
 // Inventory — the schema has already been registered by [registerSchema].
-func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
+func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema, comp *connectCompensation) error {
 	id, err := m.activator.Activate(ctx, schema)
 	if err != nil {
 		return err
@@ -570,6 +658,7 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 		m.activator.Deactivate(*reg.activation)
 	}
 	rec.registeredSchemas[schema.ResourceType] = registeredSchema{activation: &id}
+	comp.activatedSchemas = append(comp.activatedSchemas, schemaActivation{rt: schema.ResourceType, id: id})
 
 	return nil
 }
