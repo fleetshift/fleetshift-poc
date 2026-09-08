@@ -1,3 +1,4 @@
+import { useGetState } from "@scalprum/react-core";
 import {
   createContext,
   ReactNode,
@@ -7,18 +8,16 @@ import {
   useRef,
   useState,
 } from "react";
-import type { AuthProviderNoUserManagerProps } from "react-oidc-context";
 import {
   AuthProvider as OidcAuthProvider,
   useAuth as useOidcAuth,
 } from "react-oidc-context";
-import { useNavigate } from "react-router-dom";
 
 import {
   installFetchInterceptor,
   setOnUnauthorized,
 } from "../auth/fetchInterceptor";
-import { fetchOidcConfig } from "../auth/oidcConfig";
+import { uiConfigStore } from "../utils/uiConfig";
 
 export interface User {
   id: string;
@@ -126,50 +125,15 @@ function KeycloakAuthInner({ children }: { children: ReactNode }) {
   );
 }
 
-export function AuthProvider({
-  children,
-  requireAuth = true,
-}: {
-  children: ReactNode;
-  requireAuth?: boolean;
-}) {
-  const [oidcProps, setOidcProps] =
-    useState<AuthProviderNoUserManagerProps | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const state = useGetState(uiConfigStore);
 
-  useEffect(() => {
-    fetchOidcConfig(navigate)
-      .then(setOidcProps)
-      .catch((err) => setError(err.message));
-  }, [navigate]);
-
-  if (error) {
-    if (requireAuth) {
-      return (
-        <div className="ome-oidc-error">
-          Failed to load OIDC config: {error}
-        </div>
-      );
-    }
-    return <>{children}</>;
-  }
-
-  if (!oidcProps) {
-    // When auth is not required (e.g. setup mode), render children
-    // immediately instead of blocking while OIDC config loads.
-    // Auth-required routes keep the blocking behavior so the OIDC
-    // provider is ready before any authenticated component renders.
-    if (!requireAuth) return <>{children}</>;
-    return null;
-  }
-
-  if (!oidcProps.authority) {
+  if (!state.selectedIDP?.authority) {
     return <>{children}</>;
   }
 
   return (
-    <OidcAuthProvider {...oidcProps}>
+    <OidcAuthProvider {...state.selectedIDP}>
       <KeycloakAuthInner>{children}</KeycloakAuthInner>
     </OidcAuthProvider>
   );
@@ -177,6 +141,19 @@ export function AuthProvider({
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
+  const state = useGetState(uiConfigStore);
+  // TODO: Needs better flow and gating, just a dirty mock to get around async rendering issues
+  if (!ctx && !state.selectedIDP) {
+    return {
+      user: null,
+      loading: false,
+      token: undefined,
+      email: undefined,
+      authError: false,
+      login: () => {},
+      logout: () => {},
+    };
+  }
   if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;
 }

@@ -37,21 +37,24 @@ const (
 
 // ServeConfig is packaging-resolved configuration for `fleetshift serve`.
 type ServeConfig struct {
-	Endpoints          Endpoints
-	Issuer             string // peer or external
-	CAFile             string // sandbox CA on Dex-on; optional OIDC_CA_FILE on Dex-off
-	UIClientID         string
-	UIScope            string
-	ResourceAudience   string
-	EnrollmentAudience string
-	RegistryID         string
-	RegistryExpr       string
-	PublicKeyExpr      string
-	DBPath             string
-	WebDir             string
-	LogLevel           string
-	Addons             string
-	GCPHCPConfig       string
+	Endpoints             Endpoints
+	Issuer                string // primary issuer
+	AdditionalIssuer      string
+	EmailDomain           string
+	AdditionalEmailDomain string
+	CAFile                string // sandbox CA on Dex-on; optional OIDC_CA_FILE on Dex-off
+	UIClientID            string
+	UIScope               string
+	ResourceAudience      string
+	EnrollmentAudience    string
+	RegistryID            string
+	RegistryExpr          string
+	PublicKeyExpr         string
+	DBPath                string
+	WebDir                string
+	LogLevel              string
+	Addons                string
+	GCPHCPConfig          string
 }
 
 // ApplyServeDefaults fills packaging defaults for omitted AuthMethod/UI fields.
@@ -62,6 +65,12 @@ type ServeConfig struct {
 func ApplyServeDefaults(in ServeConfig) ServeConfig {
 	if in.UIClientID == "" {
 		in.UIClientID = DefaultUIClientID
+	}
+	if in.EmailDomain == "" {
+		in.EmailDomain = "fleetshift.local"
+	}
+	if in.AdditionalIssuer != "" && in.AdditionalEmailDomain == "" {
+		in.AdditionalEmailDomain = "redhat.com"
 	}
 	if in.UIScope == "" {
 		in.UIScope = uiScopeForIssuer(in.Issuer)
@@ -113,6 +122,10 @@ func ServeArgs(in ServeConfig) []string {
 		"--oidc-resource-audience", in.ResourceAudience,
 		"--oidc-ui-client-id", in.UIClientID,
 		"--oidc-ui-scope", in.UIScope,
+		"--oidc-email-domain", in.EmailDomain,
+	}
+	if in.AdditionalIssuer != "" {
+		args = append(args, "--oidc-additional-issuer", in.AdditionalIssuer, "--oidc-additional-email-domain", in.AdditionalEmailDomain)
 	}
 	if in.EnrollmentAudience != "" {
 		args = append(args, "--oidc-key-enrollment-audience", in.EnrollmentAudience)

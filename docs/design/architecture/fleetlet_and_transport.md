@@ -280,7 +280,7 @@ Why this matters for addon developers:
 - **Ingress**: the platform proxies user traffic such as UI plugins, query APIs, and webhooks through the fleetlet to the addon backend. The addon reads requests from a local socket instead of running an exposed HTTP server.
 - **Egress**: deployed agents write to a fleetlet data channel, and the addon backend reads from a local socket instead of building its own server infrastructure, fan-in path, or credential distribution.
 - **Control plane**: register, invalidate, generate, deliver, status, and access all use the same fleetlet path.
-- **Auth and multi-tenancy**: the platform authenticates and authorizes before traffic reaches the addon, so the addon receives pre-authenticated requests with tenant context.
+- **Auth and multi-tenancy**: channel-specific. For platform-authenticated addon ingress, the platform authenticates and authorizes before traffic reaches the addon, so the addon receives pre-authenticated requests with tenant context. For courier-mode delivery and target-side operations, the platform forwards the user's credential and/or provenance; the fleetlet or target-side agent validates it at the target boundary.
 - **Networking**: TLS, mutual auth, credential rotation, reconnection, fan-in, firewall and NAT traversal, and backend discovery stay in the fleetlet layer.
 
 An addon that would otherwise need a custom agent, a custom server, a TLS PKI, per-cluster credential distribution, and multi-tenancy logic becomes a `ManifestGenerator` plus a local channel reader and writer.

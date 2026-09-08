@@ -119,6 +119,9 @@ type ConfigInput struct {
 	OIDCRegistryID                string
 	OIDCRegistrySubjectExpression string
 	OIDCPublicKeyClaimExpression  string
+	OIDCEmailDomain               string
+	OIDCAdditionalIssuer          string
+	OIDCAdditionalEmailDomain     string
 	Addons                        string
 	GCPHCPConfigPath              string
 }
@@ -154,6 +157,9 @@ type Config struct {
 	OIDCRegistryID                string
 	OIDCRegistrySubjectExpression string
 	OIDCPublicKeyClaimExpression  string
+	OIDCEmailDomain               string
+	OIDCAdditionalIssuer          string
+	OIDCAdditionalEmailDomain     string
 
 	// Addons is the enabled addon name list (order preserved, duplicates removed).
 	Addons []AddonName
@@ -214,6 +220,9 @@ func NewConfig(in ConfigInput) (Config, error) {
 		OIDCRegistryID:                strings.TrimSpace(in.OIDCRegistryID),
 		OIDCRegistrySubjectExpression: strings.TrimSpace(in.OIDCRegistrySubjectExpression),
 		OIDCPublicKeyClaimExpression:  strings.TrimSpace(in.OIDCPublicKeyClaimExpression),
+		OIDCEmailDomain:               strings.TrimSpace(in.OIDCEmailDomain),
+		OIDCAdditionalIssuer:          strings.TrimSpace(in.OIDCAdditionalIssuer),
+		OIDCAdditionalEmailDomain:     strings.TrimSpace(in.OIDCAdditionalEmailDomain),
 		Addons:                        normalizeAddonList(in.Addons),
 		GCPHCPConfigPath:              in.GCPHCPConfigPath,
 	}

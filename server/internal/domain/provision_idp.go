@@ -52,7 +52,7 @@ func (s *ProvisionIdPWorkflowSpec) Name() string { return "provision-idp" }
 // overwrites the same auth method ID.
 func (s *ProvisionIdPWorkflowSpec) ResolveAndPersist() Activity[ProvisionIdPInput, AuthMethod] {
 	return NewActivity("resolve-and-persist-auth-method", func(ctx context.Context, in ProvisionIdPInput) (AuthMethod, error) {
-		method := NewOIDCAuthMethod(in.AuthMethodID, in.AuthMethod.OIDC())
+		method := NewOIDCAuthMethodForDomain(in.AuthMethodID, in.AuthMethod.OIDC(), in.AuthMethod.EmailDomain())
 
 		if err := method.Validate(); err != nil {
 			return AuthMethod{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)

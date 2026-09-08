@@ -52,9 +52,11 @@ func TestUIAuthFunc(t *testing.T) {
 			wantConfig: true,
 		},
 		{
-			name:    "multiple methods unavailable",
-			lister:  staticAuthMethodLister{methods: []domain.AuthMethod{oidcReady, oidcReady}},
-			wantErr: "at most one auth method",
+			name:       "default method selected from multiple methods",
+			lister:     staticAuthMethodLister{methods: []domain.AuthMethod{domain.NewOIDCAuthMethod("keycloak", &domain.OIDCConfig{IssuerURL: "https://issuer.example/kc", AuthorizationEndpoint: "https://issuer.example/kc/auth"}), oidcReady}},
+			wantAuth:   "https://issuer.example/dex",
+			wantAuthz:  "https://issuer.example/dex/auth",
+			wantConfig: true,
 		},
 		{
 			name:    "OIDC missing authorization endpoint",
@@ -70,7 +72,7 @@ func TestUIAuthFunc(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotAuth, gotAuthz, gotConfig, err := uiAuthFunc(tt.lister)(context.Background())
+			gotMethods, err := uiAuthMethodsFunc(tt.lister)(context.Background())
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatal("expected error")
@@ -83,9 +85,11 @@ func TestUIAuthFunc(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if gotAuth != tt.wantAuth || gotAuthz != tt.wantAuthz || gotConfig != tt.wantConfig {
-				t.Fatalf("auth=(%q,%q,%v), want (%q,%q,%v)",
-					gotAuth, gotAuthz, gotConfig, tt.wantAuth, tt.wantAuthz, tt.wantConfig)
+			if (len(gotMethods) > 0) != tt.wantConfig {
+				t.Fatalf("methods=%d, want configured=%v", len(gotMethods), tt.wantConfig)
+			}
+			if len(gotMethods) > 0 && (gotMethods[0].Authority != tt.wantAuth || gotMethods[0].AuthorizationEndpoint != tt.wantAuthz) {
+				t.Fatalf("methods=%+v, want authority=%q authz=%q", gotMethods, tt.wantAuth, tt.wantAuthz)
 			}
 		})
 	}

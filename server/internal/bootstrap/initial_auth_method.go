@@ -13,6 +13,7 @@ import (
 // only when [prepareAuthMethods] finds an empty store.
 type initialAuthMethodInstall struct {
 	oidc        domain.OIDCConfig
+	additional  domain.OIDCConfig
 	authMethods *application.AuthMethodService
 	verifier    domain.OIDCTokenVerifier
 }
@@ -48,6 +49,7 @@ func prepareAuthMethods(
 
 	return &initialAuthMethodInstall{
 		oidc:        oidcInitialAuthMethodConfig(cfg),
+		additional:  oidcAdditionalAuthMethodConfig(cfg),
 		authMethods: authMethods,
 		verifier:    verifier,
 	}, nil
@@ -75,12 +77,20 @@ func (s *initialAuthMethodInstall) Install(ctx context.Context, logger *slog.Log
 
 	id := domain.DefaultAuthMethodID
 	cfg := s.oidc
-	method := domain.NewOIDCAuthMethod(id, &cfg)
+	method := domain.NewOIDCAuthMethodForDomain(id, &cfg, cfg.EmailDomain)
 	installed, err := s.authMethods.InstallFirst(ensureCtx, id, method)
 	if err != nil {
 		return fmt.Errorf("initial AuthMethod install: %w", err)
 	}
 	registerAuthMethodJWKS(ctx, logger, s.verifier, []domain.AuthMethod{installed})
+	if s.additional.IssuerURL != "" {
+		additional := domain.NewOIDCAuthMethodForDomain("keycloak", &s.additional, s.additional.EmailDomain)
+		installedAdditional, err := s.authMethods.Install(ensureCtx, additional.ID(), additional)
+		if err != nil {
+			return fmt.Errorf("additional AuthMethod install: %w", err)
+		}
+		registerAuthMethodJWKS(ctx, logger, s.verifier, []domain.AuthMethod{installedAdditional})
+	}
 	return nil
 }
 
@@ -92,6 +102,7 @@ func oidcInitialAuthMethodConfig(cfg Config) domain.OIDCConfig {
 		Audience:                 domain.Audience(cfg.OIDCResourceAudience),
 		KeyEnrollmentAudience:    domain.Audience(cfg.OIDCKeyEnrollmentAudience),
 		PublicKeyClaimExpression: cfg.OIDCPublicKeyClaimExpression,
+		EmailDomain:              cfg.OIDCEmailDomain,
 	}
 	if cfg.OIDCRegistryID != "" && cfg.OIDCRegistrySubjectExpression != "" {
 		oidc.RegistrySubjectMapping = &domain.RegistrySubjectMapping{
@@ -100,4 +111,17 @@ func oidcInitialAuthMethodConfig(cfg Config) domain.OIDCConfig {
 		}
 	}
 	return oidc
+}
+
+func oidcAdditionalAuthMethodConfig(cfg Config) domain.OIDCConfig {
+	return domain.OIDCConfig{
+		IssuerURL:             domain.IssuerURL(cfg.OIDCAdditionalIssuer),
+		Audience:              domain.Audience(cfg.OIDCResourceAudience),
+		KeyEnrollmentAudience: domain.Audience(cfg.OIDCKeyEnrollmentAudience),
+		EmailDomain:           cfg.OIDCAdditionalEmailDomain,
+		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
+			RegistryID: "github.com",
+			Expression: "claims.github_username",
+		},
+	}
 }

@@ -83,6 +83,7 @@ func authMethodFromProto(p *pb.AuthMethod) (domain.AuthMethod, error) {
 		oidc := &domain.OIDCConfig{
 			IssuerURL:                domain.IssuerURL(oc.GetIssuerUrl()),
 			Audience:                 domain.Audience(oc.GetAudience()),
+			EmailDomain:              p.GetEmailDomain(),
 			KeyEnrollmentAudience:    domain.Audience(oc.GetKeyEnrollmentAudience()),
 			PublicKeyClaimExpression: oc.GetPublicKeyClaimExpression(),
 		}
@@ -92,7 +93,7 @@ func authMethodFromProto(p *pb.AuthMethod) (domain.AuthMethod, error) {
 				Expression: rsm.GetExpression(),
 			}
 		}
-		return domain.NewOIDCAuthMethod("", oidc), nil
+		return domain.NewOIDCAuthMethodForDomain("", oidc, p.GetEmailDomain()), nil
 	default:
 		return domain.AuthMethod{}, fmt.Errorf("unsupported auth method type: %v", p.GetType())
 	}
@@ -100,7 +101,8 @@ func authMethodFromProto(p *pb.AuthMethod) (domain.AuthMethod, error) {
 
 func authMethodToProto(m domain.AuthMethod) *pb.AuthMethod {
 	out := &pb.AuthMethod{
-		Name: authMethodName(m.ID()),
+		Name:        authMethodName(m.ID()),
+		EmailDomain: m.EmailDomain(),
 	}
 	switch m.Type() {
 	case domain.AuthMethodTypeOIDC:

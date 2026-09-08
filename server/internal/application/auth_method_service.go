@@ -43,6 +43,18 @@ func (s *AuthMethodService) InstallFirst(ctx context.Context, id domain.AuthMeth
 		return domain.AuthMethod{}, fmt.Errorf("AuthMethod store is not empty")
 	}
 
+	return s.install(ctx, id, method)
+}
+
+// Install adds an auth method through the trusted runtime bootstrap path.
+func (s *AuthMethodService) Install(ctx context.Context, id domain.AuthMethodID, method domain.AuthMethod) (domain.AuthMethod, error) {
+	if id == "" {
+		return domain.AuthMethod{}, fmt.Errorf("%w: auth method ID is required", domain.ErrInvalidArgument)
+	}
+	return s.install(ctx, id, method)
+}
+
+func (s *AuthMethodService) install(ctx context.Context, id domain.AuthMethodID, method domain.AuthMethod) (domain.AuthMethod, error) {
 	exec, err := s.ProvisionWF.Start(ctx, domain.ProvisionIdPInput{
 		AuthMethodID: id,
 		AuthMethod:   method,

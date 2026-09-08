@@ -53,20 +53,23 @@ func run() error {
 	}
 
 	issuerEnv := strings.TrimSpace(os.Getenv("OIDC_ISSUER_URL"))
-	dexOn := issuerEnv == ""
+	dexOn := true
 
 	in := aioinit.ServeConfig{
-		Endpoints:          endpoints,
-		UIClientID:         strings.TrimSpace(os.Getenv("OIDC_UI_CLIENT_ID")),
-		UIScope:            strings.TrimSpace(os.Getenv("OIDC_UI_SCOPE")),
-		ResourceAudience:   strings.TrimSpace(os.Getenv("OIDC_RESOURCE_AUDIENCE")),
-		EnrollmentAudience: strings.TrimSpace(os.Getenv("OIDC_KEY_ENROLLMENT_AUDIENCE")),
-		RegistryID:         strings.TrimSpace(os.Getenv("OIDC_REGISTRY_ID")),
-		RegistryExpr:       strings.TrimSpace(os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION")),
-		PublicKeyExpr:      strings.TrimSpace(os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION")),
-		LogLevel:           strings.TrimSpace(os.Getenv("FLEETSHIFT_LOG_LEVEL")),
-		Addons:             gcp.Addons,
-		GCPHCPConfig:       gcp.GCPHCPConfig,
+		Endpoints:             endpoints,
+		EmailDomain:           "fleetshift.local",
+		AdditionalIssuer:      issuerEnv,
+		AdditionalEmailDomain: "redhat.com",
+		UIClientID:            strings.TrimSpace(os.Getenv("OIDC_UI_CLIENT_ID")),
+		UIScope:               strings.TrimSpace(os.Getenv("OIDC_UI_SCOPE")),
+		ResourceAudience:      strings.TrimSpace(os.Getenv("OIDC_RESOURCE_AUDIENCE")),
+		EnrollmentAudience:    strings.TrimSpace(os.Getenv("OIDC_KEY_ENROLLMENT_AUDIENCE")),
+		RegistryID:            strings.TrimSpace(os.Getenv("OIDC_REGISTRY_ID")),
+		RegistryExpr:          strings.TrimSpace(os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION")),
+		PublicKeyExpr:         strings.TrimSpace(os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION")),
+		LogLevel:              strings.TrimSpace(os.Getenv("FLEETSHIFT_LOG_LEVEL")),
+		Addons:                gcp.Addons,
+		GCPHCPConfig:          gcp.GCPHCPConfig,
 	}
 
 	sandboxPKI := aioinit.DefaultSandboxPKIPaths()
@@ -86,13 +89,6 @@ func run() error {
 		}
 		in.Issuer = aioinit.PeerDexIssuer
 		in.CAFile = sandboxPKI.CACert
-	} else {
-		disableDex()
-		in.Issuer = issuerEnv
-		externalCA := strings.TrimSpace(os.Getenv("OIDC_CA_FILE"))
-		if externalCA != "" {
-			in.CAFile = externalCA
-		}
 	}
 
 	in = aioinit.ApplyServeDefaults(in)

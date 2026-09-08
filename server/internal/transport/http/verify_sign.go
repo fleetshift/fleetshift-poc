@@ -53,8 +53,7 @@ func (h *VerifySignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		enrollConfig.Audience = m.OIDC().KeyEnrollmentAudience
 		claims, verifyErr := h.Verifier.Verify(r.Context(), enrollConfig, token)
 		if verifyErr != nil {
-			writeJSON(w, http.StatusUnauthorized, verifySignResponse{Error: verifyErr.Error()})
-			return
+			continue
 		}
 		caller = &claims
 		break

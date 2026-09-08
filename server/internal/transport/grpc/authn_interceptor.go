@@ -112,7 +112,7 @@ func (a *AuthnInterceptor) authenticate(ctx context.Context, fullMethod string) 
 			claims, verifyErr := a.verifier.Verify(ctx, *oidc, token)
 			if verifyErr != nil {
 				probe.Error(verifyErr)
-				return ctx, status.Errorf(codes.Unauthenticated, "token verification failed: %v", verifyErr)
+				continue
 			}
 			subject = &claims
 			matchedType = m.Type()
@@ -124,7 +124,8 @@ func (a *AuthnInterceptor) authenticate(ctx context.Context, fullMethod string) 
 			}
 		}
 		if subject != nil {
-			break
+			continue
+			// break
 		}
 	}
 

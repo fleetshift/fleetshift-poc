@@ -30,7 +30,6 @@ const AuthGate = ({ children }: PropsWithChildren) => {
     return <AuthErrorState onSignIn={startLogin} />;
   }
 
-  if (loading || !user) return null;
   return <>{children}</>;
 };
 
