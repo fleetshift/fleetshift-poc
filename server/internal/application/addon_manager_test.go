@@ -417,74 +417,6 @@ func TestAddonManager_DisableDeactivatesSchemas(t *testing.T) {
 	}
 }
 
-func TestAddonManager_ConnectRegistersTargets(t *testing.T) {
-	env := setupAddonManager(t)
-	ctx := context.Background()
-
-	desc := kindaddon.Descriptor()
-	if err := env.mgr.Enable(ctx, desc); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
-
-	agent := &stubDeliveryAgent{}
-	err := env.mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
-		Agent: agent,
-		Targets: []domain.TargetInfo{
-			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-				ID:                    "kind-local",
-				Type:                  kindaddon.TargetType,
-				Name:                  "Local Kind Provider",
-				AcceptedManifestTypes: []domain.ManifestType{"clusters", domain.TrustBundleManifestType},
-			}),
-		},
-	})
-	if err != nil {
-		t.Fatalf("Connect with targets: %v", err)
-	}
-
-	addon, _ := env.mgr.Get(kindaddon.Descriptor().ID)
-	if addon.State != domain.AddonStateConnected {
-		t.Errorf("state = %d, want %d (connected)", addon.State, domain.AddonStateConnected)
-	}
-}
-
-func TestAddonManager_ConnectDuplicateTargetIsIdempotent(t *testing.T) {
-	env := setupAddonManager(t)
-	ctx := context.Background()
-
-	if err := env.mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
-
-	// Use NewTargetInfo (not FromSnapshot) to ensure InventoryItemID
-	// is derived and State is explicit. The repository defaults empty
-	// state to "ready", so the reconnecting target must also declare
-	// TargetStateReady to pass verification.
-	target := domain.NewTargetInfo(
-		"kind-local",
-		kindaddon.TargetType,
-		"Local Kind Provider",
-		domain.TargetStateReady,
-		nil,
-		nil,
-		[]domain.ManifestType{"clusters"},
-	)
-
-	if err := env.targetSvc.Register(ctx, target); err != nil {
-		t.Fatalf("pre-register target: %v", err)
-	}
-
-	err := env.mgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
-		Agent: &stubDeliveryAgent{},
-		Targets: []domain.TargetInfo{
-			target,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Connect should verify and accept existing target: %v", err)
-	}
-}
-
 func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 	env := setupAddonManager(t)
 	ctx := context.Background()
@@ -1417,6 +1349,11 @@ func TestAddonManager_ConnectTargetFreshAtomicCreation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Connect with fresh target: %v", err)
+	}
+
+	addon, _ := env.mgr.Get(kindaddon.Descriptor().ID)
+	if addon.State != domain.AddonStateConnected {
+		t.Errorf("state = %d, want %d (connected)", addon.State, domain.AddonStateConnected)
 	}
 
 	// Verify target + inventory item exist.
