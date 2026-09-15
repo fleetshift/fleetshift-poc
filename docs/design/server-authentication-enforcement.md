@@ -62,15 +62,20 @@ Server starts (no listeners)
                → trigger ProvisionIdP workflow (creates trust-bundle deployment)
                → register JWKS key sets
                → proceed to Phase 2
-          NO  → is AIO mode enabled? (FLEETSHIFT_AIO=true env var)
-              YES → configure embedded Dex as provider IdP
-                   → persist to DB
-                   → trigger ProvisionIdP workflow
-                   → register JWKS key sets
-                   → proceed to Phase 2
+          NO  → check for AIO environment markers (/run/fleetshift/*)
+              YES → check if Dex is enabled (/run/fleetshift/dex.enabled)
+                   YES → read PUBLIC_ORIGIN marker
+                        → configure embedded Dex as provider IdP
+                        → persist to DB
+                        → trigger ProvisionIdP workflow
+                        → register JWKS key sets
+                        → proceed to Phase 2
+                   NO  → refuse to start with clear error:
+                         "AIO environment detected but Dex not enabled.
+                          Check /run/fleetshift/dex.enabled marker."
               NO  → refuse to start with clear error:
                     "no identity provider configured: provide --bootstrap-provider-tenant
-                     or set FLEETSHIFT_AIO=true or use the AIO image"
+                     or run using the AIO image"
 ```
 
 ### Phase 2: Runtime (Listeners Open)
@@ -90,13 +95,17 @@ The server opens HTTP/gRPC listeners. Client authentication is enforced. The pro
 **Phase 1 (Bootstrap)**:
 1. Developer runs `docker run fleetshift-aio`.
 2. AIO container startup (entrypoint):
-   - Sets `FLEETSHIFT_AIO=true`
    - Starts embedded Dex internally
+   - Creates marker files:
+     - `/run/fleetshift/` (directory to signal AIO environment)
+     - `/run/fleetshift/dex.enabled` (to signal Dex is running)
+   - Sets `PUBLIC_ORIGIN` env var (resolved from container network or config)
 3. FleetShift server starts:
    - DB is empty (fresh container)
    - No `--bootstrap-provider-tenant` flag provided
-   - Sees `FLEETSHIFT_AIO=true`
-   - Auto-generates Dex IdP config (hardcoded defaults for embedded Dex)
+   - Detects AIO environment via marker files
+   - Detects Dex is enabled via marker file
+   - Auto-generates Dex IdP config (hardcoded defaults for embedded Dex, PUBLIC_ORIGIN from env)
    - Persists to DB
    - Triggers `ProvisionIdP` workflow (creates trust-bundle deployment)
 
@@ -124,15 +133,18 @@ The server opens HTTP/gRPC listeners. Client authentication is enforced. The pro
      keyEnrollmentAudience: acme-fleetshift-signing
    ```
 2. Admin starts server with bootstrap config:
-   ```bash
-   fleetshift-server serve --bootstrap-provider-tenant=/etc/fleetshift/provider-idp.yaml
-   ```
+    ```bash
+    fleetshift-server serve --bootstrap-provider-tenant=/etc/fleetshift/provider-idp.yaml
+    ```
 3. Server:
-   - Reads and parses `provider-idp.yaml`
-   - Runs OIDC discovery against Keycloak
-   - Persists AuthorityConfig to DB
-   - Triggers `ProvisionIdP` workflow
-   - Opens listeners with auth enforced
+    - Checks for AIO markers (`/run/fleetshift/`, `/run/fleetshift/dex.enabled`)
+    - None found (non-AIO deployment)
+    - Reads and parses `provider-idp.yaml` (including `domains: acme.com,acme.io`)
+    - Validates email domains are not already claimed by another authority
+    - Runs OIDC discovery against Keycloak
+    - Persists AuthorityConfig (including emailDomains) to DB
+    - Triggers `ProvisionIdP` workflow
+    - Opens listeners with auth enforced
 
 **Phase 2 (Runtime)**:
 4. Team members authenticate via Keycloak. Server resolves them to tenant `acme`.
@@ -158,6 +170,44 @@ The server opens HTTP/gRPC listeners. Client authentication is enforced. The pro
 4. RBAC determines what they can access within their tenant.
 
 For this work item, adding a contractor IdP requires: DB wipe + restart with new bootstrap config (using the new IdP).
+
+---
+
+### Scenario 4: Runtime IdP Configuration via gRPC (Future Admin API)
+
+**Note**: This scenario describes a *future capability* and is **not implemented** in this phase. It informs the design of domain objects, APIs, and authentication patterns for post-bootstrap IdP management.
+
+**User**: Acme ops admin uses a CLI tool (or programmatic client) to manage IdPs at runtime (no server restart).
+
+**Future flow (Phase 3+)**:
+1. Admin tool connects to server via gRPC over Unix domain socket (`/var/run/fleetshift/admin.sock`).
+2. Admin tool authenticates using a valid JWT (from the provider IdP).
+3. Admin tool calls the gRPC method to configure a new IdP:
+   ```protobuf
+   service AuthorityConfigService {
+     // Add a new identity provider at runtime
+     rpc CreateAuthorityConfig(CreateAuthorityConfigRequest) 
+         returns (CreateAuthorityConfigResponse);
+     
+     // Stream IdP configuration updates to connected clients
+     rpc WatchAuthorityConfig(WatchAuthorityConfigRequest) 
+         returns (stream AuthorityConfigUpdate);
+   }
+   ```
+4. Server validates the request (authenticated, has admin role), runs OIDC discovery, persists to DB.
+5. New IdP is immediately available; subsequent authentication attempts can use it.
+6. Contractor developers authenticate via contractor Keycloak, are resolved to the `acme` tenant.
+7. Connected admin tools receive stream updates (e.g., "new contractor IdP is now active").
+
+**gRPC admin flow**:
+1. **Connection**: Admin tool (or orchestration platform) connects to `unix:///var/run/fleetshift/admin.sock`.
+2. **Authentication**: Admin tool includes JWT in gRPC metadata:
+   ```
+   grpc.WithPerRPCCredentials(bearerTokenCredentials{token: "<jwt-from-provider-idp>"})
+   ```
+3. **RPC call**: Admin tool calls `CreateAuthorityConfig(IssuerUrl, Audiences, TenantId, ...)`.
+4. **Server validation**: Server extracts JWT from metadata, verifies it, checks admin role (via authorization context), runs OIDC discovery, persists.
+5. **Streaming updates**: Connected clients (other admin tools or dashboards) receive `AuthorityConfigUpdate` messages over the stream.
 
 ---
 
@@ -200,6 +250,7 @@ idp:
   audiences: acme-fleetshift-api,acme-fleetshift-cli
   clientId: fleetshift-ui                          # defaults to "fleetshift-ui"
   tenantId: acme                                    # defaults to "default"
+  domains: acme.com,acme.io                        # optional, for UI email domain routing
   keyEnrollmentAudience: acme-fleetshift-signing
   caFile: /etc/ssl/certs/idp-ca.pem                # optional
 ```
@@ -220,8 +271,75 @@ idp:
 | `audiences` | string | YES | — | Comma-separated list of accepted audience claims (e.g., `api,cli`) |
 | `clientId` | string | NO | `fleetshift-ui` | OIDC client ID for the UI |
 | `tenantId` | string | NO | `default` | FleetShift tenant ID (resolved by tenant mapping) |
+| `domains` | string | NO | — | Comma-separated email domains routed to this IdP (e.g., `acme.com,acme.io`). Must be unique across all configured authorities. |
 | `keyEnrollmentAudience` | string | NO | — | Purpose-scoped audience for signing key enrollment tokens |
 | `caFile` | string | NO | — | Path to PEM CA certificate for self-signed IdP certs |
+
+### AIO Environment Detection
+
+The server detects if it's running in AIO (All-In-One) packaging by checking for runtime markers:
+
+**Marker files** (created by AIO entrypoint):
+- `/run/fleetshift/` — directory indicating AIO environment
+- `/run/fleetshift/dex.enabled` — file indicating embedded Dex is running
+
+**Marker variable** (set by AIO entrypoint):
+- `PUBLIC_ORIGIN` env var — public hostname/URL for Dex (e.g., `https://localhost:3000`, `http://fleetshift.local`)
+
+**Detection logic** (in `serve.go`):
+
+```go
+func DetectAIOEnvironment() (isAIO bool, dexEnabled bool, publicOrigin string) {
+    // Check for AIO marker directory
+    _, err := os.Stat("/run/fleetshift")
+    isAIO = err == nil
+    
+    if isAIO {
+        // Check Dex marker file
+        _, err := os.Stat("/run/fleetshift/dex.enabled")
+        dexEnabled = err == nil
+        
+        // Get public origin from env (written by aio-init)
+        publicOrigin = os.Getenv("PUBLIC_ORIGIN")
+    }
+    
+    return isAIO, dexEnabled, publicOrigin
+}
+```
+
+**Startup behavior**:
+
+```go
+// In Phase 1 bootstrap logic
+isAIO, dexEnabled, publicOrigin := DetectAIOEnvironment()
+
+if isAIO && dexEnabled && publicOrigin != "" {
+    // Auto-configure embedded Dex
+    config := &AuthorityConfig{
+        PrincipalAuthority: PrincipalAuthority{
+            Scheme:    "oidc",
+            Authority: publicOrigin,  // e.g., https://localhost:3000
+        },
+        // ... other fields with Dex defaults
+    }
+    // Persist and proceed to Phase 2
+} else if isAIO && !dexEnabled {
+    // AIO environment detected but Dex not enabled
+    log.Fatalf("AIO environment detected but Dex is not enabled.\n" +
+               "Ensure /run/fleetshift/dex.enabled marker exists.")
+} else if !isAIO && noBootstrapConfig {
+    // Non-AIO without config
+    log.Fatalf("no identity provider configured: provide --bootstrap-provider-tenant or run using the AIO image")
+}
+```
+
+**Why markers instead of env vars**:
+
+- **Explicit**: Markers are created only by AIO entrypoint; no accidental pollution
+- **Verifiable**: Admin can check `/run/fleetshift/` to confirm AIO environment
+- **Graceful degradation**: If marker is missing, server cleanly refuses (not silent fallback)
+- **Multi-component coordination**: Dex and server can independently signal readiness
+- **Testable**: Tests can mock marker files without env var magic
 
 ### koanf Integration
 
@@ -281,6 +399,7 @@ type AuthorityConfig struct {
     credentialMethods  []CredentialMethod         // extensible; initially OIDC only
     tenantMapping      TenantMapping              // how to resolve tenant from verified claims
     allowedClients     []ClientID                 // optional azp (OAuth client) restriction
+    emailDomains       []EmailDomain              // optional, for UI email domain discovery
 }
 
 type PrincipalAuthority struct {
@@ -321,6 +440,7 @@ type TenantMapping struct {
 type TenantID string
 type Audience string
 type ClientID string
+type EmailDomain string  // e.g., "acme.com", "acme.io"
 ```
 
 #### Enriched `AuthorizationContext`
@@ -349,11 +469,25 @@ type AuthorityConfigRepository interface {
     List(ctx context.Context) ([]AuthorityConfig, error)
     // Indexed lookup for authentication routing
     FindByAuthority(ctx context.Context, pa PrincipalAuthority) (AuthorityConfig, error)
+    // Lookup for UI email domain discovery (returns error if domain not found or not unique)
+    FindByEmailDomain(ctx context.Context, domain EmailDomain) (AuthorityConfig, error)
     Delete(ctx context.Context, id AuthorityConfigID) error
 }
 ```
 
-This interface is designed for future DB persistence (SQLite, Postgres). Phase 2 implements it in-memory. Phase 3+ can swap in a DB implementation without changing authentication logic.
+#### Email Domain Discovery
+
+The `emailDomains` field on `AuthorityConfig` supports UI-side identity provider discovery:
+
+1. **User enters email** in UI login form (e.g., `alice@acme.com`)
+2. **UI extracts domain** (e.g., `acme.com`)
+3. **UI calls discovery endpoint**: `GET /api/v1/auth/discover?email_domain=acme.com` (unauthenticated)
+4. **Server looks up domain** via `FindByEmailDomain`, returns authority + clientId
+5. **UI redirects to IdP** with correct parameters (OIDC authorization endpoint)
+
+**Uniqueness constraint**: Each email domain maps to exactly one `AuthorityConfig`. If a bootstrap config claims a domain already registered to another authority, the server rejects it during validation in T8.
+
+**Not authentication**: This endpoint is unauthenticated because the UI needs to discover *which IdP to use for login*. No credentials are required.
 
 #### Shared `Authenticator`
 
@@ -418,16 +552,18 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 
 **T1: `AuthorityConfig` domain aggregate**
 - Rename `AuthMethod` → `AuthorityConfig` in `domain/authn.go`
-- Define `PrincipalAuthority`, `CredentialMethod`, `OIDCCredentialConfig`, `TenantMapping`
+- Define `PrincipalAuthority`, `CredentialMethod`, `OIDCCredentialConfig`, `TenantMapping`, `EmailDomain`
 - Add multi-audience support (`[]Audience`)
 - Add allowed-clients restriction (`[]ClientID`)
-- `AuthorityConfigRepository` interface with `Save`, `Get`, `List`, `FindByAuthority`, `Delete`
+- Add email domains support (`[]EmailDomain`) with uniqueness validation
+- `AuthorityConfigRepository` interface with `Save`, `Get`, `List`, `FindByAuthority`, `FindByEmailDomain`, `Delete`
 - Validation, snapshot serialization, tests
 
 **T2: SQLite and Postgres persistence**
 - Rename `AuthMethodRepo` → `AuthorityConfigRepo` in both SQLite and Postgres
-- Schema migration: add columns for principal authority, audiences, tenant mapping, allowed clients
+- Schema migration: add columns for principal authority, audiences, tenant mapping, allowed clients, email domains
 - Implement `FindByAuthority` with index
+- Implement `FindByEmailDomain` with UNIQUE constraint (one domain → one authority)
 - Repository contract tests
 
 ### Phase 2: Unified Authentication (T3-T6)
@@ -460,20 +596,25 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 - `BootstrapProviderTenantConfig` struct with `IDP` sub-struct
 - YAML file parsing via koanf
 - Validation: `issuerUrl` and `audiences` required; defaults for `clientId` (`"fleetshift-ui"`), `tenantId` (`"default"`)
-- Comma-separated audience parsing
+- Comma-separated parsing for `audiences` and `domains`
 - Error handling and logging
 - Tests for parsing, validation, defaults, error cases
 
 **T8: Wire bootstrap into `serve.go`**
 - Add `--bootstrap-provider-tenant` flag (file path)
 - Add `FLEETSHIFT_BOOTSTRAP_PROVIDER_TENANT` env var
-- Add `FLEETSHIFT_AIO` env var (AIO mode detection)
+- Implement `DetectAIOEnvironment()` function:
+  - Check for `/run/fleetshift/` directory
+  - Check for `/run/fleetshift/dex.enabled` marker file
+  - Read `PUBLIC_ORIGIN` env var (if AIO detected)
 - Phase 1 startup logic:
   1. Check DB for existing AuthorityConfigs
   2. If DB non-empty: load from DB, warn if bootstrap also provided, skip to Phase 2
-  3. If DB empty + bootstrap file: parse, discover, persist, trigger `ProvisionIdP` workflow
-  4. If DB empty + no bootstrap + AIO: auto-configure Dex, persist, trigger workflow
-  5. If DB empty + no bootstrap + not AIO: refuse to start with error
+  3. If DB empty + bootstrap file: parse, discover, validate email domain uniqueness, persist, trigger `ProvisionIdP` workflow
+  4. If DB empty + no bootstrap: detect AIO environment (markers)
+     - If AIO + Dex enabled: auto-configure Dex using PUBLIC_ORIGIN, persist, trigger workflow
+     - If AIO + Dex not enabled: refuse with error ("Dex not enabled")
+     - If not AIO: refuse with error ("provide --bootstrap-provider-tenant or use AIO image")
 - Adapt `ProvisionIdP` workflow context (called during bootstrap, not from API)
 - Leave `--oidc-ui-authority` flag as-is (out of scope for now)
 
@@ -498,21 +639,22 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 
 ---
 
+
 ## Open Questions for Future Work
 
-1. **Claim-based tenant mapping**: Should `TenantMapping` support extracting tenant from a JWT claim (e.g., `org_id`) for multi-tenant IdPs?
+1. **Claim-based tenant mapping**: Should `TenantMapping` support extracting tenant from a JWT claim (e.g., `org_id`) for multi-tenant IdPs? See [Email Domain Discovery](#email-domain-discovery) for context on why this is deferred.
 
-2. **SAML support**: Design and implement SAML 2.0 as an alternative credential method type.
+2. **Email domain uniqueness enforcement**: Should domain uniqueness be enforced at the DB level (UNIQUE index on individual domain values) or at the application level (domain validation on Save)?
 
-3. **mTLS/certificate authentication**: Design and implement certificate-based credential methods.
+3. **SAML support**: Design and implement SAML 2.0 as an alternative credential method type.
 
-4. **Runtime IdP management APIs**: Expose CRUD APIs for managing multiple IdPs and tenant-specific IdPs (Phase 3+).
+4. **mTLS/certificate authentication**: Design and implement certificate-based credential methods.
 
-5. **UDS admin socket bootstrap**: Allow programmatic bootstrap via a Unix domain socket endpoint (for orchestration platforms).
+5. **Runtime IdP management APIs**: Expose gRPC admin service over Unix socket for managing multiple IdPs and tenant-specific IdPs (Phase 3+). See [Scenario 4](#scenario-4-runtime-idp-configuration-via-grpc-future-admin-api) for the intended flow and design sketches for `AdminAuthContext` and the gRPC service.
 
-6. **Credential revocation**: How to proactively revoke a specific user's active tokens (currently only issuer-level removal via DB is supported)?
+6. **UDS admin socket bootstrap**: Allow programmatic bootstrap via a Unix domain socket endpoint (for orchestration platforms).
 
-7. **WebSocket authentication**: Browser WebSocket API cannot set custom headers. Should we support JWT as a query parameter (with appropriate security mitigations) or require a separate authentication handshake?
+7. **Credential revocation**: How to proactively revoke a specific user's active tokens (currently only issuer-level removal via DB is supported)?
 
 ---
 
