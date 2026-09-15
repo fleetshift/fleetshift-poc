@@ -49,6 +49,10 @@ describe("fetchOidcConfig", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) =>
+            name === "Content-Type" ? "application/json" : null,
+        },
         json: async () => ({
           oidc: {
             authority: "https://fleetshift-sandbox.localhost:8085/idp",
@@ -56,6 +60,14 @@ describe("fetchOidcConfig", () => {
             scope: "openid profile email groups",
           },
         }),
+        text: async () =>
+          JSON.stringify({
+            oidc: {
+              authority: "https://fleetshift-sandbox.localhost:8085/idp",
+              clientId: "fleetshift-ui",
+              scope: "openid profile email groups",
+            },
+          }),
       }),
     );
 
@@ -91,6 +103,10 @@ describe("fetchOidcConfig", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) =>
+            name === "Content-Type" ? "application/json" : null,
+        },
         json: async () => ({
           oidc: {
             authority: "https://fleetshift-sandbox.localhost:8085/idp",
@@ -98,6 +114,14 @@ describe("fetchOidcConfig", () => {
             scope: "openid",
           },
         }),
+        text: async () =>
+          JSON.stringify({
+            oidc: {
+              authority: "https://fleetshift-sandbox.localhost:8085/idp",
+              clientId: "fleetshift-ui",
+              scope: "openid",
+            },
+          }),
       }),
     );
 
@@ -112,6 +136,10 @@ describe("fetchOidcConfig", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) =>
+            name === "Content-Type" ? "application/json" : null,
+        },
         json: async () => ({
           oidc: {
             authority: "https://fleetshift-sandbox.localhost:8085/idp",
@@ -119,6 +147,14 @@ describe("fetchOidcConfig", () => {
             scope: "",
           },
         }),
+        text: async () =>
+          JSON.stringify({
+            oidc: {
+              authority: "https://fleetshift-sandbox.localhost:8085/idp",
+              clientId: "fleetshift-ui",
+              scope: "",
+            },
+          }),
       }),
     );
 

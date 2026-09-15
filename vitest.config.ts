@@ -4,6 +4,18 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@fleetshift/common/dynamic/client/generated/client.gen": path.resolve(
+        __dirname,
+        "sdk/common/src/client/generated/client.gen.ts",
+      ),
+      "@fleetshift/common/dynamic/client/generated/sdk.gen": path.resolve(
+        __dirname,
+        "sdk/common/src/client/generated/sdk.gen.ts",
+      ),
+      "@fleetshift/common/dynamic/client/generated/types.gen": path.resolve(
+        __dirname,
+        "sdk/common/src/client/generated/types.gen.ts",
+      ),
       "@fleetshift/common": path.resolve(__dirname, "sdk/common/src"),
       "ink-table": path.resolve(
         __dirname,

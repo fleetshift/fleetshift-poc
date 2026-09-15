@@ -1,6 +1,6 @@
 import { flagString } from "../../argv";
 import { JsonOutput } from "../../ui";
-import { clientForArgs } from "../context";
+import { clientForArgs, unwrap } from "../context";
 import type { CommandSpec } from "../types";
 import { resourceRoute } from "./helpers";
 
@@ -12,14 +12,18 @@ export const listCommand: CommandSpec = {
     const type = args.positionals[0];
     if (!type) throw new Error("resource type is required");
     const route = resourceRoute(type);
-    const query = new URLSearchParams();
     const pageSize = flagString(args, "page-size");
     const pageToken = flagString(args, "page-token");
-    if (pageSize) query.set("page_size", pageSize);
-    if (pageToken) query.set("page_token", pageToken);
-    const response = await (
-      await clientForArgs(args)
-    ).request(`${route.path}${query.size ? `?${query}` : ""}`);
+    const client = await clientForArgs(args);
+    const response = await unwrap(
+      client.get({
+        url: route.path,
+        query: {
+          ...(pageSize ? { page_size: Number(pageSize) } : {}),
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+      }),
+    );
     const resources = listResources(response, route.collection);
     return <JsonOutput value={resources} />;
   },

@@ -66,7 +66,7 @@ export interface QueryResourcesParams {
 // ---------------------------------------------------------------------------
 
 /** Structured error body returned by the gRPC-gateway. */
-export interface RpcStatus {
+export interface ResourceRpcStatus {
   code: number;
   message: string;
   details?: unknown[];
@@ -76,7 +76,7 @@ export interface RpcStatus {
 export class ResourceApiError extends Error {
   constructor(
     public readonly status: number,
-    public readonly rpcStatus: RpcStatus | null,
+    public readonly rpcStatus: ResourceRpcStatus | null,
   ) {
     super(rpcStatus?.message ?? `Query API error ${status}`);
     this.name = "ResourceApiError";
@@ -110,7 +110,9 @@ async function queryRequest<Props>(
   const url = buildQueryUrl(scope, params);
   const res = await fetch(url);
   if (!res.ok) {
-    const rpcStatus = (await res.json().catch(() => null)) as RpcStatus | null;
+    const rpcStatus = (await res
+      .json()
+      .catch(() => null)) as ResourceRpcStatus | null;
     throw new ResourceApiError(res.status, rpcStatus);
   }
   return res.json() as Promise<QueryResourcesResponse<Props>>;
@@ -248,7 +250,9 @@ async function apiRequest<T>(
 ): Promise<T> {
   const res = await fetch(`${basePath}${path}`, init);
   if (!res.ok) {
-    const rpcStatus = (await res.json().catch(() => null)) as RpcStatus | null;
+    const rpcStatus = (await res
+      .json()
+      .catch(() => null)) as ResourceRpcStatus | null;
     throw new ResourceApiError(res.status, rpcStatus);
   }
   if (res.status === 204) return undefined as T;

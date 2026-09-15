@@ -1,9 +1,10 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 
+import { signerEnrollmentServiceCreateSignerEnrollment } from "@fleetshift/common/dynamic/client/generated/sdk.gen";
+
 import { flagString, parseArgs } from "../argv";
-import { serverForArgs } from "../commands/context";
+import { clientForArgs, unwrap } from "../commands/context";
 import { loadAuthConfig, saveSigningKey } from "../config";
-import { oidcRequest } from "./helpers";
 import { runOIDCFlow } from "./login";
 
 export async function runAuthEnrollSigning(
@@ -27,20 +28,14 @@ export async function runAuthEnrollSigning(
   ]);
   if (!token.id_token) throw new Error("no id_token in enrollment response");
   const enrollmentID = randomBytes(16).toString("hex");
-  const enrollment = await oidcRequest<{ name?: string }>(
-    `${serverForArgs(args).replace(/\/$/, "")}/v1/signerEnrollments`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token.access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+  await clientForArgs(args, token.access_token);
+  const enrollment = await unwrap(
+    signerEnrollmentServiceCreateSignerEnrollment({
+      body: {
         signerEnrollmentId: enrollmentID,
         identityToken: token.id_token,
-      }),
-    },
-    config.oidc_ca_file,
+      },
+    }),
   );
   await saveSigningKey(directory, privateKeyPEM);
   return `Signer enrolled successfully.\n  Enrollment: ${enrollment.name ?? `signerEnrollments/${enrollmentID}`}`;

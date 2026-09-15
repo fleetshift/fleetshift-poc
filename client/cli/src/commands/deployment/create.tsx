@@ -1,3 +1,6 @@
+import { deploymentServiceCreateDeployment } from "@fleetshift/common/dynamic/client/generated/sdk.gen";
+import type { DeploymentServiceCreateDeploymentData } from "@fleetshift/common/dynamic/client/generated/types.gen";
+
 import { flagString } from "../../argv";
 import { configDirectory } from "../../config";
 import {
@@ -5,13 +8,9 @@ import {
   signDeploymentEnvelope,
 } from "../../crypto/signing";
 import { JsonOutput } from "../../ui";
+import { clientForArgs, unwrap } from "../context";
 import type { CommandSpec } from "../types";
-import {
-  deploymentBody,
-  deploymentClient,
-  parsePlacement,
-  readManifest,
-} from "./helpers";
+import { deploymentBody, parsePlacement, readManifest } from "./helpers";
 
 export const createCommand: CommandSpec = {
   path: "deployment create",
@@ -28,27 +27,34 @@ export const createCommand: CommandSpec = {
     }
     const manifest = await readManifest(manifestFile);
     const body = deploymentBody(args, manifest.raw);
+    let userSignature: string | undefined;
+    let validUntil: string | undefined;
     if (args.flags.get("sign") === true) {
-      const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const validUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
       const envelope = buildDeploymentEnvelope({
         deploymentID: id,
         manifestType: resourceType,
         manifest: manifest.content,
         placement: parsePlacement(args),
-        validUntil,
+        validUntil: validUntilDate,
       });
-      body.userSignature = await signDeploymentEnvelope(
+      userSignature = await signDeploymentEnvelope(
         configDirectory(flagString(args, "config-dir") || undefined),
         envelope,
       );
-      body.validUntil = validUntil.toISOString();
+      validUntil = validUntilDate.toISOString();
     }
-    const response = await (
-      await deploymentClient(args)
-    ).request(`/v1/deployments?deploymentId=${encodeURIComponent(id)}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const query: DeploymentServiceCreateDeploymentData["query"] = {
+      deploymentId: id,
+      ...(userSignature ? { userSignature, validUntil } : {}),
+    };
+    await clientForArgs(args);
+    const response = await unwrap(
+      deploymentServiceCreateDeployment({
+        body,
+        query,
+      }),
+    );
     return <JsonOutput value={response} />;
   },
 };

@@ -22,7 +22,7 @@ interface DynamicPfIconProps {
  * @example
  * <DynamicPfIcon name="FolderOpenIcon" />
  */
-export default function DynamicPfIcon({ name, className }: DynamicPfIconProps) {
+export function DynamicPfIcon({ name, className }: DynamicPfIconProps) {
   const [Icon, setIcon] = useState<PfIconComponent | null>(
     () => (getCachedPfIcon(name) as PfIconComponent | undefined) ?? null,
   );
@@ -45,3 +45,5 @@ export default function DynamicPfIcon({ name, className }: DynamicPfIconProps) {
   if (!Icon) return null;
   return <Icon {...(className ? { className } : {})} />;
 }
+
+export default DynamicPfIcon;

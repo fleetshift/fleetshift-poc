@@ -1,5 +1,5 @@
 import { JsonOutput } from "../../ui";
-import { clientForArgs } from "../context";
+import { clientForArgs, unwrap } from "../context";
 import type { CommandSpec } from "../types";
 import { resourceRoute } from "./helpers";
 
@@ -12,9 +12,10 @@ export const getCommand: CommandSpec = {
     const id = args.positionals[1];
     if (!type || !id) throw new Error("resource type and id are required");
     const route = resourceRoute(type);
-    const response = await (
-      await clientForArgs(args)
-    ).request(`${route.path}/${encodeURIComponent(id)}`);
+    const client = await clientForArgs(args);
+    const response = await unwrap(
+      client.get({ url: `${route.path}/${encodeURIComponent(id)}` }),
+    );
     return <JsonOutput value={response} />;
   },
 };

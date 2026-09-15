@@ -41,6 +41,7 @@ COPY extensions/kind/client/ extensions/kind/client/
 COPY tools/merge-web.mjs tools/merge-web.mjs
 COPY tools/generate-plugin-registry.mjs tools/generate-plugin-registry.mjs
 COPY tools/generate-icons.mjs tools/generate-icons.mjs
+COPY docs/openapi/fleetshift.swagger.yaml docs/openapi/fleetshift.swagger.yaml
 
 # Remote cache (optional): speeds up builds by pulling cached Nx task outputs from MinIO.
 #   podman build --build-arg NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://nx-cache.example.com \

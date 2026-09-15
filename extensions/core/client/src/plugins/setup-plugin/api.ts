@@ -1,3 +1,13 @@
+import {
+  authMethodServiceCreateAuthMethod,
+  authMethodServiceGetAuthMethod,
+  getUiConfig,
+} from "@fleetshift/common";
+import { client } from "@fleetshift/common/dynamic/client/generated/client.gen";
+import type { V1OidcConfigWritable } from "@fleetshift/common/dynamic/client/generated/types.gen";
+
+client.setConfig({ baseUrl: window.location.origin });
+
 export interface OidcConfig {
   issuerUrl: string;
   audience: string;
@@ -23,19 +33,42 @@ export type AuthState =
   | { status: "error"; message: string };
 
 export async function fetchAuthMethod(): Promise<AuthMethod | null> {
-  const res = await fetch("/v1/authMethods/default");
-  if (res.status === 404 || res.status === 500) return null;
-  if (!res.ok) throw new Error(`Unexpected status ${res.status}`);
-  return res.json();
+  const result = await authMethodServiceGetAuthMethod({
+    client,
+    path: { name: "authMethods/default" },
+  });
+  if (result.error) {
+    const status = result.response?.status;
+    if (status === 404 || status === 500) return null;
+    throw result.error;
+  }
+  if (!result.data) return null;
+  const oidc = result.data.oidcConfig;
+  if (!oidc) throw new Error("Auth method response missing OIDC config");
+  return {
+    name: result.data.name ?? "authMethods/default",
+    type: result.data.type ?? "TYPE_UNSPECIFIED",
+    oidcConfig: {
+      issuerUrl: oidc.issuerUrl ?? "",
+      audience: oidc.audience ?? "",
+      authorizationEndpoint: oidc.authorizationEndpoint ?? "",
+      tokenEndpoint: oidc.tokenEndpoint ?? "",
+      jwksUri: oidc.jwksUri ?? "",
+      registrySubjectMapping: oidc.registrySubjectMapping
+        ? {
+            registryId: oidc.registrySubjectMapping.registryId ?? "",
+            expression: oidc.registrySubjectMapping.expression ?? "",
+          }
+        : undefined,
+    },
+  };
 }
 
 async function getOidcClientId(): Promise<string> {
-  const res = await fetch("/api/ui/config");
-  if (!res.ok) {
-    throw new Error(`Failed to fetch UI config (${res.status})`);
-  }
-  const config = await res.json();
-  return config.oidc?.clientId ?? "fleetshift-ui";
+  const result = await getUiConfig({ client });
+  if (result.error) throw result.error;
+  if (!result.data) throw new Error("UI config response missing data");
+  return result.data.oidc.clientId;
 }
 
 export async function triggerAuthSetup(
@@ -44,28 +77,24 @@ export async function triggerAuthSetup(
   keyRegistry: "oidc" | "github",
 ): Promise<void> {
   const enrollmentAudience = await getOidcClientId();
-  const oidcConfig: Record<string, unknown> = {
-    issuer_url: issuerUrl.replace(/\/+$/, ""),
+  const oidcConfig: V1OidcConfigWritable = {
+    issuerUrl: issuerUrl.replace(/\/+$/, ""),
     audience,
-    key_enrollment_audience: enrollmentAudience,
+    keyEnrollmentAudience: enrollmentAudience,
+    ...(keyRegistry === "github"
+      ? {
+          registrySubjectMapping: {
+            registryId: "github.com",
+            expression: "claims.github_username",
+          },
+        }
+      : { publicKeyClaimExpression: "claims.signing_public_key" }),
   };
 
-  if (keyRegistry === "github") {
-    oidcConfig.registry_subject_mapping = {
-      registry_id: "github.com",
-      expression: "claims.github_username",
-    };
-  } else {
-    oidcConfig.public_key_claim_expression = "claims.signing_public_key";
-  }
-
-  const res = await fetch("/v1/authMethods?auth_method_id=default", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "TYPE_OIDC", oidc_config: oidcConfig }),
+  const result = await authMethodServiceCreateAuthMethod({
+    client,
+    query: { authMethodId: "default" },
+    body: { type: "TYPE_OIDC", oidcConfig },
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Auth setup failed (${res.status}): ${text}`);
-  }
+  if (result.error) throw result.error;
 }

@@ -16,7 +16,8 @@
       "options": {
         "command": "NODE_ENV=production rspack --config rspack.config.ts && chmod +x bin/fleetctl && mkdir -p ../../bin && ln -sfn ../client/cli/bin/fleetctl ../../bin/fleetctl",
         "cwd": "client/cli"
-      }
+      },
+      "dependsOn": ["common:build"]
     },
     "test": {
       "executor": "nx:run-commands",
@@ -24,7 +25,8 @@
       "options": {
         "command": "vitest run --config vitest.config.ts",
         "cwd": "client/cli"
-      }
+      },
+      "dependsOn": ["common:build"]
     },
     "lint": {
       "executor": "nx:run-commands",

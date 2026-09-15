@@ -11,12 +11,13 @@
     "extensions/kind/client"
   ],
   "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
     "@module-federation/enhanced": "^2.9.0",
-    "@nx/devkit": "23.1.1",
-    "@nx/docker": "^23.1.1",
-    "@nx/eslint": "^23.1.1",
-    "@nx/playwright": "^23.1.1",
-    "@nx/react": "^23.1.1",
+    "@nx/devkit": "^23.2.1",
+    "@nx/docker": "^23.2.1",
+    "@nx/eslint": "^23.2.1",
+    "@nx/playwright": "^23.2.1",
+    "@nx/react": "^23.2.1",
     "@playwright/experimental-ct-react": "^1.61.1",
     "@playwright/test": "^1.61.1",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
@@ -30,19 +31,22 @@
     "fake-indexeddb": "^6.2.5",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "nx": "^23.1.1",
+    "nx": "^23.2.1",
     "prettier": "^3.8.1",
     "stylelint": "^17.13.0",
     "stylelint-config-standard-scss": "^17.0.0",
     "typescript": "^6.0.0",
     "vitest": "^4.0.18",
+    "watchpack": "^2.5.2",
     "zx": "^8.8.5"
   },
   "scripts": {
-    "nx": "nx"
+    "nx": "nx",
+    "openapi-ts": "openapi-ts"
   },
   "dependencies": {
     "ink": "^6.0.1",
+    "meow": "^14.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   }

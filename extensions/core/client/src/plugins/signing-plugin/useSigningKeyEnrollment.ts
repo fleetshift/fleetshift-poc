@@ -220,6 +220,7 @@ export function useSigningKeyEnrollment() {
         signerEnrollmentId: `browser-${Date.now()}`,
         identityToken: freshIdToken,
       });
+      if (!enrollment.name) throw new Error("Enrollment response missing name");
       dispatch({
         type: Action.EnrollSuccess,
         enrollmentName: enrollment.name,
@@ -245,8 +246,8 @@ export function useSigningKeyEnrollment() {
       const enrollment = await createSignerEnrollment({
         signerEnrollmentId: `browser-${Date.now()}`,
         identityToken: idToken,
-        registryId: "github.com",
       });
+      if (!enrollment.name) throw new Error("Enrollment response missing name");
       dispatch({
         type: Action.EnrollSuccess,
         enrollmentName: enrollment.name,

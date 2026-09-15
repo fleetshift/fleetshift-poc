@@ -1,6 +1,8 @@
-import { flagString } from "../../argv";
+import { resourceQueryServiceQueryResources } from "@fleetshift/common/dynamic/client/generated/sdk.gen";
+
+import { flagNumber, flagString } from "../../argv";
 import { JsonOutput } from "../../ui";
-import { clientForArgs } from "../context";
+import { clientForArgs, unwrap } from "../context";
 import type { CommandSpec } from "../types";
 
 export const queryCommand: CommandSpec = {
@@ -9,18 +11,18 @@ export const queryCommand: CommandSpec = {
   description: "Query managed resources with CEL filter",
   implemented: true,
   run: async ({ args }) => {
-    const scope = flagString(args, "scope", "-");
-    const params = new URLSearchParams({ filter: flagString(args, "filter") });
-    const pageSize = flagString(args, "page-size");
-    const pageToken = flagString(args, "page-token");
-    const orderBy = flagString(args, "order-by");
-    if (pageSize) params.set("page_size", pageSize);
-    if (pageToken) params.set("page_token", pageToken);
-    if (orderBy) params.set("order_by", orderBy);
-    const response = await (
-      await clientForArgs(args)
-    ).request(
-      `/apis/fleetshift.io/v1/${encodeURIComponent(scope)}:queryResources?${params}`,
+    const scope = flagString(args, "scope", "-") ?? "-";
+    await clientForArgs(args);
+    const response = await unwrap(
+      resourceQueryServiceQueryResources({
+        path: { scope },
+        query: {
+          filter: flagString(args, "filter") ?? "",
+          pageSize: flagNumber(args, "page-size"),
+          pageToken: flagString(args, "page-token"),
+          orderBy: flagString(args, "order-by"),
+        },
+      }),
     );
     return <JsonOutput value={response} />;
   },

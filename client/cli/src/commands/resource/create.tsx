@@ -1,6 +1,6 @@
 import { flagString } from "../../argv";
 import { JsonOutput } from "../../ui";
-import { clientForArgs } from "../context";
+import { clientForArgs, unwrap } from "../context";
 import type { CommandSpec } from "../types";
 import { resourceID, resourceRoute, resourceSpec } from "./helpers";
 
@@ -14,14 +14,13 @@ export const createCommand: CommandSpec = {
     if (!type || !specFile)
       throw new Error("resource type and --spec-file are required");
     const route = resourceRoute(type);
-    const response = await (
-      await clientForArgs(args)
-    ).request(
-      `${route.path}?${route.singular}_id=${encodeURIComponent(resourceID(args))}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ spec: await resourceSpec(specFile) }),
-      },
+    const client = await clientForArgs(args);
+    const response = await unwrap(
+      client.post({
+        url: route.path,
+        query: { [`${route.singular}_id`]: resourceID(args) },
+        body: { spec: await resourceSpec(specFile) },
+      }),
     );
     return <JsonOutput value={response} />;
   },

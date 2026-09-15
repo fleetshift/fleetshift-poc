@@ -1,28 +1,27 @@
+import { deploymentServiceListDeployments } from "@fleetshift/common/dynamic/client/generated/sdk.gen";
+import type { V1Deployment } from "@fleetshift/common/dynamic/client/generated/types.gen";
 import { Box, Text } from "ink";
 import Table from "ink-table";
 import React from "react";
 
-import { flagString } from "../../argv";
+import { flagNumber, flagString } from "../../argv";
 import { JsonOutput, useOutputFormat } from "../../ui";
-import { clientForArgs } from "../context";
+import { clientForArgs, unwrap } from "../context";
 import type { CommandSpec } from "../types";
-import type { DeploymentListResponse } from "./types";
 
 export const listCommand: CommandSpec = {
   path: "deployment list",
   description: "List deployments",
   implemented: true,
   run: async ({ args }) => {
-    const query = new URLSearchParams();
-    const pageSize = flagString(args, "page-size");
-    if (pageSize) query.set("pageSize", pageSize);
-    const response = await (
-      await clientForArgs(args)
-    ).request<DeploymentListResponse>(
-      `/v1/deployments${query.size ? `?${query}` : ""}`,
-      {
-        method: "GET",
-      },
+    await clientForArgs(args);
+    const response = await unwrap(
+      deploymentServiceListDeployments({
+        query: {
+          pageSize: flagNumber(args, "page-size"),
+          pageToken: flagString(args, "page-token"),
+        },
+      }),
     );
     return <DeploymentListOutput deployments={response.deployments ?? []} />;
   },
@@ -31,7 +30,7 @@ export const listCommand: CommandSpec = {
 function DeploymentListOutput({
   deployments,
 }: {
-  deployments: NonNullable<DeploymentListResponse["deployments"]>;
+  deployments: V1Deployment[];
 }): React.ReactElement {
   if (useOutputFormat() === "json") {
     return <JsonOutput value={deployments} />;

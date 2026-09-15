@@ -30,7 +30,9 @@ export interface UseNavLayoutResult {
  * singleton — avoids MF shared-scope issues where separate module copies
  * produce separate subscription sets.
  */
-function useNavLayout(externalStore?: ExtensionStore): UseNavLayoutResult {
+export function useNavLayout(
+  externalStore?: ExtensionStore,
+): UseNavLayoutResult {
   const [loaded, setLoaded] = useState(false);
   const [override, setOverrideState] = useState<NavLayoutOverride | null>(null);
   const [legacyOrder, setLegacyOrder] = useState<string[] | null>(null);

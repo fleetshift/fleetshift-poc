@@ -1,0 +1,169 @@
+swagger: "2.0"
+paths:
+  /api/ui/config:
+    get:
+      operationId: getUiConfig
+      responses:
+        "200":
+          description: UI bootstrap configuration
+          schema:
+            $ref: "#/definitions/UiConfig"
+  /api/ui/user-config:
+    get:
+      operationId: getUiUserConfig
+      responses:
+        "200":
+          description: User-specific UI configuration
+          schema:
+            $ref: "#/definitions/UiUserConfig"
+definitions:
+  UiConfig:
+    type: object
+    required: [oidc]
+    properties:
+      oidc:
+        $ref: "#/definitions/OidcConfig"
+      scalprumConfig:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/AppMetadata"
+      pluginPages:
+        type: array
+        items:
+          $ref: "#/definitions/PluginPage"
+      pluginEntries:
+        type: array
+        items:
+          $ref: "#/definitions/PluginEntry"
+      assetsHost:
+        type: string
+      authConfigured:
+        type: boolean
+  OidcConfig:
+    type: object
+    required: [authority, clientId]
+    properties:
+      authority: { type: string }
+      clientId: { type: string }
+      scope: { type: string }
+  UiUserConfig:
+    type: object
+    properties:
+      scalprumConfig:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/AppMetadata"
+      pluginPages:
+        type: array
+        items:
+          $ref: "#/definitions/PluginPage"
+      pluginEntries:
+        type: array
+        items:
+          $ref: "#/definitions/PluginEntry"
+      assetsHost:
+        type: string
+      navLayout:
+        type: array
+        items:
+          $ref: "#/definitions/NavLayoutEntry"
+  PluginPage:
+    type: object
+    required: [id, title, path, scope, module, pluginKey]
+    properties:
+      id: { type: string }
+      title: { type: string }
+      path: { type: string }
+      scope: { type: string }
+      module: { type: string }
+      pluginKey: { type: string }
+  PluginEntry:
+    type: object
+    required: [name, key, label, persona, manifestPath, pluginManifest]
+    properties:
+      name: { type: string }
+      key: { type: string }
+      label: { type: string }
+      manifestPath: { type: string }
+      persona:
+        type: string
+        enum: [ops, dev, obs]
+      pluginManifest:
+        $ref: "#/definitions/PluginManifest"
+  AppMetadata:
+    type: object
+    required: [name]
+    properties:
+      name: { type: string }
+      assetsHost: { type: string }
+      appId: { type: string }
+      elementId: { type: string }
+      rootLocation: { type: string }
+      scriptLocation: { type: string }
+      manifestLocation: { type: string }
+      pluginManifest:
+        $ref: "#/definitions/PluginManifest"
+  PluginManifest:
+    type: object
+    required: [name, version, baseURL, extensions, loadScripts, registrationMethod]
+    properties:
+      name: { type: string }
+      version: { type: string }
+      baseURL: { type: string }
+      loadScripts:
+        type: array
+        items: { type: string }
+      registrationMethod:
+        type: string
+        enum: [callback, custom]
+      extensions:
+        type: array
+        items:
+          type: object
+          required: [type, properties]
+          properties:
+            type: { type: string }
+            properties:
+              type: object
+              additionalProperties: true
+            flags:
+              type: object
+              properties:
+                required:
+                  type: array
+                  items: { type: string }
+                disallowed:
+                  type: array
+                  items: { type: string }
+          additionalProperties: true
+      dependencies:
+        type: object
+        additionalProperties: { type: string }
+      optionalDependencies:
+        type: object
+        additionalProperties: { type: string }
+      customProperties:
+        type: object
+        additionalProperties: true
+  NavLayoutEntry:
+    type: object
+    required: [type]
+    properties:
+      type:
+        type: string
+        enum: [page, group, section, more]
+      pageId: { type: string }
+      iconOverride: { type: string }
+      groupId: { type: string }
+      pluginKey: { type: string }
+      label: { type: string }
+      id: { type: string }
+      description: { type: string }
+      keywords:
+        type: array
+        items: { type: string }
+      icon: { type: string }
+      children:
+        type: array
+        items:
+          $ref: "#/definitions/NavLayoutEntry"

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getExtensionStore } from "./extensionInstall.js";
 
-function useNavOrder() {
+export function useNavOrder() {
   const [loaded, setLoaded] = useState(false);
   const [order, setOrderState] = useState<string[] | null>(null);
   const store = useMemo(getExtensionStore, [getExtensionStore]);

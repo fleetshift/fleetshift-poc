@@ -1,12 +1,12 @@
 import { flagString, parseArgs } from "../argv";
-import { discoverOidc } from "../client";
 import { absolutePath, saveAuthConfig } from "../config";
+import { discoverOidc } from "./helpers";
 
 export async function runAuthSetup(
   args: ReturnType<typeof parseArgs>,
 ): Promise<string> {
-  const issuer = flagString(args, "issuer-url").trim();
-  const clientID = flagString(args, "client-id").trim();
+  const issuer = (flagString(args, "issuer-url") ?? "").trim();
+  const clientID = (flagString(args, "client-id") ?? "").trim();
   if (!issuer || !clientID) {
     throw new Error("--issuer-url and --client-id are required");
   }
@@ -16,7 +16,7 @@ export async function runAuthSetup(
   await saveAuthConfig(flagString(args, "config-dir") || undefined, {
     issuer_url: issuer,
     client_id: clientID,
-    scopes: flagString(args, "scopes", "openid,profile,email")
+    scopes: (flagString(args, "scopes", "openid,profile,email") ?? "")
       .split(",")
       .map((scope) => scope.trim())
       .filter(Boolean),

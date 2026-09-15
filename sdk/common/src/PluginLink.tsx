@@ -12,7 +12,7 @@ export interface PluginLinkProps extends Omit<LinkProps, "to"> {
   children?: ReactNode;
 }
 
-const PluginLink = forwardRef<HTMLAnchorElement, PluginLinkProps>(
+export const PluginLink = forwardRef<HTMLAnchorElement, PluginLinkProps>(
   ({ scope, module, to, fallback = null, children, ...rest }, ref) => {
     const { api } = useScalprum<{ api: FleetShiftApi }>();
     const basePath = api.fleetshift.getPluginPagePath(scope, module);

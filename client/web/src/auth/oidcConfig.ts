@@ -1,22 +1,16 @@
+import { getUiConfig } from "@fleetshift/common";
 import type { AuthProviderNoUserManagerProps } from "react-oidc-context";
 import type { NavigateFunction } from "react-router-dom";
 
+import apiClient, { unwrap } from "../api/client";
 import {
   APP_BASENAME,
   AUTH_CALLBACK_PATH,
-  SILENT_RENEW_PATH,
   isAuthCallbackPath,
+  SILENT_RENEW_PATH,
   stripAppBasename,
   toBrowserPath,
 } from "../appBase";
-
-interface UIConfig {
-  oidc: {
-    authority: string;
-    clientId: string;
-    scope?: string;
-  };
-}
 
 // oidc-client-ts supplies `openid` only when `scope` is omitted, not when it is "".
 export function oidcClientScope(raw: string | undefined): string | undefined {
@@ -36,13 +30,7 @@ export function oidcClientScope(raw: string | undefined): string | undefined {
 export async function fetchOidcConfig(
   navigate: NavigateFunction,
 ): Promise<AuthProviderNoUserManagerProps> {
-  const res = await fetch("/api/ui/config");
-  if (!res.ok) {
-    throw new Error(
-      `Failed to fetch UI config: ${res.status} ${res.statusText}`,
-    );
-  }
-  const data: UIConfig = await res.json();
+  const data = await unwrap(getUiConfig({ client: apiClient }));
   const scope = oidcClientScope(data.oidc.scope);
 
   return {

@@ -9,7 +9,7 @@ import simpleImportSort from "eslint-plugin-simple-import-sort";
 export default [
     playwright.configs["flat/recommended"],
     {
-        ignores: ["**/dist/**", "**/node_modules/**"],
+        ignores: ["**/dist/**", "**/node_modules/**", "sdk/common/src/client/generated/**"],
     },
     {
         files: ["**/*.{ts,tsx}"],

@@ -1,15 +1,14 @@
 import { readFile } from "node:fs/promises";
 
+import type {
+  V1DeploymentWritable,
+  V1PlacementStrategy,
+} from "@fleetshift/common/dynamic/client/generated/types.gen";
+
 import { flagString, type ParsedArgs } from "../../argv";
-import type { CliClient } from "../../client";
-import { clientForArgs } from "../context";
 
 export function deploymentName(value: string): string {
   return value.startsWith("deployments/") ? value : `deployments/${value}`;
-}
-
-export function deploymentClient(args: ParsedArgs): Promise<CliClient> {
-  return clientForArgs(args);
 }
 
 export interface ManifestInput {
@@ -24,9 +23,11 @@ export interface SigningPlacement {
 }
 
 export function parsePlacement(args: ParsedArgs): SigningPlacement {
-  const type = flagString(args, "placement-type", "all").toLowerCase();
+  const type = (
+    flagString(args, "placement-type", "all") ?? "all"
+  ).toLowerCase();
   if (type === "static") {
-    const targets = flagString(args, "target-ids")
+    const targets = (flagString(args, "target-ids") ?? "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
@@ -76,18 +77,16 @@ async function readStdin(): Promise<string> {
 export function deploymentBody(
   args: ParsedArgs,
   rawManifest: string,
-): Record<string, unknown> {
+): V1DeploymentWritable {
   const placement = parsePlacement(args);
-  const placementStrategy: Record<string, unknown> = {
-    type: `TYPE_${placement.type.toUpperCase()}`,
+  const placementStrategy: V1PlacementStrategy = {
+    type: `TYPE_${placement.type.toUpperCase()}` as V1PlacementStrategy["type"],
   };
   if (placement.targets) placementStrategy.targetIds = placement.targets;
   if (placement.match_labels)
-    placementStrategy.targetSelector = placement.match_labels;
-  const rolloutType = flagString(
-    args,
-    "rollout-type",
-    "immediate",
+    placementStrategy.targetSelector = { matchLabels: placement.match_labels };
+  const rolloutType = (
+    flagString(args, "rollout-type", "immediate") ?? "immediate"
   ).toLowerCase();
   if (rolloutType !== "immediate") {
     throw new Error(`unsupported rollout type ${rolloutType}`);
@@ -96,7 +95,10 @@ export function deploymentBody(
     manifestStrategy: {
       type: "TYPE_INLINE",
       manifests: [
-        { manifestType: flagString(args, "resource-type"), raw: rawManifest },
+        {
+          manifestType: flagString(args, "resource-type") ?? "",
+          raw: rawManifest,
+        },
       ],
     },
     placementStrategy,

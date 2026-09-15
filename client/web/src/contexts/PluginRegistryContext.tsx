@@ -5,7 +5,8 @@ export interface PluginEntry {
   name: string;
   key: string;
   label: string;
-  persona: "ops" | "dev";
+  persona: "ops" | "dev" | "obs";
+  manifestPath: string;
   pluginManifest: PluginManifest;
 }
 
