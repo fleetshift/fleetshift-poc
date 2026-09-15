@@ -14,7 +14,16 @@
       "require": "./dist/cjs/index.js"
     },
     "./package.json": "./package.json",
-    "./dist/dynamic/*": "./dist/dynamic/*/index.js",
+    "./dist/dynamic/*": {
+      "types": "./dist/esm/*.d.ts",
+      "import": "./dist/esm/*.js",
+      "require": "./dist/cjs/*.js"
+    },
+    "./dynamic/*": {
+      "types": "./dist/esm/*.d.ts",
+      "import": "./dist/esm/*.js",
+      "require": "./dist/cjs/*.js"
+    },
     "./generated/pf-icons.json": "./src/generated/pf-icons.json"
   },
   "scripts": {},
@@ -24,6 +33,7 @@
     "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
-    "@types/react": "^19.1.0"
+    "@types/react": "^19.1.0",
+    "yaml": "^2.9.1"
   }
 }

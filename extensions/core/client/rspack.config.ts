@@ -45,7 +45,7 @@ const swcLoaderRule = {
 const sharedModules = {
   react: { singleton: true, requiredVersion: "*" },
   "react-dom": { singleton: true, requiredVersion: "*" },
-  "react/jsx-dev-runtime": { singleton: true, requiredVersion: "^19" },
+  "react/jsx-dev-runtime": { singleton: true, requiredVersion: "*" },
   "@scalprum/core": { singleton: true, requiredVersion: "*" },
   "@scalprum/react-core": { singleton: true, requiredVersion: "*" },
   "@openshift/dynamic-plugin-sdk": {
@@ -54,7 +54,7 @@ const sharedModules = {
     version: "*",
   },
   "react-router-dom": { singleton: true, requiredVersion: "*" },
-  "react/jsx-runtime": { singleton: true, requiredVersion: "^19" },
+  "react/jsx-runtime": { singleton: true, requiredVersion: "*" },
   "oidc-client-ts": { singleton: true, requiredVersion: "*" },
   "react-oidc-context": { singleton: true, requiredVersion: "*" },
   ...pfSharedModules,
@@ -758,7 +758,18 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   cache: {
     type: "persistent" as const,
     version: key,
-    buildDependencies: [fileURLToPath(import.meta.url)],
+    buildDependencies: [
+      fileURLToPath(import.meta.url),
+      path.resolve(configDir, "../../../sdk/common/package.json"),
+      path.resolve(
+        configDir,
+        "../../../sdk/common/scripts/generate-dynamic-modules.mjs",
+      ),
+      path.resolve(
+        configDir,
+        "../../../sdk/common/scripts/generate-api-client.mjs",
+      ),
+    ],
   },
   entry: {
     mock: path.resolve(configDir, "./src/index.ts"),

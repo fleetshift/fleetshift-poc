@@ -5,6 +5,19 @@
   "projectType": "library",
   "tags": ["scope:ui", "type:lib"],
   "targets": {
+    "generate-api": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "sdk/common",
+        "command": "node scripts/generate-api-client.mjs --input ../../docs/openapi/fleetshift.swagger.yaml --output src/client/generated"
+      },
+      "inputs": [
+        "{workspaceRoot}/docs/openapi/fleetshift.swagger.yaml",
+        "{projectRoot}/openapi/ui.yaml",
+        "{projectRoot}/scripts/generate-api-client.mjs"
+      ],
+      "outputs": ["{projectRoot}/src/client/generated"]
+    },
     "build": {
       "executor": "nx:run-commands",
       "options": {
@@ -13,10 +26,12 @@
       },
       "inputs": [
         "{projectRoot}/src/**/*",
+        "{projectRoot}/scripts/**/*",
+        "{projectRoot}/package.json",
         "{projectRoot}/tsconfig*.json"
       ],
       "outputs": ["{projectRoot}/dist"],
-      "dependsOn": ["fleetshift-poc:web:generate-icons"]
+      "dependsOn": ["fleetshift-poc:web:generate-icons", "generate-api"]
     },
     "lint": {
       "executor": "@nx/eslint:lint",
@@ -29,10 +44,8 @@
       "options": {
         "command": "npx vitest run --config vitest.config.ts"
       },
-      "inputs": [
-        "{projectRoot}/src/**/*",
-        "{workspaceRoot}/vitest.config.ts"
-      ]
+      "inputs": ["{projectRoot}/src/**/*", "{workspaceRoot}/vitest.config.ts"],
+      "dependsOn": ["generate-api"]
     }
   }
 }

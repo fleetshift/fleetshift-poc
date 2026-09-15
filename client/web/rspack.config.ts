@@ -30,7 +30,18 @@ const pfTransformImport = createPfTransformImport();
 const config: Configuration = {
   cache: {
     type: "persistent",
-    buildDependencies: [fileURLToPath(import.meta.url)],
+    buildDependencies: [
+      fileURLToPath(import.meta.url),
+      path.resolve(configDir, "../../sdk/common/package.json"),
+      path.resolve(
+        configDir,
+        "../../sdk/common/scripts/generate-dynamic-modules.mjs",
+      ),
+      path.resolve(
+        configDir,
+        "../../sdk/common/scripts/generate-api-client.mjs",
+      ),
+    ],
   },
   entry: "./src/index.ts",
   output: {
@@ -89,10 +100,10 @@ const config: Configuration = {
       name: "fleetshift_shell",
       remotes: {},
       shared: {
-        react: { singleton: true, requiredVersion: "^19" },
-        "react/jsx-runtime": { singleton: true, requiredVersion: "^19" },
-        "react/jsx-dev-runtime": { singleton: true, requiredVersion: "^19" },
-        "react-dom": { singleton: true, requiredVersion: "^19" },
+        react: { singleton: true, requiredVersion: "*" },
+        "react/jsx-runtime": { singleton: true, requiredVersion: "*" },
+        "react/jsx-dev-runtime": { singleton: true, requiredVersion: "*" },
+        "react-dom": { singleton: true, requiredVersion: "*" },
         "react-router-dom": { singleton: true, requiredVersion: "^7" },
         "@scalprum/core": { singleton: true },
         "@scalprum/react-core": { singleton: true },

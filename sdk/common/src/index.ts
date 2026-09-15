@@ -6,7 +6,8 @@ export type {
   PlacementStrategy,
 } from "./canonical.js";
 export { buildSignedInputEnvelope, hashIntent } from "./canonical.js";
-export { default as DynamicPfIcon } from "./DynamicPfIcon.js";
+export * from "./client/generated/index.js";
+export { DynamicPfIcon } from "./DynamicPfIcon.js";
 export type { CoreExtensionMeta, ExtensionStore } from "./extensionInstall.js";
 export {
   CORE_EXTENSION_DEFAULTS,
@@ -60,7 +61,7 @@ export {
   loadPfIcon,
 } from "./pfIconLoader.js";
 export type { PluginLinkProps } from "./PluginLink.js";
-export { default as PluginLink } from "./PluginLink.js";
+export { PluginLink } from "./PluginLink.js";
 export * from "./resourceApi.js";
 export type { FleetShiftApi, NavPage } from "./scalprum.js";
 export type {
@@ -79,8 +80,8 @@ export type {
   SearchEntry,
   User,
 } from "./types.js";
-export { default as useExtensionInstall } from "./useExtensionInstall.js";
-export { default as useNavLayout } from "./useNavLayout.js";
-export { default as useNavOrder } from "./useNavOrder.js";
+export { useExtensionInstall } from "./useExtensionInstall.js";
+export { useNavLayout } from "./useNavLayout.js";
+export { useNavOrder } from "./useNavOrder.js";
 export type { PluginNavigateTo } from "./usePluginNavigate.js";
-export { default as usePluginNavigate } from "./usePluginNavigate.js";
+export { usePluginNavigate } from "./usePluginNavigate.js";

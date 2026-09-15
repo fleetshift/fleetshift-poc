@@ -5,7 +5,7 @@ import {
   getExtensionStore,
 } from "./extensionInstall.js";
 
-function useExtensionInstall() {
+export function useExtensionInstall() {
   const [loaded, setLoaded] = useState(false);
   const [state, subs] = useState<Record<string, boolean>>({});
   const store = useMemo(getExtensionStore, [getExtensionStore]);

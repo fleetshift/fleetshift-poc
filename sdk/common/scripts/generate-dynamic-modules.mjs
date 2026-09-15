@@ -1,183 +1,208 @@
 /**
  * Parse common/src/index.ts and generate:
- *   1. dist/common-modules.json   — export-name → { path, sourceExport, type }
- *   2. dist/dynamic/<file>/       — per-file entry points for MF sharing
+ *   1. dist/common-modules.json — export-name to source-module metadata
+ *   2. virtual dist/dynamic/<file> package descriptors
  *
- * Mirrors the pattern PatternFly uses with dist/dynamic/ and
- * dynamic-modules.json — every named export gets a deterministic
- * deep-import path so SWC transformImport can split barrel imports.
- *
- * Each dynamic entry uses explicit named re-exports (not `export *`)
- * because rspack's module-federation shared-module wrapping can drop
- * named exports that come through `export *`.
+ * Re-export graphs are followed recursively so each named export points at
+ * its actual compiled source file instead of a barrel index.
  */
 import fs from "fs";
 import path from "path";
+import * as ts from "typescript";
 import { fileURLToPath } from "url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const indexPath = path.resolve(root, "src/index.ts");
+const sourceRoot = path.resolve(root, "src");
+const indexPath = path.resolve(sourceRoot, "index.ts");
 const distDir = path.resolve(root, "dist");
 const dynamicDir = path.resolve(distDir, "dynamic");
 
-const src = fs.readFileSync(indexPath, "utf-8");
-
-// Match: export { Name1, Name2 } from "./file.js";
-// Match: export { default as Name } from "./file.js";
-// Match: export * from "./file.js";
-// Match: export type { ... } from "./file.js";
-const reExport =
-  /export\s+(type\s+)?(?:\{([^}]+)\}|\*)\s+from\s+["']\.\/([^"']+)["']/g;
-
-/** @type {Record<string, { path: string, sourceExport: string, type: boolean }>} */
-const moduleMap = {};
-let match;
-while ((match = reExport.exec(src)) !== null) {
-  const [, typeKeyword, names, rawFile] = match;
-  const file = rawFile.replace(/\.(js|ts|tsx)$/, "");
-  const isTypeExport = !!typeKeyword;
-
-  if (!names) {
-    // export * — handled below by parsing the source file
-    continue;
-  }
-
-  for (const raw of names.split(",")) {
-    let trimmed = raw.trim();
-    if (!trimmed) continue;
-
-    // Handle inline type specifiers: export { type Foo, type Bar as Baz }
-    const isInlineType = trimmed.startsWith("type ");
-    if (isInlineType) trimmed = trimmed.slice(5);
-
-    // Handle "default as Foo" → export name is "Foo", source export is "default"
-    const aliasMatch = trimmed.match(/(?:(default|\w+))\s+as\s+(\w+)/);
-    const exportName = aliasMatch ? aliasMatch[2] : trimmed;
-    const sourceExport = aliasMatch ? aliasMatch[1] : trimmed;
-
-    moduleMap[exportName] = {
-      path: `dist/dynamic/${file}`,
-      sourceExport,
-      type: isTypeExport || isInlineType,
-    };
+function normalizeEsmImports(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      normalizeEsmImports(filePath);
+      continue;
+    }
+    if (!entry.name.endsWith(".js")) continue;
+    const source = fs.readFileSync(filePath, "utf8");
+    const normalized = source.replace(
+      /(from\s+["']|import\s*\(\s*["'])(\.{1,2}\/[^"']+)(["'])/g,
+      (match, prefix, specifier, suffix) => {
+        if (/\.(?:js|json)$/.test(specifier)) {
+          return match;
+        }
+        const target = path.resolve(path.dirname(filePath), specifier);
+        const targetSpecifier = fs.existsSync(path.join(target, "index.js"))
+          ? `${specifier}/index.js`
+          : `${specifier}.js`;
+        return `${prefix}${targetSpecifier}${suffix}`;
+      },
+    );
+    if (normalized !== source) fs.writeFileSync(filePath, normalized);
   }
 }
 
-// Handle `export *` modules by parsing their files for export names
-const starExportRe = /export\s+\*\s+from\s+["']\.\/([^"']+)["']/g;
-let starMatch;
-const srcCopy = src;
-while ((starMatch = starExportRe.exec(srcCopy)) !== null) {
-  const rawFile = starMatch[1];
-  const file = rawFile.replace(/\.(js|ts|tsx)$/, "");
-  const filePath = path.resolve(root, "src", rawFile.replace(/\.js$/, ".ts"));
+/** @typedef {{ path: string, sourceExport: string, type: boolean }} ModuleEntry */
 
-  if (!fs.existsSync(filePath)) continue;
+const moduleCache = new Map();
 
-  const fileSrc = fs.readFileSync(filePath, "utf-8");
-
-  // Match named exports: export const/let/var/function/class Name
-  const namedExportRe =
-    /export\s+(?:const|let|var|function|class)\s+(\w+)/g;
-  let namedMatch;
-  while ((namedMatch = namedExportRe.exec(fileSrc)) !== null) {
-    moduleMap[namedMatch[1]] = {
-      path: `dist/dynamic/${file}`,
-      sourceExport: namedMatch[1],
-      type: false,
-    };
+function resolveModule(fromFile, rawImport) {
+  const raw = rawImport.replace(/\.(js|jsx|ts|tsx)$/, "");
+  const base = path.resolve(path.dirname(fromFile), raw);
+  for (const candidate of [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    path.join(base, "index.ts"),
+  ]) {
+    if (fs.existsSync(candidate)) return candidate;
   }
+  return undefined;
+}
 
-  // Match type/interface/enum exports
-  const typeExportRe =
-    /export\s+(?:type|interface|enum)\s+(\w+)/g;
-  let typeMatch;
-  while ((typeMatch = typeExportRe.exec(fileSrc)) !== null) {
-    moduleMap[typeMatch[1]] = {
-      path: `dist/dynamic/${file}`,
-      sourceExport: typeMatch[1],
-      // enum is a value at runtime, type/interface are not
-      type: !typeMatch[0].includes("enum"),
-    };
-  }
+function parseModule(filePath, stack = new Set()) {
+  const cached = moduleCache.get(filePath);
+  if (cached) return cached;
+  if (stack.has(filePath)) return new Map();
 
-  // Match re-exports from within: export { Name } from ...
-  const innerReExportRe = /export\s+(type\s+)?\{([^}]+)\}/g;
-  let innerMatch;
-  while ((innerMatch = innerReExportRe.exec(fileSrc)) !== null) {
-    const innerType = !!innerMatch[1];
-    for (const raw of innerMatch[2].split(",")) {
-      let trimmed = raw.trim();
-      if (!trimmed) continue;
+  const nextStack = new Set(stack).add(filePath);
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    fs.readFileSync(filePath, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const entries = new Map();
+  const relative = path
+    .relative(sourceRoot, filePath)
+    .replace(/\.(js|jsx|ts|tsx)$/, "");
+  const dynamicPath = `dist/dynamic/${relative}`;
 
-      const isInlineType = trimmed.startsWith("type ");
-      if (isInlineType) trimmed = trimmed.slice(5);
+  const addLocal = (name, type) => {
+    entries.set(name, { path: dynamicPath, sourceExport: name, type });
+  };
 
-      const aliasMatch = trimmed.match(/(\w+)\s+as\s+(\w+)/);
-      const name = aliasMatch ? aliasMatch[2] : trimmed;
-      const source = aliasMatch ? aliasMatch[1] : trimmed;
-      moduleMap[name] = {
-        path: `dist/dynamic/${file}`,
-        sourceExport: source,
-        type: innerType || isInlineType,
-      };
+  for (const statement of sourceFile.statements) {
+    const hasModifier = (kind) =>
+      statement.modifiers?.some((modifier) => modifier.kind === kind) ?? false;
+
+    if (ts.isExportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (!moduleSpecifier || !ts.isStringLiteral(moduleSpecifier)) continue;
+      const targetPath = resolveModule(filePath, moduleSpecifier.text);
+      if (!targetPath) continue;
+      const target = parseModule(targetPath, nextStack);
+      if (!statement.exportClause) {
+        for (const [name, entry] of target) {
+          if (name !== "default" && !entries.has(name))
+            entries.set(name, entry);
+        }
+        continue;
+      }
+      if (!ts.isNamedExports(statement.exportClause)) continue;
+      for (const specifier of statement.exportClause.elements) {
+        const sourceName = specifier.propertyName?.text ?? specifier.name.text;
+        const targetEntry = target.get(sourceName);
+        if (!targetEntry) continue;
+        entries.set(specifier.name.text, {
+          ...targetEntry,
+          type:
+            statement.isTypeOnly || specifier.isTypeOnly || targetEntry.type,
+        });
+      }
+      continue;
+    }
+
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      entries.set("default", {
+        path: dynamicPath,
+        sourceExport: "default",
+        type: false,
+      });
+      continue;
+    }
+
+    if (!hasModifier(ts.SyntaxKind.ExportKeyword)) continue;
+    const isType =
+      ts.isTypeAliasDeclaration(statement) ||
+      ts.isInterfaceDeclaration(statement);
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name))
+          addLocal(declaration.name.text, false);
+      }
+    } else if (
+      "name" in statement &&
+      statement.name &&
+      ts.isIdentifier(statement.name)
+    ) {
+      addLocal(statement.name.text, isType);
+    }
+    if (hasModifier(ts.SyntaxKind.DefaultKeyword)) {
+      entries.set("default", {
+        path: dynamicPath,
+        sourceExport: "default",
+        type: false,
+      });
     }
   }
+
+  moduleCache.set(filePath, entries);
+  return entries;
 }
 
-// Write common-modules.json
+const moduleMap = Object.fromEntries(parseModule(indexPath));
+
 fs.mkdirSync(distDir, { recursive: true });
+fs.rmSync(dynamicDir, { recursive: true, force: true });
 fs.writeFileSync(
   path.resolve(distDir, "common-modules.json"),
   JSON.stringify(moduleMap, null, 2) + "\n",
 );
 
-// Generate dist/dynamic/<file>/ entry points with explicit re-exports
-// Group exports by target file path
-/** @type {Map<string, Array<{ exportName: string, sourceExport: string, type: boolean }>>} */
-const byFile = new Map();
-for (const [exportName, entry] of Object.entries(moduleMap)) {
-  const list = byFile.get(entry.path) ?? [];
-  list.push({ exportName, sourceExport: entry.sourceExport, type: entry.type });
-  byFile.set(entry.path, list);
+function compiledFiles(directory, prefix = "") {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const relative = path.join(prefix, entry.name);
+    if (entry.isDirectory()) {
+      return compiledFiles(path.join(directory, entry.name), relative);
+    }
+    return entry.name.endsWith(".js") ? [relative.slice(0, -3)] : [];
+  });
 }
 
-for (const [dynamicPath, exports] of byFile) {
-  const file = dynamicPath.replace("dist/dynamic/", "");
-  const dir = path.resolve(dynamicDir, file);
+const compiledRoot = path.resolve(distDir, "esm");
+normalizeEsmImports(compiledRoot);
+const compiledModules = compiledFiles(compiledRoot);
+
+function relativeCompiledPath(dir, format, file) {
+  let relative = path.relative(
+    dir,
+    path.resolve(distDir, format, `${file}.js`),
+  );
+  if (!relative.startsWith(".")) relative = `./${relative}`;
+  return relative.split(path.sep).join("/");
+}
+
+function writeDescriptor(dir, file) {
   fs.mkdirSync(dir, { recursive: true });
-
-  const depth = file.split("/").length;
-  const upPrefix = "../".repeat(depth + 1); // dynamic/<file>/ → dist/esm/
-  const esmPath = `${upPrefix}esm/${file}.js`;
-
-  // Build explicit re-export statements (skip type-only exports)
-  const runtimeExports = exports.filter((e) => !e.type);
-
-  const reExports = runtimeExports.map((e) => {
-    if (e.sourceExport === e.exportName) {
-      return e.exportName;
-    }
-    return `${e.sourceExport} as ${e.exportName}`;
-  });
-
-  const lines = [];
-  if (reExports.length > 0) {
-    lines.push(`export { ${reExports.join(", ")} } from "${esmPath}";`);
-  }
-
-  fs.writeFileSync(path.resolve(dir, "index.js"), lines.join("\n") + "\n");
-
-  // package.json so MF shared resolution finds the module
+  const esmPath = relativeCompiledPath(dir, "esm", file);
+  const cjsPath = relativeCompiledPath(dir, "cjs", file);
+  const typePath = esmPath.replace(/\.js$/, ".d.ts");
   fs.writeFileSync(
     path.resolve(dir, "package.json"),
-    JSON.stringify({ module: "./index.js", main: "./index.js" }, null, 2) +
-      "\n",
+    JSON.stringify(
+      { module: esmPath, main: cjsPath, types: typePath },
+      null,
+      2,
+    ) + "\n",
   );
 }
 
-const count = Object.keys(moduleMap).length;
-const files = byFile.size;
+for (const file of compiledModules) {
+  writeDescriptor(path.resolve(dynamicDir, file), file);
+}
+
 console.log(
-  `@fleetshift/common: generated ${count} module entries across ${files} dynamic entry points`,
+  `@fleetshift/common: generated ${Object.keys(moduleMap).length} module entries across ${compiledModules.length} compiled files`,
 );

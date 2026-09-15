@@ -60,7 +60,7 @@ export default function TargetsPage() {
       for (const dep of deployments) {
         for (const tid of dep.resolvedTargetIds ?? []) {
           const existing = targetMap.get(tid) ?? [];
-          existing.push(dep.name);
+          if (dep.name) existing.push(dep.name);
           targetMap.set(tid, existing);
         }
       }

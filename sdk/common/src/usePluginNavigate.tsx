@@ -9,7 +9,7 @@ export interface PluginNavigateTo {
   search?: string;
 }
 
-const usePluginNavigate = (scope: string, module: string) => {
+export const usePluginNavigate = (scope: string, module: string) => {
   const { api } = useScalprum<{ api: FleetShiftApi }>();
   const navigate = useNavigate();
 

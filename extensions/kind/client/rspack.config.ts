@@ -113,7 +113,18 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   cache: {
     type: "persistent" as const,
     version: key,
-    buildDependencies: [fileURLToPath(import.meta.url)],
+    buildDependencies: [
+      fileURLToPath(import.meta.url),
+      path.resolve(configDir, "../../../sdk/common/package.json"),
+      path.resolve(
+        configDir,
+        "../../../sdk/common/scripts/generate-dynamic-modules.mjs",
+      ),
+      path.resolve(
+        configDir,
+        "../../../sdk/common/scripts/generate-api-client.mjs",
+      ),
+    ],
   },
   entry: {
     mock: path.resolve(configDir, "./src/index.ts"),

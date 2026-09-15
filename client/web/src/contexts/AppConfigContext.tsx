@@ -1,3 +1,5 @@
+import { getUiConfig, getUiUserConfig } from "@fleetshift/common";
+import type { NavLayoutEntry } from "@fleetshift/common/dynamic/navLayout";
 import type { AppsConfig } from "@scalprum/core";
 import {
   createContext,
@@ -7,6 +9,8 @@ import {
   useState,
 } from "react";
 
+import apiClient, { unwrap } from "../api/client";
+import { normalizeNavLayout } from "../utils/normalizeNavLayout";
 import type { PluginEntry } from "./PluginRegistryContext";
 
 export interface PluginPage {
@@ -18,32 +22,8 @@ export interface PluginPage {
   pluginKey: string;
 }
 
-export interface NavLayoutPage {
-  type: "page";
-  pageId: string;
-  /** PF icon name override (e.g. "CogIcon"). Takes priority over plugin-defined icon. */
-  iconOverride?: string;
-}
-
-export interface NavLayoutGroup {
-  type: "group";
-  groupId: string;
-  pluginKey: string;
-  label: string;
-  children: NavLayoutPage[];
-}
-
-export interface NavLayoutSection {
-  type: "section";
-  id: string;
-  label: string;
-  children: { pageId: string }[];
-}
-
-export type NavLayoutEntry = NavLayoutPage | NavLayoutGroup | NavLayoutSection;
-
 interface AppConfigContextValue {
-  scalprumConfig: AppsConfig<{ assetsHost: string }>;
+  scalprumConfig: AppsConfig;
   pluginPages: PluginPage[];
   navLayout: NavLayoutEntry[];
   pluginEntries: PluginEntry[];
@@ -78,34 +58,29 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       // Backward compatibility: older backends serve everything from
       // /api/ui/user-config. When /api/ui/config lacks scalprumConfig
       // we fall back to user-config for global fields too.
-      const [configData, userConfigData] = await Promise.all([
-        fetch("/api/ui/config")
-          .then((res) => (res.ok ? res.json() : {}))
-          .catch(() => ({})),
-        fetch("/api/ui/user-config")
-          .then((res) => (res.ok ? res.json() : {}))
-          .catch(() => ({})),
+      const [configResult, userConfigResult] = await Promise.all([
+        unwrap(getUiConfig({ client: apiClient })).catch(() => undefined),
+        unwrap(getUiUserConfig({ client: apiClient })).catch(() => undefined),
       ]);
 
       setConfig({
         scalprumConfig:
-          configData.scalprumConfig ??
-          userConfigData.scalprumConfig ??
+          configResult?.scalprumConfig ??
+          userConfigResult?.scalprumConfig ??
           FALLBACK_CONFIG.scalprumConfig,
         pluginPages:
-          configData.pluginPages ??
-          userConfigData.pluginPages ??
+          configResult?.pluginPages ??
+          userConfigResult?.pluginPages ??
           FALLBACK_CONFIG.pluginPages,
-        pluginEntries:
-          configData.pluginEntries ??
-          userConfigData.pluginEntries ??
-          FALLBACK_CONFIG.pluginEntries,
+        pluginEntries: (configResult?.pluginEntries ??
+          userConfigResult?.pluginEntries ??
+          FALLBACK_CONFIG.pluginEntries) as PluginEntry[],
         assetsHost:
-          configData.assetsHost ??
-          userConfigData.assetsHost ??
+          configResult?.assetsHost ??
+          userConfigResult?.assetsHost ??
           FALLBACK_CONFIG.assetsHost,
-        navLayout: userConfigData.navLayout ?? FALLBACK_CONFIG.navLayout,
-        authConfigured: configData.authConfigured === true,
+        navLayout: normalizeNavLayout(userConfigResult?.navLayout ?? []),
+        authConfigured: configResult?.authConfigured === true,
       });
     }
 
