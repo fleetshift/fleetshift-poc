@@ -7,6 +7,8 @@ const KIND_API_PORT = "6443";
 const KIND_CLUSTER_LABEL = "io.x-k8s.kind.cluster";
 const KIND_ROLE_LABEL = "io.x-k8s.kind.role";
 const KIND_CONTROL_PLANE_ROLE = "control-plane";
+const KIND_CA_READ_ATTEMPTS = 5;
+const KIND_CA_READ_DELAY_MS = 250;
 
 function parseAddress(value: string): { host: string; port: string } | null {
   const ipv6 = /^\[([^\]]+)]:(\d+)$/.exec(value);
@@ -97,6 +99,8 @@ async function kindControlPlaneID(hostName: string): Promise<string> {
     `label=${KIND_CLUSTER_LABEL}=${hostName}`,
     "--filter",
     `label=${KIND_ROLE_LABEL}=${KIND_CONTROL_PLANE_ROLE}`,
+    "--filter",
+    "status=running",
   ]);
   if (!ids[0])
     throw new Error(`no Kind control-plane container for ${hostName}`);
@@ -108,25 +112,37 @@ interface KindHostAPI {
   url: string;
 }
 
+async function readKindCA(containerID: string): Promise<Buffer> {
+  let stdout = "";
+  let stderr = "";
+  for (let attempt = 0; attempt < KIND_CA_READ_ATTEMPTS; attempt += 1) {
+    const result = await runCommand("podman", [
+      "exec",
+      containerID,
+      "cat",
+      "/etc/kubernetes/pki/ca.crt",
+    ]);
+    stdout = result.stdout;
+    stderr = result.stderr;
+    if (result.exitCode === 0 && stdout.includes("BEGIN CERTIFICATE")) {
+      return Buffer.from(stdout);
+    }
+    await new Promise((resolve) => setTimeout(resolve, KIND_CA_READ_DELAY_MS));
+  }
+  throw new Error(
+    `Kind CA was not PEM after ${KIND_CA_READ_ATTEMPTS} attempts for ${containerID} ` +
+      `(stdout bytes: ${Buffer.byteLength(stdout)}, stderr: ${stderr.trim() || "none"})`,
+  );
+}
+
 async function kindHostAPI(hostName: string): Promise<KindHostAPI> {
   const id = await kindControlPlaneID(hostName);
   const port = requireCommandSuccess(
     "podman port",
     await runCommand("podman", ["port", id, KIND_API_PORT]),
   );
-  const ca = requireCommandSuccess(
-    "read Kind CA",
-    await runCommand("podman", [
-      "exec",
-      id,
-      "cat",
-      "/etc/kubernetes/pki/ca.crt",
-    ]),
-  ).stdout;
-  if (!ca.includes("BEGIN CERTIFICATE")) {
-    throw new Error("Kind CA is not a PEM certificate");
-  }
-  return { ca: Buffer.from(ca), url: parsePodmanPort(port.stdout) };
+  const ca = await readKindCA(id);
+  return { ca, url: parsePodmanPort(port.stdout) };
 }
 
 export async function kindAPIRequest(
