@@ -3,7 +3,7 @@
 # Override with --build-arg HYPERSHIFT_IMAGE=... when needed.
 ARG HYPERSHIFT_IMAGE=quay.io/acm-d/rhtap-hypershift-operator:65839bbab12247d630a498e487af6f30d7788620
 
-FROM golang:1.25 AS fleetshift-builder
+FROM golang:1.26.6 AS fleetshift-builder
 
 WORKDIR /src
 
