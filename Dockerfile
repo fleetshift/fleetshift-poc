@@ -10,7 +10,12 @@ WORKDIR /src
 # Copy server module manifests to cache dependencies.
 COPY server/go.mod server/go.sum ./server/
 RUN --mount=type=cache,target=/go/pkg/mod \
-    cd server && go mod download
+    cd server && \
+    for attempt in 1 2 3 4 5; do \
+        if GODEBUG=http2client=0 go mod download; then exit 0; fi; \
+        sleep "$((attempt * 5))"; \
+    done; \
+    exit 1
 
 # Copy server source.
 COPY server/ ./server/
