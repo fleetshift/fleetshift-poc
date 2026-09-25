@@ -3,14 +3,19 @@
 # Override with --build-arg HYPERSHIFT_IMAGE=... when needed.
 ARG HYPERSHIFT_IMAGE=quay.io/acm-d/rhtap-hypershift-operator:65839bbab12247d630a498e487af6f30d7788620
 
-FROM golang:1.25 AS fleetshift-builder
+FROM golang:1.26.6 AS fleetshift-builder
 
 WORKDIR /src
 
 # Copy server module manifests to cache dependencies.
 COPY server/go.mod server/go.sum ./server/
 RUN --mount=type=cache,target=/go/pkg/mod \
-    cd server && go mod download
+    cd server && \
+    for attempt in 1 2 3 4 5; do \
+        if GODEBUG=http2client=0 go mod download; then exit 0; fi; \
+        sleep "$((attempt * 5))"; \
+    done; \
+    exit 1
 
 # Copy server source.
 COPY server/ ./server/
