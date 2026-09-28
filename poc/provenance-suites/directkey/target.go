@@ -9,6 +9,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 )
 
+var _ protocol.TargetAPI = (*Target)(nil)
+
 // Target is the direct-key/v1 target API. It retains a public-key and user
 // mapping established by applying enrollment and verifies delivery signatures
 // against that mapping only.
@@ -71,32 +73,112 @@ func principalHints(principal protocol.Principal, predicate protocol.PredicateTy
 	}
 }
 
-// Verify implements protocol.TargetAPI. Signature verification uses the
-// retained enrollment mapping, never a key from the delivery or from support
-// material. Enrollment verification authenticates proof of possession and
-// does not require a retained key.
-func (t *Target) Verify(_ context.Context, req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+// RequiresEvidenceLog implements protocol.TargetAPI. Direct-key/v1 does
+// not evaluate FleetShift log positions as cutoffs. The POC tenant policy
+// still requires occurrence verification in common selection.
+func (t *Target) RequiresEvidenceLog() bool {
+	return false
+}
+
+// BeginVerification implements protocol.TargetAPI. The session snapshots
+// the request, including defensive copies of statement bytes. Prepare
+// snapshots any retained public key under the profile lock and releases
+// that lock before returning.
+func (t *Target) BeginVerification(_ context.Context, req protocol.VerifyRequest) (protocol.ProvenanceVerificationSession, error) {
 	if req.ProfileConfig.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
-		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, req.ProfileConfig.ProvenanceType)
+		return nil, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, req.ProfileConfig.ProvenanceType)
 	}
 	if len(req.ProfileConfig.Parameters) != 0 {
-		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: direct-key/v1 has no profile parameters", protocol.ErrUnknownProvenanceType)
+		return nil, fmt.Errorf("%w: direct-key/v1 has no profile parameters", protocol.ErrUnknownProvenanceType)
 	}
+	return &verificationSession{
+		target: t,
+		req:    cloneVerifyRequest(req),
+	}, nil
+}
+
+type verificationSession struct {
+	target    *Target
+	req       protocol.VerifyRequest
+	publicKey []byte
+	hasKey    bool
+	prepared  bool
+	done      bool
+}
+
+func (s *verificationSession) Prepare(context.Context) (protocol.TemporalPreparation, error) {
+	if s.done {
+		return protocol.TemporalPreparation{}, fmt.Errorf("%w: verification session is not reusable", protocol.ErrVerificationFailed)
+	}
+	if s.prepared {
+		s.done = true
+		return protocol.TemporalPreparation{}, fmt.Errorf("%w: Prepare may be called once", protocol.ErrVerificationFailed)
+	}
+	if s.req.Statement.Evidence.MediaType == MediaTypeSignature {
+		body, err := parseSignature(s.req.Statement.Evidence)
+		if err != nil {
+			s.done = true
+			return protocol.TemporalPreparation{}, err
+		}
+		s.publicKey, s.hasKey = s.target.lookup(body.Principal)
+	}
+	s.target = nil
+	s.prepared = true
+	return protocol.TemporalPreparation{}, nil
+}
+
+func (s *verificationSession) Finish(_ context.Context, inputs protocol.VerifiedProvenanceTemporalInputs) (protocol.ProvenanceAuthenticationResult, error) {
+	if s.done {
+		return protocol.ProvenanceAuthenticationResult{}, fmt.Errorf("%w: verification session is not reusable", protocol.ErrVerificationFailed)
+	}
+	if !s.prepared {
+		s.done = true
+		return protocol.ProvenanceAuthenticationResult{}, fmt.Errorf("%w: Finish requires Prepare", protocol.ErrVerificationFailed)
+	}
+	s.done = true
+	if len(inputs.Timestamps) != 0 {
+		return protocol.ProvenanceAuthenticationResult{}, fmt.Errorf("%w: direct-key/v1 does not use timestamp observations", protocol.ErrVerificationFailed)
+	}
+
+	authenticated, assertion, err := authenticate(s.req, s.publicKey, s.hasKey)
+	if err != nil {
+		return protocol.ProvenanceAuthenticationResult{}, err
+	}
+	return protocol.ProvenanceAuthenticationResult{
+		Authenticated: authenticated,
+		Assertion:     assertion,
+	}, nil
+}
+
+func cloneVerifyRequest(req protocol.VerifyRequest) protocol.VerifyRequest {
+	out := req
+	out.Statement = protocol.SignedStatement{
+		Evidence: protocol.TypedEvidence{
+			ProvenanceType: req.Statement.Evidence.ProvenanceType,
+			Encoded:        req.Statement.Evidence.Encoded.Clone(),
+		},
+		Support: protocol.SupportMaterial(protocol.Encoded(req.Statement.Support).Clone()),
+	}
+	out.ProfileConfig.Parameters = append([]byte(nil), req.ProfileConfig.Parameters...)
+	return out
+}
+
+func authenticate(req protocol.VerifyRequest, publicKey []byte, hasKey bool) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
 	evidence := req.Statement.Evidence
 	if evidence.ProvenanceType != protocol.ProvenanceTypeDirectKeyV1 {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
 	switch evidence.MediaType {
 	case MediaTypeEnrollment:
-		return t.verifyEnrollment(req)
+		return authenticateEnrollment(req)
 	case MediaTypeSignature:
-		return t.verifySignature(req)
+		return authenticateSignature(req, publicKey, hasKey)
 	default:
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
 	}
 }
 
-func (t *Target) verifyEnrollment(req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+func authenticateEnrollment(req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
 	body, err := parseEnrollment(req.Statement.Evidence)
 	if err != nil {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
@@ -118,7 +200,7 @@ func (t *Target) verifyEnrollment(req protocol.VerifyRequest) (protocol.Authenti
 	return authenticated, assertion, nil
 }
 
-func (t *Target) verifySignature(req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+func authenticateSignature(req protocol.VerifyRequest, publicKey []byte, hasKey bool) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
 	body, err := parseSignature(req.Statement.Evidence)
 	if err != nil {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
@@ -126,8 +208,7 @@ func (t *Target) verifySignature(req protocol.VerifyRequest) (protocol.Authentic
 	if req.AuthorityConfig.PrincipalAuthority != body.Principal.PrincipalAuthority() {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: authority config does not match authenticated principal", protocol.ErrUnknownAuthority)
 	}
-	publicKey, ok := t.lookup(body.Principal)
-	if !ok {
+	if !hasKey {
 		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, fmt.Errorf("%w: no retained public key for subject %q", protocol.ErrVerificationFailed, body.Principal.Subject)
 	}
 	contentDigest, err := body.Assertion.Digest()
@@ -179,7 +260,7 @@ func authenticatedResult(req protocol.VerifyRequest, principal protocol.Principa
 // Apply implements protocol.TargetAPI. Enrollment is the mapping transition:
 // first bind wins; later substitution of an established mapping is rejected.
 // Unknown predicates fail closed. Intent predicates never reach Apply from
-// the delivery agent.
+// the delivery agent. Direct-key enrollment does not consult Temporal.
 func (t *Target) Apply(_ context.Context, req protocol.ApplyRequest) error {
 	switch req.Authenticated.PredicateType {
 	case PredicateTypeEnrollmentV1:
@@ -282,6 +363,8 @@ func parseEnrollment(evidence protocol.TypedEvidence) (EnrollmentBody, error) {
 }
 
 func parseSignature(evidence protocol.TypedEvidence) (SignatureBody, error) {
+	// TODO: in real implementation, separation of serialized vs domain object forms
+	// and deserialization vs valid construction
 	if evidence.MediaType != MediaTypeSignature {
 		return SignatureBody{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
 	}

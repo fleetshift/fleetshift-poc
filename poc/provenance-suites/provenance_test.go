@@ -551,6 +551,72 @@ func TestDeploymentIgnoresTamperedUnusedSupportingInclusion(t *testing.T) {
 	}
 }
 
+func TestManagedResourceRejectsTamperedUsedSupportingInclusion(t *testing.T) {
+	s := newEnrolledManagedResourceScenario(t)
+	s.agent.FailNextDeliveriesBeforeAccepting(1)
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-tampered-relation"), 1, json.RawMessage(`{"region":"us-east-1"}`))
+	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
+	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
+	if !errors.Is(err, deliveryagent.ErrDeliveryUnavailable) {
+		t.Fatalf("error = %v, want ErrDeliveryUnavailable", err)
+	}
+
+	pkg := s.recorder.last
+	if len(pkg.Supporting) != 1 || pkg.Supporting[0].EvidenceLog == nil {
+		t.Fatalf("expected one supporting item with an inclusion, got %+v", pkg.Supporting)
+	}
+	tampered := *pkg.Supporting[0].EvidenceLog
+	tampered.Index++
+	pkg.Supporting[0].EvidenceLog = &tampered
+
+	err = s.agent.Deliver(pkg)
+	if !errors.Is(err, protocol.ErrInvalidLogInclusion) {
+		t.Fatalf("error = %v, want ErrInvalidLogInclusion", err)
+	}
+	if errors.Is(err, deliveryagent.ErrLogFork) {
+		t.Fatalf("used-supporting inclusion error wrapped as ErrLogFork: %v", err)
+	}
+	assertNotStale(t, err)
+	if _, ok := s.agent.Applied(clusterName("cluster-tampered-relation")); ok {
+		t.Fatal("agent applied a managed resource with a tampered used supporting inclusion")
+	}
+	if got, want := s.agent.Checkpoint(), pkg.EvidenceLog.Checkpoint; got != want {
+		t.Fatalf("agent checkpoint = %+v, want package successor %+v", got, want)
+	}
+}
+
+func TestManagedResourceRejectsMissingUsedSupportingInclusion(t *testing.T) {
+	s := newEnrolledManagedResourceScenario(t)
+	s.agent.FailNextDeliveriesBeforeAccepting(1)
+	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-missing-inclusion"), 1, json.RawMessage(`{"region":"us-east-1"}`))
+	relEvidence := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
+	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
+	if !errors.Is(err, deliveryagent.ErrDeliveryUnavailable) {
+		t.Fatalf("error = %v, want ErrDeliveryUnavailable", err)
+	}
+
+	pkg := s.recorder.last
+	if len(pkg.Supporting) != 1 {
+		t.Fatalf("expected one supporting item, got %+v", pkg.Supporting)
+	}
+	pkg.Supporting[0].EvidenceLog = nil
+
+	err = s.agent.Deliver(pkg)
+	if !errors.Is(err, protocol.ErrInvalidLogInclusion) {
+		t.Fatalf("error = %v, want ErrInvalidLogInclusion", err)
+	}
+	if errors.Is(err, deliveryagent.ErrLogFork) {
+		t.Fatalf("used-supporting inclusion error wrapped as ErrLogFork: %v", err)
+	}
+	assertNotStale(t, err)
+	if _, ok := s.agent.Applied(clusterName("cluster-missing-inclusion")); ok {
+		t.Fatal("agent applied a managed resource with a missing used supporting inclusion")
+	}
+	if got, want := s.agent.Checkpoint(), pkg.EvidenceLog.Checkpoint; got != want {
+		t.Fatalf("agent checkpoint = %+v, want package successor %+v", got, want)
+	}
+}
+
 func TestUnknownRootPredicateFailsClosed(t *testing.T) {
 	s := newEnrolledScenario(t)
 	scope := protocol.DeliveryScope{

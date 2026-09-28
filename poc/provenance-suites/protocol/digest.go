@@ -1,7 +1,9 @@
 package protocol
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,11 +17,12 @@ type Digest string
 type Purpose string
 
 const (
-	purposeTypedEvidenceIdentity Purpose = "fleetshift.dev/provenance/typed-evidence-identity/v1"
-	purposeContentDigest         Purpose = "fleetshift.dev/provenance/content-digest/v1"
-	purposeAuthorityConfig       Purpose = "fleetshift.dev/provenance/authority-config/v1"
-	purposeProfileConfig         Purpose = "fleetshift.dev/provenance/profile-config/v1"
-	purposeTrustConfiguration    Purpose = "fleetshift.dev/provenance/trust-configuration/v1"
+	purposeTypedEvidenceIdentity    Purpose = "fleetshift.dev/provenance/typed-evidence-identity/v1"
+	purposeContentDigest            Purpose = "fleetshift.dev/provenance/content-digest/v1"
+	purposeAuthorityConfig          Purpose = "fleetshift.dev/provenance/authority-config/v1"
+	purposeProfileConfig            Purpose = "fleetshift.dev/provenance/profile-config/v1"
+	purposeTrustConfiguration       Purpose = "fleetshift.dev/provenance/trust-configuration/v1"
+	purposeTimestampBindingIdentity Purpose = "fleetshift.dev/provenance/timestamp-binding-identity/v1"
 )
 
 // DigestBytes returns the canonical digest of raw bytes with no extra wrapping.
@@ -72,6 +75,24 @@ func decodeDigest(encoded Digest) ([]byte, error) {
 
 func encodeDigest(hash []byte) Digest {
 	return Digest("sha256:" + hex.EncodeToString(hash))
+}
+
+// digestLengthDelimited returns a domain-separated digest of purpose plus
+// unambiguously length-delimited parts. It is not JSON DigestObject.
+func digestLengthDelimited(purpose Purpose, parts ...[]byte) Digest {
+	var buf bytes.Buffer
+	appendLengthDelimited(&buf, []byte(purpose))
+	for _, part := range parts {
+		appendLengthDelimited(&buf, part)
+	}
+	return DigestBytes(buf.Bytes())
+}
+
+func appendLengthDelimited(buf *bytes.Buffer, part []byte) {
+	var n [4]byte
+	binary.BigEndian.PutUint32(n[:], uint32(len(part)))
+	buf.Write(n[:])
+	buf.Write(part)
 }
 
 // EncodeDigest returns the canonical wire encoding for a SHA-256 hash.

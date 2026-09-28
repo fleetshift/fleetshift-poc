@@ -6,8 +6,9 @@ import (
 )
 
 // SelectAndVerify runs the common delivery-policy selection algorithm and
-// returns the first AuthenticatedEvidence that fully verifies, together with
-// the inner assertion extracted from the statement's evidence.
+// returns the first profile attempt that fully verifies, including
+// occurrence verification, timestamp coordination, window normalization,
+// and the authenticated authority/profile/policy that produced the result.
 //
 // The sequence is:
 //  1. Parse the untrusted provenance type, media type, and type-specific hints.
@@ -15,38 +16,40 @@ import (
 //  3. Locate one unambiguous delivery policy from delivery context. Predicate
 //     type comes from evidence hints, not from a couriered assertion.
 //  4. Filter that policy's ordered profile list to the evidence's type.
-//  5. Try matching profiles in authenticated policy order.
+//  5. For each matching profile: BeginVerification, Prepare, verify the
+//     item's log occurrence, verify prepared timestamp bindings, Finish,
+//     normalize that attempt's constraints, and check temporal validity.
 //  6. Derive the canonical principal and tenant mapping, then re-evaluate.
-func SelectAndVerify(ctx context.Context, statement SignedStatement, delivery DeliveryContext, trust TrustConfiguration, lookup TargetLookup) (AuthenticatedEvidence, TypedAssertion, error) {
-	evidence := statement.Evidence
+func SelectAndVerify(ctx context.Context, item Item, delivery DeliveryContext, trust TrustConfiguration, lookup TargetLookup, temporal TemporalVerificationServices) (VerificationResult, error) {
+	evidence := item.Evidence
 	if evidence.ProvenanceType == "" || evidence.MediaType == "" {
-		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: provenance type and media type are required", ErrMalformedEvidence)
+		return VerificationResult{}, fmt.Errorf("%w: provenance type and media type are required", ErrMalformedEvidence)
 	}
 	verifier, ok := lookup(evidence.ProvenanceType)
 	if !ok || verifier.ProvenanceType() != evidence.ProvenanceType {
-		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: %s", ErrUnknownProvenanceType, evidence.ProvenanceType)
+		return VerificationResult{}, fmt.Errorf("%w: %s", ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
 
 	hints, err := verifier.ParseHints(evidence)
 	if err != nil {
-		return AuthenticatedEvidence{}, TypedAssertion{}, err
+		return VerificationResult{}, err
 	}
 	if hints.PredicateType == "" {
-		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: predicate type hint is required", ErrMalformedEvidence)
+		return VerificationResult{}, fmt.Errorf("%w: predicate type hint is required", ErrMalformedEvidence)
 	}
 	delivery.PredicateType = hints.PredicateType
 
 	authority, err := trust.Authority(PrincipalAuthority{Scheme: hints.Scheme, Authority: hints.Authority})
 	if err != nil {
-		return AuthenticatedEvidence{}, TypedAssertion{}, err
+		return VerificationResult{}, err
 	}
 
 	policy, err := matchPolicy(authority, delivery)
 	if err != nil {
-		return AuthenticatedEvidence{}, TypedAssertion{}, err
+		return VerificationResult{}, err
 	}
 	if err := checkProvenanceRequirement(policy); err != nil {
-		return AuthenticatedEvidence{}, TypedAssertion{}, err
+		return VerificationResult{}, err
 	}
 
 	var last error
@@ -58,25 +61,172 @@ func SelectAndVerify(ctx context.Context, statement SignedStatement, delivery De
 			last = fmt.Errorf("%w: policy profile is not in the authority's installed set", ErrUnknownProvenanceType)
 			continue
 		}
-		authenticated, assertion, err := verifier.Verify(ctx, VerifyRequest{
-			Statement:       statement,
-			ProfileConfig:   profile,
-			AuthorityConfig: authority,
-			DeliveryContext: delivery,
-		})
+		result, err := verifyCandidate(ctx, verifier, item, delivery, authority, policy, profile, temporal)
 		if err != nil {
 			last = err
 			continue
 		}
-		if err := reevaluate(policy, profile, delivery, hints, authority, authenticated); err != nil {
-			return AuthenticatedEvidence{}, TypedAssertion{}, err
+		if err := reevaluate(policy, profile, delivery, hints, authority, result.Authenticated); err != nil {
+			return VerificationResult{}, err
 		}
-		return authenticated, assertion, nil
+		return result, nil
 	}
 	if last != nil {
-		return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: %w", ErrNoSuccessfulProfile, last)
+		return VerificationResult{}, fmt.Errorf("%w: %w", ErrNoSuccessfulProfile, last)
 	}
-	return AuthenticatedEvidence{}, TypedAssertion{}, fmt.Errorf("%w: no profile of type %s", ErrNoSuccessfulProfile, evidence.ProvenanceType)
+	return VerificationResult{}, fmt.Errorf("%w: no profile of type %s", ErrNoSuccessfulProfile, evidence.ProvenanceType)
+}
+
+func verifyCandidate(ctx context.Context, verifier TargetAPI, item Item, delivery DeliveryContext, authority AuthorityConfig, policy DeliveryPolicy, profile ProfileConfig, temporal TemporalVerificationServices) (VerificationResult, error) {
+	session, err := verifier.BeginVerification(ctx, VerifyRequest{
+		Statement:       cloneSignedStatement(item.SignedStatement),
+		ProfileConfig:   profile,
+		AuthorityConfig: authority,
+		DeliveryContext: delivery,
+	})
+	if err != nil {
+		return VerificationResult{}, err
+	}
+	prep, err := session.Prepare(ctx)
+	if err != nil {
+		return VerificationResult{}, err
+	}
+
+	position, err := verifyItemOccurrence(ctx, item, temporal, evidenceLogRequirement(verifier))
+	if err != nil {
+		return VerificationResult{}, err
+	}
+
+	observations, err := verifyPreparedTimestamps(ctx, prep.Timestamps, temporal)
+	if err != nil {
+		return VerificationResult{}, err
+	}
+
+	authenticated, err := session.Finish(ctx, VerifiedProvenanceTemporalInputs{Timestamps: cloneTimeObservations(observations)})
+	if err != nil {
+		return VerificationResult{}, err
+	}
+
+	validity, err := NormalizeValidityWindow(authenticated.Established, authenticated.Retired)
+	if err != nil {
+		return VerificationResult{}, err
+	}
+	subject := projectSubjectTemporal(position, observations)
+	if err := CheckTemporalValidity(subject, validity.Window); err != nil {
+		return VerificationResult{}, err
+	}
+	return VerificationResult{
+		ProvenanceAuthenticationResult: authenticated,
+		Validity:                       validity,
+		Temporal:                       subject,
+		Authority:                      authority,
+		Profile:                        profile,
+		Policy:                         policy,
+	}, nil
+}
+
+// pocTenantRequiresEvidenceLog is the package-private POC tenant policy:
+// every reached statement must have a verified tenant evidence-log
+// occurrence. Profile RequiresEvidenceLog() is unioned with this value.
+const pocTenantRequiresEvidenceLog = true
+
+func evidenceLogRequirement(profile TargetAPI) EvidenceLogRequirement {
+	if profile.RequiresEvidenceLog() || pocTenantRequiresEvidenceLog {
+		return EvidenceLogRequirement{Domain: LogDomainTenantEvidenceV1}
+	}
+	return EvidenceLogRequirement{}
+}
+
+func verifyItemOccurrence(ctx context.Context, item Item, temporal TemporalVerificationServices, requirement EvidenceLogRequirement) (*LogPosition, error) {
+	required := requirement.Domain != ""
+	supplied := item.EvidenceLog != nil
+	if !required && !supplied {
+		return nil, nil
+	}
+	if temporal.Log == nil {
+		return nil, fmt.Errorf("%w: ordered-log verifier is required", ErrInvalidLogInclusion)
+	}
+	if !supplied {
+		return nil, fmt.Errorf("%w: missing evidence-log inclusion", ErrInvalidLogInclusion)
+	}
+	binding, err := temporal.Log.VerifyOccurrence(ctx, item.Evidence, *item.EvidenceLog)
+	if err != nil {
+		return nil, err
+	}
+	identity, err := item.Evidence.Identity()
+	if err != nil {
+		return nil, fmt.Errorf("%w: evidence identity: %v", ErrInvalidLogInclusion, err)
+	}
+	if binding.Evidence != identity {
+		return nil, fmt.Errorf("%w: verified occurrence identity does not match the statement", ErrInvalidLogInclusion)
+	}
+	if required && binding.Position.Domain != requirement.Domain {
+		return nil, fmt.Errorf("%w: occurrence domain %q, want %q", ErrTemporalValidity, binding.Position.Domain, requirement.Domain)
+	}
+	pos := binding.Position
+	return &pos, nil
+}
+
+func verifyPreparedTimestamps(ctx context.Context, bindings []UnverifiedTimestampBinding, temporal TemporalVerificationServices) ([]VerifiedTimeObservation, error) {
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	seen := make(map[Digest]struct{}, len(bindings))
+	out := make([]VerifiedTimeObservation, 0, len(bindings))
+	for _, binding := range bindings {
+		snapshot := binding.Clone()
+		id, err := snapshot.Identity()
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := seen[id]; dup {
+			return nil, fmt.Errorf("duplicate timestamp binding identity %q", id)
+		}
+		seen[id] = struct{}{}
+		if temporal.Time == nil {
+			return nil, fmt.Errorf("trusted-time verifier is required")
+		}
+		result, err := temporal.Time.VerifyTimestamp(ctx, snapshot.Clone())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, VerifiedTimeObservation{
+			Binding:   id,
+			Authority: result.Authority,
+			Earliest:  result.Earliest,
+			Latest:    result.Latest,
+		})
+	}
+	return out, nil
+}
+
+func projectSubjectTemporal(position *LogPosition, observations []VerifiedTimeObservation) VerifiedSubjectTemporalInfo {
+	subject := VerifiedSubjectTemporalInfo{}
+	if position != nil {
+		pos := *position
+		subject.LogPosition = &pos
+	}
+	if len(observations) == 0 {
+		return subject
+	}
+	subject.Times = make([]VerifiedSubjectTime, len(observations))
+	for i, obs := range observations {
+		subject.Times[i] = VerifiedSubjectTime{
+			Authority: obs.Authority,
+			Earliest:  obs.Earliest,
+			Latest:    obs.Latest,
+		}
+	}
+	return subject
+}
+
+func cloneTimeObservations(in []VerifiedTimeObservation) []VerifiedTimeObservation {
+	if in == nil {
+		return nil
+	}
+	out := make([]VerifiedTimeObservation, len(in))
+	copy(out, in)
+	return out
 }
 
 func matchPolicy(authority AuthorityConfig, delivery DeliveryContext) (DeliveryPolicy, error) {
