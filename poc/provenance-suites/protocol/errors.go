@@ -62,4 +62,16 @@ var (
 	// proof does not place the adjacent TypedEvidence identity at the
 	// stated index under the given checkpoint.
 	ErrInvalidLogInclusion = errors.New("invalid evidence-log inclusion")
+
+	// ErrInvalidTimestampBinding is returned when a timestamp binding's
+	// format is empty or unknown, or when token or message bytes exceed
+	// the POC size bounds. Identity() returns this before producing a
+	// digest so the coordinator can skip the time adapter.
+	ErrInvalidTimestampBinding = errors.New("invalid timestamp binding")
+
+	// ErrTemporalValidity is returned when a normalized validity window
+	// is inverted or unsatisfiable, when subject facts fall outside that
+	// window, or when a required comparable fact or log domain is missing
+	// or mismatched.
+	ErrTemporalValidity = errors.New("temporal validity check failed")
 )

@@ -17,7 +17,7 @@ func TestVerifyRejectsNonEmptyProfileParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	_, _, err = target.Verify(context.Background(), protocol.VerifyRequest{
+	_, _, err = runSession(t, target, protocol.VerifyRequest{
 		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   protocol.ProfileConfig{ProvenanceType: protocol.ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"fulcio":"no"}`)},
 		AuthorityConfig: testAuthority(),
@@ -38,7 +38,7 @@ func TestVerifyRejectsAuthorityConfigForADifferentPrincipalAuthority(t *testing.
 	}
 	authority := testAuthority()
 	authority.PrincipalAuthority.Authority = "https://other.example.test"
-	_, _, err = target.Verify(context.Background(), protocol.VerifyRequest{
+	_, _, err = runSession(t, target, protocol.VerifyRequest{
 		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: authority,
@@ -166,7 +166,7 @@ func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
 		MediaType: MediaTypeEnrollment,
 		Bytes:     attacker.PublicKey(),
 	}
-	authenticated, assertion, err := target.Verify(context.Background(), protocol.VerifyRequest{
+	authenticated, assertion, err := runSession(t, target, protocol.VerifyRequest{
 		Statement: protocol.SignedStatement{
 			Evidence: evidence,
 			Support:  support,
@@ -195,7 +195,7 @@ func TestVerifyFailsWithoutEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	_, _, err = NewTarget().Verify(context.Background(), protocol.VerifyRequest{
+	_, _, err = runSession(t, NewTarget(), protocol.VerifyRequest{
 		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
@@ -216,7 +216,7 @@ func TestVerifyFailsWhenSignatureDoesNotMatchRetainedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	_, _, err = target.Verify(context.Background(), protocol.VerifyRequest{
+	_, _, err = runSession(t, target, protocol.VerifyRequest{
 		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
@@ -336,7 +336,7 @@ func TestApplyOfDeploymentPredicateFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEvidence: %v", err)
 	}
-	authenticated, assertion, err := target.Verify(context.Background(), protocol.VerifyRequest{
+	authenticated, assertion, err := runSession(t, target, protocol.VerifyRequest{
 		Statement:       protocol.SignedStatement{Evidence: evidence},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
@@ -349,7 +349,6 @@ func TestApplyOfDeploymentPredicateFailsClosed(t *testing.T) {
 		Authenticated: authenticated,
 		Assertion:     assertion,
 		Statement:     protocol.SignedStatement{Evidence: evidence},
-		Index:         1,
 	})
 	if !errors.Is(err, protocol.ErrUnknownPredicateType) {
 		t.Fatalf("error = %v, want ErrUnknownPredicateType", err)
@@ -460,6 +459,120 @@ func TestDecodeAssertionDoesNotAuthenticate(t *testing.T) {
 	}
 }
 
+func runSession(t *testing.T, target *Target, req protocol.VerifyRequest) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
+	t.Helper()
+	session, err := target.BeginVerification(context.Background(), req)
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	if _, err := session.Prepare(context.Background()); err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	result, err := session.Finish(context.Background(), protocol.VerifiedProvenanceTemporalInputs{})
+	if err != nil {
+		return protocol.AuthenticatedEvidence{}, protocol.TypedAssertion{}, err
+	}
+	return result.Authenticated, result.Assertion, nil
+}
+
+func TestRequiresEvidenceLogIsFalse(t *testing.T) {
+	if NewTarget().RequiresEvidenceLog() {
+		t.Fatal("direct-key/v1 RequiresEvidenceLog must be false")
+	}
+}
+
+func TestVerificationSessionRejectsReuse(t *testing.T) {
+	producer := newTestProducer(t)
+	target := NewTarget()
+	mustEnroll(t, target, producer)
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	req := protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	}
+
+	session, err := target.BeginVerification(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BeginVerification: %v", err)
+	}
+	if _, err := session.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if _, err := session.Prepare(context.Background()); !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("second Prepare error = %v, want ErrVerificationFailed", err)
+	}
+
+	session, err = target.BeginVerification(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BeginVerification: %v", err)
+	}
+	if _, err := session.Finish(context.Background(), protocol.VerifiedProvenanceTemporalInputs{}); !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("Finish before Prepare error = %v, want ErrVerificationFailed", err)
+	}
+
+	session, err = target.BeginVerification(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BeginVerification: %v", err)
+	}
+	if _, err := session.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if _, err := session.Finish(context.Background(), protocol.VerifiedProvenanceTemporalInputs{}); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if _, err := session.Finish(context.Background(), protocol.VerifiedProvenanceTemporalInputs{}); !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("second Finish error = %v, want ErrVerificationFailed", err)
+	}
+}
+
+func TestFinishUsesKeySnapshottedDuringPrepare(t *testing.T) {
+	producer := newTestProducer(t)
+	target := NewTarget()
+	evidence, err := producer.CreateEvidence(context.Background(), testAssertion(t))
+	if err != nil {
+		t.Fatalf("CreateEvidence: %v", err)
+	}
+	req := protocol.VerifyRequest{
+		Statement:       protocol.SignedStatement{Evidence: evidence},
+		ProfileConfig:   testProfile(),
+		AuthorityConfig: testAuthority(),
+		DeliveryContext: testDeliveryContext(),
+	}
+
+	session, err := target.BeginVerification(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BeginVerification: %v", err)
+	}
+	if _, err := session.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	mustEnroll(t, target, producer)
+	_, err = session.Finish(context.Background(), protocol.VerifiedProvenanceTemporalInputs{})
+	if !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("Finish after later enrollment error = %v, want snapshotted absence", err)
+	}
+
+	mustEnroll(t, target, producer)
+	session, err = target.BeginVerification(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BeginVerification: %v", err)
+	}
+	if _, err := session.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	target.mu.Lock()
+	delete(target.bindings, producer.Principal())
+	target.mu.Unlock()
+	if _, err := session.Finish(context.Background(), protocol.VerifiedProvenanceTemporalInputs{}); err != nil {
+		t.Fatalf("Finish after deleting the live mapping: %v", err)
+	}
+}
+
 func newTestProducer(t *testing.T) *Producer {
 	t.Helper()
 	producer, err := NewProducer(protocol.Principal{
@@ -490,7 +603,7 @@ func mustEnroll(t *testing.T, target *Target, producer *Producer) {
 
 func verifyEnrollment(t *testing.T, target *Target, enrollment protocol.TypedEvidence) (protocol.AuthenticatedEvidence, protocol.TypedAssertion, error) {
 	t.Helper()
-	return target.Verify(context.Background(), protocol.VerifyRequest{
+	return runSession(t, target, protocol.VerifyRequest{
 		Statement:       protocol.SignedStatement{Evidence: enrollment},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
@@ -507,7 +620,6 @@ func applyEnrollment(t *testing.T, target *Target, enrollment protocol.TypedEvid
 		Authenticated: authenticated,
 		Assertion:     assertion,
 		Statement:     protocol.SignedStatement{Evidence: enrollment},
-		Index:         0,
 	})
 }
 

@@ -120,7 +120,9 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 
 // Deliver verifies package-wide evidence-log consistency and inclusion of
 // the root Item through temporal.Prepare, then provenance under matched
-// policy. Supporting-item inclusions are not verified yet.
+// policy. SelectAndVerify verifies occurrence for each reached Item (root
+// or used supporting). Unused supporting-item inclusions are not verified.
+// ApplyRequest.Temporal receives the root VerificationResult only.
 // Authenticated predicate type selects apply: intent predicates use
 // fulfillment apply, trust-config-update is reserved on the agent, and
 // predicates the selected profile Owns call TargetAPI.Apply. Unknown
@@ -149,21 +151,23 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	// inert rejected leaf in the accepted prefix so a later fork cannot omit it.
 	a.retained = prepared.NextState
 
-	authenticated, assertion, err := protocol.SelectAndVerify(
+	services := protocol.TemporalVerificationServices{Log: prepared.Log}
+	result, err := protocol.SelectAndVerify(
 		context.Background(),
-		pkg.Root.SignedStatement,
+		pkg.Root,
 		protocol.DeliveryContext{
 			ClaimedTenant:     a.config.TenantID,
 			RootAuthorization: true,
 		},
 		a.trust,
 		a.lookupLocked,
+		services,
 	)
 	if err != nil {
 		return err
 	}
 
-	if err := a.dispatchApplyLocked(pkg, authenticated, assertion); err != nil {
+	if err := a.dispatchApplyLocked(pkg, services, result); err != nil {
 		return err
 	}
 	if a.loseNextAcknowledgement {
@@ -233,36 +237,36 @@ func (a *Agent) lookupLocked(pt protocol.ProvenanceType) (protocol.TargetAPI, bo
 	return nil, false
 }
 
-func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) error {
-	switch authenticated.PredicateType {
+func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, services protocol.TemporalVerificationServices, result protocol.VerificationResult) error {
+	switch result.Authenticated.PredicateType {
 	case protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1:
-		view, err := a.decodeAndDeriveLocked(pkg, authenticated, assertion)
+		view, err := a.decodeAndDeriveLocked(pkg, services, result)
 		if err != nil {
 			return err
 		}
 		if view.Scope.TenantID != a.config.TenantID || view.Scope.TargetID != a.config.TargetID {
 			return fmt.Errorf("%w: tenant or target mismatch", protocol.ErrPolicyReevaluation)
 		}
-		if authenticated.MappedFleetShiftTenant != a.config.TenantID {
-			return fmt.Errorf("%w: mapped tenant %q, agent tenant %q", protocol.ErrTenantMismatch, authenticated.MappedFleetShiftTenant, a.config.TenantID)
+		if result.Authenticated.MappedFleetShiftTenant != a.config.TenantID {
+			return fmt.Errorf("%w: mapped tenant %q, agent tenant %q", protocol.ErrTenantMismatch, result.Authenticated.MappedFleetShiftTenant, a.config.TenantID)
 		}
-		return a.applyLocked(view, append([]byte(nil), assertion.Bytes...))
+		return a.applyLocked(view, append([]byte(nil), result.Assertion.Bytes...))
 	case protocol.PredicateTypeTrustConfigUpdateV1:
 		return fmt.Errorf("%w: trust-config-update/v1 is not implemented", protocol.ErrUnknownPredicateType)
 	default:
-		target, ok := a.lookupLocked(authenticated.ProvenanceType)
+		target, ok := a.lookupLocked(result.Authenticated.ProvenanceType)
 		if !ok {
-			return fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, authenticated.ProvenanceType)
+			return fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, result.Authenticated.ProvenanceType)
 		}
-		if !target.Owns(authenticated.PredicateType) {
-			return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, authenticated.PredicateType)
+		if !target.Owns(result.Authenticated.PredicateType) {
+			return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
 		}
 		a.suiteApplyCount++
 		return target.Apply(context.Background(), protocol.ApplyRequest{
-			Authenticated: authenticated,
-			Assertion:     assertion,
+			Authenticated: result.Authenticated,
+			Assertion:     result.Assertion,
 			Statement:     pkg.Root.SignedStatement,
-			Index:         pkg.Root.EvidenceLog.Index,
+			Temporal:      result.Temporal,
 		})
 	}
 }
@@ -287,10 +291,10 @@ func (a *Agent) mapLogError(err error) error {
 	return fmt.Errorf("%w: %w", ErrLogFork, err)
 }
 
-func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authenticated protocol.AuthenticatedEvidence, assertion protocol.TypedAssertion) (AppliedDelivery, error) {
-	switch authenticated.PredicateType {
+func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, services protocol.TemporalVerificationServices, result protocol.VerificationResult) (AppliedDelivery, error) {
+	switch result.Authenticated.PredicateType {
 	case protocol.PredicateTypeDeploymentV1:
-		authorization, err := protocol.DecodeDeploymentAuthorization(assertion)
+		authorization, err := protocol.DecodeDeploymentAuthorization(result.Assertion)
 		if err != nil {
 			return AppliedDelivery{}, err
 		}
@@ -305,11 +309,11 @@ func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authe
 			Manifests:     cloneManifests(authorization.Manifests),
 		}, nil
 	case protocol.PredicateTypeManagedResourceV1:
-		authorization, err := protocol.DecodeManagedResourceAuthorization(assertion)
+		authorization, err := protocol.DecodeManagedResourceAuthorization(result.Assertion)
 		if err != nil {
 			return AppliedDelivery{}, err
 		}
-		relation, err := a.verifyFulfillmentRelationLocked(pkg, authorization)
+		relation, err := a.verifyFulfillmentRelationLocked(pkg, services, authorization)
 		if err != nil {
 			return AppliedDelivery{}, err
 		}
@@ -325,12 +329,12 @@ func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, authe
 			}},
 		}, nil
 	default:
-		return AppliedDelivery{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, authenticated.PredicateType)
+		return AppliedDelivery{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
 	}
 }
 
-func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPackage, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
-	var found *protocol.SignedStatement
+func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPackage, services protocol.TemporalVerificationServices, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
+	var found *protocol.Item
 	for i := range pkg.Supporting {
 		item := &pkg.Supporting[i]
 		hints, err := a.profile.ParseHints(item.Evidence)
@@ -343,13 +347,13 @@ func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPack
 		if found != nil {
 			return protocol.FulfillmentRelation{}, fmt.Errorf("%w: multiple fulfillment relations", protocol.ErrAmbiguousPolicy)
 		}
-		found = &item.SignedStatement
+		found = item
 	}
 	if found == nil {
 		return protocol.FulfillmentRelation{}, ErrFulfillmentRelationRequired
 	}
 
-	authenticated, assertion, err := protocol.SelectAndVerify(
+	result, err := protocol.SelectAndVerify(
 		context.Background(),
 		*found,
 		protocol.DeliveryContext{
@@ -358,14 +362,15 @@ func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPack
 		},
 		a.trust,
 		a.lookupLocked,
+		services,
 	)
 	if err != nil {
 		return protocol.FulfillmentRelation{}, err
 	}
-	if authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
-		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, authenticated.PredicateType)
+	if result.Authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
+		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
 	}
-	relation, err := protocol.DecodeFulfillmentRelation(assertion)
+	relation, err := protocol.DecodeFulfillmentRelation(result.Assertion)
 	if err != nil {
 		return protocol.FulfillmentRelation{}, err
 	}

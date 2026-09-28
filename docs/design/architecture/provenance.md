@@ -948,6 +948,21 @@ transparency, or global fork detection. A timestamp authority, witnesses, or
 gossip may extend those guarantees later. Ordinary live queries need not be
 logged merely because they use request signing.
 
+When trusted time is used for validity, the selected profile's authenticated
+authority configuration should determine which timestamp authorities are
+approved and whether one observation or a threshold is required. A time
+boundary's `ObservedBy` records the source that established that boundary; it
+does not require the subject's timestamp observation to come from the same
+source.
+Common temporal evaluation compares coordinates from approved observations,
+and one observation must satisfy both sides of the window. Cross-authority
+comparison is valid when policy approves both sources and their UTC uncertainty
+intervals are comparable. Sources must be explicitly trusted; a valid token
+from an unconfigured TSA is insufficient by itself. The current POC
+demonstrates coordinate comparison over observations already admitted by
+policy; its direct-key profile emits no timestamps and it has no concrete TSA
+verifier.
+
 Log scope, compaction, permanent-rejection progression, and optional TSA
 integration remain open design work. An established target that cannot extend
 its retained checkpoint fails closed rather than restarting from TOFU.

@@ -238,6 +238,7 @@ func (m *Manager) AcceptDelivery(_ context.Context, caller protocol.Principal, e
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
+	// TODO: this is a stand-in for richer authorization logic
 	if scope.TenantID != m.tenantID {
 		return DeliveryReceipt{}, fmt.Errorf("%w: delivery tenant mismatch", ErrUnauthorized)
 	}

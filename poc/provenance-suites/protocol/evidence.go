@@ -78,7 +78,7 @@ func (e TypedEvidence) Identity() (Digest, error) {
 
 // TypedAssertion is the inner purpose-typed statement a profile authenticates.
 // Envelope encodings such as a Sigstore Bundle carry this statement inside
-// TypedEvidence bytes. Verify emits it; common code does not read it from a
+// TypedEvidence bytes. Finish emits it; common code does not read it from a
 // parallel couriered field.
 type TypedAssertion struct {
 	PredicateType PredicateType `json:"predicate_type"`
@@ -146,8 +146,9 @@ type SignedStatement struct {
 // that statement's optional FleetShift evidence-log inclusion. It is a
 // package slot, not a provenance type. Embedding keeps the JSON object
 // flat (evidence, support, evidence_log) while keeping SignedStatement
-// distinct. VerifyRequest, SelectAndVerify, and ApplyRequest continue to
-// take SignedStatement. The inclusion is common couriered material, not
+// distinct. SelectAndVerify takes Item so it can verify the sibling
+// inclusion; VerifyRequest and ApplyRequest continue to take
+// SignedStatement. The inclusion is common couriered material, not
 // SupportMaterial and not part of TypedEvidence identity.
 type Item struct {
 	SignedStatement
@@ -252,6 +253,16 @@ func (a FulfillmentRelation) Assertion() (TypedAssertion, error) {
 		PredicateType: PredicateTypeFulfillmentRelationV1,
 		Bytes:         encoded,
 	}, nil
+}
+
+func cloneSignedStatement(s SignedStatement) SignedStatement {
+	return SignedStatement{
+		Evidence: TypedEvidence{
+			ProvenanceType: s.Evidence.ProvenanceType,
+			Encoded:        s.Evidence.Encoded.Clone(),
+		},
+		Support: SupportMaterial(Encoded(s.Support).Clone()),
+	}
 }
 
 // DecodeDeliveryScope extracts signed delivery-protocol identity from a

@@ -35,8 +35,10 @@ type ResourceManagerAPI interface {
 // TargetAPI is the target side of a provenance profile.
 // ParseHints reads untrusted type-specific material only to locate
 // authenticated authority configuration and a candidate predicate type.
-// Verify produces AuthenticatedEvidence and the authenticated inner
-// assertion extracted from the statement's evidence.
+// RequiresEvidenceLog reports config: this suite needs FleetShift log
+// positions (for example continuity key events). It is not a session
+// method and does not describe the statement window.
+// BeginVerification creates a single-use session for one SignedStatement.
 // Owns declares the suite-owned predicates this profile applies.
 // Apply updates retained profile state for those predicates. Intent and
 // trust-config-update predicates are handled by the agent and are never
@@ -44,14 +46,17 @@ type ResourceManagerAPI interface {
 type TargetAPI interface {
 	ProvenanceType() ProvenanceType
 	ParseHints(evidence TypedEvidence) (TentativeHints, error)
-	Verify(ctx context.Context, req VerifyRequest) (AuthenticatedEvidence, TypedAssertion, error)
+	RequiresEvidenceLog() bool
+	BeginVerification(ctx context.Context, req VerifyRequest) (ProvenanceVerificationSession, error)
 	Owns(predicate PredicateType) bool
 	Apply(ctx context.Context, req ApplyRequest) error
 }
 
 // VerifyRequest is the authenticated policy and one couriered signed
-// statement supplied to a target-side profile. Retained profile state stays
-// with the TargetAPI implementation and is associated with the authenticated
+// statement supplied to a target-side profile. Statement is a
+// SignedStatement: common selection copies item.SignedStatement and must
+// not copy item.EvidenceLog. Retained profile state stays with the
+// TargetAPI implementation and is associated with the authenticated
 // authority and profile configuration, never with an RM-supplied profile ID.
 type VerifyRequest struct {
 	Statement       SignedStatement
@@ -60,19 +65,18 @@ type VerifyRequest struct {
 	DeliveryContext DeliveryContext
 }
 
-// ApplyRequest is the authenticated result of Verify plus the evidence-log
-// position assigned when the resource manager accepted this evidence. Suites
-// use it to update retained proof material for predicates they own. Intent
-// predicates never reach Apply.
+// ApplyRequest is the authenticated result of SelectAndVerify plus verified
+// temporal facts for this subject. Suites use it to update retained proof
+// material for predicates they own. Intent predicates never reach Apply.
 type ApplyRequest struct {
 	Authenticated AuthenticatedEvidence
 	Assertion     TypedAssertion
 	Statement     SignedStatement
-	// Index is the evidence-log position of this evidence identity. The
-	// honest RM assigns it once at acceptance, independently of later
-	// deliveries or outbox entries. Continuity/v3 cutoffs will need it;
-	// profiles that do not consult log position ignore it.
-	Index uint64
+	// Temporal is the verified subject-temporal projection for this
+	// statement. LogPosition is set only after occurrence verification.
+	// Continuity/v3 cutoffs will need it; profiles that do not consult
+	// temporal facts ignore it.
+	Temporal VerifiedSubjectTemporalInfo
 }
 
 // TargetLookup returns the installed target implementation for a provenance
