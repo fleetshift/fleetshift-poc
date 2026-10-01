@@ -74,8 +74,8 @@ func principalHints(principal protocol.Principal, predicate protocol.PredicateTy
 }
 
 // RequiresEvidenceLog implements protocol.TargetAPI. Direct-key/v1 does
-// not evaluate FleetShift log positions as cutoffs. The POC tenant policy
-// still requires occurrence verification in common selection.
+// not evaluate FleetShift log positions as cutoffs. A matched delivery policy
+// can independently require occurrence verification in common selection.
 func (t *Target) RequiresEvidenceLog() bool {
 	return false
 }
@@ -159,7 +159,16 @@ func cloneVerifyRequest(req protocol.VerifyRequest) protocol.VerifyRequest {
 		},
 		Support: protocol.SupportMaterial(protocol.Encoded(req.Statement.Support).Clone()),
 	}
-	out.ProfileConfig.Parameters = append([]byte(nil), req.ProfileConfig.Parameters...)
+	out.ProfileConfig.Parameters = cloneBytes(req.ProfileConfig.Parameters)
+	return out
+}
+
+func cloneBytes(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
 	return out
 }
 
@@ -230,10 +239,6 @@ func authenticateSignature(req protocol.VerifyRequest, publicKey []byte, hasKey 
 }
 
 func authenticatedResult(req protocol.VerifyRequest, principal protocol.Principal, assertion protocol.TypedAssertion) (protocol.AuthenticatedEvidence, error) {
-	mapped, err := req.AuthorityConfig.TenantMapping.Map(principal.TenantPartition)
-	if err != nil {
-		return protocol.AuthenticatedEvidence{}, err
-	}
 	authorityDigest, err := req.AuthorityConfig.Digest()
 	if err != nil {
 		return protocol.AuthenticatedEvidence{}, err
@@ -247,13 +252,12 @@ func authenticatedResult(req protocol.VerifyRequest, principal protocol.Principa
 		return protocol.AuthenticatedEvidence{}, err
 	}
 	return protocol.AuthenticatedEvidence{
-		Principal:              principal,
-		MappedFleetShiftTenant: mapped,
-		PredicateType:          assertion.PredicateType,
-		ContentDigest:          contentDigest,
-		ProvenanceType:         protocol.ProvenanceTypeDirectKeyV1,
-		AuthorityConfigDigest:  authorityDigest,
-		ProfileConfigDigest:    profileDigest,
+		Principal:             principal,
+		PredicateType:         assertion.PredicateType,
+		ContentDigest:         contentDigest,
+		ProvenanceType:        protocol.ProvenanceTypeDirectKeyV1,
+		AuthorityConfigDigest: authorityDigest,
+		ProfileConfigDigest:   profileDigest,
 	}, nil
 }
 

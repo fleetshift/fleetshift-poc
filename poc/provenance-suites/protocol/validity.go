@@ -49,6 +49,7 @@ type AuthenticatedValidity struct {
 
 // AuthenticatedTemporalConstraint is one established or retired cutoff
 // returned by Finish, together with the evidence authenticating it.
+// Common code treats Basis and nested boundary pointers as immutable.
 type AuthenticatedTemporalConstraint struct {
 	Boundary AuthenticatedTemporalBoundary
 	Basis    []Digest
@@ -60,6 +61,7 @@ type AuthenticatedTemporalConstraint struct {
 // windows, and unsatisfiable discrete or inclusive bounds fail with
 // ErrTemporalValidity. Basis is the deterministic deduplicated union of
 // every constraint basis, including dominated constraints.
+// Inputs are immutable; the normalized window shares its selected boundaries.
 func NormalizeValidityWindow(established, retired []AuthenticatedTemporalConstraint) (AuthenticatedValidity, error) {
 	if err := validateConstraintGroups(established, retired); err != nil {
 		return AuthenticatedValidity{}, err
@@ -139,19 +141,18 @@ func pickLogBound(constraints []AuthenticatedTemporalConstraint, established boo
 		if log == nil {
 			continue
 		}
-		copied := *log
 		if best == nil {
-			best = &copied
+			best = log
 			continue
 		}
 		if established {
-			if copied.Position.Index > best.Position.Index || (copied.Position.Index == best.Position.Index && !copied.Inclusive && best.Inclusive) {
-				best = &copied
+			if log.Position.Index > best.Position.Index || (log.Position.Index == best.Position.Index && !log.Inclusive && best.Inclusive) {
+				best = log
 			}
 			continue
 		}
-		if copied.Position.Index < best.Position.Index || (copied.Position.Index == best.Position.Index && !copied.Inclusive && best.Inclusive) {
-			best = &copied
+		if log.Position.Index < best.Position.Index || (log.Position.Index == best.Position.Index && !log.Inclusive && best.Inclusive) {
+			best = log
 		}
 	}
 	return best
@@ -164,19 +165,18 @@ func pickTimeBound(constraints []AuthenticatedTemporalConstraint, established bo
 		if tb == nil {
 			continue
 		}
-		copied := cloneTimeBoundary(*tb)
 		if best == nil {
-			best = &copied
+			best = tb
 			continue
 		}
 		if established {
-			if copied.Latest.After(best.Latest) || (copied.Latest.Equal(best.Latest) && !copied.Inclusive && best.Inclusive) {
-				best = &copied
+			if tb.Latest.After(best.Latest) || (tb.Latest.Equal(best.Latest) && !tb.Inclusive && best.Inclusive) {
+				best = tb
 			}
 			continue
 		}
-		if copied.Earliest.Before(best.Earliest) || (copied.Earliest.Equal(best.Earliest) && !copied.Inclusive && best.Inclusive) {
-			best = &copied
+		if tb.Earliest.Before(best.Earliest) || (tb.Earliest.Equal(best.Earliest) && !tb.Inclusive && best.Inclusive) {
+			best = tb
 		}
 	}
 	return best

@@ -3,6 +3,10 @@ package protocol
 import "errors"
 
 var (
+	// ErrInvalidTrustConfiguration reports malformed or unresolved authenticated
+	// configuration. It is not an ordinary failed profile attempt.
+	ErrInvalidTrustConfiguration = errors.New("invalid trust configuration")
+
 	// ErrUnknownProvenanceType is returned when no installed implementation
 	// matches the evidence's provenance type.
 	ErrUnknownProvenanceType = errors.New("unknown provenance type")
@@ -19,9 +23,9 @@ var (
 	// does not match an authenticated AuthorityConfig.
 	ErrUnknownAuthority = errors.New("unknown authority")
 
-	// ErrAmbiguousPolicy is returned when delivery context matches more
-	// than one delivery policy.
-	ErrAmbiguousPolicy = errors.New("ambiguous delivery policy")
+	// ErrAmbiguousRelation is returned when fulfillment-relation selection
+	// has more than one candidate.
+	ErrAmbiguousRelation = errors.New("ambiguous fulfillment relation")
 
 	// ErrNoMatchingPolicy is returned when no delivery policy matches.
 	ErrNoMatchingPolicy = errors.New("no matching delivery policy")
@@ -34,9 +38,9 @@ var (
 	// content does not match the policy or hints used to select it.
 	ErrPolicyReevaluation = errors.New("authenticated result failed policy re-evaluation")
 
-	// ErrTenantMismatch is returned when a claimed tenant does not match
-	// the verified tenant mapping.
-	ErrTenantMismatch = errors.New("tenant mapping mismatch")
+	// ErrTenantMismatch reports an authenticated principal whose tenant identity
+	// does not satisfy the relationship checked by common semantic evaluation.
+	ErrTenantMismatch = errors.New("tenant identity mismatch")
 
 	// ErrUninitializedVerifier is returned when an operation requires
 	// bootstrapped trust configuration.

@@ -82,6 +82,7 @@ type VerifiedSubjectTime struct {
 // source-approved, Finish-endorsed timestamp observations with binding
 // digests dropped. The initial POC does not implement trusted-time source
 // policy or a timestamp verifier.
+// Common consumers treat the position and time slice as immutable.
 type VerifiedSubjectTemporalInfo struct {
 	LogPosition *LogPosition
 	Times       []VerifiedSubjectTime
@@ -92,6 +93,7 @@ type VerifiedSubjectTemporalInfo struct {
 // checkpoint and memoize occurrence proofs; they never scan a package-wide
 // digest map. Inclusion is supplied by value as the adjacent proof for this
 // evidence, not looked up by digest.
+// Inputs are borrowed immutable values and may be retained by the verifier.
 type OrderedLogEvidenceVerifier interface {
 	VerifyOccurrence(
 		ctx context.Context,
@@ -130,8 +132,8 @@ type UnverifiedTimestampBinding struct {
 func (b UnverifiedTimestampBinding) Clone() UnverifiedTimestampBinding {
 	return UnverifiedTimestampBinding{
 		Format:  b.Format,
-		Token:   append([]byte(nil), b.Token...),
-		Message: append([]byte(nil), b.Message...),
+		Token:   cloneBytes(b.Token),
+		Message: cloneBytes(b.Message),
 	}
 }
 
@@ -192,6 +194,8 @@ type TemporalVerificationServices struct {
 // TemporalPreparation is the untrusted timestamp bindings identified by
 // Prepare. It does not carry validity boundaries or an authentication
 // result.
+// Common code copies profile-owned buffers at the Prepare boundary, then
+// shares those bindings as immutable values during coordination.
 type TemporalPreparation struct {
 	Timestamps []UnverifiedTimestampBinding
 }
@@ -224,6 +228,9 @@ type ProvenanceAuthenticationResult struct {
 // content, the normalized validity window, digest-free subject temporal
 // facts, and the authenticated authority/profile/policy that produced
 // them.
+// The result and all nested data are immutable within common code. Authority,
+// Profile, and Policy share the selected trust configuration's backing data;
+// consumers must not mutate their slices or pointers.
 type VerificationResult struct {
 	ProvenanceAuthenticationResult
 	Validity  AuthenticatedValidity

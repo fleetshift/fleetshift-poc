@@ -42,6 +42,7 @@ func NewCheckpoint(size uint64, root []byte) (Checkpoint, error) {
 // a manager using a stale cached checkpoint can be distinguished from a
 // log fork. Per-item inclusion lives on Item, not on this package-wide
 // update.
+// Common code treats the checkpoint data and proof slice as immutable.
 type EvidenceLogUpdate struct {
 	From             Checkpoint `json:"from"`
 	Checkpoint       Checkpoint `json:"checkpoint"`
@@ -54,6 +55,7 @@ type EvidenceLogUpdate struct {
 // hash; the inclusion does not serialize that digest. That identity
 // received its index when the resource manager accepted the evidence, not
 // when a delivery or outbox entry was created.
+// The proof slice is immutable; common verifiers may retain it directly.
 type EvidenceLogInclusion struct {
 	Index          uint64   `json:"index"`
 	InclusionProof []Digest `json:"inclusion_proof"`

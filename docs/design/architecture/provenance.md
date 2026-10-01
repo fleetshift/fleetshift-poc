@@ -220,7 +220,6 @@ Conceptually:
 ```text
 AuthorityConfig {
     principal_authority: (scheme, authority)
-    tenant_mapping
     credential_methods[]
     provenance_profiles[]
     delivery_policies[]
@@ -265,36 +264,51 @@ One authority config may serve one FleetShift tenant or many tenant
 partitions. A provider-operated multi-tenant IdP or CA therefore does not
 require every tenant to duplicate the same trust configuration.
 
-### Canonical principals and tenant mapping
+### Canonical principals and external tenants
 
-Successful verification yields a canonical principal:
+Successful verification yields canonical external identities:
 
 ```text
 Principal = (scheme, authority, tenant_partition?, subject)
+Tenant    = (scheme, authority, tenant_partition?)
 ```
 
-The optional external tenant partition is scoped to its own `(scheme,
-authority)`. A value such as `acme` from one issuer has no relationship to the
-same string from another issuer. Equal subject strings under different
-authorities or tenant partitions identify different principals.
+The optional tenant partition is scoped to its own `(scheme, authority)`.
+A value such as `acme` from one issuer has no relationship to the same string
+from another issuer. Equal subject strings under different authorities or
+tenant partitions identify different principals. An absent partition denotes
+the unpartitioned tenant under that authority.
 
-An authority config defines at most one applicable tenant-mapping rule for the
-verified credential or provenance form. Supported rule shapes include:
+The configured credential or provenance implementation derives the partition
+from verified material: for example, a JWT claim, an X.509 OID or SAN component,
+or authenticated continuity state. It need not be a FleetShift-specific claim.
+Evidence hints and RM labels do not establish tenant identity.
 
-- an authenticated JWT claim;
-- an authenticated X.509 OID or SAN component;
-- a tenant value proven through continuity/v3 authenticated state; or
-- a static FleetShift tenant for a single-tenant authority.
+Internal FleetShift tenant IDs remain local to the resource manager for storage,
+routing, and ordinary permission evaluation. The RM binds an external tenant
+identity to that local ID. Producer configuration, signed delivery scopes, and
+target provisioning use the external identity; a delivery agent does not need
+the RM's external-to-internal mapping.
 
-The rule runs on verified material, not on an RM-supplied label. It maps the
-external tenant partition to a FleetShift tenant ID. Zero mappings and
-ambiguous mappings fail closed. Any tenant claimed in the delivery or by the
-resource manager must exactly match the verified result.
+Supporting evidence can belong to a different tenant or authority from the
+resource intent. Every assertion authenticates under its own source policy;
+common semantic evaluation then checks the authenticated external tenant against
+the relationship it resolves. Authentication can be memoized by evidence
+identity under fixed trust, while relationship checks run on every use.
+Consumer policy does not replace provider policy. Successful provenance
+verification does not move the RM's tenant/workspace permission state into the
+target.
 
-Tenant mapping isolates principals sharing one authority. It does not move the
-resource manager's complete tenant/workspace authorization state into the
-target. The resource manager remains responsible for ordinary permission
-evaluation after authentication produces the same canonical principal.
+Each platform has one provider tenant and zero or more consumer tenants. They
+share the same identity and ordinary tenant machinery. The provider governs
+root platform trust and installed abstractions, including managed-resource types
+in the single shared API. An independently running agent needs authenticated
+platform trust and a reference identifying that provider tenant; the reference
+can be provisioned separately from authority/profile configuration. A shared
+issuer can serve both provider and consumers, so the external reference includes
+the applicable tenant partition. Fulfillment semantics check that provider
+relationship after source-policy authentication; finer-grained addon
+responsibility remains an additional authorization requirement.
 
 ### Well-known provenance types
 
@@ -339,29 +353,67 @@ and does not select a verifier.
 If a format also carries an internal media type, as Sigstore Bundle does, the
 selected profile requires it to match the outer `media_type`.
 
-Profile configuration is an authenticated entry inside an `AuthorityConfig`.
-It is not named by an RM-maintained or producer-visible profile ID. An
-implementation may derive local storage keys or configuration references for
-profile state, but package data cannot use such a key to grant authority or
-select code.
+Profile configurations are defined once in their principal authority's
+`AuthorityConfig`. Delivery policies refer to an ordered list of exact,
+domain-separated configuration digests within that authority. Each digest
+binds the complete configuration, including anchors and parameters. Unknown
+references, duplicate definitions, and duplicate references invalidate
+configuration rather than becoming failed profile attempts. Changing a
+configuration changes its digest and requires updating its policy references.
+
+Published evidence, authority configuration, temporal constraints, and
+verification results are immutable values, including any nested buffers and
+references. Common coordination and semantic evaluation share them under that
+contract. Ownership copies belong at external ingestion and profile
+boundaries. A verification cache reuses immutable results, and a configuration
+change publishes a new value rather than mutating one already in use.
+
+These authenticated references are not producer-visible profile selectors.
+Evidence cannot name arbitrary configurations or resurrect historical anchors.
+An implementation may derive local storage keys for profile state, but package
+data cannot use such a key to grant authority or select code.
 
 ## Delivery Policy And Profile Selection
 
-Each authority defines deterministic delivery policies. A policy matches
+Each authority defines an ordered list of delivery policies. A policy matches
 bounded delivery context such as:
 
 - verified tenant partition;
-- delivery predicate type;
-- root authorization versus supporting graph evidence; and
+- assertion predicate type; and
 - other explicitly defined scope constraints.
+
+The first matching policy owns verification. Tenant-specific exceptions belong
+before a match-all default; an earlier default shadows later exceptions for
+the same purpose. Overlapping matches are permitted, and policy order is part
+of authenticated authority configuration. Verification failure never advances
+to another policy. Configuration validation still checks every policy's
+structure and profile references, including entries shadowed by earlier ones.
+
+A package designates one root for common semantic evaluation. Each assertion
+is authenticated under the policy for its purpose and principal authority,
+whether it appears as that root or as a dependency. An original resource
+intent therefore uses the same policy when it becomes prior evidence in an
+update chain. The common evaluator checks authenticated relationships and
+requires the selected root to have delivery action semantics or be an admitted
+control event. A fulfillment relation can authenticate successfully while
+being unsuitable as a standalone delivery root.
 
 A matched policy states:
 
 - whether live credential presentation is required or allowed;
 - whether provenance is required or allowed;
 - constraints on the principal, content, freshness, or configured mechanism;
-  and
-- an ordered `any-of` list of provenance profiles.
+- whether evidence-log inclusion is required; and
+- an ordered `any-of` list of authority-local profile configuration digests.
+
+The effective evidence-log requirement is the union of the selected delivery
+policy's requirement and the provenance mechanism's intrinsic requirement.
+A tenant can request audit inclusion for a profile that does not otherwise
+need ordering, but cannot disable a mechanism's ordering requirement. The RM
+uses this same decision when registering accepted evidence; the target
+enforces it for each semantically reached assertion. Supplied optional log
+material is still verified. A package with no logged items need not carry a
+checkpoint update; an unlogged root may accompany logged supporting evidence.
 
 Profile combination has only `any-of` semantics in this design. Thresholds,
 principal diversity, and requirements for several verification paths are not
@@ -377,15 +429,20 @@ this sequence for each graph assertion:
    tenant hint.
 2. Use the tentative `(scheme, authority)` only to locate the corresponding
    authenticated `AuthorityConfig`. Missing configuration fails.
-3. Use delivery context and tentative fields to locate a candidate delivery
-   policy. Policy matching must resolve unambiguously.
-4. Filter that policy's ordered profile list to the evidence's well-known
-   provenance type.
+3. Select the first policy matching assertion purpose and the tentative tenant
+   partition, in authenticated configuration order. A nil tenant predicate
+   matches all tenants; an empty exact partition matches the unpartitioned
+   tenant. Verification failure does not fall back to a later policy.
+4. Resolve every reference in that policy's ordered profile list within the
+   authority, then filter by the evidence's well-known provenance type.
 5. Try matching profiles in authenticated policy order. The first profile that
    fully verifies the evidence and its constraints is selected.
-6. Derive the canonical principal and verified tenant mapping from the
-   authenticated result, then re-evaluate the policy and every supplied hint.
-   Any mismatch fails.
+6. Derive the canonical principal and external tenant from the authenticated
+   result, reselect the policy using those values, and recheck supplied hints.
+   Both selections must identify the same policy entry; any mismatch fails.
+   An omitted tenant hint cannot bypass an earlier tenant-specific policy.
+   Callers supply no expected tenant to authentication;
+   common semantic evaluation subsequently checks tenant relationships.
 
 Trying the next configured profile after a failure is deliberate `any-of`
 policy, not evidence-controlled downgrade. The evidence and RM may narrow the
@@ -451,7 +508,6 @@ Successful profile verification produces a deliberately small common result:
 ```text
 AuthenticatedEvidence {
     principal
-    mapped_fleetshift_tenant?
     predicate_type
     content_digest
     provenance_type
@@ -642,15 +698,18 @@ A provenance profile neither replaces nor branches the common semantics.
 ### Shared-authority delivery example
 
 Consider a provider-operated OIDC issuer and Fulcio CA serving several managed
-service tenants. The authority config is keyed by the OIDC issuer and maps a
-verified `tenant` claim to a FleetShift tenant. Its root-delivery policy allows
-an ordered set of Sigstore profiles configured with the shared Fulcio CA.
+service tenants. The authority config is keyed by the OIDC issuer. Its
+Sigstore configurations specify how verified identity material establishes an
+external tenant partition. Deployment policies can match that partition and
+refer to shared Fulcio configurations by digest.
 
 Alice signs tenant A's delivery authorization through Sigstore. The RM claims
 that the request is for tenant A and attaches Alice's Bundle. That claim only
 locates the authority config. The target verifies the Fulcio chain and OIDC
 identity extensions, obtains Alice's canonical OIDC principal and tenant
-partition, maps that partition to tenant A, and rechecks the root policy.
+partition, rechecks the policy for that intent, and compares the external
+tenant identity with the signed scope and the target's provisioned tenant A.
+The target does not translate that identity to an internal FleetShift ID.
 
 The signed intent names a provider addon as its manifest strategy. That addon
 signs the exact manifests using its provider workload authority, such as a
@@ -701,7 +760,7 @@ without requiring IdP-issued proof-of-possession support.
 The signature covers the relevant request components, credential binding,
 freshness data, audience or destination, and body or intent digest as
 applicable. Verification reuses authority lookup, credential/key validation,
-canonical identity, tenant mapping, and policy constraints.
+canonical external identity, tenant partition, and policy constraints.
 
 A request signature authorizes only the live root request. It is not durable
 historical evidence and cannot authenticate supporting graph assertions. The
@@ -1008,7 +1067,7 @@ composition of them.
 
 The predecessor authorizes its successor, including changes to:
 
-- delivery policies and tenant mappings;
+- delivery policies and external tenant scopes;
 - allowed credentials and provenance profiles;
 - trust anchors and profile parameters;
 - profile lifecycle or update authority; and
@@ -1221,7 +1280,7 @@ Failures are classified at the layer that detects them:
 
 - unknown authority, provenance type, media type, or configuration;
 - no applicable or successful profile in the ordered policy list;
-- invalid credential, request signature, provenance, tenant mapping, or
+- invalid credential, request signature, provenance, tenant identity, or
   identity agreement;
 - missing or invalid profile state and historical material;
 - invalid graph relationship, constraint, placement, removal, or generation;
@@ -1252,10 +1311,12 @@ never makes it an uninitialized verifier.
 3. **Tentative hints:** provenance type, media type, authority, tenant, subject,
    certificate, key, and repository labels are untrusted until verification.
 4. **Canonical identity:** authorization compares the complete canonical
-   principal and verified tenant mapping; equal strings in other authorities
+   principal and authenticated external tenant; equal strings in other authorities
    or partitions do not merge identities.
-5. **Policy-owned selection:** one unambiguous delivery policy supplies the
-   ordered `any-of` profile list; the first complete success wins.
+5. **Policy-owned selection:** the first matching delivery policy supplies the
+   ordered `any-of` profile list; the first complete profile success wins.
+   Authenticated content must select the same policy entry, and verification
+   failure never falls back to a later policy.
 6. **Exact content:** a profile authenticates the exact typed content and
    purpose consumed by the common evaluator. That inner predicate type is
    distinct from the outer provenance type and media type.
@@ -1290,7 +1351,7 @@ never makes it an uninitialized verifier.
 Common protocol tests apply to every provenance implementation:
 
 - shared and single-tenant authorities, static and claim-derived tenant
-  mappings, identical subjects in different partitions, and cross-tenant
+  policies, identical subjects in different partitions, and cross-tenant
   replay rejection;
 - missing, forged, cross-authority, overlapping, and ambiguous authority or
   tenant claims;

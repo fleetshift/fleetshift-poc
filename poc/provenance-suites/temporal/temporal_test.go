@@ -11,10 +11,17 @@ import (
 	"github.com/transparency-dev/merkle/rfc6962"
 )
 
-func TestPrepareRejectsNilUpdate(t *testing.T) {
-	_, err := Prepare(RetainedState{EvidenceLog: protocol.EmptyCheckpoint()}, nil, protocol.TypedEvidence{}, nil)
-	if !errors.Is(err, ErrMissingUpdate) {
-		t.Fatalf("error = %v, want ErrMissingUpdate", err)
+func TestPrepareAllowsNoLogMaterial(t *testing.T) {
+	retained := RetainedState{EvidenceLog: newLogFixture(t).u2.Checkpoint}
+	prepared, err := Prepare(retained, nil, protocol.TypedEvidence{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Log != nil || prepared.NextState != retained {
+		t.Fatal("absent log material changed temporal state")
+	}
+	if _, err := Prepare(retained, nil, protocol.TypedEvidence{}, &protocol.EvidenceLogInclusion{}); !errors.Is(err, ErrMissingUpdate) {
+		t.Fatalf("inclusion without checkpoint error = %v", err)
 	}
 }
 
@@ -121,10 +128,13 @@ func TestPrepare(t *testing.T) {
 		assertFork(t, err)
 	})
 
-	t.Run("missing root inclusion", func(t *testing.T) {
-		_, err := Prepare(RetainedState{EvidenceLog: protocol.EmptyCheckpoint()}, &fx.u1, fx.e1, nil)
-		if !errors.Is(err, ErrMissingRootInclusion) {
-			t.Fatalf("error = %v, want ErrMissingRootInclusion", err)
+	t.Run("update with unlogged root", func(t *testing.T) {
+		prepared, err := Prepare(RetainedState{EvidenceLog: protocol.EmptyCheckpoint()}, &fx.u1, fx.e1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prepared.Log == nil || prepared.NextState.EvidenceLog != fx.u1.Checkpoint {
+			t.Fatal("support log update was not prepared")
 		}
 	})
 
@@ -396,4 +406,12 @@ func mustAppendLog(t *testing.T, tree *merklelog.Tree, from protocol.Checkpoint,
 		t.Fatalf("append leaf: %v", err)
 	}
 	return mustEvidenceLogUpdate(t, tree, from), mustEvidenceLogInclusion(t, tree, tree.Size()-1)
+}
+
+func profileDigest(profile protocol.ProfileConfig) protocol.Digest {
+	reference, err := profile.Digest()
+	if err != nil {
+		panic(err)
+	}
+	return reference
 }

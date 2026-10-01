@@ -181,8 +181,8 @@ func TestVerifyUsesRetainedMappingNotSupportMaterial(t *testing.T) {
 	if authenticated.Principal.Subject != "alice" {
 		t.Fatalf("subject = %q, want alice", authenticated.Principal.Subject)
 	}
-	if authenticated.MappedFleetShiftTenant != "tenant-acme" {
-		t.Fatalf("tenant = %q, want tenant-acme", authenticated.MappedFleetShiftTenant)
+	if authenticated.Principal.Tenant() != (protocol.Tenant{PrincipalAuthority: protocol.PrincipalAuthority{Scheme: protocol.IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}}) {
+		t.Fatalf("tenant = %q, want tenant-acme", authenticated.Principal.Tenant())
 	}
 	if assertion.PredicateType != protocol.PredicateTypeDeploymentV1 {
 		t.Fatalf("emitted predicate = %s, want %s", assertion.PredicateType, protocol.PredicateTypeDeploymentV1)
@@ -417,7 +417,7 @@ func TestDecodeAssertionThenDecodeDeliveryScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeDeliveryScope: %v", err)
 	}
-	if scope.TenantID != "tenant-acme" || scope.TargetID != "target-east" || scope.FullResourceName != "//fleetshift.io/deployments/web" {
+	if scope.Tenant != (protocol.Tenant{PrincipalAuthority: testAuthority().PrincipalAuthority}) || scope.TargetID != "target-east" || scope.FullResourceName != "//fleetshift.io/deployments/web" {
 		t.Fatalf("scope = %+v", scope)
 	}
 }
@@ -440,7 +440,7 @@ func TestDecodeAssertionDoesNotAuthenticate(t *testing.T) {
 	if err := json.Unmarshal(evidence.Bytes, &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	body.Assertion.Bytes = []byte(`{"tenant_id":"tenant-other"}`)
+	body.Assertion.Bytes = []byte(`{"tenant":{"scheme":"oidc-sub/v1","authority":"https://other.example"}}`)
 	raw, err := encodeJSON(body)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -607,10 +607,7 @@ func verifyEnrollment(t *testing.T, target *Target, enrollment protocol.TypedEvi
 		Statement:       protocol.SignedStatement{Evidence: enrollment},
 		ProfileConfig:   testProfile(),
 		AuthorityConfig: testAuthority(),
-		DeliveryContext: protocol.DeliveryContext{
-			ClaimedTenant:     "tenant-acme",
-			RootAuthorization: true,
-		},
+		DeliveryContext: protocol.DeliveryContext{PredicateType: PredicateTypeEnrollmentV1},
 	})
 }
 
@@ -627,7 +624,7 @@ func testAssertion(t *testing.T) protocol.TypedAssertion {
 	t.Helper()
 	assertion, err := protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TenantID:         "tenant-acme",
+			Tenant:           protocol.Tenant{PrincipalAuthority: testAuthority().PrincipalAuthority},
 			TargetID:         "target-east",
 			FullResourceName: "//fleetshift.io/deployments/web",
 			Generation:       1,
@@ -655,26 +652,26 @@ func testAuthority() protocol.AuthorityConfig {
 			Scheme:    protocol.IdentitySchemeOIDCSubV1,
 			Authority: "https://issuer.example.test",
 		},
-		TenantMapping:      protocol.TenantMapping{StaticTenant: "tenant-acme"},
+
 		ProvenanceProfiles: []protocol.ProfileConfig{profile},
 		DeliveryPolicies: []protocol.DeliveryPolicy{
 			{
 				Match: protocol.PolicyMatch{
-					PredicateType:     protocol.PredicateTypeDeploymentV1,
-					RootAuthorization: true,
+					PredicateType: protocol.PredicateTypeDeploymentV1,
 				},
-				LiveCredential: protocol.RequirementNone,
-				Provenance:     protocol.RequirementRequired,
-				Profiles:       []protocol.ProfileConfig{profile},
+				LiveCredential:     protocol.RequirementNone,
+				Provenance:         protocol.RequirementRequired,
+				RequireEvidenceLog: true,
+				Profiles:           []protocol.Digest{profileDigest(profile)},
 			},
 			{
 				Match: protocol.PolicyMatch{
-					PredicateType:     PredicateTypeEnrollmentV1,
-					RootAuthorization: true,
+					PredicateType: PredicateTypeEnrollmentV1,
 				},
-				LiveCredential: protocol.RequirementNone,
-				Provenance:     protocol.RequirementRequired,
-				Profiles:       []protocol.ProfileConfig{profile},
+				LiveCredential:     protocol.RequirementNone,
+				Provenance:         protocol.RequirementRequired,
+				RequireEvidenceLog: true,
+				Profiles:           []protocol.Digest{profileDigest(profile)},
 			},
 		},
 	}
@@ -682,8 +679,14 @@ func testAuthority() protocol.AuthorityConfig {
 
 func testDeliveryContext() protocol.DeliveryContext {
 	return protocol.DeliveryContext{
-		ClaimedTenant:     "tenant-acme",
-		PredicateType:     protocol.PredicateTypeDeploymentV1,
-		RootAuthorization: true,
+		PredicateType: protocol.PredicateTypeDeploymentV1,
 	}
+}
+
+func profileDigest(profile protocol.ProfileConfig) protocol.Digest {
+	reference, err := profile.Digest()
+	if err != nil {
+		panic(err)
+	}
+	return reference
 }

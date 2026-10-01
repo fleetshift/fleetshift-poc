@@ -53,7 +53,14 @@ func (e *CheckpointStaleError) LatestCheckpoint() protocol.Checkpoint {
 
 // Config provisions one delivery agent.
 type Config struct {
-	TenantID protocol.TenantID
+	// Tenant is the provisioned external identity for resource deliveries.
+	Tenant protocol.Tenant
+	// ProviderTenant references the platform's single provider tenant, whose
+	// fulfillment relations this target admits. It is provisioned separately
+	// from the authority/profile configurations used to authenticate evidence.
+	ProviderTenant protocol.Tenant
+	// A stand-in, single target identifier for this delivery agent.
+	// A real agent may support multiple, dynamic target IDs.
 	TargetID string
 }
 
@@ -90,7 +97,7 @@ type Agent struct {
 
 // New constructs an uninitialized verifier.
 func New(config Config) (*Agent, error) {
-	if config.TenantID == "" || config.TargetID == "" {
+	if config.Tenant.Scheme == "" || config.Tenant.Authority == "" || config.TargetID == "" {
 		return nil, errors.New("tenant and target are required")
 	}
 	return &Agent{
@@ -110,18 +117,19 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 	if a.initialized {
 		return protocol.ErrAlreadyInitialized
 	}
-	if len(trust.AuthorityRegistry) == 0 {
-		return errors.New("trust configuration has no authority registry")
+	if err := trust.Validate(); err != nil {
+		return err
 	}
-	a.trust = trust
+	a.trust = trust.Clone()
 	a.initialized = true
 	return nil
 }
 
-// Deliver verifies package-wide evidence-log consistency and inclusion of
-// the root Item through temporal.Prepare, then provenance under matched
-// policy. SelectAndVerify verifies occurrence for each reached Item (root
-// or used supporting). Unused supporting-item inclusions are not verified.
+// Deliver first validates and snapshots package structure, then verifies
+// any supplied package-wide evidence-log consistency and root inclusion through
+// temporal.Prepare. A per-delivery verificationSession selects and verifies
+// the root and any semantically used supporting items. Unused supporting-item
+// inclusions are structurally checked but not cryptographically verified.
 // ApplyRequest.Temporal receives the root VerificationResult only.
 // Authenticated predicate type selects apply: intent predicates use
 // fulfillment apply, trust-config-update is reserved on the agent, and
@@ -142,32 +150,34 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		return ErrDeliveryUnavailable
 	}
 
-	prepared, err := a.acceptLogLocked(pkg)
+	catalog, err := newEvidenceCatalog(pkg, a.lookupLocked, defaultVerificationLimits())
 	if err != nil {
 		return err
+	}
+	root := catalog.item(catalog.rootID)
+	prepared, err := temporal.Prepare(a.retained, catalog.update, root.Evidence, root.EvidenceLog)
+	if err != nil {
+		return a.mapLogError(err)
 	}
 
 	// The log observation is independent of apply. Pinning it here keeps an
 	// inert rejected leaf in the accepted prefix so a later fork cannot omit it.
+	// This POC retains the observed prefix before per-statement policy admission;
+	// it grants no authority to entries and does not satisfy their log requirements.
 	a.retained = prepared.NextState
 
 	services := protocol.TemporalVerificationServices{Log: prepared.Log}
-	result, err := protocol.SelectAndVerify(
+	session := newVerificationSession(catalog, a.trust, services)
+	// Source policy authenticates every assertion independently of its use.
+	// Common semantics bind intent to this tenant and fulfillment relations to
+	// the platform-wide provider reference provisioned on this agent.
+	if err := session.withNode(
 		context.Background(),
-		pkg.Root,
-		protocol.DeliveryContext{
-			ClaimedTenant:     a.config.TenantID,
-			RootAuthorization: true,
+		catalog.rootID,
+		func(root verifiedNode) error {
+			return a.dispatchApplyLocked(session, root)
 		},
-		a.trust,
-		a.lookupLocked,
-		services,
-	)
-	if err != nil {
-		return err
-	}
-
-	if err := a.dispatchApplyLocked(pkg, services, result); err != nil {
+	); err != nil {
 		return err
 	}
 	if a.loseNextAcknowledgement {
@@ -237,46 +247,45 @@ func (a *Agent) lookupLocked(pt protocol.ProvenanceType) (protocol.TargetAPI, bo
 	return nil, false
 }
 
-func (a *Agent) dispatchApplyLocked(pkg resourcemanager.DeliveryPackage, services protocol.TemporalVerificationServices, result protocol.VerificationResult) error {
+func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedNode) error {
+	result := root.result
 	switch result.Authenticated.PredicateType {
 	case protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1:
-		view, err := a.decodeAndDeriveLocked(pkg, services, result)
+		view, err := a.decodeAndDeriveLocked(session, root)
 		if err != nil {
 			return err
 		}
-		if view.Scope.TenantID != a.config.TenantID || view.Scope.TargetID != a.config.TargetID {
+		if view.Scope.Tenant != a.config.Tenant || view.Scope.TargetID != a.config.TargetID {
 			return fmt.Errorf("%w: tenant or target mismatch", protocol.ErrPolicyReevaluation)
 		}
-		if result.Authenticated.MappedFleetShiftTenant != a.config.TenantID {
-			return fmt.Errorf("%w: mapped tenant %q, agent tenant %q", protocol.ErrTenantMismatch, result.Authenticated.MappedFleetShiftTenant, a.config.TenantID)
+		if result.Authenticated.Principal.Tenant() != a.config.Tenant {
+			return fmt.Errorf("%w: root principal does not belong to the provisioned resource tenant", protocol.ErrTenantMismatch)
 		}
-		return a.applyLocked(view, append([]byte(nil), result.Assertion.Bytes...))
+		if _, err := session.validateSelectedGraph(root.identity); err != nil {
+			return err
+		}
+		return a.applyLocked(view, result.Assertion.Bytes)
 	case protocol.PredicateTypeTrustConfigUpdateV1:
 		return fmt.Errorf("%w: trust-config-update/v1 is not implemented", protocol.ErrUnknownPredicateType)
 	default:
-		target, ok := a.lookupLocked(result.Authenticated.ProvenanceType)
+		target, ok := session.catalog.lookup(result.Authenticated.ProvenanceType)
 		if !ok {
 			return fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, result.Authenticated.ProvenanceType)
 		}
 		if !target.Owns(result.Authenticated.PredicateType) {
 			return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
 		}
+		if _, err := session.validateSelectedGraph(root.identity); err != nil {
+			return err
+		}
 		a.suiteApplyCount++
-		return target.Apply(context.Background(), protocol.ApplyRequest{
+		return target.Apply(context.Background(), cloneApplyRequest(protocol.ApplyRequest{
 			Authenticated: result.Authenticated,
 			Assertion:     result.Assertion,
-			Statement:     pkg.Root.SignedStatement,
+			Statement:     root.statement,
 			Temporal:      result.Temporal,
-		})
+		}))
 	}
-}
-
-func (a *Agent) acceptLogLocked(pkg resourcemanager.DeliveryPackage) (temporal.PreparedUpdate, error) {
-	prepared, err := temporal.Prepare(a.retained, pkg.EvidenceLog, pkg.Root.Evidence, pkg.Root.EvidenceLog)
-	if err != nil {
-		return temporal.PreparedUpdate{}, a.mapLogError(err)
-	}
-	return prepared, nil
 }
 
 func (a *Agent) mapLogError(err error) error {
@@ -291,7 +300,8 @@ func (a *Agent) mapLogError(err error) error {
 	return fmt.Errorf("%w: %w", ErrLogFork, err)
 }
 
-func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, services protocol.TemporalVerificationServices, result protocol.VerificationResult) (AppliedDelivery, error) {
+func (a *Agent) decodeAndDeriveLocked(session *verificationSession, root verifiedNode) (AppliedDelivery, error) {
+	result := root.result
 	switch result.Authenticated.PredicateType {
 	case protocol.PredicateTypeDeploymentV1:
 		authorization, err := protocol.DecodeDeploymentAuthorization(result.Assertion)
@@ -306,14 +316,14 @@ func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, servi
 		return AppliedDelivery{
 			Scope:         authorization.DeliveryScope,
 			PredicateType: protocol.PredicateTypeDeploymentV1,
-			Manifests:     cloneManifests(authorization.Manifests),
+			Manifests:     authorization.Manifests,
 		}, nil
 	case protocol.PredicateTypeManagedResourceV1:
 		authorization, err := protocol.DecodeManagedResourceAuthorization(result.Assertion)
 		if err != nil {
 			return AppliedDelivery{}, err
 		}
-		relation, err := a.verifyFulfillmentRelationLocked(pkg, services, authorization)
+		relation, err := a.verifyFulfillmentRelationLocked(session, root.identity, authorization)
 		if err != nil {
 			return AppliedDelivery{}, err
 		}
@@ -325,7 +335,7 @@ func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, servi
 			PredicateType: protocol.PredicateTypeManagedResourceV1,
 			Manifests: []protocol.TypedManifest{{
 				MediaType: relation.MediaType,
-				Bytes:     append([]byte(nil), authorization.Spec...),
+				Bytes:     authorization.Spec,
 			}},
 		}, nil
 	default:
@@ -333,52 +343,52 @@ func (a *Agent) decodeAndDeriveLocked(pkg resourcemanager.DeliveryPackage, servi
 	}
 }
 
-func (a *Agent) verifyFulfillmentRelationLocked(pkg resourcemanager.DeliveryPackage, services protocol.TemporalVerificationServices, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
-	var found *protocol.Item
-	for i := range pkg.Supporting {
-		item := &pkg.Supporting[i]
-		hints, err := a.profile.ParseHints(item.Evidence)
-		if err != nil {
-			return protocol.FulfillmentRelation{}, err
-		}
-		if hints.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
-			continue
-		}
-		if found != nil {
-			return protocol.FulfillmentRelation{}, fmt.Errorf("%w: multiple fulfillment relations", protocol.ErrAmbiguousPolicy)
-		}
-		found = item
+func (a *Agent) verifyFulfillmentRelationLocked(session *verificationSession, parent protocol.Digest, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
+	if a.config.ProviderTenant == (protocol.Tenant{}) {
+		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: provider tenant is not provisioned", protocol.ErrTenantMismatch)
 	}
-	if found == nil {
+	candidates, err := session.supportingCandidates(protocol.PredicateTypeFulfillmentRelationV1)
+	if err != nil {
+		return protocol.FulfillmentRelation{}, err
+	}
+	switch len(candidates) {
+	case 0:
 		return protocol.FulfillmentRelation{}, ErrFulfillmentRelationRequired
+	case 1:
+	default:
+		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: multiple fulfillment relations", protocol.ErrAmbiguousRelation)
 	}
 
-	result, err := protocol.SelectAndVerify(
+	var relation protocol.FulfillmentRelation
+	err = session.withNode(
 		context.Background(),
-		*found,
-		protocol.DeliveryContext{
-			ClaimedTenant:     a.config.TenantID,
-			RootAuthorization: false,
+		candidates[0],
+		func(support verifiedNode) error {
+			if support.result.Authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
+				return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, support.result.Authenticated.PredicateType)
+			}
+			if support.result.Authenticated.Principal.Tenant() != a.config.ProviderTenant {
+				return fmt.Errorf("%w: fulfillment relation principal does not belong to the platform provider tenant", protocol.ErrTenantMismatch)
+			}
+			decoded, err := protocol.DecodeFulfillmentRelation(support.result.Assertion)
+			if err != nil {
+				return err
+			}
+			if decoded.MediaType == "" {
+				return fmt.Errorf("%w: fulfillment relation media type is required", protocol.ErrMalformedEvidence)
+			}
+			if decoded.ResourceType != authorization.ResourceType {
+				return fmt.Errorf("%w: fulfillment relation resource type %q, authorization %q", protocol.ErrPolicyReevaluation, decoded.ResourceType, authorization.ResourceType)
+			}
+			if err := session.recordDependency(parent, support.identity); err != nil {
+				return err
+			}
+			relation = decoded
+			return nil
 		},
-		a.trust,
-		a.lookupLocked,
-		services,
 	)
 	if err != nil {
 		return protocol.FulfillmentRelation{}, err
-	}
-	if result.Authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
-		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
-	}
-	relation, err := protocol.DecodeFulfillmentRelation(result.Assertion)
-	if err != nil {
-		return protocol.FulfillmentRelation{}, err
-	}
-	if relation.MediaType == "" {
-		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: fulfillment relation media type is required", protocol.ErrMalformedEvidence)
-	}
-	if relation.ResourceType != authorization.ResourceType {
-		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: fulfillment relation resource type %q, authorization %q", protocol.ErrPolicyReevaluation, relation.ResourceType, authorization.ResourceType)
 	}
 	return relation, nil
 }
@@ -405,7 +415,9 @@ func (a *Agent) applyLocked(view AppliedDelivery, signed []byte) error {
 		delete(a.applied, view.Scope.FullResourceName)
 		return nil
 	}
-	a.applied[view.Scope.FullResourceName] = appliedState{view: cloneApplied(view), signed: signed}
+	// Common derivation already owns immutable delivery data; retaining it
+	// shares those values. Applied detaches data for callers outside the agent.
+	a.applied[view.Scope.FullResourceName] = appliedState{view: view, signed: signed}
 	return nil
 }
 
@@ -422,6 +434,35 @@ func cloneManifests(in []protocol.TypedManifest) []protocol.TypedManifest {
 	out := make([]protocol.TypedManifest, len(in))
 	for i, item := range in {
 		out[i] = protocol.TypedManifest(protocol.Encoded(item).Clone())
+	}
+	return out
+}
+
+// cloneApplyRequest detaches only the data exposed to the profile's Apply API.
+func cloneApplyRequest(in protocol.ApplyRequest) protocol.ApplyRequest {
+	out := in
+	out.Authenticated.SatisfiedConstraints = cloneSlice(in.Authenticated.SatisfiedConstraints)
+	out.Assertion.Bytes = cloneBytes(in.Assertion.Bytes)
+	out.Statement = cloneSignedStatement(in.Statement)
+	out.Temporal = cloneSubjectTemporalInfo(in.Temporal)
+	return out
+}
+
+func cloneSignedStatement(in protocol.SignedStatement) protocol.SignedStatement {
+	return protocol.SignedStatement{
+		Evidence: protocol.TypedEvidence{
+			ProvenanceType: in.Evidence.ProvenanceType,
+			Encoded:        in.Evidence.Encoded.Clone(),
+		},
+		Support: protocol.SupportMaterial(protocol.Encoded(in.Support).Clone()),
+	}
+}
+
+func cloneSubjectTemporalInfo(in protocol.VerifiedSubjectTemporalInfo) protocol.VerifiedSubjectTemporalInfo {
+	out := protocol.VerifiedSubjectTemporalInfo{Times: cloneSlice(in.Times)}
+	if in.LogPosition != nil {
+		position := *in.LogPosition
+		out.LogPosition = &position
 	}
 	return out
 }

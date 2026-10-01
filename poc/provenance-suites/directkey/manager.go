@@ -96,3 +96,11 @@ func (m *Manager) PublicKey(principal protocol.Principal) ([]byte, bool) {
 	}
 	return append([]byte(nil), key...), true
 }
+
+// ParseHints reads tentative policy-selection fields without authentication.
+func (m *Manager) ParseHints(evidence protocol.TypedEvidence) (protocol.TentativeHints, error) {
+	return ParseHints(evidence)
+}
+
+// RequiresEvidenceLog reports that direct-key has no intrinsic ordering need.
+func (m *Manager) RequiresEvidenceLog() bool { return false }

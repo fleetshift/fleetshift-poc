@@ -11,12 +11,9 @@ import (
 )
 
 var (
-	// ErrMissingUpdate is returned when Prepare is given a nil log update.
+	// ErrMissingUpdate is returned when an inclusion is supplied without its
+	// checkpoint transition.
 	ErrMissingUpdate = errors.New("missing evidence-log update")
-
-	// ErrMissingRootInclusion is returned when Prepare is given a nil
-	// root inclusion proof.
-	ErrMissingRootInclusion = errors.New("missing root evidence-log inclusion")
 
 	// ErrSecondOccurrence is returned when VerifyOccurrence is asked to bind
 	// an already observed evidence identity to a different inclusion.
@@ -61,13 +58,17 @@ type PreparedUpdate struct {
 	NextState RetainedState
 }
 
-// Prepare verifies that update extends retained and that rootEvidence is
-// included under the successor checkpoint. From must equal the retained
-// checkpoint exactly. An older From is stale regardless of whether the
-// successor matches, lags, or forks the retained head, including when
-// RFC 6962 equal-size consistency against that head would succeed. A newer
+// Prepare verifies any supplied checkpoint transition and root inclusion.
+// With no log material it returns retained unchanged and no log verifier.
+// This prepares package-wide log state; whether an occurrence is required is
+// decided later by each reached statement's source policy and mechanism.
+// An unlogged root may therefore accompany logged supporting evidence.
+//
+// From must equal the retained checkpoint exactly. An older From is stale
+// regardless of whether the successor matches, lags, or forks the retained head,
+// including when RFC 6962 equal-size consistency against that head would succeed. A newer
 // From, same-size different From root, rollback from an exact From, or
-// invalid consistency proof is an invalid log update. A missing or
+// invalid consistency proof is an invalid log update. A supplied but
 // mismatched root inclusion fails after a valid checkpoint transition and
 // returns no candidate state.
 func Prepare(
@@ -77,7 +78,10 @@ func Prepare(
 	rootInclusion *protocol.EvidenceLogInclusion,
 ) (PreparedUpdate, error) {
 	if update == nil {
-		return PreparedUpdate{}, ErrMissingUpdate
+		if rootInclusion != nil {
+			return PreparedUpdate{}, ErrMissingUpdate
+		}
+		return PreparedUpdate{NextState: retained}, nil
 	}
 	if update.From != retained.EvidenceLog {
 		if update.From.Size < retained.EvidenceLog.Size {
@@ -91,12 +95,14 @@ func Prepare(
 	if err := protocol.VerifyEvidenceLogUpdate(retained.EvidenceLog, *update); err != nil {
 		return PreparedUpdate{}, err
 	}
-	if rootInclusion == nil {
-		return PreparedUpdate{}, ErrMissingRootInclusion
-	}
 	log := newIdentityMemoLog(update.Checkpoint)
-	if _, err := log.VerifyOccurrence(context.Background(), rootEvidence, *rootInclusion); err != nil {
-		return PreparedUpdate{}, err
+	if rootInclusion != nil {
+		// The POC checks supplied root inclusion before exposing installable
+		// checkpoint state. This seeds the occurrence memo; subsequent per-item
+		// policy checks reuse the binding without repeating the Merkle proof.
+		if _, err := log.VerifyOccurrence(context.Background(), rootEvidence, *rootInclusion); err != nil {
+			return PreparedUpdate{}, err
+		}
 	}
 	return PreparedUpdate{
 		Log:       log,
@@ -143,7 +149,7 @@ func (v *identityMemoLog) VerifyOccurrence(_ context.Context, evidence protocol.
 		Evidence: identity,
 	}
 	v.seen[identity] = memo{
-		inclusion: cloneInclusion(inclusion),
+		inclusion: inclusion,
 		binding:   binding,
 	}
 	return binding, nil
@@ -159,11 +165,4 @@ func sameInclusion(a, b protocol.EvidenceLogInclusion) bool {
 		}
 	}
 	return true
-}
-
-func cloneInclusion(in protocol.EvidenceLogInclusion) protocol.EvidenceLogInclusion {
-	return protocol.EvidenceLogInclusion{
-		Index:          in.Index,
-		InclusionProof: append([]protocol.Digest(nil), in.InclusionProof...),
-	}
 }
