@@ -13,28 +13,24 @@ import (
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 )
 
-// Config identifies the principal authority and subject this producer signs as.
+// Config identifies the external principal, including its tenant partition,
+// that this producer signs as.
 type Config struct {
 	Principal protocol.Principal
-	TenantID  protocol.TenantID
 }
 
 // Producer is the controlled-producer role.
 type Producer struct {
-	tenantID protocol.TenantID
-	profile  *directkey.Producer
+	profile *directkey.Producer
 }
 
 // New constructs a producer with a single direct-key/v1 signing key pair.
 func New(config Config) (*Producer, error) {
-	if config.TenantID == "" {
-		return nil, errors.New("tenant ID is required")
-	}
 	profile, err := directkey.NewProducer(config.Principal)
 	if err != nil {
 		return nil, err
 	}
-	return &Producer{tenantID: config.TenantID, profile: profile}, nil
+	return &Producer{profile: profile}, nil
 }
 
 // Principal returns the canonical principal this producer authenticates as.
@@ -105,11 +101,12 @@ func (p *Producer) SignFulfillmentRelation(ctx context.Context, relation protoco
 }
 
 func (p *Producer) bindScope(scope *protocol.DeliveryScope) error {
-	if scope.TenantID == "" {
-		scope.TenantID = p.tenantID
+	tenant := p.Principal().Tenant()
+	if scope.Tenant == (protocol.Tenant{}) {
+		scope.Tenant = tenant
 	}
-	if scope.TenantID != p.tenantID {
-		return fmt.Errorf("delivery tenant %q does not match producer tenant %q", scope.TenantID, p.tenantID)
+	if scope.Tenant != tenant {
+		return fmt.Errorf("delivery tenant %+v does not match producer tenant %+v", scope.Tenant, tenant)
 	}
 	if scope.TargetID == "" || scope.FullResourceName == "" || scope.Action == "" {
 		return errors.New("target, resource name, and action are required")

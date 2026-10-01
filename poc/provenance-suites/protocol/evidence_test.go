@@ -181,7 +181,7 @@ func TestTypedAssertionDigestBindsPredicateTypeAndBytes(t *testing.T) {
 
 func TestDeliveryScopeSignsResourceNameAndStaticPlacement(t *testing.T) {
 	scope := DeliveryScope{
-		TenantID:         "tenant-acme",
+		Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 		TargetID:         "target-east",
 		FullResourceName: "//fleetshift.io/deployments/web",
 		Generation:       1,
@@ -213,7 +213,7 @@ func TestDeliveryScopeSignsResourceNameAndStaticPlacement(t *testing.T) {
 func TestCanonicalJSONIsDeterministicForFixedStructs(t *testing.T) {
 	value := DeploymentAuthorization{
 		DeliveryScope: DeliveryScope{
-			TenantID:         "tenant-acme",
+			Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 			TargetID:         "target-east",
 			FullResourceName: "//fleetshift.io/deployments/web",
 			Generation:       1,
@@ -240,7 +240,7 @@ func TestCanonicalJSONIsDeterministicForFixedStructs(t *testing.T) {
 func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 	deployment, err := DeploymentAuthorization{
 		DeliveryScope: DeliveryScope{
-			TenantID:         "tenant-acme",
+			Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 			TargetID:         "target-east",
 			FullResourceName: "//fleetshift.io/deployments/web",
 			Generation:       1,
@@ -260,7 +260,7 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 
 	managed, err := ManagedResourceAuthorization{
 		DeliveryScope: DeliveryScope{
-			TenantID:         "tenant-acme",
+			Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 			TargetID:         "target-east",
 			FullResourceName: "//kind.fleetshift.io/clusters/prod",
 			Generation:       1,

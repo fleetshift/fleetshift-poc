@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/deliveryagent"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	testTenant               = protocol.TenantID("tenant-acme")
+	testInternalTenant       = "tenant-acme"
 	testTarget               = "target-east"
 	testIssuer               = protocol.Authority("https://issuer.example.test")
 	testReplicasMediaType    = protocol.MediaType("application/vnd.example.replicas+json")
@@ -109,7 +110,7 @@ func TestIntentAndTrustConfigUpdateDoNotCallSuiteApply(t *testing.T) {
 	}
 
 	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
-		TenantID:         testTenant,
+		Tenant:           testTenantIdentity(),
 		TargetID:         testTarget,
 		FullResourceName: deploymentName("trust-config"),
 		Generation:       1,
@@ -140,19 +141,19 @@ func TestUnownedPredicateWithPolicyDoesNotCallSuiteApply(t *testing.T) {
 	profile := trust.AuthorityRegistry[0].ProvenanceProfiles[0]
 	trust.AuthorityRegistry[0].DeliveryPolicies = append(trust.AuthorityRegistry[0].DeliveryPolicies, protocol.DeliveryPolicy{
 		Match: protocol.PolicyMatch{
-			PredicateType:     unowned,
-			RootAuthorization: true,
+			PredicateType: unowned,
 		},
-		LiveCredential: protocol.RequirementNone,
-		Provenance:     protocol.RequirementRequired,
-		Profiles:       []protocol.ProfileConfig{profile},
+		LiveCredential:     protocol.RequirementNone,
+		Provenance:         protocol.RequirementRequired,
+		RequireEvidenceLog: true,
+		Profiles:           []protocol.Digest{profileDigest(profile)},
 	})
 	s := newScenarioWithTrust(t, trust)
 	enrollProducer(t, s, s.user)
 	afterEnroll := s.agent.SuiteApplyCount()
 
 	encoded, err := protocol.MarshalCanonical(protocol.DeliveryScope{
-		TenantID:         testTenant,
+		Tenant:           testTenantIdentity(),
 		TargetID:         testTarget,
 		FullResourceName: deploymentName("unowned"),
 		Generation:       1,
@@ -243,7 +244,7 @@ func TestFirstEnrollmentIsTOFUWonByWhoeverArrivesFirst(t *testing.T) {
 
 func TestAuthorizerBypassStillRequiresAuthenticProvenance(t *testing.T) {
 	s := newScenario(t)
-	s.manager = resourcemanager.New(testTenant, func(resourcemanager.AuthorizationRequest) error {
+	s.manager = newTestManager(t, func(resourcemanager.AuthorizationRequest) error {
 		return errors.New("rbac denied")
 	})
 	if err := s.manager.RegisterAgent(testTarget, s.agent); err != nil {
@@ -289,7 +290,7 @@ func TestInitializedVerifierRejectsSecondBootstrap(t *testing.T) {
 }
 
 func TestUninitializedVerifierRejectsDelivery(t *testing.T) {
-	agent, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
+	agent, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
 	}
@@ -309,7 +310,7 @@ func TestAlteredAssertionBytesFailContentBinding(t *testing.T) {
 		if err := json.Unmarshal(assertion.Bytes, &authorization); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		authorization.TenantID = "tenant-other"
+		authorization.Tenant.Partition = "other"
 		tampered, err := protocol.MarshalCanonical(authorization)
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
@@ -482,6 +483,51 @@ func TestManagedResourceRejectsFulfillmentRelationWithWrongResourceType(t *testi
 	}
 }
 
+func TestManagedResourceRejectsMultipleHintedRelationsBeforeVerifyingSupport(t *testing.T) {
+	s := newEnrolledManagedResourceScenario(t)
+	root := mustSignManagedResource(t, s.user, clusterName("cluster-ambiguous-relations"), 1, json.RawMessage(`{"region":"us-east-1"}`))
+	// This decoy has a valid relation hint but an unenrolled signer and the
+	// wrong resource type. Phase 6 rejects the two hinted candidates before
+	// trying either candidate's provenance.
+	rogue := mustProducer(t, "rogue-addon")
+	decoy := mustSignRelation(t, rogue, "wrong-resource-type", testClusterSpecMediaType)
+	valid := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
+	_, err := s.manager.Compromised().PushDelivery(context.Background(), root, decoy, valid)
+	if !errors.Is(err, protocol.ErrAmbiguousRelation) {
+		t.Fatalf("multiple hinted relation error = %v, want ErrAmbiguousRelation before provenance verification", err)
+	}
+	if _, ok := s.agent.Applied(clusterName("cluster-ambiguous-relations")); ok {
+		t.Fatal("agent applied a managed resource with ambiguous fulfillment relations")
+	}
+}
+
+func TestAgentRejectsDuplicatePackageIdentityBeforeLogTransition(t *testing.T) {
+	s := newEnrolledManagedResourceScenario(t)
+	s.agent.FailNextDeliveriesBeforeAccepting(1)
+	root := mustSignManagedResource(t, s.user, clusterName("cluster-duplicate-package-item"), 1, json.RawMessage(`{"region":"us-east-1"}`))
+	relation := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
+	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), root, relation)
+	if !errors.Is(err, deliveryagent.ErrDeliveryUnavailable) {
+		t.Fatalf("initial delivery error = %v, want ErrDeliveryUnavailable", err)
+	}
+
+	pkg := s.recorder.last
+	if len(pkg.Supporting) != 1 {
+		t.Fatalf("supporting items = %d, want 1", len(pkg.Supporting))
+	}
+	pkg.Supporting = append(pkg.Supporting, pkg.Supporting[0])
+	retained := s.agent.Checkpoint()
+	if err := s.agent.Deliver(pkg); err == nil || !strings.Contains(err.Error(), "duplicate evidence identity") {
+		t.Fatalf("duplicate package error = %v, want duplicate identity", err)
+	}
+	if got := s.agent.Checkpoint(); got != retained {
+		t.Fatalf("checkpoint advanced on structural catalog failure: got %+v, retained %+v", got, retained)
+	}
+	if _, ok := s.agent.Applied(clusterName("cluster-duplicate-package-item")); ok {
+		t.Fatal("agent applied a package with a duplicate evidence identity")
+	}
+}
+
 func TestManagedResourceRejectsRelationSignedByUnenrolledKey(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
 	rogue := mustProducer(t, "rogue-addon")
@@ -620,7 +666,7 @@ func TestManagedResourceRejectsMissingUsedSupportingInclusion(t *testing.T) {
 func TestUnknownRootPredicateFailsClosed(t *testing.T) {
 	s := newEnrolledScenario(t)
 	scope := protocol.DeliveryScope{
-		TenantID:         testTenant,
+		Tenant:           testTenantIdentity(),
 		TargetID:         testTarget,
 		FullResourceName: deploymentName("unknown-pred"),
 		Generation:       1,
@@ -651,7 +697,7 @@ func TestDeploymentRejectsMissingManifestMediaType(t *testing.T) {
 	s := newEnrolledScenario(t)
 	authorization := protocol.DeploymentAuthorization{
 		DeliveryScope: protocol.DeliveryScope{
-			TenantID:         testTenant,
+			Tenant:           testTenantIdentity(),
 			TargetID:         testTarget,
 			FullResourceName: deploymentName("missing-media"),
 			Generation:       1,
@@ -916,11 +962,11 @@ func TestReusedEvidenceKeepsItsFirstLogIndex(t *testing.T) {
 func TestEnrollmentBroadcastIsOneLeafAndTwoDispatches(t *testing.T) {
 	const westTarget = "target-west"
 	user := mustProducer(t, "alice")
-	east, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
+	east, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new east agent: %v", err)
 	}
-	west, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: westTarget})
+	west, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: westTarget})
 	if err != nil {
 		t.Fatalf("new west agent: %v", err)
 	}
@@ -930,7 +976,7 @@ func TestEnrollmentBroadcastIsOneLeafAndTwoDispatches(t *testing.T) {
 	if err := west.Bootstrap(testTrust()); err != nil {
 		t.Fatalf("bootstrap west: %v", err)
 	}
-	manager := resourcemanager.New(testTenant, nil)
+	manager := newTestManager(t, nil)
 	if err := manager.RegisterAgent(testTarget, east); err != nil {
 		t.Fatalf("register east: %v", err)
 	}
@@ -978,7 +1024,7 @@ func TestAcceptanceWithoutRouteLeavesDispatchableOutbox(t *testing.T) {
 		t.Fatalf("failed dispatch appended evidence: size = %d", got)
 	}
 
-	agent, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: missing})
+	agent, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: missing})
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
 	}
@@ -998,13 +1044,13 @@ func TestAcceptanceWithoutRouteLeavesDispatchableOutbox(t *testing.T) {
 
 func TestDispatchDoesNotAppendOrReauthorize(t *testing.T) {
 	var delivers int
-	manager := resourcemanager.New(testTenant, func(req resourcemanager.AuthorizationRequest) error {
+	manager := newTestManager(t, func(req resourcemanager.AuthorizationRequest) error {
 		if req.Action == resourcemanager.ActionDeliver {
 			delivers++
 		}
 		return nil
 	})
-	agent, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
+	agent, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
 	}
@@ -1086,7 +1132,7 @@ func TestFailedAcceptDoesNotRegisterEvidence(t *testing.T) {
 	s := newEnrolledScenario(t)
 	before := s.manager.EvidenceLogSize()
 	evidence := mustSignDeployment(t, s.user, deploymentName("denied"), 1, []byte(`{"ok":true}`))
-	denied := resourcemanager.New(testTenant, func(resourcemanager.AuthorizationRequest) error {
+	denied := newTestManager(t, func(resourcemanager.AuthorizationRequest) error {
 		return errors.New("denied")
 	})
 	if _, err := denied.AcceptDelivery(context.Background(), s.user.Principal(), evidence); !errors.Is(err, resourcemanager.ErrUnauthorized) {
@@ -1208,7 +1254,7 @@ func newScenario(t *testing.T) *scenario {
 func newScenarioWithTrust(t *testing.T, trust protocol.TrustConfiguration) *scenario {
 	t.Helper()
 	user := mustProducer(t, "alice")
-	agent, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
+	agent, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new agent: %v", err)
 	}
@@ -1216,7 +1262,10 @@ func newScenarioWithTrust(t *testing.T, trust protocol.TrustConfiguration) *scen
 		t.Fatalf("bootstrap: %v", err)
 	}
 	recorder := &recordingAgent{inner: agent}
-	manager := resourcemanager.New(testTenant, nil)
+	manager, err := resourcemanager.New(resourcemanager.Config{TenantID: testInternalTenant, Tenant: testTenantIdentity(), Trust: trust}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.RegisterAgent(testTarget, recorder); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
@@ -1241,11 +1290,11 @@ func newEnrolledManagedResourceScenario(t *testing.T) *scenario {
 func newTwoTargetScenario(t *testing.T, westTarget string) *scenario {
 	t.Helper()
 	user := mustProducer(t, "alice")
-	east, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: testTarget})
+	east, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: testTarget})
 	if err != nil {
 		t.Fatalf("new east agent: %v", err)
 	}
-	west, err := deliveryagent.New(deliveryagent.Config{TenantID: testTenant, TargetID: westTarget})
+	west, err := deliveryagent.New(deliveryagent.Config{Tenant: testTenantIdentity(), ProviderTenant: testTenantIdentity(), TargetID: westTarget})
 	if err != nil {
 		t.Fatalf("new west agent: %v", err)
 	}
@@ -1256,7 +1305,7 @@ func newTwoTargetScenario(t *testing.T, westTarget string) *scenario {
 		t.Fatalf("bootstrap west: %v", err)
 	}
 	recorder := &recordingAgent{inner: east}
-	manager := resourcemanager.New(testTenant, nil)
+	manager := newTestManager(t, nil)
 	if err := manager.RegisterAgent(testTarget, recorder); err != nil {
 		t.Fatalf("register east agent: %v", err)
 	}
@@ -1288,7 +1337,6 @@ func enrollProducer(t *testing.T, s *scenario, c *producer.Producer) {
 func mustProducer(t *testing.T, subject protocol.Subject) *producer.Producer {
 	t.Helper()
 	c, err := producer.New(producer.Config{
-		TenantID: testTenant,
 		Principal: protocol.Principal{
 			Scheme:    protocol.IdentitySchemeOIDCSubV1,
 			Authority: testIssuer,
@@ -1421,55 +1469,76 @@ func testTrust() protocol.TrustConfiguration {
 				Scheme:    protocol.IdentitySchemeOIDCSubV1,
 				Authority: testIssuer,
 			},
-			TenantMapping:      protocol.TenantMapping{StaticTenant: testTenant},
+
 			ProvenanceProfiles: []protocol.ProfileConfig{profile},
 			DeliveryPolicies: []protocol.DeliveryPolicy{
 				{
 					Match: protocol.PolicyMatch{
-						PredicateType:     protocol.PredicateTypeDeploymentV1,
-						RootAuthorization: true,
+						PredicateType: protocol.PredicateTypeDeploymentV1,
 					},
-					LiveCredential: protocol.RequirementNone,
-					Provenance:     protocol.RequirementRequired,
-					Profiles:       []protocol.ProfileConfig{profile},
+					LiveCredential:     protocol.RequirementNone,
+					Provenance:         protocol.RequirementRequired,
+					RequireEvidenceLog: true,
+					Profiles:           []protocol.Digest{profileDigest(profile)},
 				},
 				{
 					Match: protocol.PolicyMatch{
-						PredicateType:     protocol.PredicateTypeManagedResourceV1,
-						RootAuthorization: true,
+						PredicateType: protocol.PredicateTypeManagedResourceV1,
 					},
-					LiveCredential: protocol.RequirementNone,
-					Provenance:     protocol.RequirementRequired,
-					Profiles:       []protocol.ProfileConfig{profile},
+					LiveCredential:     protocol.RequirementNone,
+					Provenance:         protocol.RequirementRequired,
+					RequireEvidenceLog: true,
+					Profiles:           []protocol.Digest{profileDigest(profile)},
 				},
 				{
 					Match: protocol.PolicyMatch{
-						PredicateType:     protocol.PredicateTypeFulfillmentRelationV1,
-						RootAuthorization: false,
+						PredicateType: protocol.PredicateTypeFulfillmentRelationV1,
 					},
-					LiveCredential: protocol.RequirementNone,
-					Provenance:     protocol.RequirementRequired,
-					Profiles:       []protocol.ProfileConfig{profile},
+					LiveCredential:     protocol.RequirementNone,
+					Provenance:         protocol.RequirementRequired,
+					RequireEvidenceLog: true,
+					Profiles:           []protocol.Digest{profileDigest(profile)},
 				},
 				{
 					Match: protocol.PolicyMatch{
-						PredicateType:     directkey.PredicateTypeEnrollmentV1,
-						RootAuthorization: true,
+						PredicateType: directkey.PredicateTypeEnrollmentV1,
 					},
-					LiveCredential: protocol.RequirementNone,
-					Provenance:     protocol.RequirementRequired,
-					Profiles:       []protocol.ProfileConfig{profile},
+					LiveCredential:     protocol.RequirementNone,
+					Provenance:         protocol.RequirementRequired,
+					RequireEvidenceLog: true,
+					Profiles:           []protocol.Digest{profileDigest(profile)},
 				},
 				{
 					Match: protocol.PolicyMatch{
-						PredicateType:     protocol.PredicateTypeTrustConfigUpdateV1,
-						RootAuthorization: true,
+						PredicateType: protocol.PredicateTypeTrustConfigUpdateV1,
 					},
-					LiveCredential: protocol.RequirementNone,
-					Provenance:     protocol.RequirementRequired,
-					Profiles:       []protocol.ProfileConfig{profile},
+					LiveCredential:     protocol.RequirementNone,
+					Provenance:         protocol.RequirementRequired,
+					RequireEvidenceLog: true,
+					Profiles:           []protocol.Digest{profileDigest(profile)},
 				},
 			},
 		}},
 	}
+}
+
+func testTenantIdentity() protocol.Tenant {
+	return protocol.Tenant{PrincipalAuthority: protocol.PrincipalAuthority{Scheme: protocol.IdentitySchemeOIDCSubV1, Authority: testIssuer}}
+}
+
+func newTestManager(t *testing.T, authorizer resourcemanager.Authorizer) *resourcemanager.Manager {
+	t.Helper()
+	manager, err := resourcemanager.New(resourcemanager.Config{TenantID: testInternalTenant, Tenant: testTenantIdentity(), Trust: testTrust()}, authorizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
+}
+
+func profileDigest(profile protocol.ProfileConfig) protocol.Digest {
+	reference, err := profile.Digest()
+	if err != nil {
+		panic(err)
+	}
+	return reference
 }

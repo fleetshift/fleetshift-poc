@@ -36,9 +36,10 @@ var (
 )
 
 // AuthorizationRequest is the RM's ordinary permission check. Provenance
-// does not reproduce this policy at the target.
+// does not reproduce this policy at the target. TenantID is local to the RM;
+// Caller retains the authenticated external identity.
 type AuthorizationRequest struct {
-	TenantID protocol.TenantID
+	TenantID string
 	Caller   protocol.Principal
 	Action   string
 	TargetID string
@@ -75,6 +76,9 @@ type StoredDelivery struct {
 // extracted from each statement's evidence by the selected profile.
 // EvidenceLog is the shared checkpoint transition and consistency proof;
 // it does not authorize content. Per-item inclusion lives on Item.
+// Common code treats the package and all nested buffers as immutable. A target
+// takes its own snapshot at ingestion; assembling a package can borrow stored
+// immutable evidence.
 type DeliveryPackage struct {
 	Root        protocol.Item               `json:"root"`
 	Supporting  []protocol.Item             `json:"supporting,omitempty"`
@@ -118,11 +122,12 @@ type storedDispatch struct {
 }
 
 type plannedEvidence struct {
-	evidence protocol.TypedEvidence
-	identity protocol.Digest
-	leafHash []byte
-	index    uint64
-	isNew    bool
+	evidence    protocol.TypedEvidence
+	identity    protocol.Digest
+	leafHash    []byte
+	index       uint64
+	isNew       bool
+	registerLog bool
 }
 
 type agentRoute struct {
@@ -136,7 +141,11 @@ type agentRoute struct {
 type Manager struct {
 	mu sync.Mutex
 
-	tenantID   protocol.TenantID
+	// Tenant is a POC stand-in default for a caller's tenant
+	tenantID   string
+	tenant     protocol.Tenant
+	trust      protocol.TrustConfiguration
+	lookup     protocol.ResourceManagerLookup
 	authorizer Authorizer
 	profile    *directkey.Manager
 	tree       *merklelog.Tree
@@ -150,13 +159,31 @@ type Manager struct {
 	agents               map[string]*agentRoute
 }
 
-// New constructs a manager for one FleetShift tenant.
-func New(tenantID protocol.TenantID, authorizer Authorizer) *Manager {
+// Config binds an external tenant identity to an RM-local routing ID.
+// Producers and delivery agents receive only the external identity.
+type Config struct {
+	TenantID string
+	Tenant   protocol.Tenant
+	Trust    protocol.TrustConfiguration
+}
+
+// New constructs a manager for one internal resource-routing tenant using
+// authenticated policy shared with its delivery agents. Profiles establish
+// external identities; policy decides evidence-log registration per assertion.
+func New(config Config, authorizer Authorizer) (*Manager, error) {
+	if config.TenantID == "" || config.Tenant.Scheme == "" || config.Tenant.Authority == "" {
+		return nil, errors.New("routing tenant and external tenant identity are required")
+	}
+	if err := config.Trust.Validate(); err != nil {
+		return nil, err
+	}
 	if authorizer == nil {
 		authorizer = func(AuthorizationRequest) error { return nil }
 	}
-	return &Manager{
-		tenantID:             tenantID,
+	manager := &Manager{
+		trust:                config.Trust.Clone(),
+		tenantID:             config.TenantID,
+		tenant:               config.Tenant,
 		authorizer:           authorizer,
 		profile:              directkey.NewManager(),
 		tree:                 merklelog.New(),
@@ -166,6 +193,10 @@ func New(tenantID protocol.TenantID, authorizer Authorizer) *Manager {
 		dispatches:           make(map[DispatchID]storedDispatch),
 		agents:               make(map[string]*agentRoute),
 	}
+	manager.lookup = func(pt protocol.ProvenanceType) (protocol.ResourceManagerAPI, bool) {
+		return manager.profile, pt == manager.profile.ProvenanceType()
+	}
+	return manager, nil
 }
 
 // RegisterAgent installs the delivery route for one target. The manager starts
@@ -189,10 +220,10 @@ func (m *Manager) RegisterAgent(targetID string, agent DeliveryAgent) error {
 }
 
 // AcceptDirectKeyEnrollment is the typed direct-key/v1 lifecycle API. It is
-// not a generic RegisterKey. After the RM's own enrollment check it registers
-// the evidence identity in the evidence log (reusing a prior index if this
-// exact envelope was already accepted) and enqueues one dispatch per currently
-// registered agent. It does not perform network I/O.
+// not a generic RegisterKey. After the RM's own enrollment check it stores the
+// evidence and registers its identity if policy or the mechanism requires a
+// log (reusing any existing registration). It enqueues one dispatch per
+// currently registered agent without network I/O.
 func (m *Manager) AcceptDirectKeyEnrollment(_ context.Context, caller protocol.Principal, evidence protocol.TypedEvidence) (DeliveryReceipt, error) {
 	if err := m.authorize(caller, ActionEnroll, ""); err != nil {
 		return DeliveryReceipt{}, err
@@ -201,7 +232,7 @@ func (m *Manager) AcceptDirectKeyEnrollment(_ context.Context, caller protocol.P
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	if caller.Scheme != hints.Scheme || caller.Authority != hints.Authority || caller.Subject != hints.Subject {
+	if !callerMatches(caller, hints) {
 		return DeliveryReceipt{}, fmt.Errorf("%w: enrollment principal does not match caller", ErrUnauthorized)
 	}
 	m.mu.Lock()
@@ -230,7 +261,7 @@ func (m *Manager) AcceptDelivery(_ context.Context, caller protocol.Principal, e
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	assertion, err := courier.DecodeAssertion(evidence)
+	assertion, err := courier.DecodeAssertion(cloneEvidence(evidence))
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
@@ -239,13 +270,13 @@ func (m *Manager) AcceptDelivery(_ context.Context, caller protocol.Principal, e
 		return DeliveryReceipt{}, err
 	}
 	// TODO: this is a stand-in for richer authorization logic
-	if scope.TenantID != m.tenantID {
+	if scope.Tenant != m.tenant {
 		return DeliveryReceipt{}, fmt.Errorf("%w: delivery tenant mismatch", ErrUnauthorized)
 	}
 	if err := m.authorize(caller, ActionDeliver, scope.TargetID); err != nil {
 		return DeliveryReceipt{}, err
 	}
-	hints, err := courier.CheckDelivery(evidence)
+	hints, err := courier.CheckDelivery(cloneEvidence(evidence))
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
@@ -257,7 +288,7 @@ func (m *Manager) AcceptDelivery(_ context.Context, caller protocol.Principal, e
 		if err != nil {
 			return DeliveryReceipt{}, err
 		}
-		if _, err := itemCourier.CheckDelivery(item); err != nil {
+		if _, err := itemCourier.CheckDelivery(cloneEvidence(item)); err != nil {
 			return DeliveryReceipt{}, err
 		}
 	}
@@ -267,7 +298,7 @@ func (m *Manager) AcceptDelivery(_ context.Context, caller protocol.Principal, e
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	return m.commitAcceptanceLocked(ordered, scope.TargetID, nil)
+	return m.commitAcceptanceLocked(ordered, scope.TargetID, nil, false)
 }
 
 // SubmitDelivery accepts evidence then dispatches the resulting outbox
@@ -308,17 +339,17 @@ func (m *Manager) commitEnrollmentLocked(evidence protocol.TypedEvidence) (Deliv
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	return m.commitAcceptanceLocked([]protocol.TypedEvidence{evidence}, "", &transition)
+	return m.commitAcceptanceLocked([]protocol.TypedEvidence{evidence}, "", &transition, false)
 }
 
-func (m *Manager) commitAcceptanceLocked(ordered []protocol.TypedEvidence, targetID string, enrollment *directkey.EnrollmentTransition) (DeliveryReceipt, error) {
-	planned, err := m.planEvidenceLocked(ordered)
+func (m *Manager) commitAcceptanceLocked(ordered []protocol.TypedEvidence, targetID string, enrollment *directkey.EnrollmentTransition, forceLog bool) (DeliveryReceipt, error) {
+	planned, err := m.planEvidenceLocked(ordered, forceLog)
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
 	newHashes := make([][]byte, 0, len(planned))
 	for _, item := range planned {
-		if item.isNew {
+		if item.registerLog {
 			newHashes = append(newHashes, item.leafHash)
 		}
 	}
@@ -329,7 +360,7 @@ func (m *Manager) commitAcceptanceLocked(ordered []protocol.TypedEvidence, targe
 		}
 		next := pending.BaseSize()
 		for i := range planned {
-			if !planned[i].isNew {
+			if !planned[i].registerLog {
 				continue
 			}
 			planned[i].index = next
@@ -342,6 +373,8 @@ func (m *Manager) commitAcceptanceLocked(ordered []protocol.TypedEvidence, targe
 	for _, item := range planned {
 		if item.isNew {
 			m.evidenceByID[item.identity] = cloneEvidence(item.evidence)
+		}
+		if item.registerLog {
 			m.logIndexByEvidenceID[item.identity] = item.index
 		}
 	}
@@ -377,7 +410,7 @@ func (m *Manager) commitAcceptanceLocked(ordered []protocol.TypedEvidence, targe
 	return DeliveryReceipt{DeliveryID: deliveryID, DispatchIDs: dispatchIDs}, nil
 }
 
-func (m *Manager) planEvidenceLocked(ordered []protocol.TypedEvidence) ([]plannedEvidence, error) {
+func (m *Manager) planEvidenceLocked(ordered []protocol.TypedEvidence, forceLog bool) ([]plannedEvidence, error) {
 	planned := make([]plannedEvidence, 0, len(ordered))
 	for _, evidence := range ordered {
 		identity, err := evidence.Identity()
@@ -389,7 +422,7 @@ func (m *Manager) planEvidenceLocked(ordered []protocol.TypedEvidence) ([]planne
 			return nil, err
 		}
 		item := plannedEvidence{
-			evidence: cloneEvidence(evidence),
+			evidence: evidence,
 			identity: identity,
 			leafHash: leafHash,
 		}
@@ -397,11 +430,20 @@ func (m *Manager) planEvidenceLocked(ordered []protocol.TypedEvidence) ([]planne
 			if !sameEnvelope(existing, evidence) {
 				return nil, fmt.Errorf("%w: %s", ErrEvidenceCollision, identity)
 			}
-			item.index = m.logIndexByEvidenceID[identity]
 			item.isNew = false
 		} else {
 			item.isNew = true
 		}
+		required := forceLog
+		if !required {
+			required, err = m.requiresEvidenceLog(evidence)
+			if err != nil {
+				return nil, err
+			}
+		}
+		index, logged := m.logIndexByEvidenceID[identity]
+		item.index = index
+		item.registerLog = required && !logged
 		planned = append(planned, item)
 	}
 	return planned, nil
@@ -502,7 +544,9 @@ func (m *Manager) pushToRoute(ctx context.Context, route *agentRoute, dispatchID
 
 		// A successful call is the acknowledgement. The manager records exactly
 		// the checkpoint whose consistency and inclusion proofs were delivered.
-		route.checkpoint = update.Checkpoint
+		if pkg.EvidenceLog != nil {
+			route.checkpoint = pkg.EvidenceLog.Checkpoint
+		}
 		m.mu.Lock()
 		current = m.dispatches[dispatchID]
 		current.State = dispatchAcknowledged
@@ -525,12 +569,16 @@ func (m *Manager) deliveryPackageLocked(ctx context.Context, update protocol.Evi
 		}
 		out = append(out, item)
 	}
-	updateCopy := update
-	return DeliveryPackage{
-		EvidenceLog: &updateCopy,
-		Root:        root,
-		Supporting:  out,
-	}, nil
+	pkg := DeliveryPackage{Root: root, Supporting: out}
+	logged := root.EvidenceLog != nil
+	for _, item := range out {
+		logged = logged || item.EvidenceLog != nil
+	}
+	if logged {
+		updateCopy := update
+		pkg.EvidenceLog = &updateCopy
+	}
+	return pkg, nil
 }
 
 func (m *Manager) assembleItemLocked(ctx context.Context, id protocol.Digest) (protocol.Item, error) {
@@ -581,7 +629,7 @@ func (m *Manager) evidenceLogUpdateLocked(from protocol.Checkpoint) (protocol.Ev
 func (m *Manager) evidenceLogInclusionLocked(identity protocol.Digest) (*protocol.EvidenceLogInclusion, error) {
 	index, ok := m.logIndexByEvidenceID[identity]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", errUnknownEvidence, identity)
+		return nil, nil
 	}
 	size := m.tree.Size()
 	if index >= size {
@@ -623,7 +671,7 @@ func (m *Manager) lookupEvidenceLocked(id protocol.Digest) (protocol.TypedEviden
 	if !ok {
 		return protocol.TypedEvidence{}, fmt.Errorf("%w: %s", errUnknownEvidence, id)
 	}
-	return cloneEvidence(evidence), nil
+	return evidence, nil
 }
 
 // EvidenceLogSize is the number of accepted evidence-log leaves.
@@ -708,14 +756,15 @@ func (c *CompromisedManager) CommitEnrollment(ctx context.Context, evidence prot
 }
 
 // PushDelivery stores and routes a delivery without authorization or the
-// RM's own provenance check. Evidence registration, first-index assignment,
-// and outbox enqueue still use the honest-service path.
+// RM's own provenance check. It forces log registration so malformed or
+// policy-rejected evidence can exercise rejection after a valid prefix.
+// Deduplication, first-index assignment, and outbox enqueue use the common path.
 func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol.TypedEvidence, supporting ...protocol.TypedEvidence) (DeliveryReceipt, error) {
 	courier, err := c.manager.courier(evidence.ProvenanceType)
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	assertion, err := courier.DecodeAssertion(evidence)
+	assertion, err := courier.DecodeAssertion(cloneEvidence(evidence))
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
@@ -728,7 +777,7 @@ func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol
 		return DeliveryReceipt{}, err
 	}
 	c.manager.mu.Lock()
-	receipt, err := c.manager.commitAcceptanceLocked(ordered, scope.TargetID, nil)
+	receipt, err := c.manager.commitAcceptanceLocked(ordered, scope.TargetID, nil, true)
 	c.manager.mu.Unlock()
 	if err != nil {
 		return receipt, err
@@ -737,10 +786,41 @@ func (c *CompromisedManager) PushDelivery(ctx context.Context, evidence protocol
 }
 
 func (m *Manager) courier(pt protocol.ProvenanceType) (protocol.ResourceManagerAPI, error) {
-	if m.profile.ProvenanceType() != pt {
+	courier, ok := m.lookup(pt)
+	if !ok || courier == nil || courier.ProvenanceType() != pt {
 		return nil, fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, pt)
 	}
-	return m.profile, nil
+	return courier, nil
+}
+
+func (m *Manager) requiresEvidenceLog(evidence protocol.TypedEvidence) (bool, error) {
+	courier, err := m.courier(evidence.ProvenanceType)
+	if err != nil {
+		return false, err
+	}
+	hints, err := courier.ParseHints(cloneEvidence(evidence))
+	if err != nil {
+		return false, err
+	}
+	authority, policy, err := m.trust.SelectPolicy(hints)
+	if err != nil {
+		return false, err
+	}
+	profiles, err := authority.ResolveProfiles(policy.Profiles)
+	if err != nil {
+		return false, err
+	}
+	admitted := false
+	for _, profile := range profiles {
+		if profile.ProvenanceType == evidence.ProvenanceType {
+			admitted = true
+			break
+		}
+	}
+	if !admitted {
+		return false, fmt.Errorf("%w: policy admits no profile for %s", protocol.ErrNoSuccessfulProfile, evidence.ProvenanceType)
+	}
+	return policy.RequireEvidenceLog || courier.RequiresEvidenceLog(), nil
 }
 
 func (m *Manager) assemble(ctx context.Context, evidence protocol.TypedEvidence) (protocol.SupportMaterial, error) {
@@ -748,7 +828,7 @@ func (m *Manager) assemble(ctx context.Context, evidence protocol.TypedEvidence)
 	if err != nil {
 		return protocol.SupportMaterial{}, err
 	}
-	return courier.AssembleSupportMaterial(ctx, evidence)
+	return courier.AssembleSupportMaterial(ctx, cloneEvidence(evidence))
 }
 
 func (m *Manager) assembleStatement(ctx context.Context, evidence protocol.TypedEvidence) (protocol.SignedStatement, error) {
@@ -757,7 +837,7 @@ func (m *Manager) assembleStatement(ctx context.Context, evidence protocol.Typed
 		return protocol.SignedStatement{}, err
 	}
 	return protocol.SignedStatement{
-		Evidence: cloneEvidence(evidence),
+		Evidence: evidence,
 		Support:  cloneSupport(support),
 	}, nil
 }
@@ -767,7 +847,7 @@ func prependRoot(root protocol.TypedEvidence, supporting []protocol.TypedEvidenc
 	if err != nil {
 		return nil, err
 	}
-	ordered := []protocol.TypedEvidence{cloneEvidence(root)}
+	ordered := []protocol.TypedEvidence{root}
 	seen := map[protocol.Digest]protocol.TypedEvidence{rootID: ordered[0]}
 	for _, item := range supporting {
 		id, err := item.Identity()
@@ -780,9 +860,8 @@ func prependRoot(root protocol.TypedEvidence, supporting []protocol.TypedEvidenc
 			}
 			continue
 		}
-		cloned := cloneEvidence(item)
-		seen[id] = cloned
-		ordered = append(ordered, cloned)
+		seen[id] = item
+		ordered = append(ordered, item)
 	}
 	return ordered, nil
 }
@@ -801,5 +880,5 @@ func cloneSupport(in protocol.SupportMaterial) protocol.SupportMaterial {
 }
 
 func callerMatches(caller protocol.Principal, hints protocol.TentativeHints) bool {
-	return caller.Scheme == hints.Scheme && caller.Authority == hints.Authority && caller.Subject == hints.Subject
+	return caller.Scheme == hints.Scheme && caller.Authority == hints.Authority && caller.TenantPartition == hints.TenantPartition && caller.Subject == hints.Subject
 }

@@ -21,8 +21,19 @@ type Subject string
 // (scheme, authority). An empty value means the principal has no partition.
 type TenantPartition string
 
-// TenantID is a FleetShift tenant identifier produced by tenant mapping.
-type TenantID string
+// Tenant is the external tenant identity established by a provenance profile.
+// Its partition is scoped by principal authority, just like a subject. An
+// empty partition denotes the unpartitioned tenant under that authority.
+// Internal FleetShift routing IDs remain local to the resource manager.
+type Tenant struct {
+	PrincipalAuthority
+	Partition TenantPartition `json:"partition,omitempty"`
+}
+
+// Tenant returns the principal's authority-scoped external tenant identity.
+func (p Principal) Tenant() Tenant {
+	return Tenant{PrincipalAuthority: p.PrincipalAuthority(), Partition: p.TenantPartition}
+}
 
 // FullResourceName is an AIP-122 full resource name of the form
 // "//{service}/{collection}/{id}", for example

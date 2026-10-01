@@ -92,7 +92,7 @@ For an OIDC credential, verification normally includes:
 - audience or resource indicator;
 - expiry, not-before, and other freshness checks;
 - subject and any claims consumed by policy constraints; and
-- verified tenant-partition mapping.
+- authenticated tenant partition scoped by principal authority.
 
 An X.509 or another credential method performs its corresponding chain,
 purpose, name, revocation, and freshness checks before yielding the same

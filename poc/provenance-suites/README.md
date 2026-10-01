@@ -49,7 +49,7 @@ the evidence bytes; `Finish` emits it. `SelectAndVerify` takes the package
 take the `SignedStatement`, not the enclosing `Item`.
 
 Common resource-manager code never parses `TypedEvidence` bytes. It owns the
-immutable evidence repository and assigns each accepted identity one
+immutable evidence repository and assigns each log-required identity one
 canonical evidence-log position. Content deliveries look up the installed
 profile by provenance type, unwrap the inner statement with
 `DecodeAssertion`, then read routing identity with `DecodeDeliveryScope`.
@@ -59,12 +59,33 @@ agent. That pairing is why statement encodings can stay common while
 evidence encodings stay profile-owned.
 
 Common target code runs the documented selection algorithm:
-untrusted provenance type and hints locate `AuthorityConfig`, one
-unambiguous delivery policy supplies an ordered `any-of` profile list,
+untrusted provenance type and hints locate `AuthorityConfig`, the first
+matching delivery policy supplies an ordered `any-of` profile list,
 each candidate runs `Prepare`, occurrence verification, and `Finish`,
-the first complete success wins, then principal and tenant mapping are
-re-checked. Implementations arrive through trusted software; unknown types
+the first complete success wins, then external principal, tenant identity, and
+policy selection are rechecked. Implementations arrive through trusted software; unknown types
 fail closed.
+
+Each authority defines profile configurations once. Delivery policies refer to
+those configurations by exact digest, and can match one external tenant
+partition or default to all partitions. Policies are evaluated in configured
+order, and the first match wins. Put tenant exceptions before the match-all
+default; an earlier default shadows later exceptions. Policy order is bound
+by the authority-configuration digest. Verification failure never falls back
+to another policy. References are resolved before any attempt, and authenticated
+identity must select the same policy entry as the hints. Configuration
+validation checks even shadowed policies' structure and profile references.
+Evidence cannot supply anchors or choose historical configuration by digest.
+
+A tenant identity is `(scheme, authority, partition?)`, derived from the
+profile-authenticated principal. Producers, signed delivery scopes, and agent
+provisioning use that external identity. Internal tenant IDs exist only in RM
+configuration and its permission hook. The agent needs no external-to-internal
+mapping. Each assertion authenticates under its own source policy. Common
+semantics then bind resource intent to its provisioned tenant and fulfillment
+relations to the platform-wide provider reference. Each platform has one
+provider tenant and zero or more consumers, sharing one API; the provider
+reference is provisioned separately from authority/profile definitions.
 
 Lifecycle operations stay typed per mechanism at the resource manager.
 Direct-key enrollment is not a generic `RegisterKey` and is not a method of
@@ -75,6 +96,20 @@ predicate type then selects apply: intent predicates use fulfillment apply,
 predicates the selected profile `Owns` call `TargetAPI.Apply`, and
 `trust-config-update/v1` is reserved on the agent. Unknown predicates fail
 closed even if policy matched.
+
+## Value ownership
+
+Evidence, package items, published trust configuration, temporal constraints,
+and verification results are immutable within common code, including their
+nested slices and pointers. Common lookups, selection, normalization, cache
+reads, and semantic callbacks share those values directly. The Go types
+explicitly document this contract.
+
+External package ingestion and trust bootstrap take independent snapshots.
+Copies at profile and time-adapter boundaries isolate their buffers from
+common state. Cached results are shared internally, and suite-owned Apply
+receives a detached request. Replace an immutable value with a new one when
+its content or configuration changes.
 
 ## Typing layers
 
@@ -126,9 +161,9 @@ with a deployment does not change apply.
   uses only the retained mapping. `Finish` emits the authenticated
   statement; `DecodeAssertion` unwraps it without authenticating.
 - `RequiresEvidenceLog` is false and `Prepare` returns no timestamp
-  bindings. The POC tenant policy still requires the log, so common
-  selection verifies inclusion; `Finish` returns no constraints, and
-  normalization yields an unbounded window.
+  bindings. Delivery policy decides whether inclusion is required; common
+  selection also verifies any supplied optional inclusion. `Finish` returns
+  no constraints, and normalization yields an unbounded window.
 
 That is weaker than continuity/v3 or Sigstore on purpose. A compromised
 resource manager can win the first enrollment bind. It cannot later
@@ -164,15 +199,16 @@ controlled producer
 resource manager
   - performs ordinary API authorization through an Authorizer hook
   - stores immutable TypedEvidence in a common repository
-  - assigns one evidence-log position per accepted TypedEvidence identity
-    (root, supporting, and lifecycle), independently of later deliveries
-    or target fanout
+  - resolves each accepted item's source policy and unions its log requirement
+    with the installed mechanism's requirement
+  - assigns one position per log-required TypedEvidence identity (root,
+    supporting, and lifecycle), independently of delivery or target fanout
   - enqueues separate delivery/outbox records; a log index is not a retry
     handle
-  - couriers a package-wide evidence-log update (checkpoint transition and
-    consistency from the agent's last ack) plus an Item for each stored
-    identity (SignedStatement with that identity's inclusion), including
-    optional supporting items such as fulfillment relations
+  - couriers an Item for each stored identity, including fulfillment support;
+    registered items carry inclusion under a shared checkpoint update with
+    consistency from the agent's last acknowledgement
+  - omits the update when no couriered item is registered
   - submits typed direct-key enrollment the same way: register, enqueue,
     then Dispatch to every currently registered agent
   - assembles empty support material for this profile
@@ -186,12 +222,21 @@ resource manager
 delivery agent
   - is bootstrapped with authenticated AuthorityConfig
   - never returns to TOFU after initialization
-  - verifies package-wide log consistency and inclusion of the root Item
-    through `temporal.Prepare` before profile selection
-  - selects a profile from policy and runs `SelectAndVerify` on each
-    reached Item (root, then used supporting). That coordinator runs
-    `Prepare`, then occurrence verification, then `Finish`; unused supporting
-    inclusions are not verified
+  - first bounds and snapshots the whole couriered package; it rejects
+    duplicate evidence identities, bounds checkpoint-root encodings, and
+    validates every supplied proof's encoding
+  - verifies any supplied package log update and root inclusion through
+    `temporal.Prepare` before profile selection; absent log material leaves
+    retained state unchanged
+  - uses one private `verificationSession` per delivery to select and verify
+    the root and any semantically selected supporting items through
+    `SelectAndVerify`; successful results are memoized by evidence identity
+    under fixed session trust; semantic callbacks check tenant relationships
+    independently on every use, including cache hits
+  - parses supporting hints lazily through each item's installed provenance
+    verifier; hints locate candidates but do not authorize them or create
+    dependency edges
+  - leaves unused supporting inclusions cryptographically unverified
   - projects the **root** `VerificationResult` into `ApplyRequest.Temporal`
     (used-supporting positions stay on that node's result, not in Apply)
   - dispatches on authenticated predicate type: intent apply, profile-owned
@@ -199,21 +244,27 @@ delivery agent
 ```
 
 Storage is in memory. The evidence log is an RFC 6962 Merkle tree. The honest
-RM assigns each accepted `TypedEvidence` identity one canonical leaf at
-acceptance, not per delivery or outbox entry. Retrying or reusing evidence
-does not append it again. Each couriered package carries a shared checkpoint
-transition plus consistency proof, and each `Item` discloses that statement's
-accepted position. The verifier recomputes the evidence identity from the
-adjacent statement; inclusion does not serialize a leaf digest. Unrelated
-accepted-evidence leaves are skipped via consistency, not listed. The agent
-accepts a package only when `From` equals the retained checkpoint exactly;
+RM assigns each log-required `TypedEvidence` identity one canonical leaf at
+registration, not per delivery or outbox entry. Retrying or reusing evidence
+does not append it again. A package with registered items carries a shared
+checkpoint transition and consistency proof, and each registered `Item`
+discloses its position. A policy can require root logging, support logging,
+both, or neither. Mechanism requirements cannot be disabled by policy. The
+verifier recomputes the evidence identity from the adjacent statement; inclusion
+does not serialize a leaf digest. Unrelated accepted-evidence leaves are skipped via consistency, not listed. The agent
+accepts a supplied log update only when `From` equals its retained checkpoint;
 an older `From` is stale even if Merkle consistency against the retained head
-would succeed. This POC verifies inclusion for reached items: the root Item
-in `Prepare`, then `SelectAndVerify` for that root and any used supporting
-Item. Unused supporting inclusions are not verified. There is no attestation
-graph, credential presentation, rotation, or historical cutoff yet. Those
-belong to the hybrid attestation POC and the mature profiles. This suite
-implements only `RegisteredSelfTarget` for fulfillment relations.
+would succeed. This POC verifies supplied root inclusion in `Prepare`; an
+unlogged root can accompany logged support. The verification session calls
+`SelectAndVerify` for the root and any used supporting Item. Repeated
+authentication of an identity reuses the successful result; each semantic use
+still checks its tenant relationships. Assertion purpose selects provenance
+policy regardless of package position; predicate dispatch determines whether the root can produce
+an action or apply a suite-owned control event. Unused supporting inclusions
+are structurally checked but not cryptographically verified. There is no
+full attestation graph, credential presentation, rotation, or historical cutoff
+yet. Those belong to the hybrid attestation POC and the mature profiles. This suite implements only
+`RegisteredSelfTarget` for fulfillment relations.
 
 ## Security cases pinned by tests
 
@@ -221,7 +272,7 @@ implements only `RegisteredSelfTarget` for fulfillment relations.
 | --- | --- |
 | Producer enrolls and signs a `deployment/v1` authorization | Target applies the typed manifests |
 | Enrollment is logged and Delivered to every registered agent | One evidence-log leaf and two dispatches; both agents Apply the mapping; later content consistency-proves over the enrollment leaf |
-| Root plus two supporting statements accepted together | Three new evidence-log leaves; stored delivery holds identities, not duplicate bytes |
+| Root plus two supporting statements under log-required policies | Three new evidence-log leaves; stored delivery holds identities, not duplicate bytes |
 | Same supporting evidence reused in a later delivery | First index retained; log grows only for new evidence |
 | Same evidence resubmitted after intervening leaves | Canonical index does not move; no new leaf |
 | Duplicate supporting evidence in one acceptance | One leaf; stored support lists the identity once |
@@ -234,9 +285,13 @@ implements only `RegisteredSelfTarget` for fulfillment relations.
 | Managed resource with no relation, wrong resource type, or unenrolled relation signer | Rejected |
 | Fulfillment relation couriered with a deployment | Ignored; deployment apply is unchanged |
 | Tampered unused supporting inclusion | Ignored; deployment still applies |
+| Malformed proof digest on unused support | Rejected during structural catalog validation |
 | Tampered used supporting inclusion | Rejected; checkpoint still advances |
-| Missing used supporting inclusion | Rejected; checkpoint still advances |
+| Missing used supporting inclusion under a log-required policy | Rejected; checkpoint still advances |
 | Unknown root predicate | Fail closed |
+| Authenticated fulfillment relation presented as the root | Rejected by predicate dispatch; no effects |
+| Original intent reused as a dependency of a later delivery | Same assertion-purpose policy; verified once per identity in each delivery |
+| Cached authentication used for different semantic tenant checks | Matching use succeeds, mismatched use fails; one profile attempt, no edge from the rejected use |
 | Deployment item missing manifest media type | Rejected |
 | Resource manager signs a delivery with an unenrolled key | Rejected |
 | Resource manager changes assertion bytes after the user signs | Rejected by content digest binding |
@@ -253,6 +308,19 @@ implements only `RegisteredSelfTarget` for fulfillment relations.
 | Delivery to B while A is idle, then delivery to A | A's consistency proof covers B's leaf without disclosing B's evidence |
 | Root Item inclusion does not prove root evidence identity | Rejected |
 | Forked or skip-ahead log proofs | Rejected as a log fork, not reported as stale |
+| Duplicate root/supporting identity in one couriered package | Rejected before log preparation or apply |
+| More supporting candidates than the POC work bound | Rejected without truncating the candidate set |
+| Multiple hinted fulfillment relations (phase-6 migration rule) | Temporarily rejected as ambiguous before candidate provenance verification; phase 7 selects authenticated matches and skips candidate-local hint failures within the work bound |
+| Shared issuer, distinct consumer/provider partitions with the same subject | Separate principals; relation uses provider policy and provisioned tenant |
+| Consumer/provider policies independently require logging | All four combinations apply; only required identities register and retries add no leaves |
+| Mechanism requires logging while delivery policy makes it optional | Inclusion remains required at RM and target |
+| Tenant exception before default, or default before exception | First match controls logging at RM and target, including consumer/provider policies and retries |
+| First matching policy fails while a later policy could verify | Rejected without policy fallback |
+| Omitted tenant hint would select a different policy entry | Rejected after authentication |
+| Missing or duplicate profile configuration references | Invalid configuration before profile attempts |
+| Caller has the same issuer/subject but another tenant partition | RM rejects enrollment or delivery |
+| Authenticated relation with a mismatched or missing platform provider reference | Rejected before dependency selection or apply |
+| Signed delivery scope | Carries external tenant identity; internal routing ID stays in RM permission requests |
 
 ## Run it
 
@@ -274,8 +342,8 @@ No external identity provider, database, or transparency service is required.
 | `directkey/` | Naive profile: enrollment, signature encoding, retained mapping, trivial Prepare/Finish session |
 | `producer/` | Controlled-producer role |
 | `resourcemanager/` | Authorization, common evidence repository, evidence log, delivery/outbox, last-ack cache, typed enrollment accept, compromise harness |
-| `deliveryagent/` | Bootstrap, `temporal.Prepare` for package-wide consistency and root inclusion, `SelectAndVerify` for reached-item occurrence and provenance, predicate dispatch, apply |
-| `provenance_test.go` | End-to-end guarantees and accepted TOFU limitation |
+| `deliveryagent/` | Bootstrap, bounded structural evidence catalog, per-delivery memoized verification session, `temporal.Prepare` for supplied package consistency and root inclusion, predicate dispatch, apply |
+| `provenance_test.go`, `policy_integration_test.go` | End-to-end guarantees, cross-tenant policy/log combinations, and accepted TOFU limitation |
 
 ## Recommended next experiments
 
@@ -284,4 +352,5 @@ No external identity provider, database, or transparency service is required.
    attestation graph instead of applying a delivery authorization here.
 3. Implement `trust-config-update/v1` on the agent-owned handler, still
    through the same evidence log, selection, and delivery path.
-4. Add claim-derived tenant mapping and a second authority in one package.
+4. Recover external tenant partitions from real credentials and exercise a
+   second authority in the same package.

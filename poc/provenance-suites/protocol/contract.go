@@ -27,6 +27,10 @@ type ProducerAPI interface {
 // statement. The RM never parses TypedEvidence.Bytes itself.
 type ResourceManagerAPI interface {
 	ProvenanceType() ProvenanceType
+	// ParseHints locates tentative policy for registration without granting trust.
+	ParseHints(evidence TypedEvidence) (TentativeHints, error)
+	// RequiresEvidenceLog has the same mechanism requirement as TargetAPI.
+	RequiresEvidenceLog() bool
 	AssembleSupportMaterial(ctx context.Context, evidence TypedEvidence) (SupportMaterial, error)
 	CheckDelivery(evidence TypedEvidence) (TentativeHints, error)
 	DecodeAssertion(evidence TypedEvidence) (TypedAssertion, error)
@@ -58,6 +62,10 @@ type TargetAPI interface {
 // not copy item.EvidenceLog. Retained profile state stays with the
 // TargetAPI implementation and is associated with the authenticated
 // authority and profile configuration, never with an RM-supplied profile ID.
+// DeliveryContext contains hint-derived source policy fields, not the tenant
+// expected by a semantic consumer of the assertion.
+// Common selection detaches statement and configuration buffers at this
+// profile boundary so the implementation cannot change shared common values.
 type VerifyRequest struct {
 	Statement       SignedStatement
 	ProfileConfig   ProfileConfig
@@ -68,6 +76,7 @@ type VerifyRequest struct {
 // ApplyRequest is the authenticated result of SelectAndVerify plus verified
 // temporal facts for this subject. Suites use it to update retained proof
 // material for predicates they own. Intent predicates never reach Apply.
+// The agent detaches the request's buffers at this profile boundary.
 type ApplyRequest struct {
 	Authenticated AuthenticatedEvidence
 	Assertion     TypedAssertion
@@ -83,3 +92,7 @@ type ApplyRequest struct {
 // type. Implementations arrive through the verifier's trusted software supply
 // chain; unknown types fail closed.
 type TargetLookup func(ProvenanceType) (TargetAPI, bool)
+
+// ResourceManagerLookup returns installed courier and admission mechanisms
+// from the resource manager's trusted software supply chain.
+type ResourceManagerLookup func(ProvenanceType) (ResourceManagerAPI, bool)

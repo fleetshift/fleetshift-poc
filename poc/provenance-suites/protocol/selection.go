@@ -2,25 +2,39 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+const (
+	maxPreparedTimestampBindings = 16
+	maxPreparedTimestampBytes    = 512 * 1024
+)
+
+var errPreparedTimestampLimit = errors.New("prepared timestamp work limit exceeded")
 
 // SelectAndVerify runs the common delivery-policy selection algorithm and
 // returns the first profile attempt that fully verifies, including
 // occurrence verification, timestamp coordination, window normalization,
 // and the authenticated authority/profile/policy that produced the result.
+// Policy context comes from evidence hints and is rechecked after authentication;
+// tenant relationships belong to subsequent common semantic evaluation.
+// Inputs are borrowed immutable values. Returned configuration shares trust's
+// backing data. Copies are made where data crosses a profile boundary.
 //
 // The sequence is:
 //  1. Parse the untrusted provenance type, media type, and type-specific hints.
 //  2. Locate the authenticated AuthorityConfig by tentative (scheme, authority).
-//  3. Locate one unambiguous delivery policy from delivery context. Predicate
-//     type comes from evidence hints, not from a couriered assertion.
-//  4. Filter that policy's ordered profile list to the evidence's type.
+//  3. Select the first policy matching delivery context. Predicate type comes
+//     from evidence hints, not from a couriered assertion. Policy failure does
+//     not fall back to another policy.
+//  4. Resolve the policy's configuration digests within this authority, then
+//     filter the ordered profile list to the evidence's type.
 //  5. For each matching profile: BeginVerification, Prepare, verify the
 //     item's log occurrence, verify prepared timestamp bindings, Finish,
 //     normalize that attempt's constraints, and check temporal validity.
-//  6. Derive the canonical principal and tenant mapping, then re-evaluate.
-func SelectAndVerify(ctx context.Context, item Item, delivery DeliveryContext, trust TrustConfiguration, lookup TargetLookup, temporal TemporalVerificationServices) (VerificationResult, error) {
+//  6. Derive the canonical principal and external tenant, then re-evaluate.
+func SelectAndVerify(ctx context.Context, item Item, trust TrustConfiguration, lookup TargetLookup, temporal TemporalVerificationServices) (VerificationResult, error) {
 	evidence := item.Evidence
 	if evidence.ProvenanceType == "" || evidence.MediaType == "" {
 		return VerificationResult{}, fmt.Errorf("%w: provenance type and media type are required", ErrMalformedEvidence)
@@ -30,43 +44,43 @@ func SelectAndVerify(ctx context.Context, item Item, delivery DeliveryContext, t
 		return VerificationResult{}, fmt.Errorf("%w: %s", ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
 
-	hints, err := verifier.ParseHints(evidence)
+	hints, err := verifier.ParseHints(cloneTypedEvidence(evidence))
 	if err != nil {
 		return VerificationResult{}, err
 	}
 	if hints.PredicateType == "" {
 		return VerificationResult{}, fmt.Errorf("%w: predicate type hint is required", ErrMalformedEvidence)
 	}
-	delivery.PredicateType = hints.PredicateType
+	delivery := DeliveryContext{PredicateType: hints.PredicateType, TenantPartition: hints.TenantPartition}
 
-	authority, err := trust.Authority(PrincipalAuthority{Scheme: hints.Scheme, Authority: hints.Authority})
+	authority, policyIndex, err := trust.selectPolicy(hints)
 	if err != nil {
 		return VerificationResult{}, err
 	}
+	policy := authority.DeliveryPolicies[policyIndex]
 
-	policy, err := matchPolicy(authority, delivery)
-	if err != nil {
-		return VerificationResult{}, err
-	}
 	if err := checkProvenanceRequirement(policy); err != nil {
 		return VerificationResult{}, err
 	}
 
+	profiles, err := authority.ResolveProfiles(policy.Profiles)
+	if err != nil {
+		return VerificationResult{}, err
+	}
 	var last error
-	for _, profile := range policy.Profiles {
+	for _, profile := range profiles {
 		if profile.ProvenanceType != evidence.ProvenanceType {
-			continue
-		}
-		if !profileInstalled(authority, profile) {
-			last = fmt.Errorf("%w: policy profile is not in the authority's installed set", ErrUnknownProvenanceType)
 			continue
 		}
 		result, err := verifyCandidate(ctx, verifier, item, delivery, authority, policy, profile, temporal)
 		if err != nil {
+			if errors.Is(err, errPreparedTimestampLimit) {
+				return VerificationResult{}, err
+			}
 			last = err
 			continue
 		}
-		if err := reevaluate(policy, profile, delivery, hints, authority, result.Authenticated); err != nil {
+		if err := reevaluate(policyIndex, profile, hints, authority, result.Authenticated); err != nil {
 			return VerificationResult{}, err
 		}
 		return result, nil
@@ -78,10 +92,11 @@ func SelectAndVerify(ctx context.Context, item Item, delivery DeliveryContext, t
 }
 
 func verifyCandidate(ctx context.Context, verifier TargetAPI, item Item, delivery DeliveryContext, authority AuthorityConfig, policy DeliveryPolicy, profile ProfileConfig, temporal TemporalVerificationServices) (VerificationResult, error) {
+	// Detach the profile request from common immutable evidence and policy.
 	session, err := verifier.BeginVerification(ctx, VerifyRequest{
 		Statement:       cloneSignedStatement(item.SignedStatement),
-		ProfileConfig:   profile,
-		AuthorityConfig: authority,
+		ProfileConfig:   cloneProfileConfig(profile),
+		AuthorityConfig: cloneAuthorityConfig(authority),
 		DeliveryContext: delivery,
 	})
 	if err != nil {
@@ -91,8 +106,13 @@ func verifyCandidate(ctx context.Context, verifier TargetAPI, item Item, deliver
 	if err != nil {
 		return VerificationResult{}, err
 	}
+	if err := validatePreparedTimestampBounds(prep.Timestamps); err != nil {
+		return VerificationResult{}, err
+	}
+	// Take ownership of buffers returned by the profile before common use.
+	prep = cloneTemporalPreparation(prep)
 
-	position, err := verifyItemOccurrence(ctx, item, temporal, evidenceLogRequirement(verifier))
+	position, err := verifyItemOccurrence(ctx, item, temporal, evidenceLogRequirement(verifier, policy.RequireEvidenceLog))
 	if err != nil {
 		return VerificationResult{}, err
 	}
@@ -106,6 +126,7 @@ func verifyCandidate(ctx context.Context, verifier TargetAPI, item Item, deliver
 	if err != nil {
 		return VerificationResult{}, err
 	}
+	authenticated = cloneProvenanceAuthenticationResult(authenticated)
 
 	validity, err := NormalizeValidityWindow(authenticated.Established, authenticated.Retired)
 	if err != nil {
@@ -125,18 +146,91 @@ func verifyCandidate(ctx context.Context, verifier TargetAPI, item Item, deliver
 	}, nil
 }
 
-// pocTenantRequiresEvidenceLog is the package-private POC tenant policy:
-// every reached statement must have a verified tenant evidence-log
-// occurrence. Profile RequiresEvidenceLog() is unioned with this value.
-const pocTenantRequiresEvidenceLog = true
+func cloneTypedEvidence(in TypedEvidence) TypedEvidence {
+	return TypedEvidence{ProvenanceType: in.ProvenanceType, Encoded: in.Encoded.Clone()}
+}
 
-func evidenceLogRequirement(profile TargetAPI) EvidenceLogRequirement {
-	if profile.RequiresEvidenceLog() || pocTenantRequiresEvidenceLog {
+func cloneProvenanceAuthenticationResult(in ProvenanceAuthenticationResult) ProvenanceAuthenticationResult {
+	out := in
+	out.Authenticated.SatisfiedConstraints = cloneSlice(in.Authenticated.SatisfiedConstraints)
+	out.Assertion.Bytes = cloneBytes(in.Assertion.Bytes)
+	out.Established = cloneTemporalConstraints(in.Established)
+	out.Retired = cloneTemporalConstraints(in.Retired)
+	return out
+}
+
+func cloneTemporalConstraints(in []AuthenticatedTemporalConstraint) []AuthenticatedTemporalConstraint {
+	if in == nil {
+		return nil
+	}
+	out := make([]AuthenticatedTemporalConstraint, len(in))
+	for i, constraint := range in {
+		out[i] = AuthenticatedTemporalConstraint{
+			Boundary: cloneTemporalBoundary(constraint.Boundary),
+			Basis:    cloneSlice(constraint.Basis),
+		}
+	}
+	return out
+}
+
+func cloneTemporalBoundary(in AuthenticatedTemporalBoundary) AuthenticatedTemporalBoundary {
+	out := AuthenticatedTemporalBoundary{}
+	if in.Log != nil {
+		log := *in.Log
+		out.Log = &log
+	}
+	if in.Time != nil {
+		time := cloneTimeBoundary(*in.Time)
+		out.Time = &time
+	}
+	return out
+}
+
+func validatePreparedTimestampBounds(bindings []UnverifiedTimestampBinding) error {
+	if len(bindings) > maxPreparedTimestampBindings {
+		return fmt.Errorf("%w: binding count %d exceeds %d", errPreparedTimestampLimit, len(bindings), maxPreparedTimestampBindings)
+	}
+
+	totalBytes := 0
+	for i, binding := range bindings {
+		if len(binding.Token) > MaxTimestampTokenBytes {
+			return fmt.Errorf("%w: %w: binding %d token length %d exceeds %d", errPreparedTimestampLimit, ErrInvalidTimestampBinding, i, len(binding.Token), MaxTimestampTokenBytes)
+		}
+		if len(binding.Message) > MaxTimestampMessageBytes {
+			return fmt.Errorf("%w: %w: binding %d message length %d exceeds %d", errPreparedTimestampLimit, ErrInvalidTimestampBinding, i, len(binding.Message), MaxTimestampMessageBytes)
+		}
+		bindingBytes := len(binding.Token) + len(binding.Message)
+		if bindingBytes > maxPreparedTimestampBytes-totalBytes {
+			return fmt.Errorf("%w: aggregate token and message bytes exceed %d", errPreparedTimestampLimit, maxPreparedTimestampBytes)
+		}
+		totalBytes += bindingBytes
+	}
+	return nil
+}
+
+func cloneTemporalPreparation(in TemporalPreparation) TemporalPreparation {
+	if in.Timestamps == nil {
+		return TemporalPreparation{}
+	}
+	out := TemporalPreparation{Timestamps: make([]UnverifiedTimestampBinding, len(in.Timestamps))}
+	for i := range in.Timestamps {
+		out.Timestamps[i] = in.Timestamps[i].Clone()
+	}
+	return out
+}
+
+func evidenceLogRequirement(profile TargetAPI, policyRequiresEvidenceLog bool) EvidenceLogRequirement {
+	if profile.RequiresEvidenceLog() || policyRequiresEvidenceLog {
 		return EvidenceLogRequirement{Domain: LogDomainTenantEvidenceV1}
 	}
 	return EvidenceLogRequirement{}
 }
 
+// verifyItemOccurrence enforces one reached statement's log requirement, the
+// union of its selected source policy and mechanism requirements. It also
+// verifies supplied optional inclusion, using the log verifier bound to the
+// package's prepared checkpoint. Checkpoint preparation alone does not enforce
+// whether this statement must have an occurrence.
 func verifyItemOccurrence(ctx context.Context, item Item, temporal TemporalVerificationServices, requirement EvidenceLogRequirement) (*LogPosition, error) {
 	required := requirement.Domain != ""
 	supplied := item.EvidenceLog != nil
@@ -171,11 +265,14 @@ func verifyPreparedTimestamps(ctx context.Context, bindings []UnverifiedTimestam
 	if len(bindings) == 0 {
 		return nil, nil
 	}
+	type identifiedBinding struct {
+		binding  UnverifiedTimestampBinding
+		identity Digest
+	}
+	identified := make([]identifiedBinding, len(bindings))
 	seen := make(map[Digest]struct{}, len(bindings))
-	out := make([]VerifiedTimeObservation, 0, len(bindings))
-	for _, binding := range bindings {
-		snapshot := binding.Clone()
-		id, err := snapshot.Identity()
+	for i, binding := range bindings {
+		id, err := binding.Identity()
 		if err != nil {
 			return nil, err
 		}
@@ -183,15 +280,20 @@ func verifyPreparedTimestamps(ctx context.Context, bindings []UnverifiedTimestam
 			return nil, fmt.Errorf("duplicate timestamp binding identity %q", id)
 		}
 		seen[id] = struct{}{}
-		if temporal.Time == nil {
-			return nil, fmt.Errorf("trusted-time verifier is required")
-		}
-		result, err := temporal.Time.VerifyTimestamp(ctx, snapshot.Clone())
+		identified[i] = identifiedBinding{binding: binding, identity: id}
+	}
+	if temporal.Time == nil {
+		return nil, fmt.Errorf("trusted-time verifier is required")
+	}
+
+	out := make([]VerifiedTimeObservation, 0, len(identified))
+	for _, prepared := range identified {
+		result, err := temporal.Time.VerifyTimestamp(ctx, prepared.binding.Clone())
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, VerifiedTimeObservation{
-			Binding:   id,
+			Binding:   prepared.identity,
 			Authority: result.Authority,
 			Earliest:  result.Earliest,
 			Latest:    result.Latest,
@@ -221,46 +323,16 @@ func projectSubjectTemporal(position *LogPosition, observations []VerifiedTimeOb
 }
 
 func cloneTimeObservations(in []VerifiedTimeObservation) []VerifiedTimeObservation {
-	if in == nil {
-		return nil
-	}
-	out := make([]VerifiedTimeObservation, len(in))
-	copy(out, in)
-	return out
+	return cloneSlice(in)
 }
 
-func matchPolicy(authority AuthorityConfig, delivery DeliveryContext) (DeliveryPolicy, error) {
-	var matched []DeliveryPolicy
-	for _, policy := range authority.DeliveryPolicies {
+func matchPolicy(authority AuthorityConfig, delivery DeliveryContext) (int, error) {
+	for i, policy := range authority.DeliveryPolicies {
 		if policy.Match.Matches(delivery) {
-			matched = append(matched, policy)
+			return i, nil
 		}
 	}
-	switch len(matched) {
-	case 0:
-		return DeliveryPolicy{}, fmt.Errorf("%w: predicate type %s", ErrNoMatchingPolicy, delivery.PredicateType)
-	case 1:
-		return matched[0], nil
-	default:
-		return DeliveryPolicy{}, fmt.Errorf("%w: %d policies match predicate type %s", ErrAmbiguousPolicy, len(matched), delivery.PredicateType)
-	}
-}
-
-func profileInstalled(authority AuthorityConfig, profile ProfileConfig) bool {
-	want, err := profile.Digest()
-	if err != nil {
-		return false
-	}
-	for _, installed := range authority.ProvenanceProfiles {
-		got, err := installed.Digest()
-		if err != nil {
-			continue
-		}
-		if got == want {
-			return true
-		}
-	}
-	return false
+	return 0, fmt.Errorf("%w: predicate type %s", ErrNoMatchingPolicy, delivery.PredicateType)
 }
 
 func checkProvenanceRequirement(policy DeliveryPolicy) error {
@@ -274,7 +346,7 @@ func checkProvenanceRequirement(policy DeliveryPolicy) error {
 	}
 }
 
-func reevaluate(policy DeliveryPolicy, selected ProfileConfig, delivery DeliveryContext, hints TentativeHints, authority AuthorityConfig, authenticated AuthenticatedEvidence) error {
+func reevaluate(policyIndex int, selected ProfileConfig, hints TentativeHints, authority AuthorityConfig, authenticated AuthenticatedEvidence) error {
 	if authenticated.ProvenanceType == "" {
 		return fmt.Errorf("%w: provenance type is missing", ErrPolicyReevaluation)
 	}
@@ -284,11 +356,17 @@ func reevaluate(policy DeliveryPolicy, selected ProfileConfig, delivery Delivery
 	if hints.PredicateType != authenticated.PredicateType {
 		return fmt.Errorf("%w: authenticated predicate type %s, hint %s", ErrPolicyReevaluation, authenticated.PredicateType, hints.PredicateType)
 	}
-	if !policy.Match.Matches(DeliveryContext{
-		PredicateType:     authenticated.PredicateType,
-		RootAuthorization: delivery.RootAuthorization,
-	}) {
-		return fmt.Errorf("%w: authenticated predicate type %s", ErrPolicyReevaluation, authenticated.PredicateType)
+	authenticatedPolicyIndex, err := matchPolicy(authority, DeliveryContext{
+		PredicateType:   authenticated.PredicateType,
+		TenantPartition: authenticated.Principal.TenantPartition,
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPolicyReevaluation, err)
+	}
+	// Reselect the exact entry in the authenticated snapshot. A match-all
+	// policy chosen through an omitted hint cannot bypass an earlier tenant rule.
+	if authenticatedPolicyIndex != policyIndex {
+		return fmt.Errorf("%w: authenticated tenant selects a different policy", ErrPolicyReevaluation)
 	}
 	if authenticated.Principal.Scheme != hints.Scheme || authenticated.Principal.Authority != hints.Authority {
 		return fmt.Errorf("%w: authenticated authority does not match tentative hints", ErrPolicyReevaluation)
@@ -298,17 +376,6 @@ func reevaluate(policy DeliveryPolicy, selected ProfileConfig, delivery Delivery
 	}
 	if hints.Subject != "" && authenticated.Principal.Subject != hints.Subject {
 		return fmt.Errorf("%w: authenticated subject does not match hint", ErrPolicyReevaluation)
-	}
-
-	mapped, err := authority.TenantMapping.Map(authenticated.Principal.TenantPartition)
-	if err != nil {
-		return err
-	}
-	if authenticated.MappedFleetShiftTenant != mapped {
-		return fmt.Errorf("%w: authenticated tenant %q, mapped %q", ErrTenantMismatch, authenticated.MappedFleetShiftTenant, mapped)
-	}
-	if delivery.ClaimedTenant != "" && delivery.ClaimedTenant != mapped {
-		return fmt.Errorf("%w: claimed tenant %q, mapped %q", ErrTenantMismatch, delivery.ClaimedTenant, mapped)
 	}
 
 	authorityDigest, err := authority.Digest()

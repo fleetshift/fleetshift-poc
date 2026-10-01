@@ -7,29 +7,24 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/internal/merklelog"
 )
 
-func TestStaticTenantMappingFailsClosedWhenUnconfigured(t *testing.T) {
-	_, err := TenantMapping{}.Map("")
-	if !errors.Is(err, ErrTenantMismatch) {
-		t.Fatalf("error = %v, want ErrTenantMismatch", err)
-	}
-}
-
 func TestSelectAndVerifyAcceptsFirstMatchingProfile(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	var tried []ProvenanceType
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
 				tried = append(tried, pt)
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
 
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -42,7 +37,7 @@ func TestSelectAndVerifyAcceptsFirstMatchingProfile(t *testing.T) {
 }
 
 func TestSelectAndVerifyCopiesOnlySignedStatementIntoVerifyRequest(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	support := SupportMaterial{
 		MediaType: "application/test+json",
 		Bytes:     []byte("helpers"),
@@ -61,12 +56,12 @@ func TestSelectAndVerifyCopiesOnlySignedStatementIntoVerifyRequest(t *testing.T)
 			pt: pt,
 			verify: func(req VerifyRequest) (AuthenticatedEvidence, error) {
 				got = req.Statement
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
 
-	_, err := SelectAndVerify(context.Background(), item, delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), item, trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -81,25 +76,91 @@ func TestSelectAndVerifyCopiesOnlySignedStatementIntoVerifyRequest(t *testing.T)
 	}
 }
 
+func TestSelectAndVerifyDetachesOnlyProfileBoundaryInputs(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	trust.AuthorityRegistry[0].CredentialMethods = []string{"credential"}
+	trust.AuthorityRegistry[0].ProvenanceProfiles[0].Parameters = []byte("anchor")
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles[0] = profileDigest(trust.AuthorityRegistry[0].ProvenanceProfiles[0])
+	evidence.Bytes = []byte("original evidence")
+	statement := SignedStatement{
+		Evidence: evidence,
+		Support:  SupportMaterial(Encoded{MediaType: "application/test", Bytes: []byte("original support")}),
+	}
+
+	parseInput := []byte(nil)
+	beginInput := []byte(nil)
+	target := &stubTarget{
+		pt: ProvenanceTypeDirectKeyV1,
+		parse: func(evidence TypedEvidence) (TentativeHints, error) {
+			parseInput = append([]byte(nil), evidence.Bytes...)
+			evidence.Bytes[0] = 'P'
+			return TentativeHints{
+				Scheme:        IdentitySchemeOIDCSubV1,
+				Authority:     "https://issuer.example.test",
+				Subject:       "alice",
+				PredicateType: PredicateTypeDeploymentV1,
+			}, nil
+		},
+		begin: func(req VerifyRequest) {
+			beginInput = append([]byte(nil), req.Statement.Evidence.Bytes...)
+			req.Statement.Evidence.Bytes[0] = 'B'
+			req.Statement.Support.Bytes[0] = 'B'
+			req.ProfileConfig.Parameters[0] = 'B'
+			req.AuthorityConfig.CredentialMethods[0] = "mutated"
+			req.AuthorityConfig.ProvenanceProfiles[0].Parameters[0] = 'B'
+			req.AuthorityConfig.DeliveryPolicies[0].Profiles[0] = "mutated-reference"
+		},
+		verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
+			return successfulEvidence(t, trust, evidence), nil
+		},
+	}
+	result, err := SelectAndVerify(context.Background(), Item{SignedStatement: statement, EvidenceLog: &EvidenceLogInclusion{Index: 7}}, trust, func(ProvenanceType) (TargetAPI, bool) {
+		return target, true
+	}, defaultServices())
+	if err != nil {
+		t.Fatalf("SelectAndVerify: %v", err)
+	}
+	if !bytes.Equal(parseInput, []byte("original evidence")) || !bytes.Equal(beginInput, []byte("original evidence")) {
+		t.Fatalf("profile inputs = parse %q, begin %q; want detached original evidence", parseInput, beginInput)
+	}
+	if !bytes.Equal(evidence.Bytes, []byte("original evidence")) || !bytes.Equal(statement.Support.Bytes, []byte("original support")) {
+		t.Fatal("profile mutation escaped into caller-owned statement bytes")
+	}
+	if got := trust.AuthorityRegistry[0].CredentialMethods[0]; got != "credential" {
+		t.Fatalf("credential method = %q, want original", got)
+	}
+	if got := string(trust.AuthorityRegistry[0].ProvenanceProfiles[0].Parameters); got != "anchor" {
+		t.Fatalf("installed profile parameters = %q, want original", got)
+	}
+	if got := trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles[0]; got != profileDigest(trust.AuthorityRegistry[0].ProvenanceProfiles[0]) {
+		t.Fatalf("policy profile reference = %q, want original", got)
+	}
+	if &result.Authority.ProvenanceProfiles[0].Parameters[0] != &trust.AuthorityRegistry[0].ProvenanceProfiles[0].Parameters[0] ||
+		&result.Profile.Parameters[0] != &trust.AuthorityRegistry[0].ProvenanceProfiles[0].Parameters[0] ||
+		&result.Policy.Profiles[0] != &trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles[0] {
+		t.Fatal("selection copied immutable source configuration")
+	}
+}
+
 func TestSelectAndVerifyRejectsPolicyProfileThatIsNotInstalled(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []ProfileConfig{{
+	trust, evidence := selectionFixture(t)
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []Digest{profileDigest(ProfileConfig{
 		ProvenanceType: ProvenanceTypeDirectKeyV1,
 		Parameters:     []byte(`{"not":"installed"}`),
-	}}
+	})}
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{pt: pt}, true
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
-	if !errors.Is(err, ErrUnknownProvenanceType) && !errors.Is(err, ErrNoSuccessfulProfile) {
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
+	if !errors.Is(err, ErrInvalidTrustConfiguration) {
 		t.Fatalf("error = %v, want uninstalled profile to fail closed", err)
 	}
 }
 
 func TestSelectAndVerifyRejectsUnknownProvenanceType(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	evidence.ProvenanceType = "unknown/v1"
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, func(ProvenanceType) (TargetAPI, bool) {
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, func(ProvenanceType) (TargetAPI, bool) {
 		return nil, false
 	}, defaultServices())
 	if !errors.Is(err, ErrUnknownProvenanceType) {
@@ -108,7 +169,7 @@ func TestSelectAndVerifyRejectsUnknownProvenanceType(t *testing.T) {
 }
 
 func TestSelectAndVerifyRejectsUnknownAuthority(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	lookup := func(ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: evidence.ProvenanceType,
@@ -120,14 +181,14 @@ func TestSelectAndVerifyRejectsUnknownAuthority(t *testing.T) {
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if !errors.Is(err, ErrUnknownAuthority) {
 		t.Fatalf("error = %v, want ErrUnknownAuthority", err)
 	}
 }
 
 func TestSelectAndVerifyRejectsPredicateTypeOutsideMatchedPolicy(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
@@ -139,29 +200,35 @@ func TestSelectAndVerifyRejectsPredicateTypeOutsideMatchedPolicy(t *testing.T) {
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if !errors.Is(err, ErrNoMatchingPolicy) {
 		t.Fatalf("error = %v, want ErrNoMatchingPolicy", err)
 	}
 }
 
-func TestSelectAndVerifyRejectsAmbiguousPolicies(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	trust.AuthorityRegistry[0].DeliveryPolicies = append(trust.AuthorityRegistry[0].DeliveryPolicies, trust.AuthorityRegistry[0].DeliveryPolicies[0])
-	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
-		return &stubTarget{pt: pt}, true
+func TestSelectAndVerifyUsesFirstMatchingPolicy(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	later := trust.AuthorityRegistry[0].DeliveryPolicies[0]
+	later.Provenance = RequirementNone
+	trust.AuthorityRegistry[0].DeliveryPolicies = append(trust.AuthorityRegistry[0].DeliveryPolicies, later)
+	if err := trust.Validate(); err != nil {
+		t.Fatal(err)
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
-	if !errors.Is(err, ErrAmbiguousPolicy) {
-		t.Fatalf("error = %v, want ErrAmbiguousPolicy", err)
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, successLookup(t, trust, evidence), defaultServices())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Policy.Provenance != RequirementRequired {
+		t.Fatalf("selected provenance requirement = %q, want first policy", got.Policy.Provenance)
 	}
 }
 
 func TestSelectAndVerifyDoesNotFallBackAcrossProvenanceTypes(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	other := ProfileConfig{ProvenanceType: "other/v1"}
-	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []ProfileConfig{
-		other,
+	trust.AuthorityRegistry[0].ProvenanceProfiles = append(trust.AuthorityRegistry[0].ProvenanceProfiles, other)
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []Digest{
+		profileDigest(other),
 		trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles[0],
 	}
 	triedOther := false
@@ -172,11 +239,11 @@ func TestSelectAndVerifyDoesNotFallBackAcrossProvenanceTypes(t *testing.T) {
 				if pt == "other/v1" {
 					triedOther = true
 				}
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -189,16 +256,16 @@ func TestSelectAndVerifyDoesNotFallBackAcrossProvenanceTypes(t *testing.T) {
 }
 
 func TestSelectAndVerifyBindsProfileDigestToTheProfileThatVerified(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	first := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":1}`)}
 	second := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":2}`)}
-	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []ProfileConfig{first, second}
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []Digest{profileDigest(first), profileDigest(second)}
 	trust.AuthorityRegistry[0].ProvenanceProfiles = []ProfileConfig{first, second}
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
 			verify: func(req VerifyRequest) (AuthenticatedEvidence, error) {
-				auth := successfulEvidence(t, trust, evidence, delivery)
+				auth := successfulEvidence(t, trust, evidence)
 				digest, err := second.Digest()
 				if err != nil {
 					t.Fatalf("digest: %v", err)
@@ -208,17 +275,17 @@ func TestSelectAndVerifyBindsProfileDigestToTheProfileThatVerified(t *testing.T)
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if !errors.Is(err, ErrPolicyReevaluation) {
 		t.Fatalf("error = %v, want ErrPolicyReevaluation", err)
 	}
 }
 
 func TestSelectAndVerifyTriesNextProfileOfSameTypeAfterFailure(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	first := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":1}`)}
 	second := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":2}`)}
-	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []ProfileConfig{first, second}
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []Digest{profileDigest(first), profileDigest(second)}
 	trust.AuthorityRegistry[0].ProvenanceProfiles = []ProfileConfig{first, second}
 
 	var tried []string
@@ -230,7 +297,7 @@ func TestSelectAndVerifyTriesNextProfileOfSameTypeAfterFailure(t *testing.T) {
 				if string(req.ProfileConfig.Parameters) == `{"n":1}` {
 					return AuthenticatedEvidence{}, ErrVerificationFailed
 				}
-				auth := successfulEvidence(t, trust, evidence, delivery)
+				auth := successfulEvidence(t, trust, evidence)
 				digest, err := req.ProfileConfig.Digest()
 				if err != nil {
 					t.Fatalf("profile digest: %v", err)
@@ -240,7 +307,7 @@ func TestSelectAndVerifyTriesNextProfileOfSameTypeAfterFailure(t *testing.T) {
 			},
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -256,20 +323,15 @@ func TestSelectAndVerifyTriesNextProfileOfSameTypeAfterFailure(t *testing.T) {
 	}
 }
 
-func TestSelectAndVerifyRejectsClaimedTenantMismatch(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	delivery.ClaimedTenant = "tenant-other"
-	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
-		return &stubTarget{
-			pt: pt,
-			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
-				return successfulEvidence(t, trust, evidence, delivery), nil
-			},
-		}, true
-	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
-	if !errors.Is(err, ErrTenantMismatch) {
-		t.Fatalf("error = %v, want ErrTenantMismatch", err)
+func TestSelectAndVerifyRechecksTenantHints(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	target := &stubTarget{pt: evidence.ProvenanceType, hints: TentativeHints{
+		Scheme: trust.AuthorityRegistry[0].PrincipalAuthority.Scheme, Authority: trust.AuthorityRegistry[0].PrincipalAuthority.Authority,
+		TenantPartition: "hint-other", Subject: "alice", PredicateType: PredicateTypeDeploymentV1,
+	}, verify: func(VerifyRequest) (AuthenticatedEvidence, error) { return successfulEvidence(t, trust, evidence), nil }}
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, func(ProvenanceType) (TargetAPI, bool) { return target, true }, defaultServices())
+	if !errors.Is(err, ErrPolicyReevaluation) {
+		t.Fatalf("authenticated tenant differs from hint: %v", err)
 	}
 }
 
@@ -291,7 +353,7 @@ func TestTargetAPIApplyUnknownPredicateFailsClosed(t *testing.T) {
 }
 
 func TestSelectAndVerifyRejectsHintSubjectMismatch(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
@@ -302,33 +364,33 @@ func TestSelectAndVerifyRejectsHintSubjectMismatch(t *testing.T) {
 				PredicateType: PredicateTypeDeploymentV1,
 			},
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if !errors.Is(err, ErrPolicyReevaluation) {
 		t.Fatalf("error = %v, want ErrPolicyReevaluation", err)
 	}
 }
 
 func TestSelectAndVerifyRejectsOccurrenceIdentityMismatch(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
 	log := &fakeLogVerifier{
 		evidence: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{Log: log})
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{Log: log})
 	if !errors.Is(err, ErrInvalidLogInclusion) || !errors.Is(err, ErrNoSuccessfulProfile) {
 		t.Fatalf("error = %v, want identity mismatch to fail the candidate", err)
 	}
 }
 
 func TestSelectAndVerifyProjectsOnlyLogPosition(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
 	item := itemFor(evidence)
-	got, err := SelectAndVerify(context.Background(), item, delivery, trust, lookup, defaultServices())
+	got, err := SelectAndVerify(context.Background(), item, trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -344,30 +406,30 @@ func TestSelectAndVerifyProjectsOnlyLogPosition(t *testing.T) {
 }
 
 func TestSelectAndVerifyRejectsOccurrenceOutsideRequiredDomain(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
 	log := &fakeLogVerifier{domain: "other-log/v1"}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{Log: log})
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{Log: log})
 	if !errors.Is(err, ErrTemporalValidity) {
 		t.Fatalf("error = %v, want ErrTemporalValidity for a non-tenant occurrence domain", err)
 	}
 }
 
 func TestSelectAndVerifyRejectsMissingInclusion(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
 	item := Item{SignedStatement: SignedStatement{Evidence: evidence}}
-	_, err := SelectAndVerify(context.Background(), item, delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), item, trust, lookup, defaultServices())
 	if !errors.Is(err, ErrInvalidLogInclusion) {
 		t.Fatalf("error = %v, want ErrInvalidLogInclusion", err)
 	}
 }
 
 func TestSelectAndVerifyOccurrenceFailureTriesNextProfile(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	first := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":1}`)}
 	second := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":2}`)}
-	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []ProfileConfig{first, second}
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []Digest{profileDigest(first), profileDigest(second)}
 	trust.AuthorityRegistry[0].ProvenanceProfiles = []ProfileConfig{first, second}
 
 	log := &fakeLogVerifier{failLeft: 1}
@@ -375,7 +437,7 @@ func TestSelectAndVerifyOccurrenceFailureTriesNextProfile(t *testing.T) {
 		return &stubTarget{
 			pt: pt,
 			verify: func(req VerifyRequest) (AuthenticatedEvidence, error) {
-				auth := successfulEvidence(t, trust, evidence, delivery)
+				auth := successfulEvidence(t, trust, evidence)
 				digest, err := req.ProfileConfig.Digest()
 				if err != nil {
 					t.Fatalf("profile digest: %v", err)
@@ -385,7 +447,7 @@ func TestSelectAndVerifyOccurrenceFailureTriesNextProfile(t *testing.T) {
 			},
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{Log: log})
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{Log: log})
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -402,9 +464,9 @@ func TestSelectAndVerifyOccurrenceFailureTriesNextProfile(t *testing.T) {
 }
 
 func TestSelectAndVerifyResultCarriesSelectedContext(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -421,10 +483,10 @@ func TestSelectAndVerifyResultCarriesSelectedContext(t *testing.T) {
 }
 
 func TestSelectAndVerifyEmptyConstraintsYieldUnboundedWindow(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
 	item := itemFor(evidence)
-	got, err := SelectAndVerify(context.Background(), item, delivery, trust, lookup, defaultServices())
+	got, err := SelectAndVerify(context.Background(), item, trust, lookup, defaultServices())
 	if err != nil {
 		t.Fatalf("SelectAndVerify: %v", err)
 	}
@@ -437,7 +499,7 @@ func TestSelectAndVerifyEmptyConstraintsYieldUnboundedWindow(t *testing.T) {
 }
 
 func TestSelectAndVerifyNilTimeFailsClosedWhenPrepareReturnsBindings(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
@@ -449,11 +511,11 @@ func TestSelectAndVerifyNilTimeFailsClosedWhenPrepareReturnsBindings(t *testing.
 				}}}, nil
 			},
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, defaultServices())
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, defaultServices())
 	if err == nil {
 		t.Fatal("SelectAndVerify succeeded with timestamp bindings and a nil Time verifier")
 	}
@@ -463,7 +525,7 @@ func TestSelectAndVerifyNilTimeFailsClosedWhenPrepareReturnsBindings(t *testing.
 }
 
 func TestSelectAndVerifyFakeTimestampPathClonesAndProjects(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	token := []byte("token-bytes")
 	message := []byte("message-bytes")
 	binding := UnverifiedTimestampBinding{
@@ -489,7 +551,7 @@ func TestSelectAndVerifyFakeTimestampPathClonesAndProjects(t *testing.T) {
 			},
 			finish: func(inputs VerifiedProvenanceTemporalInputs) (ProvenanceAuthenticationResult, error) {
 				finishSaw = append([]VerifiedTimeObservation(nil), inputs.Timestamps...)
-				auth := successfulEvidence(t, trust, evidence, delivery)
+				auth := successfulEvidence(t, trust, evidence)
 				return ProvenanceAuthenticationResult{
 					Authenticated: auth,
 					Assertion:     TypedAssertion{PredicateType: auth.PredicateType, Bytes: []byte(`{"ok":true}`)},
@@ -498,7 +560,7 @@ func TestSelectAndVerifyFakeTimestampPathClonesAndProjects(t *testing.T) {
 		}, true
 	}
 	fakeTime := &fakeTimeVerifier{mutate: true, earliest: t0, latest: t0.Add(time.Second)}
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{
 		Log:  &fakeLogVerifier{},
 		Time: fakeTime,
 	})
@@ -519,8 +581,36 @@ func TestSelectAndVerifyFakeTimestampPathClonesAndProjects(t *testing.T) {
 	}
 }
 
+func TestSelectAndVerifyRejectsDuplicateTimestampBindingsBeforeAdapter(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	binding := UnverifiedTimestampBinding{
+		Format:  TimestampFormatRFC3161V1,
+		Token:   []byte("token"),
+		Message: []byte("message"),
+	}
+	target := &stubTarget{
+		pt: ProvenanceTypeDirectKeyV1,
+		prepare: func() (TemporalPreparation, error) {
+			return TemporalPreparation{Timestamps: []UnverifiedTimestampBinding{binding, binding}}, nil
+		},
+		verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
+			return successfulEvidence(t, trust, evidence), nil
+		},
+	}
+	timeAdapter := &fakeTimeVerifier{}
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, func(ProvenanceType) (TargetAPI, bool) {
+		return target, true
+	}, TemporalVerificationServices{Log: &fakeLogVerifier{}, Time: timeAdapter})
+	if err == nil {
+		t.Fatal("SelectAndVerify succeeded with duplicate timestamp bindings")
+	}
+	if timeAdapter.calls != 0 {
+		t.Fatalf("VerifyTimestamp calls = %d, want 0 for duplicate bindings", timeAdapter.calls)
+	}
+}
+
 func TestSelectAndVerifyProjectsCoordinatorObservationsNotFinishMutations(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	t0 := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
@@ -539,7 +629,7 @@ func TestSelectAndVerifyProjectsCoordinatorObservationsNotFinishMutations(t *tes
 				inputs.Timestamps[0].Authority = "invented-tsa"
 				inputs.Timestamps[0].Earliest = t0.Add(-time.Hour)
 				inputs.Timestamps[0].Latest = t0.Add(-time.Hour)
-				auth := successfulEvidence(t, trust, evidence, delivery)
+				auth := successfulEvidence(t, trust, evidence)
 				return ProvenanceAuthenticationResult{
 					Authenticated: auth,
 					Assertion:     TypedAssertion{PredicateType: auth.PredicateType, Bytes: []byte(`{"ok":true}`)},
@@ -547,7 +637,7 @@ func TestSelectAndVerifyProjectsCoordinatorObservationsNotFinishMutations(t *tes
 			},
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{
 		Log:  &fakeLogVerifier{},
 		Time: &fakeTimeVerifier{earliest: t0, latest: t0.Add(time.Second)},
 	})
@@ -563,7 +653,7 @@ func TestSelectAndVerifyProjectsCoordinatorObservationsNotFinishMutations(t *tes
 }
 
 func TestSelectAndVerifyIdentityErrorDoesNotCallTimeAdapter(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	lookup := func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
@@ -575,12 +665,12 @@ func TestSelectAndVerifyIdentityErrorDoesNotCallTimeAdapter(t *testing.T) {
 				}}}, nil
 			},
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
 	fakeTime := &fakeTimeVerifier{}
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{
 		Log:  &fakeLogVerifier{},
 		Time: fakeTime,
 	})
@@ -593,10 +683,10 @@ func TestSelectAndVerifyIdentityErrorDoesNotCallTimeAdapter(t *testing.T) {
 }
 
 func TestSelectAndVerifyFailedFirstProfileContributesNoTemporalFacts(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
+	trust, evidence := selectionFixture(t)
 	first := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":1}`)}
 	second := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte(`{"n":2}`)}
-	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []ProfileConfig{first, second}
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].Profiles = []Digest{profileDigest(first), profileDigest(second)}
 	trust.AuthorityRegistry[0].ProvenanceProfiles = []ProfileConfig{first, second}
 	t0 := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 
@@ -606,10 +696,9 @@ func TestSelectAndVerifyFailedFirstProfileContributesNoTemporalFacts(t *testing.
 			pt:       pt,
 			trust:    trust,
 			evidence: evidence,
-			delivery: delivery,
 		}, true
 	}
-	got, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{
+	got, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{
 		Log:  &fakeLogVerifier{},
 		Time: &fakeTimeVerifier{earliest: t0, latest: t0},
 	})
@@ -629,28 +718,129 @@ func TestSelectAndVerifyFailedFirstProfileContributesNoTemporalFacts(t *testing.
 }
 
 func TestSelectAndVerifyNilLogFailsWhenInclusionRequired(t *testing.T) {
-	trust, evidence, delivery := selectionFixture(t)
-	lookup := successLookup(t, trust, evidence, delivery)
-	_, err := SelectAndVerify(context.Background(), itemFor(evidence), delivery, trust, lookup, TemporalVerificationServices{})
+	trust, evidence := selectionFixture(t)
+	lookup := successLookup(t, trust, evidence)
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{})
 	if !errors.Is(err, ErrInvalidLogInclusion) {
 		t.Fatalf("error = %v, want ErrInvalidLogInclusion", err)
 	}
 }
 
+func TestSelectAndVerifyPreparedTimestampLimitsAreFatalBeforeOccurrenceOrAdapter(t *testing.T) {
+	tests := []struct {
+		name     string
+		bindings []UnverifiedTimestampBinding
+	}{
+		{
+			name: "too many bindings",
+			bindings: func() []UnverifiedTimestampBinding {
+				bindings := make([]UnverifiedTimestampBinding, maxPreparedTimestampBindings+1)
+				return bindings
+			}(),
+		},
+		{
+			name: "aggregate bytes",
+			bindings: func() []UnverifiedTimestampBinding {
+				bindings := make([]UnverifiedTimestampBinding, 9)
+				for i := range bindings {
+					bindings[i] = UnverifiedTimestampBinding{
+						Format:  TimestampFormatRFC3161V1,
+						Message: bytes.Repeat([]byte("x"), MaxTimestampMessageBytes),
+					}
+				}
+				return bindings
+			}(),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			trust, evidence := selectionFixture(t)
+			first := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte("first")}
+			second := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1, Parameters: []byte("second")}
+			authority := &trust.AuthorityRegistry[0]
+			authority.ProvenanceProfiles = []ProfileConfig{first, second}
+			authority.DeliveryPolicies[0].Profiles = []Digest{profileDigest(first), profileDigest(second)}
+
+			target := &stubTarget{
+				pt: ProvenanceTypeDirectKeyV1,
+				prepare: func() (TemporalPreparation, error) {
+					return TemporalPreparation{Timestamps: test.bindings}, nil
+				},
+			}
+			lookup := func(ProvenanceType) (TargetAPI, bool) { return target, true }
+			log := &fakeLogVerifier{}
+			timeAdapter := &fakeTimeVerifier{}
+
+			_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, lookup, TemporalVerificationServices{
+				Log:  log,
+				Time: timeAdapter,
+			})
+			if !errors.Is(err, errPreparedTimestampLimit) {
+				t.Fatalf("error = %v, want fatal prepared-timestamp limit", err)
+			}
+			if target.beginCalls != 1 {
+				t.Fatalf("BeginVerification calls = %d, want one attempt with no profile fallback", target.beginCalls)
+			}
+			if log.calls != 0 {
+				t.Fatalf("occurrence verification calls = %d, want 0", log.calls)
+			}
+			if timeAdapter.calls != 0 {
+				t.Fatalf("trusted-time calls = %d, want 0", timeAdapter.calls)
+			}
+		})
+	}
+}
+
+func TestSelectAndVerifyAcceptsPreparedTimestampAggregateByteLimitExactly(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	bindings := make([]UnverifiedTimestampBinding, 8)
+	for i := range bindings {
+		message := bytes.Repeat([]byte("x"), MaxTimestampMessageBytes)
+		message[0] = byte(i)
+		bindings[i] = UnverifiedTimestampBinding{Format: TimestampFormatRFC3161V1, Message: message}
+	}
+	target := &stubTarget{
+		pt: ProvenanceTypeDirectKeyV1,
+		prepare: func() (TemporalPreparation, error) {
+			return TemporalPreparation{Timestamps: bindings}, nil
+		},
+		verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
+			return successfulEvidence(t, trust, evidence), nil
+		},
+	}
+	timeAdapter := &fakeTimeVerifier{}
+	if _, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, func(ProvenanceType) (TargetAPI, bool) {
+		return target, true
+	}, TemporalVerificationServices{Log: &fakeLogVerifier{}, Time: timeAdapter}); err != nil {
+		t.Fatalf("SelectAndVerify at exact aggregate-byte limit: %v", err)
+	}
+	if timeAdapter.calls != len(bindings) {
+		t.Fatalf("trusted-time calls = %d, want %d at exact limit", timeAdapter.calls, len(bindings))
+	}
+}
+
 type stubTarget struct {
-	pt      ProvenanceType
-	hints   TentativeHints
-	verify  func(VerifyRequest) (AuthenticatedEvidence, error)
-	prepare func() (TemporalPreparation, error)
-	finish  func(VerifiedProvenanceTemporalInputs) (ProvenanceAuthenticationResult, error)
-	owns    map[PredicateType]bool
+	pt          ProvenanceType
+	requiresLog bool
+	hints       TentativeHints
+	parse       func(TypedEvidence) (TentativeHints, error)
+	begin       func(VerifyRequest)
+	verify      func(VerifyRequest) (AuthenticatedEvidence, error)
+	prepare     func() (TemporalPreparation, error)
+	finish      func(VerifiedProvenanceTemporalInputs) (ProvenanceAuthenticationResult, error)
+	owns        map[PredicateType]bool
+	beginCalls  int
 }
 
 func (s *stubTarget) ProvenanceType() ProvenanceType { return s.pt }
 
-func (s *stubTarget) RequiresEvidenceLog() bool { return false }
+func (s *stubTarget) RequiresEvidenceLog() bool { return s.requiresLog }
 
-func (s *stubTarget) ParseHints(TypedEvidence) (TentativeHints, error) {
+func (s *stubTarget) ParseHints(evidence TypedEvidence) (TentativeHints, error) {
+	if s.parse != nil {
+		return s.parse(evidence)
+	}
 	if s.hints.Scheme != "" {
 		return s.hints, nil
 	}
@@ -663,6 +853,10 @@ func (s *stubTarget) ParseHints(TypedEvidence) (TentativeHints, error) {
 }
 
 func (s *stubTarget) BeginVerification(_ context.Context, req VerifyRequest) (ProvenanceVerificationSession, error) {
+	s.beginCalls++
+	if s.begin != nil {
+		s.begin(req)
+	}
 	return &stubSession{target: s, req: req}, nil
 }
 
@@ -733,7 +927,6 @@ type failThenSucceedTarget struct {
 	pt       ProvenanceType
 	trust    TrustConfiguration
 	evidence TypedEvidence
-	delivery DeliveryContext
 	attempts int
 }
 
@@ -777,7 +970,7 @@ func (s *failThenSucceedSession) Finish(context.Context, VerifiedProvenanceTempo
 	if s.attempt == 1 {
 		return ProvenanceAuthenticationResult{}, ErrVerificationFailed
 	}
-	auth := successfulEvidence(s.parent.t, s.parent.trust, s.parent.evidence, s.parent.delivery)
+	auth := successfulEvidence(s.parent.t, s.parent.trust, s.parent.evidence)
 	digest, err := s.req.ProfileConfig.Digest()
 	if err != nil {
 		return ProvenanceAuthenticationResult{}, err
@@ -849,13 +1042,13 @@ func (f *fakeTimeVerifier) VerifyTimestamp(_ context.Context, binding Unverified
 	return VerifiedTimestampResult{Authority: authority, Earliest: earliest, Latest: latest}, nil
 }
 
-func successLookup(t *testing.T, trust TrustConfiguration, evidence TypedEvidence, delivery DeliveryContext) TargetLookup {
+func successLookup(t *testing.T, trust TrustConfiguration, evidence TypedEvidence) TargetLookup {
 	t.Helper()
 	return func(pt ProvenanceType) (TargetAPI, bool) {
 		return &stubTarget{
 			pt: pt,
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
-				return successfulEvidence(t, trust, evidence, delivery), nil
+				return successfulEvidence(t, trust, evidence), nil
 			},
 		}, true
 	}
@@ -872,7 +1065,7 @@ func defaultServices() TemporalVerificationServices {
 	return TemporalVerificationServices{Log: &fakeLogVerifier{}}
 }
 
-func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, DeliveryContext) {
+func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence) {
 	t.Helper()
 	profile := ProfileConfig{ProvenanceType: ProvenanceTypeDirectKeyV1}
 	authority := AuthorityConfig{
@@ -880,16 +1073,16 @@ func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, Delivery
 			Scheme:    IdentitySchemeOIDCSubV1,
 			Authority: "https://issuer.example.test",
 		},
-		TenantMapping:      TenantMapping{StaticTenant: "tenant-acme"},
+
 		ProvenanceProfiles: []ProfileConfig{profile},
 		DeliveryPolicies: []DeliveryPolicy{{
 			Match: PolicyMatch{
-				PredicateType:     PredicateTypeDeploymentV1,
-				RootAuthorization: true,
+				PredicateType: PredicateTypeDeploymentV1,
 			},
-			LiveCredential: RequirementNone,
-			Provenance:     RequirementRequired,
-			Profiles:       []ProfileConfig{profile},
+			LiveCredential:     RequirementNone,
+			Provenance:         RequirementRequired,
+			RequireEvidenceLog: true,
+			Profiles:           []Digest{profileDigest(profile)},
 		}},
 	}
 	trust := TrustConfiguration{AuthorityRegistry: []AuthorityConfig{authority}}
@@ -900,15 +1093,10 @@ func selectionFixture(t *testing.T) (TrustConfiguration, TypedEvidence, Delivery
 			Bytes:     []byte(`{"hint":"alice"}`),
 		},
 	}
-	delivery := DeliveryContext{
-		ClaimedTenant:     "tenant-acme",
-		PredicateType:     PredicateTypeDeploymentV1,
-		RootAuthorization: true,
-	}
-	return trust, evidence, delivery
+	return trust, evidence
 }
 
-func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEvidence, delivery DeliveryContext) AuthenticatedEvidence {
+func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEvidence) AuthenticatedEvidence {
 	t.Helper()
 	authority := trust.AuthorityRegistry[0]
 	authorityDigest, err := authority.Digest()
@@ -917,7 +1105,11 @@ func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEv
 	}
 	var profileDigest Digest
 	foundProfile := false
-	for _, profile := range authority.DeliveryPolicies[0].Profiles {
+	for _, reference := range authority.DeliveryPolicies[0].Profiles {
+		profile, err := authority.Profile(reference)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if profile.ProvenanceType != evidence.ProvenanceType {
 			continue
 		}
@@ -932,7 +1124,7 @@ func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEv
 	if !foundProfile {
 		t.Fatalf("fixture policy has no profile of type %s", evidence.ProvenanceType)
 	}
-	assertion := TypedAssertion{PredicateType: delivery.PredicateType, Bytes: []byte(`{"ok":true}`)}
+	assertion := TypedAssertion{PredicateType: PredicateTypeDeploymentV1, Bytes: []byte(`{"ok":true}`)}
 	contentDigest, err := assertion.Digest()
 	if err != nil {
 		t.Fatalf("content digest: %v", err)
@@ -943,11 +1135,150 @@ func successfulEvidence(t *testing.T, trust TrustConfiguration, evidence TypedEv
 			Authority: "https://issuer.example.test",
 			Subject:   "alice",
 		},
-		MappedFleetShiftTenant: "tenant-acme",
-		PredicateType:          delivery.PredicateType,
-		ContentDigest:          contentDigest,
-		ProvenanceType:         evidence.ProvenanceType,
-		AuthorityConfigDigest:  authorityDigest,
-		ProfileConfigDigest:    profileDigest,
+
+		PredicateType:         PredicateTypeDeploymentV1,
+		ContentDigest:         contentDigest,
+		ProvenanceType:        evidence.ProvenanceType,
+		AuthorityConfigDigest: authorityDigest,
+		ProfileConfigDigest:   profileDigest,
 	}
+}
+
+func TestSelectAndVerifyLeavesMissingProfileTimeRequirementToFinish(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	prepareCalls := 0
+	finishCalls := 0
+	var finishObservations []VerifiedTimeObservation
+	target := &stubTarget{
+		pt: ProvenanceTypeDirectKeyV1,
+		prepare: func() (TemporalPreparation, error) {
+			prepareCalls++
+			// This profile is time-dependent, but its current authenticated
+			// history has no timestamp binding to offer to common code.
+			return TemporalPreparation{}, nil
+		},
+		finish: func(inputs VerifiedProvenanceTemporalInputs) (ProvenanceAuthenticationResult, error) {
+			finishCalls++
+			finishObservations = append([]VerifiedTimeObservation(nil), inputs.Timestamps...)
+			if len(inputs.Timestamps) != 0 {
+				t.Errorf("Finish observations = %v, want zero when Prepare returned no bindings", inputs.Timestamps)
+			}
+			// Finish owns the rule that this statement needs an accepted time
+			// boundary. Common selection must not infer or reconstruct one.
+			return ProvenanceAuthenticationResult{}, ErrVerificationFailed
+		},
+	}
+	timeVerifier := &fakeTimeVerifier{}
+	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, func(ProvenanceType) (TargetAPI, bool) {
+		return target, true
+	}, TemporalVerificationServices{Log: &fakeLogVerifier{}, Time: timeVerifier})
+	if !errors.Is(err, ErrNoSuccessfulProfile) || !errors.Is(err, ErrVerificationFailed) {
+		t.Fatalf("SelectAndVerify error = %v, want Finish's missing-history rejection", err)
+	}
+	if prepareCalls != 1 || finishCalls != 1 {
+		t.Fatalf("Prepare calls = %d, Finish calls = %d, want one each", prepareCalls, finishCalls)
+	}
+	if len(finishObservations) != 0 {
+		t.Fatalf("Finish received %d observations, want zero", len(finishObservations))
+	}
+	if timeVerifier.calls != 0 {
+		t.Fatalf("VerifyTimestamp calls = %d, want zero without a prepared binding", timeVerifier.calls)
+	}
+}
+
+func TestSelectAndVerifyOptionalLogVerifiesSuppliedProofAndProjectsPosition(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	checkpoint, inclusion := selectionProofFor(t, evidence)
+	item := Item{SignedStatement: SignedStatement{Evidence: evidence}, EvidenceLog: &inclusion}
+	logVerifier := &proofCheckingSelectionLog{checkpoint: checkpoint}
+
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].RequireEvidenceLog = false
+	got, err := SelectAndVerify(context.Background(), item, trust, successLookup(t, trust, evidence), TemporalVerificationServices{Log: logVerifier})
+	if err != nil {
+		t.Fatalf("optional-log selection with a valid supplied proof: %v", err)
+	}
+	wantIdentity, err := evidence.Identity()
+	if err != nil {
+		t.Fatalf("evidence identity: %v", err)
+	}
+	if logVerifier.seen != wantIdentity {
+		t.Fatalf("log verifier saw evidence identity %q, want exact subject identity %q", logVerifier.seen, wantIdentity)
+	}
+	if got.Temporal.LogPosition == nil {
+		t.Fatal("optional supplied binding did not project a LogPosition")
+	}
+	if want := (LogPosition{Domain: LogDomainTenantEvidenceV1, Index: inclusion.Index}); *got.Temporal.LogPosition != want {
+		t.Fatalf("LogPosition = %+v, want verified supplied position %+v", got.Temporal.LogPosition, want)
+	}
+}
+
+func TestSelectAndVerifyOptionalLogAllowsNoBindingWithoutAdapter(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	item := Item{SignedStatement: SignedStatement{Evidence: evidence}}
+
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].RequireEvidenceLog = false
+	got, err := SelectAndVerify(context.Background(), item, trust, successLookup(t, trust, evidence), TemporalVerificationServices{})
+	if err != nil {
+		t.Fatalf("optional-log selection without an inclusion or log adapter: %v", err)
+	}
+	if got.Temporal.LogPosition != nil {
+		t.Fatalf("LogPosition = %+v, want nil when an optional binding is absent", got.Temporal.LogPosition)
+	}
+}
+
+func TestSelectAndVerifyOptionalLogStillRejectsMalformedSuppliedProof(t *testing.T) {
+	trust, evidence := selectionFixture(t)
+	checkpoint, inclusion := selectionProofFor(t, evidence)
+	inclusion.InclusionProof = append([]Digest(nil), inclusion.InclusionProof...)
+	inclusion.InclusionProof[0] = DigestBytes([]byte("wrong inclusion path"))
+	item := Item{SignedStatement: SignedStatement{Evidence: evidence}, EvidenceLog: &inclusion}
+	logVerifier := &proofCheckingSelectionLog{checkpoint: checkpoint}
+
+	trust.AuthorityRegistry[0].DeliveryPolicies[0].RequireEvidenceLog = false
+	_, err := SelectAndVerify(context.Background(), item, trust, successLookup(t, trust, evidence), TemporalVerificationServices{Log: logVerifier})
+	if !errors.Is(err, ErrInvalidLogInclusion) || !errors.Is(err, ErrNoSuccessfulProfile) {
+		t.Fatalf("optional malformed-proof error = %v, want inclusion rejection", err)
+	}
+	if logVerifier.calls != 1 {
+		t.Fatalf("VerifyOccurrence calls = %d, want supplied malformed proof to be checked", logVerifier.calls)
+	}
+}
+
+type proofCheckingSelectionLog struct {
+	checkpoint Checkpoint
+	seen       Digest
+	calls      int
+}
+
+func (v *proofCheckingSelectionLog) VerifyOccurrence(_ context.Context, evidence TypedEvidence, inclusion EvidenceLogInclusion) (VerifiedEvidenceLogBinding, error) {
+	v.calls++
+	if err := VerifyEvidenceLogInclusion(v.checkpoint, evidence, inclusion); err != nil {
+		return VerifiedEvidenceLogBinding{}, err
+	}
+	identity, err := evidence.Identity()
+	if err != nil {
+		return VerifiedEvidenceLogBinding{}, err
+	}
+	v.seen = identity
+	return VerifiedEvidenceLogBinding{
+		Position: LogPosition{Domain: LogDomainTenantEvidenceV1, Index: inclusion.Index},
+		Evidence: identity,
+	}, nil
+}
+
+func selectionProofFor(t *testing.T, evidence TypedEvidence) (Checkpoint, EvidenceLogInclusion) {
+	t.Helper()
+	tree := merklelog.New()
+	preceding := testLogEvidence("selection-prefix")
+	first, _ := mustAppendLog(t, tree, EmptyCheckpoint(), preceding)
+	update, _ := mustAppendLog(t, tree, first.Checkpoint, evidence)
+	return update.Checkpoint, mustEvidenceLogInclusion(t, tree, 1)
+}
+
+func profileDigest(profile ProfileConfig) Digest {
+	reference, err := profile.Digest()
+	if err != nil {
+		panic(err)
+	}
+	return reference
 }

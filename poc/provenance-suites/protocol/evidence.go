@@ -25,6 +25,8 @@ type MediaType string
 // TypedManifest share this form and remain distinct types because their
 // authority and lifecycle differ. TypedAssertion is not Encoded: a
 // predicate type is purpose, not a media type.
+// Bytes are immutable once the value is shared within common code. Use Clone
+// when independent buffer ownership is needed at an API or storage boundary.
 type Encoded struct {
 	MediaType MediaType `json:"media_type"`
 	Bytes     []byte    `json:"bytes"`
@@ -34,8 +36,26 @@ type Encoded struct {
 func (e Encoded) Clone() Encoded {
 	return Encoded{
 		MediaType: e.MediaType,
-		Bytes:     append([]byte(nil), e.Bytes...),
+		Bytes:     cloneBytes(e.Bytes),
 	}
+}
+
+func cloneBytes(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneSlice[T any](in []T) []T {
+	if in == nil {
+		return nil
+	}
+	out := make([]T, len(in))
+	copy(out, in)
+	return out
 }
 
 // PredicateType names the inner assertion's purpose. It is established only
@@ -77,6 +97,7 @@ func (e TypedEvidence) Identity() (Digest, error) {
 }
 
 // TypedAssertion is the inner purpose-typed statement a profile authenticates.
+// Its bytes are immutable when shared within common code.
 // Envelope encodings such as a Sigstore Bundle carry this statement inside
 // TypedEvidence bytes. Finish emits it; common code does not read it from a
 // parallel couriered field.
@@ -102,14 +123,13 @@ type ConstraintOutcome struct {
 // verification. Configuration digests bind the result to the exact
 // authenticated policy and anchors used; they are not profile selectors.
 type AuthenticatedEvidence struct {
-	Principal              Principal           `json:"principal"`
-	MappedFleetShiftTenant TenantID            `json:"mapped_fleetshift_tenant,omitempty"`
-	PredicateType          PredicateType       `json:"predicate_type"`
-	ContentDigest          Digest              `json:"content_digest"`
-	ProvenanceType         ProvenanceType      `json:"provenance_type"`
-	AuthorityConfigDigest  Digest              `json:"authority_config_digest"`
-	ProfileConfigDigest    Digest              `json:"profile_config_digest"`
-	SatisfiedConstraints   []ConstraintOutcome `json:"satisfied_constraints,omitempty"`
+	Principal             Principal           `json:"principal"`
+	PredicateType         PredicateType       `json:"predicate_type"`
+	ContentDigest         Digest              `json:"content_digest"`
+	ProvenanceType        ProvenanceType      `json:"provenance_type"`
+	AuthorityConfigDigest Digest              `json:"authority_config_digest"`
+	ProfileConfigDigest   Digest              `json:"profile_config_digest"`
+	SatisfiedConstraints  []ConstraintOutcome `json:"satisfied_constraints,omitempty"`
 }
 
 // TentativeHints are parsed from untrusted evidence to locate authenticated
@@ -129,6 +149,7 @@ type TentativeHints struct {
 // is implied by the evidence it accompanies. It is not part of the immutable
 // TypedEvidence identity and gains authority only by verifying against
 // retained state and committed evidence.
+// Replacing support creates a new value; shared support bytes remain immutable.
 type SupportMaterial Encoded
 
 // SignedStatement is one independently authenticated assertion as couriered
@@ -137,6 +158,7 @@ type SupportMaterial Encoded
 // the selected profile to verify that evidence. It is not a second signed
 // assertion. A delivery package couriers each statement as an Item, which
 // may also carry that statement's evidence-log inclusion.
+// Common code shares the statement and its backing buffers as immutable values.
 type SignedStatement struct {
 	Evidence TypedEvidence   `json:"evidence"`
 	Support  SupportMaterial `json:"support"`
@@ -150,19 +172,21 @@ type SignedStatement struct {
 // inclusion; VerifyRequest and ApplyRequest continue to take
 // SignedStatement. The inclusion is common couriered material, not
 // SupportMaterial and not part of TypedEvidence identity.
+// An Item and its nested slices and pointers are immutable within common code.
 type Item struct {
 	SignedStatement
 	EvidenceLog *EvidenceLogInclusion `json:"evidence_log,omitempty"`
 }
 
 // DeliveryContext is the bounded context used to match a delivery policy
-// before evidence is authoritative. PredicateType is filled from untrusted
-// evidence hints during selection, not supplied as a separate couriered
-// assertion.
+// before evidence is authoritative. Common selection derives these fields from
+// untrusted evidence hints and rechecks them against authenticated content.
+// Callers supply no tenant expectation. Package position does not affect
+// provenance policy; common predicate handlers check tenant relationships and
+// determine whether the selected root can produce an action.
 type DeliveryContext struct {
-	ClaimedTenant     TenantID      `json:"claimed_tenant,omitempty"`
-	PredicateType     PredicateType `json:"predicate_type,omitempty"`
-	RootAuthorization bool          `json:"root_authorization"`
+	PredicateType   PredicateType   `json:"predicate_type,omitempty"`
+	TenantPartition TenantPartition `json:"tenant_partition,omitempty"`
 }
 
 const (
@@ -174,13 +198,14 @@ const (
 // is embedded in each root authorization so the resource manager cannot
 // retarget tenant, placement, resource, generation, or action.
 //
+// Tenant is the authority-scoped external identity, not an RM routing ID.
 // FullResourceName is the AIP-122 identity of the Deployment or
 // ManagedResource. TargetID is a stand-in for a placement strategy: this
 // POC uses one static target rather than a selector. A later placement
 // model replaces TargetID without changing the resource name, generation,
 // or action.
 type DeliveryScope struct {
-	TenantID         TenantID         `json:"tenant_id"`
+	Tenant           Tenant           `json:"tenant"`
 	TargetID         string           `json:"target_id"`
 	FullResourceName FullResourceName `json:"name"`
 	Generation       uint64           `json:"generation"`

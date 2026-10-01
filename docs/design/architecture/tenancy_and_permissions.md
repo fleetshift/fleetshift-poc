@@ -35,7 +35,13 @@ The platform is natively multi-tenant.
 - **Tenants** exist within that system and require authorization isolation as a hard boundary.
 - Recursive instantiation remains available when a stronger boundary is needed, such as separate process, storage, or identity configuration per instance.
 
-The exact relationship between provider and tenant is still intentionally unresolved here. The current provider/consumer exploration lives in [../provider_consumer_model.md](../provider_consumer_model.md).
+Each platform has exactly one provider tenant and zero or more consumer tenants.
+They share the ordinary tenant model and authorization isolation. The provider
+additionally governs root platform trust and platform-installed abstractions.
+Managed-resource types extend the single platform-wide API and are governed by
+that provider; consumers create resources through the same shared API.
+Operational provider/consumer/factory topology is explored in
+[../provider_consumer_model.md](../provider_consumer_model.md).
 
 ### Actors
 
