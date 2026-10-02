@@ -99,6 +99,9 @@ func TestOrdinaryChecksPrecedeSupportingWork(t *testing.T) {
 				if !tc.stale && len(agent.generations) != 0 {
 					t.Fatal("rejection retained a generation")
 				}
+				if session.basisContributors != nil || session.actionBasis != nil {
+					t.Fatal("early rejection initialized basis accounting")
+				}
 			})
 		}
 	}
@@ -161,6 +164,9 @@ func TestCompletedOrdinaryRetriesSkipSupportingAndManifestWork(t *testing.T) {
 				}
 				if step.retry && (counted.parseCalls != 1 || counted.beginCalls != 1 || counted.finishCalls != 1 || session.catalog.cursor != 0 || session.edgeCount != 0 || logs.calls[session.catalog.supporting[0]] != 0) {
 					t.Fatal("retry performed supporting work")
+				}
+				if step.retry && (session.basisContributors != nil || session.actionBasis != nil) {
+					t.Fatal("completed retry initialized basis accounting")
 				}
 			}
 		})
@@ -300,6 +306,9 @@ func TestReservedRootPredicatesCannotBeClaimedByProfile(t *testing.T) {
 			}
 			if counted.finishCalls != 1 || counted.applyCalls != 0 || agent.suiteApplyCount != 0 || len(agent.applied) != 0 || len(agent.generations) != 0 {
 				t.Fatal("reserved predicate failed to authenticate or reached effects")
+			}
+			if session.basisContributors != nil || session.actionBasis != nil {
+				t.Fatal("reserved root initialized basis accounting")
 			}
 		})
 	}

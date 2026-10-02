@@ -253,7 +253,7 @@ func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedN
 		var required bool
 		var err error
 		if result.Authenticated.PredicateType == protocol.PredicateTypeDeploymentV1 {
-			view, required, err = a.handleDeploymentLocked(root)
+			view, required, err = a.handleDeploymentLocked(session, root)
 		} else {
 			view, required, err = a.handleManagedResourceLocked(session, root)
 		}
@@ -262,9 +262,6 @@ func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedN
 		}
 		if !required {
 			return nil
-		}
-		if _, err := session.validateSelectedGraph(root.identity); err != nil {
-			return err
 		}
 		return a.applyLocked(view)
 	case protocol.PredicateTypeFulfillmentRelationV1:
@@ -278,9 +275,6 @@ func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedN
 		}
 		if !target.Owns(result.Authenticated.PredicateType) {
 			return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
-		}
-		if _, err := session.validateSelectedGraph(root.identity); err != nil {
-			return err
 		}
 		a.suiteApplyCount++
 		return target.Apply(context.Background(), cloneApplyRequest(protocol.ApplyRequest{

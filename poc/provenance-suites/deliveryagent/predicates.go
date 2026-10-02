@@ -9,7 +9,7 @@ import (
 
 // The common handlers decode authenticated content once. Their boolean result
 // reports whether work is required; completed deliveries derive no new view.
-func (a *Agent) handleDeploymentLocked(root verifiedNode) (AppliedDelivery, bool, error) {
+func (a *Agent) handleDeploymentLocked(session *verificationSession, root verifiedNode) (AppliedDelivery, bool, error) {
 	authorization, err := protocol.DecodeDeploymentAuthorization(root.result.Assertion)
 	if err != nil {
 		return AppliedDelivery{}, false, err
@@ -18,6 +18,7 @@ func (a *Agent) handleDeploymentLocked(root verifiedNode) (AppliedDelivery, bool
 	if err != nil || !required {
 		return AppliedDelivery{}, false, err
 	}
+	session.addBasisContribution(root)
 	for i, manifest := range authorization.Manifests {
 		if manifest.MediaType == "" {
 			return AppliedDelivery{}, false, fmt.Errorf("%w: manifest %d media type is required", protocol.ErrMalformedEvidence, i)
@@ -39,6 +40,7 @@ func (a *Agent) handleManagedResourceLocked(session *verificationSession, root v
 	if err != nil || !required {
 		return AppliedDelivery{}, false, err
 	}
+	session.addBasisContribution(root)
 	relation, err := a.verifyFulfillmentRelationLocked(session, root.identity, authorization)
 	if err != nil {
 		return AppliedDelivery{}, false, err
