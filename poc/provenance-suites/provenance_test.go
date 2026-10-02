@@ -421,6 +421,78 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 	}
 }
 
+func TestOrdinaryRemovalRetryRetainsGenerationAfterLostAcknowledgement(t *testing.T) {
+	for _, purpose := range []protocol.PredicateType{protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1} {
+		t.Run(string(purpose), func(t *testing.T) {
+			s := newEnrolledManagedResourceScenario(t)
+			name := deploymentName("removal-retry")
+			if purpose == protocol.PredicateTypeManagedResourceV1 {
+				name = clusterName("removal-retry")
+			}
+			sign := func(generation uint64, action string, content []byte) protocol.TypedEvidence {
+				scope := protocol.DeliveryScope{TargetID: testTarget, FullResourceName: name, Generation: generation, Action: action}
+				var evidence protocol.TypedEvidence
+				var err error
+				if purpose == protocol.PredicateTypeDeploymentV1 {
+					evidence, err = s.user.SignDeployment(context.Background(), protocol.DeploymentAuthorization{DeliveryScope: scope, Manifests: []protocol.TypedManifest{{MediaType: testReplicasMediaType, Bytes: content}}})
+				} else {
+					evidence, err = s.user.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{DeliveryScope: scope, ResourceType: resourceTypeForTest(t, testResourceType), Spec: content})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return evidence
+			}
+			var support []protocol.TypedEvidence
+			if purpose == protocol.PredicateTypeManagedResourceV1 {
+				support = []protocol.TypedEvidence{mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)}
+			}
+			for _, generation := range []uint64{1, 2} {
+				if _, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), sign(generation, protocol.ActionPut, []byte(`{"live":true}`)), support...); err != nil {
+					t.Fatal(err)
+				}
+				view, ok := s.agent.Applied(name)
+				if !ok || view.Scope.Generation != generation {
+					t.Fatal("put did not retain advancing generation")
+				}
+			}
+			s.agent.LoseNextAcknowledgement()
+			receipt, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), sign(3, protocol.ActionRemove, []byte(`{}`)), support...)
+			if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
+				t.Fatalf("remove: %v", err)
+			}
+			if _, ok := s.agent.Applied(name); ok {
+				t.Fatal("removal did not complete before losing acknowledgement")
+			}
+			if err := s.manager.Dispatch(context.Background(), onlyDispatch(t, receipt)); err != nil {
+				t.Fatalf("retry removal: %v", err)
+			}
+			// The refreshed package has caught up to the retained checkpoint.
+			// Omitting its relation must still acknowledge the completed removal.
+			retry := s.recorder.last
+			retry.Supporting = nil
+			if err := s.agent.Deliver(retry); err != nil {
+				t.Fatalf("retry without support: %v", err)
+			}
+			if _, ok := s.agent.Applied(name); ok {
+				t.Fatal("retry resurrected removed resource")
+			}
+			if checkpoint, ok := s.manager.AgentCheckpoint(testTarget); !ok || checkpoint != s.agent.Checkpoint() {
+				t.Fatal("lost-ack retry did not recover manager checkpoint")
+			}
+			// Different signed content avoids RM reuse of the earlier put. The
+			// agent's removal marker must independently reject this stale work.
+			_, err = s.manager.SubmitDelivery(context.Background(), s.user.Principal(), sign(2, protocol.ActionPut, []byte(`{"stale":true}`)))
+			if !errors.Is(err, deliveryagent.ErrGeneration) {
+				t.Fatalf("stale put after removal: %v", err)
+			}
+			if _, ok := s.agent.Applied(name); ok {
+				t.Fatal("stale put resurrected removed resource")
+			}
+		})
+	}
+}
+
 func TestManagedResourceAppliesDerivedManifestFromFulfillmentRelation(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
 	spec := json.RawMessage(`{"region":"us-east-1"}`)
@@ -772,7 +844,7 @@ func TestSignDeploymentRequiresResourceName(t *testing.T) {
 func TestSignManagedResourceRequiresCompleteDeliveryScope(t *testing.T) {
 	c := mustProducer(t, "alice")
 	_, err := c.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{
-		ResourceType: testResourceType,
+		ResourceType: resourceTypeForTest(t, testResourceType),
 		Spec:         json.RawMessage(`{}`),
 	})
 	if err == nil {
@@ -1382,7 +1454,7 @@ func mustSignManagedResource(t *testing.T, c *producer.Producer, name protocol.F
 			Generation:       generation,
 			Action:           protocol.ActionPut,
 		},
-		ResourceType: testResourceType,
+		ResourceType: resourceTypeForTest(t, testResourceType),
 		Spec:         spec,
 	})
 	if err != nil {
@@ -1394,7 +1466,7 @@ func mustSignManagedResource(t *testing.T, c *producer.Producer, name protocol.F
 func mustSignRelation(t *testing.T, c *producer.Producer, resourceType string, mediaType protocol.MediaType) protocol.TypedEvidence {
 	t.Helper()
 	evidence, err := c.SignFulfillmentRelation(context.Background(), protocol.FulfillmentRelation{
-		ResourceType: resourceType,
+		ResourceType: resourceTypeForTest(t, resourceType),
 		MediaType:    mediaType,
 	})
 	if err != nil {
@@ -1540,4 +1612,13 @@ func profileDigest(profile protocol.ProfileConfig) protocol.Digest {
 		panic(err)
 	}
 	return reference
+}
+
+func resourceTypeForTest(t *testing.T, value string) protocol.ResourceType {
+	t.Helper()
+	parsed, err := protocol.ParseResourceType(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

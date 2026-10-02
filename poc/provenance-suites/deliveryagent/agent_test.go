@@ -59,7 +59,7 @@ func TestFulfillmentRelationChecksProviderReferenceAfterAuthentication(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := protocol.FulfillmentRelation{ResourceType: "test.example/Cluster", MediaType: "application/json"}
+			want := protocol.FulfillmentRelation{ResourceType: resourceTypeForTest(t, "test.example/Cluster"), MediaType: "application/json"}
 			assertion, err := want.Assertion()
 			if err != nil {
 				t.Fatal(err)
@@ -161,7 +161,7 @@ func TestAgentAuthenticatesFulfillmentRelationRootButRejectsApply(t *testing.T) 
 	user := testProducer(t, "addon")
 	enrollTestTarget(t, agent.profile, user)
 	assertion, err := (protocol.FulfillmentRelation{
-		ResourceType: "test.example/Cluster",
+		ResourceType: resourceTypeForTest(t, "test.example/Cluster"),
 		MediaType:    "application/json",
 	}).Assertion()
 	if err != nil {

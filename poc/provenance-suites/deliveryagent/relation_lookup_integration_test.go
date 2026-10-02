@@ -118,15 +118,12 @@ func TestRequestedRelationUsesAuthenticatedContentAfterTentativeLookup(t *testin
 			target := directkey.NewTarget()
 			enrollTestTarget(t, target, user)
 			enrollTestTarget(t, target, addon)
-			actual, err := (protocol.FulfillmentRelation{ResourceType: tc.actualType, MediaType: tc.media}).Assertion()
-			if err != nil {
-				t.Fatal(err)
-			}
+			actual := rawRelationAssertion(t, tc.actualType, tc.media)
 			actual.PredicateType = tc.purpose
 			item := lookupAssertionItem(t, addon, actual)
 			root := lookupManagedRoot(t, user, "kind.example/Cluster")
 			pkg := loggedTestPackage(t, root, item.Evidence)
-			claim, err := (protocol.FulfillmentRelation{ResourceType: "kind.example/Cluster", MediaType: "application/tentative"}).Assertion()
+			claim, err := (protocol.FulfillmentRelation{ResourceType: resourceTypeForTest(t, "kind.example/Cluster"), MediaType: "application/tentative"}).Assertion()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,12 +152,30 @@ func lookupManagedRoot(t *testing.T, signer *directkey.Producer, kind string) pr
 	t.Helper()
 	assertion, err := (protocol.ManagedResourceAuthorization{
 		DeliveryScope: protocol.DeliveryScope{Tenant: signer.Principal().Tenant(), TargetID: "target-test", FullResourceName: "//fleetshift.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
-		ResourceType:  kind, Spec: []byte(`{"region":"east"}`),
+		ResourceType:  resourceTypeForTest(t, kind), Spec: []byte(`{"region":"east"}`),
 	}).Assertion()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return lookupAssertionItem(t, signer, assertion).Evidence
+}
+
+// rawManagedRoot lets the native producer sign malformed type syntax to test
+// parsing at the target boundary, without constructing an invalid ResourceType.
+func rawManagedRoot(t *testing.T, signer *directkey.Producer, kind string) protocol.TypedEvidence {
+	t.Helper()
+	encoded, err := protocol.MarshalCanonical(struct {
+		protocol.DeliveryScope
+		ResourceType string          `json:"resource_type"`
+		Spec         json.RawMessage `json:"spec"`
+	}{
+		DeliveryScope: protocol.DeliveryScope{Tenant: signer.Principal().Tenant(), TargetID: "target-test", FullResourceName: "//fleetshift.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
+		ResourceType:  kind, Spec: []byte(`{"region":"east"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return lookupAssertionItem(t, signer, protocol.TypedAssertion{PredicateType: protocol.PredicateTypeManagedResourceV1, Bytes: encoded}).Evidence
 }
 
 func TestManagedResourceIgnoresUnusableAndUnrelatedSupport(t *testing.T) {
@@ -193,7 +208,7 @@ func TestManagedResourceIgnoresUnusableAndUnrelatedSupport(t *testing.T) {
 				case "malformed common predicate":
 					decoy = lookupAssertionItem(t, addon, protocol.TypedAssertion{PredicateType: protocol.PredicateTypeFulfillmentRelationV1, Bytes: []byte("not common JSON")})
 				case "invalid resource key":
-					decoy = lookupRelationItem(t, addon, "local-kind", "application/json")
+					decoy = lookupAssertionItem(t, addon, rawRelationAssertion(t, "local-kind", "application/json"))
 				case "opaque suite predicate":
 					decoy = lookupAssertionItem(t, addon, protocol.TypedAssertion{PredicateType: "suite/opaque", Bytes: []byte("opaque event")})
 				}
@@ -233,7 +248,7 @@ func TestManagedRootValidatesResourceTypeDespiteNativeProducerBypass(t *testing.
 	enrollTestTarget(t, target, user)
 	for _, kind := range []string{"clusters", "kind.example/v1/Cluster", "kind.example/Clus ter"} {
 		t.Run(kind, func(t *testing.T) {
-			root := lookupManagedRoot(t, user, kind)
+			root := rawManagedRoot(t, user, kind)
 			counted := &countedTarget{delegate: target}
 			session, _ := relationLookupSession(t, loggedTestPackage(t, root), counted)
 			agent := newDispatchTestAgent()

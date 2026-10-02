@@ -5,7 +5,6 @@
 package deliveryagent
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,7 +17,7 @@ import (
 )
 
 var (
-	ErrGeneration = errors.New("delivery generation is stale or conflicting")
+	ErrGeneration = errors.New("delivery generation is stale")
 	ErrLogFork    = errors.New("package does not extend retained evidence-log checkpoint")
 
 	// ErrAcknowledgementLost is a test fault injected after an otherwise
@@ -72,8 +71,7 @@ type AppliedDelivery struct {
 }
 
 type appliedState struct {
-	view   AppliedDelivery
-	signed []byte
+	view AppliedDelivery
 }
 
 // Agent is the target role.
@@ -132,7 +130,7 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 // inclusions are structurally checked but not cryptographically verified.
 // ApplyRequest.Temporal receives the root VerificationResult only.
 // Authenticated predicate type selects apply: intent predicates use
-// fulfillment apply, trust-config-update is reserved on the agent, and
+// fulfillment apply, supporting relations and trust-config-update are reserved, and
 // predicates the selected profile Owns call TargetAPI.Apply. Unknown
 // predicates fail closed. A verified evidence-log checkpoint is retained
 // even when the included evidence is later rejected. When the manager
@@ -251,20 +249,26 @@ func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedN
 	result := root.result
 	switch result.Authenticated.PredicateType {
 	case protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1:
-		view, err := a.decodeAndDeriveLocked(session, root)
+		var view AppliedDelivery
+		var required bool
+		var err error
+		if result.Authenticated.PredicateType == protocol.PredicateTypeDeploymentV1 {
+			view, required, err = a.handleDeploymentLocked(root)
+		} else {
+			view, required, err = a.handleManagedResourceLocked(session, root)
+		}
 		if err != nil {
 			return err
 		}
-		if view.Scope.Tenant != a.config.Tenant || view.Scope.TargetID != a.config.TargetID {
-			return fmt.Errorf("%w: tenant or target mismatch", protocol.ErrPolicyReevaluation)
-		}
-		if result.Authenticated.Principal.Tenant() != a.config.Tenant {
-			return fmt.Errorf("%w: root principal does not belong to the provisioned resource tenant", protocol.ErrTenantMismatch)
+		if !required {
+			return nil
 		}
 		if _, err := session.validateSelectedGraph(root.identity); err != nil {
 			return err
 		}
-		return a.applyLocked(view, result.Assertion.Bytes)
+		return a.applyLocked(view)
+	case protocol.PredicateTypeFulfillmentRelationV1:
+		return fmt.Errorf("%w: fulfillment-relation/v1 is supporting evidence", protocol.ErrUnknownPredicateType)
 	case protocol.PredicateTypeTrustConfigUpdateV1:
 		return fmt.Errorf("%w: trust-config-update/v1 is not implemented", protocol.ErrUnknownPredicateType)
 	default:
@@ -300,113 +304,14 @@ func (a *Agent) mapLogError(err error) error {
 	return fmt.Errorf("%w: %w", ErrLogFork, err)
 }
 
-func (a *Agent) decodeAndDeriveLocked(session *verificationSession, root verifiedNode) (AppliedDelivery, error) {
-	result := root.result
-	switch result.Authenticated.PredicateType {
-	case protocol.PredicateTypeDeploymentV1:
-		authorization, err := protocol.DecodeDeploymentAuthorization(result.Assertion)
-		if err != nil {
-			return AppliedDelivery{}, err
-		}
-		for i, manifest := range authorization.Manifests {
-			if manifest.MediaType == "" {
-				return AppliedDelivery{}, fmt.Errorf("%w: manifest %d media type is required", protocol.ErrMalformedEvidence, i)
-			}
-		}
-		return AppliedDelivery{
-			Scope:         authorization.DeliveryScope,
-			PredicateType: protocol.PredicateTypeDeploymentV1,
-			Manifests:     authorization.Manifests,
-		}, nil
-	case protocol.PredicateTypeManagedResourceV1:
-		authorization, err := protocol.DecodeManagedResourceAuthorization(result.Assertion)
-		if err != nil {
-			return AppliedDelivery{}, err
-		}
-		relation, err := a.verifyFulfillmentRelationLocked(session, root.identity, authorization)
-		if err != nil {
-			return AppliedDelivery{}, err
-		}
-		// RegisteredSelfTarget: the named delivery target is the addon
-		// itself. TargetID is this POC's static-placement stand-in; the
-		// caller already required it to equal this agent's ID before apply.
-		return AppliedDelivery{
-			Scope:         authorization.DeliveryScope,
-			PredicateType: protocol.PredicateTypeManagedResourceV1,
-			Manifests: []protocol.TypedManifest{{
-				MediaType: relation.MediaType,
-				Bytes:     authorization.Spec,
-			}},
-		}, nil
-	default:
-		return AppliedDelivery{}, fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
-	}
-}
-
-func (a *Agent) verifyFulfillmentRelationLocked(session *verificationSession, parent protocol.Digest, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
-	if err := protocol.ValidateResourceType(authorization.ResourceType); err != nil {
-		return protocol.FulfillmentRelation{}, err
-	}
-	if a.config.ProviderTenant == (protocol.Tenant{}) {
-		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: provider tenant is not provisioned", protocol.ErrTenantMismatch)
-	}
-	identity, err := session.supportingRelation(authorization.ResourceType)
-	if err != nil {
-		return protocol.FulfillmentRelation{}, err
-	}
-
-	var relation protocol.FulfillmentRelation
-	err = session.withNode(
-		context.Background(),
-		identity,
-		func(support verifiedNode) error {
-			if support.result.Authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
-				return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, support.result.Authenticated.PredicateType)
-			}
-			if support.result.Authenticated.Principal.Tenant() != a.config.ProviderTenant {
-				return fmt.Errorf("%w: fulfillment relation principal does not belong to the platform provider tenant", protocol.ErrTenantMismatch)
-			}
-			decoded, err := protocol.DecodeFulfillmentRelation(support.result.Assertion)
-			if err != nil {
-				return err
-			}
-			if err := protocol.ValidateResourceType(decoded.ResourceType); err != nil {
-				return err
-			}
-			if decoded.MediaType == "" {
-				return fmt.Errorf("%w: fulfillment relation media type is required", protocol.ErrMalformedEvidence)
-			}
-			if decoded.ResourceType != authorization.ResourceType {
-				return fmt.Errorf("%w: fulfillment relation resource type %q, authorization %q", protocol.ErrPolicyReevaluation, decoded.ResourceType, authorization.ResourceType)
-			}
-			if err := session.recordDependency(parent, support.identity); err != nil {
-				return err
-			}
-			relation = decoded
-			return nil
-		},
-	)
-	if err != nil {
-		return protocol.FulfillmentRelation{}, err
-	}
-	return relation, nil
-}
-
-func (a *Agent) applyLocked(view AppliedDelivery, signed []byte) error {
-	if view.Scope.Action != protocol.ActionPut && view.Scope.Action != protocol.ActionRemove {
-		return fmt.Errorf("unsupported action %q", view.Scope.Action)
-	}
+func (a *Agent) applyLocked(view AppliedDelivery) error {
 	previous, exists := a.generations[view.Scope.FullResourceName]
 	if exists {
 		if view.Scope.Generation < previous {
 			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, view.Scope.Generation, previous)
 		}
 		if view.Scope.Generation == previous {
-			applied := a.applied[view.Scope.FullResourceName]
-			if bytes.Equal(applied.signed, signed) {
-				return nil
-			}
-			return fmt.Errorf("%w: generation %d has different signed content", ErrGeneration, view.Scope.Generation)
+			return nil
 		}
 	}
 	a.generations[view.Scope.FullResourceName] = view.Scope.Generation
@@ -416,7 +321,7 @@ func (a *Agent) applyLocked(view AppliedDelivery, signed []byte) error {
 	}
 	// Common derivation already owns immutable delivery data; retaining it
 	// shares those values. Applied detaches data for callers outside the agent.
-	a.applied[view.Scope.FullResourceName] = appliedState{view: view, signed: signed}
+	a.applied[view.Scope.FullResourceName] = appliedState{view: view}
 	return nil
 }
 

@@ -97,7 +97,7 @@ type evidenceCatalog struct {
 	rootID     protocol.Digest
 	byID       map[protocol.Digest]protocol.Item
 	supporting []protocol.Digest
-	relations  map[string]protocol.Digest
+	relations  map[protocol.ResourceType]protocol.Digest
 	cursor     int
 	lookup     protocol.TargetLookup
 	limits     verificationLimits
@@ -120,7 +120,7 @@ func newEvidenceCatalog(pkg resourcemanager.DeliveryPackage, lookup protocol.Tar
 	catalog := &evidenceCatalog{
 		byID:       make(map[protocol.Digest]protocol.Item, len(pkg.Supporting)+1),
 		supporting: make([]protocol.Digest, 0, len(pkg.Supporting)),
-		relations:  make(map[string]protocol.Digest),
+		relations:  make(map[protocol.ResourceType]protocol.Digest),
 		lookup:     lookup,
 		limits:     limits,
 	}
@@ -293,7 +293,7 @@ func (c *evidenceCatalog) item(identity protocol.Digest) protocol.Item {
 // resource type. Tentative parsing grants no authority or selected edge. Each
 // reached item is examined at most once across requests; input is already
 // structurally bounded. Only actual end-of-input establishes absence.
-func (c *evidenceCatalog) supportingRelation(resourceType string) (protocol.Digest, error) {
+func (c *evidenceCatalog) supportingRelation(resourceType protocol.ResourceType) (protocol.Digest, error) {
 	if identity, ok := c.relations[resourceType]; ok {
 		return identity, nil
 	}
@@ -332,7 +332,7 @@ func (c *evidenceCatalog) supportingRelation(resourceType string) (protocol.Dige
 		// predicate are transient; only the decoded key and identity are retained.
 		hints.Assertion.Bytes = append([]byte(nil), hints.Assertion.Bytes...)
 		relation, err := protocol.DecodeFulfillmentRelation(hints.Assertion)
-		if err != nil || protocol.ValidateResourceType(relation.ResourceType) != nil {
+		if err != nil {
 			continue
 		}
 		if _, exists := c.relations[relation.ResourceType]; !exists {

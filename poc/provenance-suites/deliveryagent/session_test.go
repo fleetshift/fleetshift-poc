@@ -204,7 +204,7 @@ func TestVerificationSessionFailedVerificationCanRetryAndMissingIdentityFailsClo
 
 func TestVerificationSessionRelationLookupDoesNotCreateDependency(t *testing.T) {
 	session, _, supportID, target, logVerifier := newVerificationFixture(t, nil, defaultVerificationLimits())
-	identity, err := session.supportingRelation("test.example/Cluster")
+	identity, err := session.supportingRelation(resourceTypeForTest(t, "test.example/Cluster"))
 	if err != nil {
 		t.Fatalf("supportingRelation: %v", err)
 	}
