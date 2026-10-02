@@ -28,7 +28,7 @@ func TestVerificationSessionMemoizesSupportingVerificationAsImmutableData(t *tes
 	if err != nil {
 		t.Fatalf("second support verification: %v", err)
 	}
-	if string(second.result.Assertion.Bytes) != `{"relation":true}` {
+	if string(second.result.Assertion.Bytes) != `{"resource_type":"test.example/Cluster","media_type":"application/json"}` {
 		t.Fatalf("cached assertion = %q, want original relation", second.result.Assertion.Bytes)
 	}
 	if second.result.Temporal.LogPosition == nil || second.result.Temporal.LogPosition.Index != 1 {
@@ -59,8 +59,9 @@ func TestVerificationSessionMemoizesSupportingVerificationAsImmutableData(t *tes
 
 func TestVerificationSessionAuthenticatesPriorIntentAsDependency(t *testing.T) {
 	user := testProducer(t, "alice")
-	target := &countedTarget{delegate: directkey.NewTarget()}
-	enrollTestTarget(t, target.delegate, user)
+	baseTarget := directkey.NewTarget()
+	target := &countedTarget{delegate: baseTarget}
+	enrollTestTarget(t, baseTarget, user)
 	trust := sessionTestTrust()
 	lookup := func(pt protocol.ProvenanceType) (protocol.TargetAPI, bool) {
 		return target, pt == target.ProvenanceType()
@@ -201,17 +202,17 @@ func TestVerificationSessionFailedVerificationCanRetryAndMissingIdentityFailsClo
 	}
 }
 
-func TestVerificationSessionCandidateInspectionDoesNotCreateDependency(t *testing.T) {
+func TestVerificationSessionRelationLookupDoesNotCreateDependency(t *testing.T) {
 	session, _, supportID, target, logVerifier := newVerificationFixture(t, nil, defaultVerificationLimits())
-	candidates, err := session.supportingCandidates(protocol.PredicateTypeFulfillmentRelationV1)
+	identity, err := session.supportingRelation("test.example/Cluster")
 	if err != nil {
-		t.Fatalf("supportingCandidates: %v", err)
+		t.Fatalf("supportingRelation: %v", err)
 	}
-	if len(candidates) != 1 || candidates[0] != supportID {
-		t.Fatalf("candidates = %v, want support identity %s", candidates, supportID)
+	if identity != supportID {
+		t.Fatalf("relation identity = %s, want %s", identity, supportID)
 	}
 	if target.beginCalls != 0 || logVerifier.calls[supportID] != 0 || session.edgeCount != 0 {
-		t.Fatalf("tentative candidate inspection performed work: Begin=%d log=%d edges=%d", target.beginCalls, logVerifier.calls[supportID], session.edgeCount)
+		t.Fatalf("tentative relation lookup performed work: Begin=%d log=%d edges=%d", target.beginCalls, logVerifier.calls[supportID], session.edgeCount)
 	}
 	if _, err := session.verifyNode(context.Background(), supportID); err != nil {
 		t.Fatalf("candidate verification: %v", err)
@@ -373,8 +374,8 @@ func TestProfileOutputIsDetachedBeforeCommonCaching(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(first.result.Assertion.Bytes) != `{"relation":true}` ||
-		string(second.result.Assertion.Bytes) != `{"relation":true}` {
+	if string(first.result.Assertion.Bytes) != `{"resource_type":"test.example/Cluster","media_type":"application/json"}` ||
+		string(second.result.Assertion.Bytes) != `{"resource_type":"test.example/Cluster","media_type":"application/json"}` {
 		t.Fatal("profile-owned output changed the cached authentication")
 	}
 	if target.finishCalls != 1 {
@@ -446,7 +447,7 @@ func newVerificationFixture(t *testing.T, supportSigner *directkey.Producer, lim
 	if err != nil {
 		t.Fatalf("create root evidence: %v", err)
 	}
-	supportEvidence, err := supportSigner.CreateEvidence(context.Background(), protocol.TypedAssertion{PredicateType: protocol.PredicateTypeFulfillmentRelationV1, Bytes: []byte(`{"relation":true}`)})
+	supportEvidence, err := supportSigner.CreateEvidence(context.Background(), protocol.TypedAssertion{PredicateType: protocol.PredicateTypeFulfillmentRelationV1, Bytes: []byte(`{"resource_type":"test.example/Cluster","media_type":"application/json"}`)})
 	if err != nil {
 		t.Fatalf("create support evidence: %v", err)
 	}
@@ -596,7 +597,7 @@ func enrollTestTarget(t *testing.T, target *directkey.Target, producer *directke
 }
 
 type countedTarget struct {
-	delegate    *directkey.Target
+	delegate    protocol.TargetAPI
 	beginCalls  int
 	finishCalls int
 	parseCalls  int

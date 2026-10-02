@@ -43,9 +43,9 @@ func TestTenantPoliciesUseConfiguredOrder(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, got, err := config.SelectPolicy(TentativeHints{
-				Scheme:        config.AuthorityRegistry[0].PrincipalAuthority.Scheme,
-				Authority:     config.AuthorityRegistry[0].PrincipalAuthority.Authority,
-				PredicateType: PredicateTypeDeploymentV1, TenantPartition: tc.partition,
+				Scheme:    config.AuthorityRegistry[0].PrincipalAuthority.Scheme,
+				Authority: config.AuthorityRegistry[0].PrincipalAuthority.Authority,
+				Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1}, TenantPartition: tc.partition,
 			})
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("selection error = %v, want %v", err, tc.wantErr)
@@ -88,7 +88,7 @@ func TestFirstMatchingTenantPolicyDoesNotFallBack(t *testing.T) {
 	authority.DeliveryPolicies = []DeliveryPolicy{exact, authority.DeliveryPolicies[0]}
 	target := &stubTarget{pt: evidence.ProvenanceType, hints: TentativeHints{
 		Scheme: authority.PrincipalAuthority.Scheme, Authority: authority.PrincipalAuthority.Authority,
-		TenantPartition: partition, Subject: "alice", PredicateType: PredicateTypeDeploymentV1,
+		TenantPartition: partition, Subject: "alice", Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 	}}
 	target.verify = func(req VerifyRequest) (AuthenticatedEvidence, error) {
 		if req.DeliveryContext.TenantPartition != partition || req.DeliveryContext.PredicateType != PredicateTypeDeploymentV1 {

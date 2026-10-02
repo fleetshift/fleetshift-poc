@@ -148,11 +148,11 @@ func (s *verificationSession) verifyNode(
 	return verified, nil
 }
 
-func (s *verificationSession) supportingCandidates(predicate protocol.PredicateType) ([]protocol.Digest, error) {
+func (s *verificationSession) supportingRelation(resourceType string) (protocol.Digest, error) {
 	if s.catalog == nil {
-		return nil, errUnknownCatalogEvidence
+		return "", errUnknownCatalogEvidence
 	}
-	return s.catalog.supportingCandidates(predicate)
+	return s.catalog.supportingRelation(resourceType)
 }
 
 // recordDependency adds an edge only after common semantic code has selected

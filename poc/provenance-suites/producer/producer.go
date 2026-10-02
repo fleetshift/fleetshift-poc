@@ -76,8 +76,8 @@ func (p *Producer) SignManagedResource(ctx context.Context, authorization protoc
 	if err := p.bindScope(&authorization.DeliveryScope); err != nil {
 		return protocol.TypedEvidence{}, err
 	}
-	if authorization.ResourceType == "" {
-		return protocol.TypedEvidence{}, errors.New("resource type is required")
+	if err := protocol.ValidateResourceType(authorization.ResourceType); err != nil {
+		return protocol.TypedEvidence{}, err
 	}
 	assertion, err := authorization.Assertion()
 	if err != nil {
@@ -90,8 +90,11 @@ func (p *Producer) SignManagedResource(ctx context.Context, authorization protoc
 // fulfillment-relation/v1 assertion. The relation is supporting evidence,
 // not a root delivery authorization.
 func (p *Producer) SignFulfillmentRelation(ctx context.Context, relation protocol.FulfillmentRelation) (protocol.TypedEvidence, error) {
-	if relation.ResourceType == "" || relation.MediaType == "" {
-		return protocol.TypedEvidence{}, errors.New("resource type and media type are required")
+	if err := protocol.ValidateResourceType(relation.ResourceType); err != nil {
+		return protocol.TypedEvidence{}, err
+	}
+	if relation.MediaType == "" {
+		return protocol.TypedEvidence{}, errors.New("media type is required")
 	}
 	assertion, err := relation.Assertion()
 	if err != nil {

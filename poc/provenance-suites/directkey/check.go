@@ -28,7 +28,7 @@ func (m *Manager) CheckDelivery(evidence protocol.TypedEvidence) (protocol.Tenta
 	if err := verify(publicKey, purposeAssertion, signatureMaterial(body.Principal, body.Assertion.PredicateType, contentDigest), body.Signature); err != nil {
 		return protocol.TentativeHints{}, err
 	}
-	return principalHints(body.Principal, body.Assertion.PredicateType), nil
+	return principalHints(body.Principal, body.Assertion), nil
 }
 
 // DecodeAssertion implements protocol.ResourceManagerAPI. It unwraps the

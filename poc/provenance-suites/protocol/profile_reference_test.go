@@ -114,7 +114,7 @@ func TestPolicySelectionBorrowsImmutableAuthority(t *testing.T) {
 	authority := trust.AuthorityRegistry[0]
 	selectedAuthority, policy, err := trust.SelectPolicy(TentativeHints{
 		Scheme: authority.PrincipalAuthority.Scheme, Authority: authority.PrincipalAuthority.Authority,
-		PredicateType: PredicateTypeDeploymentV1,
+		Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 	})
 	if err != nil {
 		t.Fatal(err)

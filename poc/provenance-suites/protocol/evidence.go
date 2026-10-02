@@ -134,14 +134,17 @@ type AuthenticatedEvidence struct {
 
 // TentativeHints are parsed from untrusted evidence to locate authenticated
 // authority configuration and a candidate delivery policy. They grant no
-// identity or authority. PredicateType is an untrusted hint of the inner
-// statement purpose; it is re-checked after verification.
+// identity or authority. Assertion is the unverified inner statement recovered
+// by the native implementation. Its purpose locates policy; common predicate
+// code may decode lookup fields from its body. Only Finish supplies authenticated
+// content. Assertion bytes are immutable within common code and detached at
+// profile boundaries.
 type TentativeHints struct {
 	Scheme          IdentityScheme  `json:"scheme"`
 	Authority       Authority       `json:"authority"`
 	TenantPartition TenantPartition `json:"tenant_partition,omitempty"`
 	Subject         Subject         `json:"subject,omitempty"`
-	PredicateType   PredicateType   `json:"predicate_type,omitempty"`
+	Assertion       TypedAssertion  `json:"assertion"`
 }
 
 // SupportMaterial is replaceable, reconstructable profile proof material

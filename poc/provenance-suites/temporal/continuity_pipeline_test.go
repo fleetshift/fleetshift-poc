@@ -378,10 +378,10 @@ func continuityTestTrust() protocol.TrustConfiguration {
 
 func continuityTestHints() protocol.TentativeHints {
 	return protocol.TentativeHints{
-		Scheme:        protocol.IdentitySchemeOIDCSubV1,
-		Authority:     continuityTestAuthority,
-		Subject:       "alice",
-		PredicateType: continuityTestPredicateType,
+		Scheme:    protocol.IdentitySchemeOIDCSubV1,
+		Authority: continuityTestAuthority,
+		Subject:   "alice",
+		Assertion: protocol.TypedAssertion{PredicateType: continuityTestPredicateType},
 	}
 }
 
