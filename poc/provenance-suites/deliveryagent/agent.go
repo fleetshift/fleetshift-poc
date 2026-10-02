@@ -344,25 +344,21 @@ func (a *Agent) decodeAndDeriveLocked(session *verificationSession, root verifie
 }
 
 func (a *Agent) verifyFulfillmentRelationLocked(session *verificationSession, parent protocol.Digest, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
+	if err := protocol.ValidateResourceType(authorization.ResourceType); err != nil {
+		return protocol.FulfillmentRelation{}, err
+	}
 	if a.config.ProviderTenant == (protocol.Tenant{}) {
 		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: provider tenant is not provisioned", protocol.ErrTenantMismatch)
 	}
-	candidates, err := session.supportingCandidates(protocol.PredicateTypeFulfillmentRelationV1)
+	identity, err := session.supportingRelation(authorization.ResourceType)
 	if err != nil {
 		return protocol.FulfillmentRelation{}, err
-	}
-	switch len(candidates) {
-	case 0:
-		return protocol.FulfillmentRelation{}, ErrFulfillmentRelationRequired
-	case 1:
-	default:
-		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: multiple fulfillment relations", protocol.ErrAmbiguousRelation)
 	}
 
 	var relation protocol.FulfillmentRelation
 	err = session.withNode(
 		context.Background(),
-		candidates[0],
+		identity,
 		func(support verifiedNode) error {
 			if support.result.Authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
 				return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, support.result.Authenticated.PredicateType)
@@ -372,6 +368,9 @@ func (a *Agent) verifyFulfillmentRelationLocked(session *verificationSession, pa
 			}
 			decoded, err := protocol.DecodeFulfillmentRelation(support.result.Assertion)
 			if err != nil {
+				return err
+			}
+			if err := protocol.ValidateResourceType(decoded.ResourceType); err != nil {
 				return err
 			}
 			if decoded.MediaType == "" {

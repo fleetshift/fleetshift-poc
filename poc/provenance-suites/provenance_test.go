@@ -21,7 +21,7 @@ const (
 	testIssuer               = protocol.Authority("https://issuer.example.test")
 	testReplicasMediaType    = protocol.MediaType("application/vnd.example.replicas+json")
 	testClusterSpecMediaType = protocol.MediaType("application/vnd.example.cluster-spec+json")
-	testResourceType         = "clusters"
+	testResourceType         = "kind.fleetshift.io/Cluster"
 )
 
 func deploymentName(id string) protocol.FullResourceName {
@@ -473,7 +473,7 @@ func TestManagedResourceWithoutFulfillmentRelationIsRejected(t *testing.T) {
 func TestManagedResourceRejectsFulfillmentRelationWithWrongResourceType(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
 	evidence := mustSignManagedResource(t, s.user, clusterName("cluster-wrong-type"), 1, json.RawMessage(`{"region":"us-east-1"}`))
-	relEvidence := mustSignRelation(t, s.addon, "monitoring-stacks", testClusterSpecMediaType)
+	relEvidence := mustSignRelation(t, s.addon, "monitoring.example/MonitoringStack", testClusterSpecMediaType)
 	_, err := s.manager.SubmitDelivery(context.Background(), s.user.Principal(), evidence, relEvidence)
 	if err == nil {
 		t.Fatal("accepted a fulfillment relation for a different resource type")
@@ -483,21 +483,20 @@ func TestManagedResourceRejectsFulfillmentRelationWithWrongResourceType(t *testi
 	}
 }
 
-func TestManagedResourceRejectsMultipleHintedRelationsBeforeVerifyingSupport(t *testing.T) {
+func TestManagedResourceIgnoresUnrelatedUnenrolledRelation(t *testing.T) {
 	s := newEnrolledManagedResourceScenario(t)
-	root := mustSignManagedResource(t, s.user, clusterName("cluster-ambiguous-relations"), 1, json.RawMessage(`{"region":"us-east-1"}`))
-	// This decoy has a valid relation hint but an unenrolled signer and the
-	// wrong resource type. Phase 6 rejects the two hinted candidates before
-	// trying either candidate's provenance.
+	root := mustSignManagedResource(t, s.user, clusterName("cluster-unrelated-relations"), 1, json.RawMessage(`{"region":"us-east-1"}`))
+	// The decoy's type is usable for lookup, but it is unrelated to this root.
+	// Its unenrolled signer must never prevent verification of the requested relation.
 	rogue := mustProducer(t, "rogue-addon")
-	decoy := mustSignRelation(t, rogue, "wrong-resource-type", testClusterSpecMediaType)
+	decoy := mustSignRelation(t, rogue, "other.example/Cluster", testClusterSpecMediaType)
 	valid := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
 	_, err := s.manager.Compromised().PushDelivery(context.Background(), root, decoy, valid)
-	if !errors.Is(err, protocol.ErrAmbiguousRelation) {
-		t.Fatalf("multiple hinted relation error = %v, want ErrAmbiguousRelation before provenance verification", err)
+	if err != nil {
+		t.Fatalf("delivery with unrelated relation: %v", err)
 	}
-	if _, ok := s.agent.Applied(clusterName("cluster-ambiguous-relations")); ok {
-		t.Fatal("agent applied a managed resource with ambiguous fulfillment relations")
+	if _, ok := s.agent.Applied(clusterName("cluster-unrelated-relations")); !ok {
+		t.Fatal("agent did not apply the managed resource using its requested relation")
 	}
 }
 
@@ -869,7 +868,7 @@ func TestRootAndSupportingEvidenceGetDistinctLogPositionsAtAcceptance(t *testing
 	before := s.manager.EvidenceLogSize()
 	root := mustSignManagedResource(t, s.user, clusterName("cluster-three-leaves"), 1, json.RawMessage(`{"region":"us-east-1"}`))
 	relA := mustSignRelation(t, s.addon, testResourceType, testClusterSpecMediaType)
-	relB := mustSignRelation(t, s.addon, "monitoring-stacks", testClusterSpecMediaType)
+	relB := mustSignRelation(t, s.addon, "monitoring.example/MonitoringStack", testClusterSpecMediaType)
 	receipt, err := s.manager.AcceptDelivery(context.Background(), s.user.Principal(), root, relA, relB)
 	if err != nil {
 		t.Fatalf("accept: %v", err)

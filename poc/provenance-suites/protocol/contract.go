@@ -27,7 +27,8 @@ type ProducerAPI interface {
 // statement. The RM never parses TypedEvidence.Bytes itself.
 type ResourceManagerAPI interface {
 	ProvenanceType() ProvenanceType
-	// ParseHints locates tentative policy for registration without granting trust.
+	// ParseHints returns native identity hints and the unverified inner assertion
+	// to locate tentative policy for registration without granting trust.
 	ParseHints(evidence TypedEvidence) (TentativeHints, error)
 	// RequiresEvidenceLog has the same mechanism requirement as TargetAPI.
 	RequiresEvidenceLog() bool
@@ -38,7 +39,9 @@ type ResourceManagerAPI interface {
 
 // TargetAPI is the target side of a provenance profile.
 // ParseHints reads untrusted type-specific material only to locate
-// authenticated authority configuration and a candidate predicate type.
+// authenticated authority configuration and returns the unverified inner
+// assertion. Common predicate code, not the native implementation, decodes
+// tentative lookup fields. Successful Finish supplies authenticated content.
 // RequiresEvidenceLog reports config: this suite needs FleetShift log
 // positions (for example continuity key events). It is not a session
 // method and does not describe the statement window.

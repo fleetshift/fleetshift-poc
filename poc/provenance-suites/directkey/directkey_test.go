@@ -95,8 +95,8 @@ func TestParseHintsEnrollmentReturnsEnrollmentPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseHints: %v", err)
 	}
-	if hints.PredicateType != PredicateTypeEnrollmentV1 {
-		t.Fatalf("predicate hint = %s, want %s", hints.PredicateType, PredicateTypeEnrollmentV1)
+	if hints.Assertion.PredicateType != PredicateTypeEnrollmentV1 {
+		t.Fatalf("predicate hint = %s, want %s", hints.Assertion.PredicateType, PredicateTypeEnrollmentV1)
 	}
 	if hints.Subject != "alice" {
 		t.Fatalf("subject hint = %q, want alice", hints.Subject)

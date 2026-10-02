@@ -18,7 +18,6 @@ const (
 	maxProofHashes           = 64
 	maxPackageProofBytes     = 2 << 20
 	maxCheckpointRootBytes   = len("sha256:") + sha256.Size*2
-	maxPredicateCandidates   = 128
 	maxActiveDependencyDepth = 32
 	maxChosenSemanticEdges   = 512
 )
@@ -28,6 +27,7 @@ var (
 	errVerificationWorkLimit     = errors.New("delivery verification work limit exceeded")
 	errUnknownCatalogEvidence    = errors.New("evidence identity is not in the delivery package")
 	errVerificationCycle         = errors.New("evidence dependency cycle")
+	errInvalidTargetLookup       = errors.New("invalid installed verifier lookup")
 )
 
 type verificationLimits struct {
@@ -38,7 +38,6 @@ type verificationLimits struct {
 	maxTotalSupport    int
 	maxProofHashes     int
 	maxProofBytes      int
-	maxCandidates      int
 	maxDepth           int
 	maxEdges           int
 }
@@ -52,7 +51,6 @@ func defaultVerificationLimits() verificationLimits {
 		maxTotalSupport:    maxPackageSupportBytes,
 		maxProofHashes:     maxProofHashes,
 		maxProofBytes:      maxPackageProofBytes,
-		maxCandidates:      maxPredicateCandidates,
 		maxDepth:           maxActiveDependencyDepth,
 		maxEdges:           maxChosenSemanticEdges,
 	}
@@ -81,9 +79,6 @@ func normalizeVerificationLimits(in verificationLimits) verificationLimits {
 	if in.maxProofBytes <= 0 {
 		in.maxProofBytes = defaults.maxProofBytes
 	}
-	if in.maxCandidates <= 0 {
-		in.maxCandidates = defaults.maxCandidates
-	}
 	if in.maxDepth <= 0 {
 		in.maxDepth = defaults.maxDepth
 	}
@@ -93,26 +88,21 @@ func normalizeVerificationLimits(in verificationLimits) verificationLimits {
 	return in
 }
 
-type hintResult struct {
-	hints protocol.TentativeHints
-	err   error
-}
-
 // evidenceCatalog is a package-scoped structural snapshot. Building it does
 // not verify provenance or turn parsed hints into authorization dependencies.
-// Items and completed candidate lists are immutable; accessors borrow their
-// backing data. Profile calls receive detached copies at the API boundary.
+// Items are immutable; accessors borrow their backing data. Relation lookup
+// retains only the first usable key-to-identity mappings and a forward cursor.
+// Profile calls receive detached copies at the API boundary.
 type evidenceCatalog struct {
 	rootID     protocol.Digest
 	byID       map[protocol.Digest]protocol.Item
 	supporting []protocol.Digest
-	candidates map[protocol.PredicateType][]protocol.Digest
-	hints      map[protocol.Digest]hintResult
+	relations  map[string]protocol.Digest
+	cursor     int
 	lookup     protocol.TargetLookup
 	limits     verificationLimits
 	update     *protocol.EvidenceLogUpdate
-	indexBuilt bool
-	indexErr   error
+	lookupErr  error
 }
 
 // newEvidenceCatalog checks package size and proof encodings before a profile
@@ -130,7 +120,7 @@ func newEvidenceCatalog(pkg resourcemanager.DeliveryPackage, lookup protocol.Tar
 	catalog := &evidenceCatalog{
 		byID:       make(map[protocol.Digest]protocol.Item, len(pkg.Supporting)+1),
 		supporting: make([]protocol.Digest, 0, len(pkg.Supporting)),
-		hints:      make(map[protocol.Digest]hintResult, len(pkg.Supporting)),
+		relations:  make(map[string]protocol.Digest),
 		lookup:     lookup,
 		limits:     limits,
 	}
@@ -299,54 +289,60 @@ func (c *evidenceCatalog) item(identity protocol.Digest) protocol.Item {
 	return c.byID[identity]
 }
 
-func (c *evidenceCatalog) supportingCandidates(predicate protocol.PredicateType) ([]protocol.Digest, error) {
-	if err := c.buildCandidateIndex(); err != nil {
-		return nil, err
+// supportingRelation returns the first usable supporting claim for the full
+// resource type. Tentative parsing grants no authority or selected edge. Each
+// reached item is examined at most once across requests; input is already
+// structurally bounded. Only actual end-of-input establishes absence.
+func (c *evidenceCatalog) supportingRelation(resourceType string) (protocol.Digest, error) {
+	if identity, ok := c.relations[resourceType]; ok {
+		return identity, nil
 	}
-	return c.candidates[predicate], nil
-}
-
-func (c *evidenceCatalog) buildCandidateIndex() error {
-	if c.indexBuilt {
-		return c.indexErr
+	if c.lookupErr != nil {
+		return "", c.lookupErr
 	}
-	c.indexBuilt = true
-	if len(c.supporting) > c.limits.maxCandidates {
-		c.indexErr = fmt.Errorf("%w: candidate scan count %d exceeds %d", errVerificationWorkLimit, len(c.supporting), c.limits.maxCandidates)
-		return c.indexErr
-	}
-
-	candidates := make(map[protocol.PredicateType][]protocol.Digest)
-	for _, identity := range c.supporting {
-		result, exists := c.hints[identity]
+	for c.cursor < len(c.supporting) {
+		identity := c.supporting[c.cursor]
+		item, exists := c.byID[identity]
 		if !exists {
-			item := c.byID[identity]
-			if c.lookup == nil {
-				result.err = fmt.Errorf("%w: no installed verifier lookup", protocol.ErrUnknownProvenanceType)
-			} else {
-				verifier, ok := c.lookup(item.Evidence.ProvenanceType)
-				if !ok || verifier == nil || verifier.ProvenanceType() != item.Evidence.ProvenanceType {
-					result.err = fmt.Errorf("%w: no matching verifier for %s", protocol.ErrUnknownProvenanceType, item.Evidence.ProvenanceType)
-				} else {
-					result.hints, result.err = verifier.ParseHints(protocol.TypedEvidence{
-						ProvenanceType: item.Evidence.ProvenanceType,
-						Encoded:        item.Evidence.Encoded.Clone(),
-					})
-					if result.err == nil && result.hints.PredicateType == "" {
-						result.err = fmt.Errorf("%w: predicate type hint is required", protocol.ErrMalformedEvidence)
-					}
-				}
-			}
-			c.hints[identity] = result
+			c.lookupErr = fmt.Errorf("%w: supporting identity %s", errUnknownCatalogEvidence, identity)
+			return "", c.lookupErr
 		}
-		if result.err != nil {
-			c.indexErr = result.err
-			return c.indexErr
+		if c.lookup == nil {
+			c.lookupErr = fmt.Errorf("%w: no lookup function", errInvalidTargetLookup)
+			return "", c.lookupErr
 		}
-		candidates[result.hints.PredicateType] = append(candidates[result.hints.PredicateType], identity)
+		verifier, ok := c.lookup(item.Evidence.ProvenanceType)
+		if !ok {
+			c.cursor++
+			continue
+		}
+		if verifier == nil || verifier.ProvenanceType() != item.Evidence.ProvenanceType {
+			c.lookupErr = fmt.Errorf("%w: no matching implementation for %s", errInvalidTargetLookup, item.Evidence.ProvenanceType)
+			return "", c.lookupErr
+		}
+		c.cursor++
+		hints, err := verifier.ParseHints(protocol.TypedEvidence{
+			ProvenanceType: item.Evidence.ProvenanceType,
+			Encoded:        item.Evidence.Encoded.Clone(),
+		})
+		if err != nil || hints.Assertion.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {
+			continue
+		}
+		// Detach native output before common parsing. The assertion and parsed
+		// predicate are transient; only the decoded key and identity are retained.
+		hints.Assertion.Bytes = append([]byte(nil), hints.Assertion.Bytes...)
+		relation, err := protocol.DecodeFulfillmentRelation(hints.Assertion)
+		if err != nil || protocol.ValidateResourceType(relation.ResourceType) != nil {
+			continue
+		}
+		if _, exists := c.relations[relation.ResourceType]; !exists {
+			c.relations[relation.ResourceType] = identity
+		}
+		if found, ok := c.relations[resourceType]; ok {
+			return found, nil
+		}
 	}
-	c.candidates = candidates
-	return nil
+	return "", ErrFulfillmentRelationRequired
 }
 
 func cloneBytes(in []byte) []byte {

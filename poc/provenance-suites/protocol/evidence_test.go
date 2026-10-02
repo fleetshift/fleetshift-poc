@@ -266,7 +266,7 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 			Generation:       1,
 			Action:           ActionPut,
 		},
-		ResourceType: "clusters",
+		ResourceType: "kind.fleetshift.io/Cluster",
 		Spec:         []byte(`{"region":"us-east-1"}`),
 	}.Assertion()
 	if err != nil {
@@ -277,7 +277,7 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 	}
 
 	relation, err := FulfillmentRelation{
-		ResourceType: "clusters",
+		ResourceType: "kind.fleetshift.io/Cluster",
 		MediaType:    "application/vnd.example.cluster-spec+json",
 	}.Assertion()
 	if err != nil {

@@ -39,8 +39,11 @@ func SelectAndVerify(ctx context.Context, item Item, trust TrustConfiguration, l
 	if evidence.ProvenanceType == "" || evidence.MediaType == "" {
 		return VerificationResult{}, fmt.Errorf("%w: provenance type and media type are required", ErrMalformedEvidence)
 	}
+	if lookup == nil {
+		return VerificationResult{}, fmt.Errorf("%w: no installed verifier lookup", ErrUnknownProvenanceType)
+	}
 	verifier, ok := lookup(evidence.ProvenanceType)
-	if !ok || verifier.ProvenanceType() != evidence.ProvenanceType {
+	if !ok || verifier == nil || verifier.ProvenanceType() != evidence.ProvenanceType {
 		return VerificationResult{}, fmt.Errorf("%w: %s", ErrUnknownProvenanceType, evidence.ProvenanceType)
 	}
 
@@ -48,10 +51,11 @@ func SelectAndVerify(ctx context.Context, item Item, trust TrustConfiguration, l
 	if err != nil {
 		return VerificationResult{}, err
 	}
-	if hints.PredicateType == "" {
+	hints.Assertion.Bytes = cloneBytes(hints.Assertion.Bytes)
+	if hints.Assertion.PredicateType == "" {
 		return VerificationResult{}, fmt.Errorf("%w: predicate type hint is required", ErrMalformedEvidence)
 	}
-	delivery := DeliveryContext{PredicateType: hints.PredicateType, TenantPartition: hints.TenantPartition}
+	delivery := DeliveryContext{PredicateType: hints.Assertion.PredicateType, TenantPartition: hints.TenantPartition}
 
 	authority, policyIndex, err := trust.selectPolicy(hints)
 	if err != nil {
@@ -353,8 +357,8 @@ func reevaluate(policyIndex int, selected ProfileConfig, hints TentativeHints, a
 	if authenticated.ProvenanceType != selected.ProvenanceType {
 		return fmt.Errorf("%w: authenticated provenance type %s, selected %s", ErrPolicyReevaluation, authenticated.ProvenanceType, selected.ProvenanceType)
 	}
-	if hints.PredicateType != authenticated.PredicateType {
-		return fmt.Errorf("%w: authenticated predicate type %s, hint %s", ErrPolicyReevaluation, authenticated.PredicateType, hints.PredicateType)
+	if hints.Assertion.PredicateType != authenticated.PredicateType {
+		return fmt.Errorf("%w: authenticated predicate type %s, hint %s", ErrPolicyReevaluation, authenticated.PredicateType, hints.Assertion.PredicateType)
 	}
 	authenticatedPolicyIndex, err := matchPolicy(authority, DeliveryContext{
 		PredicateType:   authenticated.PredicateType,

@@ -35,7 +35,8 @@ func (t *Target) Owns(predicate protocol.PredicateType) bool {
 	return predicate == PredicateTypeEnrollmentV1
 }
 
-// ParseHints extracts tentative principal fields from untrusted evidence.
+// ParseHints extracts tentative principal fields and the inner assertion from
+// untrusted evidence without interpreting common predicate bodies.
 func ParseHints(evidence protocol.TypedEvidence) (protocol.TentativeHints, error) {
 	return NewTarget().ParseHints(evidence)
 }
@@ -51,25 +52,29 @@ func (t *Target) ParseHints(evidence protocol.TypedEvidence) (protocol.Tentative
 		if err != nil {
 			return protocol.TentativeHints{}, err
 		}
-		return principalHints(body.Principal, PredicateTypeEnrollmentV1), nil
+		assertion, err := enrollmentAssertion(body)
+		if err != nil {
+			return protocol.TentativeHints{}, err
+		}
+		return principalHints(body.Principal, assertion), nil
 	case MediaTypeSignature:
 		body, err := parseSignature(evidence)
 		if err != nil {
 			return protocol.TentativeHints{}, err
 		}
-		return principalHints(body.Principal, body.Assertion.PredicateType), nil
+		return principalHints(body.Principal, body.Assertion), nil
 	default:
 		return protocol.TentativeHints{}, fmt.Errorf("%w: %s", protocol.ErrUnknownMediaType, evidence.MediaType)
 	}
 }
 
-func principalHints(principal protocol.Principal, predicate protocol.PredicateType) protocol.TentativeHints {
+func principalHints(principal protocol.Principal, assertion protocol.TypedAssertion) protocol.TentativeHints {
 	return protocol.TentativeHints{
 		Scheme:          principal.Scheme,
 		Authority:       principal.Authority,
 		TenantPartition: principal.TenantPartition,
 		Subject:         principal.Subject,
-		PredicateType:   predicate,
+		Assertion:       assertion,
 	}
 }
 

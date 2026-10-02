@@ -95,10 +95,10 @@ func TestSelectAndVerifyDetachesOnlyProfileBoundaryInputs(t *testing.T) {
 			parseInput = append([]byte(nil), evidence.Bytes...)
 			evidence.Bytes[0] = 'P'
 			return TentativeHints{
-				Scheme:        IdentitySchemeOIDCSubV1,
-				Authority:     "https://issuer.example.test",
-				Subject:       "alice",
-				PredicateType: PredicateTypeDeploymentV1,
+				Scheme:    IdentitySchemeOIDCSubV1,
+				Authority: "https://issuer.example.test",
+				Subject:   "alice",
+				Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 			}, nil
 		},
 		begin: func(req VerifyRequest) {
@@ -174,10 +174,10 @@ func TestSelectAndVerifyRejectsUnknownAuthority(t *testing.T) {
 		return &stubTarget{
 			pt: evidence.ProvenanceType,
 			hints: TentativeHints{
-				Scheme:        IdentitySchemeOIDCSubV1,
-				Authority:     "https://unknown.example.test",
-				Subject:       "alice",
-				PredicateType: PredicateTypeDeploymentV1,
+				Scheme:    IdentitySchemeOIDCSubV1,
+				Authority: "https://unknown.example.test",
+				Subject:   "alice",
+				Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 			},
 		}, true
 	}
@@ -193,10 +193,10 @@ func TestSelectAndVerifyRejectsPredicateTypeOutsideMatchedPolicy(t *testing.T) {
 		return &stubTarget{
 			pt: pt,
 			hints: TentativeHints{
-				Scheme:        IdentitySchemeOIDCSubV1,
-				Authority:     "https://issuer.example.test",
-				Subject:       "alice",
-				PredicateType: PredicateTypeManagedResourceV1,
+				Scheme:    IdentitySchemeOIDCSubV1,
+				Authority: "https://issuer.example.test",
+				Subject:   "alice",
+				Assertion: TypedAssertion{PredicateType: PredicateTypeManagedResourceV1},
 			},
 		}, true
 	}
@@ -327,7 +327,7 @@ func TestSelectAndVerifyRechecksTenantHints(t *testing.T) {
 	trust, evidence := selectionFixture(t)
 	target := &stubTarget{pt: evidence.ProvenanceType, hints: TentativeHints{
 		Scheme: trust.AuthorityRegistry[0].PrincipalAuthority.Scheme, Authority: trust.AuthorityRegistry[0].PrincipalAuthority.Authority,
-		TenantPartition: "hint-other", Subject: "alice", PredicateType: PredicateTypeDeploymentV1,
+		TenantPartition: "hint-other", Subject: "alice", Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 	}, verify: func(VerifyRequest) (AuthenticatedEvidence, error) { return successfulEvidence(t, trust, evidence), nil }}
 	_, err := SelectAndVerify(context.Background(), itemFor(evidence), trust, func(ProvenanceType) (TargetAPI, bool) { return target, true }, defaultServices())
 	if !errors.Is(err, ErrPolicyReevaluation) {
@@ -358,10 +358,10 @@ func TestSelectAndVerifyRejectsHintSubjectMismatch(t *testing.T) {
 		return &stubTarget{
 			pt: pt,
 			hints: TentativeHints{
-				Scheme:        IdentitySchemeOIDCSubV1,
-				Authority:     "https://issuer.example.test",
-				Subject:       "mallory",
-				PredicateType: PredicateTypeDeploymentV1,
+				Scheme:    IdentitySchemeOIDCSubV1,
+				Authority: "https://issuer.example.test",
+				Subject:   "mallory",
+				Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 			},
 			verify: func(VerifyRequest) (AuthenticatedEvidence, error) {
 				return successfulEvidence(t, trust, evidence), nil
@@ -845,10 +845,10 @@ func (s *stubTarget) ParseHints(evidence TypedEvidence) (TentativeHints, error) 
 		return s.hints, nil
 	}
 	return TentativeHints{
-		Scheme:        IdentitySchemeOIDCSubV1,
-		Authority:     "https://issuer.example.test",
-		Subject:       "alice",
-		PredicateType: PredicateTypeDeploymentV1,
+		Scheme:    IdentitySchemeOIDCSubV1,
+		Authority: "https://issuer.example.test",
+		Subject:   "alice",
+		Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 	}, nil
 }
 
@@ -934,10 +934,10 @@ func (s *failThenSucceedTarget) ProvenanceType() ProvenanceType { return s.pt }
 func (s *failThenSucceedTarget) RequiresEvidenceLog() bool      { return false }
 func (s *failThenSucceedTarget) ParseHints(TypedEvidence) (TentativeHints, error) {
 	return TentativeHints{
-		Scheme:        IdentitySchemeOIDCSubV1,
-		Authority:     "https://issuer.example.test",
-		Subject:       "alice",
-		PredicateType: PredicateTypeDeploymentV1,
+		Scheme:    IdentitySchemeOIDCSubV1,
+		Authority: "https://issuer.example.test",
+		Subject:   "alice",
+		Assertion: TypedAssertion{PredicateType: PredicateTypeDeploymentV1},
 	}, nil
 }
 func (s *failThenSucceedTarget) Owns(PredicateType) bool { return false }

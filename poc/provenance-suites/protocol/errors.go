@@ -23,10 +23,6 @@ var (
 	// does not match an authenticated AuthorityConfig.
 	ErrUnknownAuthority = errors.New("unknown authority")
 
-	// ErrAmbiguousRelation is returned when fulfillment-relation selection
-	// has more than one candidate.
-	ErrAmbiguousRelation = errors.New("ambiguous fulfillment relation")
-
 	// ErrNoMatchingPolicy is returned when no delivery policy matches.
 	ErrNoMatchingPolicy = errors.New("no matching delivery policy")
 

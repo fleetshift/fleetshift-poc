@@ -196,7 +196,7 @@ func (c TrustConfiguration) selectPolicy(hints TentativeHints) (AuthorityConfig,
 	if err != nil {
 		return AuthorityConfig{}, 0, err
 	}
-	index, err := matchPolicy(authority, DeliveryContext{PredicateType: hints.PredicateType, TenantPartition: hints.TenantPartition})
+	index, err := matchPolicy(authority, DeliveryContext{PredicateType: hints.Assertion.PredicateType, TenantPartition: hints.TenantPartition})
 	if err != nil {
 		return AuthorityConfig{}, 0, err
 	}

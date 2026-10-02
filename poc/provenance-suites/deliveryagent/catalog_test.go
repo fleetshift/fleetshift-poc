@@ -1,7 +1,6 @@
 package deliveryagent
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -437,179 +436,6 @@ func TestEvidenceCatalogValidatesUnusedProofEncodingWithoutVerifyingIt(t *testin
 	}
 }
 
-func TestEvidenceCatalogLazilyCachesDetachedPerTypeHints(t *testing.T) {
-	root := catalogItem("root", "")
-	first := catalogItem("first", "first support")
-	first.Evidence.ProvenanceType = "first/v1"
-	first.EvidenceLog = &protocol.EvidenceLogInclusion{Index: 1, InclusionProof: []protocol.Digest{protocol.DigestBytes([]byte("first inclusion"))}}
-	second := catalogItem("second", "second support")
-	second.Evidence.ProvenanceType = "second/v1"
-	firstTarget := &catalogTestTarget{
-		provenanceType:  "first/v1",
-		predicateByBody: map[string]protocol.PredicateType{"first": "wanted/v1"},
-		mutateInput:     true,
-	}
-	secondTarget := &catalogTestTarget{
-		provenanceType:  "second/v1",
-		predicateByBody: map[string]protocol.PredicateType{"second": "other/v1"},
-	}
-	update := &protocol.EvidenceLogUpdate{ConsistencyProof: []protocol.Digest{protocol.DigestBytes([]byte("consistency"))}}
-	pkg := resourcemanager.DeliveryPackage{Root: root, Supporting: []protocol.Item{first, second}, EvidenceLog: update}
-	catalog, err := newEvidenceCatalog(pkg, catalogLookup(map[protocol.ProvenanceType]*catalogTestTarget{
-		"first/v1":  firstTarget,
-		"second/v1": secondTarget,
-	}), defaultVerificationLimits())
-	if err != nil {
-		t.Fatalf("newEvidenceCatalog: %v", err)
-	}
-	if firstTarget.parseCalls != 0 || secondTarget.parseCalls != 0 {
-		t.Fatal("catalog parsed hints before a selector requested them")
-	}
-	first.Evidence.Bytes[0] = 'Y'
-	first.Support.Bytes[0] = 'Y'
-	first.EvidenceLog.InclusionProof[0] = "mutated proof"
-	update.ConsistencyProof[0] = "mutated consistency"
-	if got, err := catalog.supportingCandidates("wanted/v1"); err != nil || len(got) != 1 {
-		t.Fatalf("wanted candidates = %v, %v; want one", got, err)
-	}
-	if got, err := catalog.supportingCandidates("other/v1"); err != nil || len(got) != 1 {
-		t.Fatalf("other candidates = %v, %v; want one", got, err)
-	}
-	if firstTarget.parseCalls != 1 || secondTarget.parseCalls != 1 {
-		t.Fatalf("ParseHints calls = first %d, second %d; want one each", firstTarget.parseCalls, secondTarget.parseCalls)
-	}
-	if got := catalog.item(catalog.supporting[0]).Evidence.Bytes; string(got) != "first" {
-		t.Fatalf("catalog evidence changed through ParseHints mutation: %q", got)
-	}
-	item := catalog.item(catalog.supporting[0])
-	if got := item.Support.Bytes; string(got) != "first support" {
-		t.Fatalf("catalog support snapshot = %q, want original", got)
-	}
-	if got := item.EvidenceLog.InclusionProof[0]; got != protocol.DigestBytes([]byte("first inclusion")) {
-		t.Fatalf("catalog inclusion proof = %q, want original encoding", got)
-	}
-	if got := catalog.update.ConsistencyProof[0]; got != protocol.DigestBytes([]byte("consistency")) {
-		t.Fatalf("catalog consistency proof = %q, want original encoding", got)
-	}
-	if item.EvidenceLog != catalog.byID[catalog.supporting[0]].EvidenceLog {
-		t.Fatal("catalog lookup copied its immutable item")
-	}
-	candidates, err := catalog.supportingCandidates("wanted/v1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if &candidates[0] != &catalog.candidates["wanted/v1"][0] {
-		t.Fatal("catalog lookup copied its immutable candidate list")
-	}
-}
-
-func TestEvidenceCatalogCandidateLimitFailsWithoutTruncationOrParsing(t *testing.T) {
-	exactTarget := &catalogTestTarget{
-		provenanceType:  protocol.ProvenanceTypeDirectKeyV1,
-		predicateByBody: map[string]protocol.PredicateType{"exact-support": "wanted/v1"},
-	}
-	exactCatalog, err := newEvidenceCatalog(resourcemanager.DeliveryPackage{Root: catalogItem("exact-root", ""), Supporting: []protocol.Item{catalogItem("exact-support", "")}}, catalogLookup(map[protocol.ProvenanceType]*catalogTestTarget{
-		protocol.ProvenanceTypeDirectKeyV1: exactTarget,
-	}), limitsWith(verificationLimits{maxCandidates: 1}))
-	if err != nil {
-		t.Fatalf("newEvidenceCatalog at candidate limit: %v", err)
-	}
-	if candidates, err := exactCatalog.supportingCandidates("wanted/v1"); err != nil || len(candidates) != 1 {
-		t.Fatalf("exact-limit candidates = %v, %v; want one", candidates, err)
-	}
-
-	first := catalogItem("first", "")
-	second := catalogItem("second", "")
-	target := &catalogTestTarget{provenanceType: protocol.ProvenanceTypeDirectKeyV1}
-	catalog, err := newEvidenceCatalog(resourcemanager.DeliveryPackage{Root: catalogItem("root", ""), Supporting: []protocol.Item{first, second}}, catalogLookup(map[protocol.ProvenanceType]*catalogTestTarget{
-		protocol.ProvenanceTypeDirectKeyV1: target,
-	}), limitsWith(verificationLimits{maxCandidates: 1}))
-	if err != nil {
-		t.Fatalf("newEvidenceCatalog: %v", err)
-	}
-	if _, err := catalog.supportingCandidates("wanted/v1"); !errors.Is(err, errVerificationWorkLimit) {
-		t.Fatalf("supportingCandidates error = %v, want candidate work limit", err)
-	}
-	if target.parseCalls != 0 {
-		t.Fatalf("ParseHints calls = %d, want no partial candidate scan", target.parseCalls)
-	}
-}
-
-func TestEvidenceCatalogCachesLookupAndParseErrors(t *testing.T) {
-	item := catalogItem("support", "")
-	var lookups int
-	catalog, err := newEvidenceCatalog(resourcemanager.DeliveryPackage{Root: catalogItem("root", ""), Supporting: []protocol.Item{item}}, func(protocol.ProvenanceType) (protocol.TargetAPI, bool) {
-		lookups++
-		return nil, false
-	}, defaultVerificationLimits())
-	if err != nil {
-		t.Fatalf("newEvidenceCatalog: %v", err)
-	}
-	for i := 0; i < 2; i++ {
-		if _, err := catalog.supportingCandidates("wanted/v1"); !errors.Is(err, protocol.ErrUnknownProvenanceType) {
-			t.Fatalf("supportingCandidates error = %v, want unknown provenance type", err)
-		}
-	}
-	if lookups != 1 {
-		t.Fatalf("target lookup calls = %d, want cached single lookup", lookups)
-	}
-}
-
-// This pins phase 6's temporary fail-closed lookup/ParseHints error handling.
-// Phase 7 must skip a failed hint item and continue the bounded candidate scan;
-// this test does not establish a package requirement that all couriered items
-// have usable hints.
-func TestEvidenceCatalogCachesVerifierMismatchAndParseErrors(t *testing.T) {
-	parseFailure := errors.New("test ParseHints failure")
-	tests := []struct {
-		name       string
-		target     *catalogTestTarget
-		wantParse  int
-		wantLookup int
-	}{
-		{
-			name:       "mismatched provenance type",
-			target:     &catalogTestTarget{provenanceType: "other/v1"},
-			wantParse:  0,
-			wantLookup: 1,
-		},
-		{
-			name:       "cached ParseHints error",
-			target:     &catalogTestTarget{provenanceType: protocol.ProvenanceTypeDirectKeyV1, parseErr: parseFailure},
-			wantParse:  1,
-			wantLookup: 1,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			var lookups int
-			catalog, err := newEvidenceCatalog(resourcemanager.DeliveryPackage{Root: catalogItem("root", ""), Supporting: []protocol.Item{catalogItem("support", "")}}, func(protocol.ProvenanceType) (protocol.TargetAPI, bool) {
-				lookups++
-				return test.target, true
-			}, defaultVerificationLimits())
-			if err != nil {
-				t.Fatalf("newEvidenceCatalog: %v", err)
-			}
-			for i := 0; i < 2; i++ {
-				_, err := catalog.supportingCandidates("wanted/v1")
-				if err == nil {
-					t.Fatal("supportingCandidates unexpectedly succeeded")
-				}
-				if test.name == "cached ParseHints error" && !errors.Is(err, parseFailure) {
-					t.Fatalf("supportingCandidates error = %v, want cached ParseHints error", err)
-				}
-				if test.name == "mismatched provenance type" && !errors.Is(err, protocol.ErrUnknownProvenanceType) {
-					t.Fatalf("supportingCandidates error = %v, want provenance mismatch", err)
-				}
-			}
-			if lookups != test.wantLookup || test.target.parseCalls != test.wantParse {
-				t.Fatalf("lookup calls = %d, ParseHints calls = %d; want %d and %d", lookups, test.target.parseCalls, test.wantLookup, test.wantParse)
-			}
-		})
-	}
-}
-
 func catalogItem(body, support string) protocol.Item {
 	return protocol.Item{SignedStatement: protocol.SignedStatement{
 		Evidence: protocol.TypedEvidence{
@@ -635,7 +461,7 @@ func cloneCatalogItem(in protocol.Item) protocol.Item {
 	return out
 }
 
-func catalogLookup(targets map[protocol.ProvenanceType]*catalogTestTarget) protocol.TargetLookup {
+func catalogLookup(targets map[protocol.ProvenanceType]protocol.TargetAPI) protocol.TargetLookup {
 	return func(provenanceType protocol.ProvenanceType) (protocol.TargetAPI, bool) {
 		target, ok := targets[provenanceType]
 		if !ok {
@@ -668,9 +494,6 @@ func limitsWith(overrides verificationLimits) verificationLimits {
 	if overrides.maxProofBytes != 0 {
 		limits.maxProofBytes = overrides.maxProofBytes
 	}
-	if overrides.maxCandidates != 0 {
-		limits.maxCandidates = overrides.maxCandidates
-	}
 	if overrides.maxDepth != 0 {
 		limits.maxDepth = overrides.maxDepth
 	}
@@ -678,39 +501,4 @@ func limitsWith(overrides verificationLimits) verificationLimits {
 		limits.maxEdges = overrides.maxEdges
 	}
 	return limits
-}
-
-type catalogTestTarget struct {
-	provenanceType  protocol.ProvenanceType
-	predicateByBody map[string]protocol.PredicateType
-	mutateInput     bool
-	parseErr        error
-	parseCalls      int
-}
-
-func (t *catalogTestTarget) ProvenanceType() protocol.ProvenanceType { return t.provenanceType }
-func (t *catalogTestTarget) RequiresEvidenceLog() bool               { return false }
-func (t *catalogTestTarget) ParseHints(evidence protocol.TypedEvidence) (protocol.TentativeHints, error) {
-	t.parseCalls++
-	if t.parseErr != nil {
-		return protocol.TentativeHints{}, t.parseErr
-	}
-	if t.mutateInput && len(evidence.Bytes) > 0 {
-		evidence.Bytes[0] = 'X'
-	}
-	predicate, ok := t.predicateByBody[string(evidence.Bytes)]
-	if !ok && t.mutateInput && len(evidence.Bytes) > 0 {
-		predicate, ok = t.predicateByBody["first"]
-	}
-	if !ok {
-		return protocol.TentativeHints{}, errors.New("no test hint")
-	}
-	return protocol.TentativeHints{PredicateType: predicate}, nil
-}
-func (t *catalogTestTarget) BeginVerification(context.Context, protocol.VerifyRequest) (protocol.ProvenanceVerificationSession, error) {
-	return nil, errors.New("not used by catalog test")
-}
-func (t *catalogTestTarget) Owns(protocol.PredicateType) bool { return false }
-func (t *catalogTestTarget) Apply(context.Context, protocol.ApplyRequest) error {
-	return errors.New("not used by catalog test")
 }

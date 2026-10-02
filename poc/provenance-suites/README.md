@@ -26,10 +26,10 @@ ProducerAPI
 ResourceManagerAPI
   AssembleSupportMaterial(TypedEvidence) -> replaceable support material
   DecodeAssertion(TypedEvidence) -> untrusted inner statement
-  CheckDelivery(TypedEvidence) -> tentative principal and predicate hints
+  CheckDelivery(TypedEvidence) -> tentative principal and inner TypedAssertion
 
 TargetAPI
-  ParseHints(TypedEvidence) -> tentative (scheme, authority, tenant, subject, predicate)
+  ParseHints(TypedEvidence) -> TentativeHints (identity fields + unverified TypedAssertion)
   RequiresEvidenceLog() -> whether this suite needs FleetShift log positions
   BeginVerification(SignedStatement, authenticated profile and authority config)
       -> single-use session: Prepare identifies timestamp bindings;
@@ -57,6 +57,13 @@ Suite submit APIs such as enrollment do not: they authorize, check, register
 the evidence identity, and enqueue one dispatch per currently relevant
 agent. That pairing is why statement encodings can stay common while
 evidence encodings stay profile-owned.
+
+Native implementations unwrap their own evidence and return identity hints
+plus the unverified inner `TypedAssertion`; they do not decode common predicate
+bodies. Policy routing reads `hints.Assertion.PredicateType`, with no separate
+purpose field. Common code decodes predicate lookup fields only when needed.
+The earlier tentative assertion is never promoted into authenticated content:
+semantic checks use the assertion returned by successful `Finish`.
 
 Common target code runs the documented selection algorithm:
 untrusted provenance type and hints locate `AuthorityConfig`, the first
@@ -144,6 +151,49 @@ generation, and action. The agent applies a managed resource only after
 verifying a couriered fulfillment relation that names the derived payload
 media type. Unused supporting evidence is not authority: a relation couriered
 with a deployment does not change apply.
+
+## Fulfillment-relation lookup
+
+Managed-resource and relation `ResourceType` values use the full versionless
+`{service}/{type}` identity, for example `kind.fleetshift.io/Cluster`. Common
+validation requires two nonempty components separated by one slash, without
+whitespace or extra path components. Comparison is exact; there is no service
+normalization, DNS naming policy, or requirement that the type's service equal
+the resource name's service. Producer helpers validate before signing; the
+target also checks signed values because native producers can bypass helpers.
+
+The authenticated root's full type names the required relation. The structural
+catalog retains a private map from discovered types to their first usable
+supporting evidence identities and one forward cursor. A cached key returns
+immediately. An uncached request resumes scanning and caches usable other keys
+along the way, stopping as soon as its key is found. Only end-of-input establishes
+absence; later missing-key requests do no further scanning. No per-item hint
+results, parsed predicates, or ordinary parse failures are retained.
+
+Unknown couriered provenance types, ordinary native/common lookup parse errors,
+missing purposes, and invalid relation keys are skipped. A missing trusted
+lookup, or a successful lookup returning nil or the wrong implementation type,
+rejects when encountered. An additional claim never overwrites the first mapping
+or causes duplicate-claim rejection. The courier can omit other claims, so a
+package scan cannot establish global uniqueness.
+
+Only the selected identity undergoes full source-policy, provenance, and
+occurrence/temporal verification. Its authenticated purpose, full type, provider
+tenant, and media type must pass common semantic checks before a dependency is
+recorded. Every selected failure rejects the delivery without trying a later
+claim. Unrelated relations are never authenticated; trailing support is not
+lookup-parsed. Neither tentative lookup nor unused evidence creates authority,
+selected edges, or temporal basis.
+
+The existing 256-statement package cap permits at most 255 supporting items;
+each is examined at most once during lookup across requests. Package/per-item
+byte and proof limits remain, including structural validation of unused proof
+encodings. There is no separate item scan limit. Context propagation and deadline
+cooperation are deferred to the server / real agent implementation.
+
+This increment implements phase 7 sections 2–3 through the existing managed-
+resource verification path. Final action derivation, evidence-basis assembly,
+and changes to ordinary apply/idempotency remain later phase 7 work.
 
 ## The naive profile
 
@@ -233,9 +283,10 @@ delivery agent
     `SelectAndVerify`; successful results are memoized by evidence identity
     under fixed session trust; semantic callbacks check tenant relationships
     independently on every use, including cache hits
-  - parses supporting hints lazily through each item's installed provenance
-    verifier; hints locate candidates but do not authorize them or create
-    dependency edges
+  - incrementally locates the first usable relation claim for the root's full
+    resource type, using native assertions and common predicate parsing; the
+    lookup stops at its requested key and grants no authority or dependency edge
+  - verifies only that selected relation, with no alternative-relation fallback
   - leaves unused supporting inclusions cryptographically unverified
   - projects the **root** `VerificationResult` into `ApplyRequest.Temporal`
     (used-supporting positions stay on that node's result, not in Apply)
@@ -298,7 +349,9 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Resource manager wins first enrollment for a claimed subject | Accepted (TOFU limitation) |
 | Resource manager substitutes the key after the mapping is retained | Rejected |
 | Resource manager bypasses RBAC but forwards genuine evidence | Accepted by the agent |
-| Unknown provenance type | Fail closed |
+| Unknown root provenance type | Fail closed |
+| Unsupported provenance type or unreadable predicate encountered during supporting lookup | Skipped; required relation must still be found and fully verified |
+| Trusted lookup missing, or reporting success with nil/the wrong implementation type | Rejected when encountered |
 | Second bootstrap of an initialized verifier | Rejected |
 | Lost acknowledgement then retry | Idempotent apply via DispatchID; manager cache catches up via stale-checkpoint recovery |
 | Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs without appending evidence |
@@ -309,8 +362,13 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Root Item inclusion does not prove root evidence identity | Rejected |
 | Forked or skip-ahead log proofs | Rejected as a log fork, not reported as stale |
 | Duplicate root/supporting identity in one couriered package | Rejected before log preparation or apply |
-| More supporting candidates than the POC work bound | Rejected without truncating the candidate set |
-| Multiple hinted fulfillment relations (phase-6 migration rule) | Temporarily rejected as ambiguous before candidate provenance verification; phase 7 selects authenticated matches and skips candidate-local hint failures within the work bound |
+| Requested relation at the last supporting position within the 256-statement package cap | Found without a separate item scan limit; each supporting item is lookup-parsed at most once |
+| Repeated lookup for a discovered key or an exhausted missing key | No additional lookup parsing |
+| Additional relation claims for a discovered type | Preserve the first mapping; trailing claims remain unparsed unless another lookup reaches them |
+| Good selected relation followed by a bad same-type claim | Accepted without examining the later claim |
+| Bad selected relation followed by a good same-type claim | Rejected without examining the later claim |
+| Unrelated type with a well-formed bad inclusion | Never occurrence-verified; requested relation still applies |
+| False tentative relation purpose or resource type | Rejected by authenticated reselection/semantic checks; no dependency edge |
 | Shared issuer, distinct consumer/provider partitions with the same subject | Separate principals; relation uses provider policy and provisioned tenant |
 | Consumer/provider policies independently require logging | All four combinations apply; only required identities register and retries add no leaves |
 | Mechanism requires logging while delivery policy makes it optional | Inclusion remains required at RM and target |
