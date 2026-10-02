@@ -63,6 +63,7 @@ func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.
 	if relationCounted.requests[0].DeliveryContext.TenantPartition != providerPartition || relationCounted.requests[0].ProfileConfig.ProvenanceType != profile.ProvenanceType {
 		t.Fatal("relation verification used the root's policy context")
 	}
+	assertSelectedBasis(t, session, catalog.rootID, catalog.supporting[0])
 }
 
 // relationTestProfile uses real direct-key signatures and retained keys under a

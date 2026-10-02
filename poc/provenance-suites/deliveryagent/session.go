@@ -3,6 +3,8 @@ package deliveryagent
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
 )
@@ -12,14 +14,6 @@ type nodePhase uint8
 const (
 	nodeVerifying nodePhase = iota + 1
 	nodeVerified
-)
-
-type graphVisitState uint8
-
-const (
-	graphUnseen graphVisitState = iota
-	graphVisiting
-	graphComplete
 )
 
 type nodeState struct {
@@ -51,6 +45,12 @@ type verificationSession struct {
 	activeSet map[protocol.Digest]struct{}
 	edges     map[protocol.Digest]map[protocol.Digest]struct{}
 	edgeCount int
+
+	// Contribution tracking is distinct from basis membership: temporal basis
+	// can name evidence before common semantics selects that evidence itself.
+	// Both sets are allocated only when ordinary semantic selection begins.
+	basisContributors map[protocol.Digest]struct{}
+	actionBasis       map[protocol.Digest]struct{}
 }
 
 func newVerificationSession(catalog *evidenceCatalog, trust protocol.TrustConfiguration, temporal protocol.TemporalVerificationServices) *verificationSession {
@@ -155,10 +155,10 @@ func (s *verificationSession) supportingRelation(resourceType protocol.ResourceT
 	return s.catalog.supportingRelation(resourceType)
 }
 
-// recordDependency adds an edge only after common semantic code has selected
-// and authenticated the child. Recursive cycles are rejected by withNode;
-// cycles between independently cached nodes are rejected by
-// validateSelectedGraph before apply.
+// recordDependency adds an edge and the child's basis contribution only after
+// common semantic code has authenticated and accepted the required premise.
+// Consumers remain active until their premises complete through withNode,
+// which rejects cycles even when authentication was previously cached.
 func (s *verificationSession) recordDependency(parent, child protocol.Digest) error {
 	if !s.hasVerifiedIdentity(parent) || !s.hasVerifiedIdentity(child) {
 		return fmt.Errorf("%w: dependency endpoints must be verified before edge insertion", protocol.ErrPolicyReevaluation)
@@ -179,6 +179,7 @@ func (s *verificationSession) recordDependency(parent, child protocol.Digest) er
 	}
 	s.edges[parent][child] = struct{}{}
 	s.edgeCount++
+	s.addBasisContribution(s.memo[child].verified)
 	return nil
 }
 
@@ -187,37 +188,28 @@ func (s *verificationSession) hasVerifiedIdentity(identity protocol.Digest) bool
 	return exists && state.phase == nodeVerified
 }
 
-// validateSelectedGraph checks the selected dependency closure with one
-// depth-first traversal. It returns the reachable identities in traversal
-// order so common action derivation can include them in Basis; callers sort
-// the combined basis separately.
-func (s *verificationSession) validateSelectedGraph(root protocol.Digest) ([]protocol.Digest, error) {
-	states := make(map[protocol.Digest]graphVisitState)
-	reachable := make([]protocol.Digest, 0)
-	var visit func(protocol.Digest) error
-	visit = func(identity protocol.Digest) error {
-		switch states[identity] {
-		case graphVisiting:
-			return fmt.Errorf("%w: identity %s is already on the selected dependency path", errVerificationCycle, identity)
-		case graphComplete:
-			return nil
-		}
-		if !s.hasVerifiedIdentity(identity) {
-			return fmt.Errorf("%w: selected dependency identity %s is not verified", protocol.ErrPolicyReevaluation, identity)
-		}
+// addBasisContribution accounts for a selected authenticated node once. The
+// ordinary root enters after early checks require work; dependency contributions
+// enter through recordDependency after their semantic checks. Authentication
+// alone contributes nothing, and this accounting never skips semantic checks.
+func (s *verificationSession) addBasisContribution(node verifiedNode) {
+	if _, merged := s.basisContributors[node.identity]; merged {
+		return
+	}
+	if s.basisContributors == nil {
+		s.basisContributors = make(map[protocol.Digest]struct{})
+		s.actionBasis = make(map[protocol.Digest]struct{})
+	}
+	s.basisContributors[node.identity] = struct{}{}
+	s.actionBasis[node.identity] = struct{}{}
+	for _, identity := range node.result.Validity.Basis {
+		s.actionBasis[identity] = struct{}{}
+	}
+}
 
-		states[identity] = graphVisiting
-		reachable = append(reachable, identity)
-		for child := range s.edges[identity] {
-			if err := visit(child); err != nil {
-				return err
-			}
-		}
-		states[identity] = graphComplete
-		return nil
-	}
-	if err := visit(root); err != nil {
-		return nil, err
-	}
-	return reachable, nil
+// selectedBasis materializes a detached, sorted snapshot after successful
+// ordinary semantic evaluation. It performs no graph walk or authorization
+// check. A failed evaluation discards its session and partial accounting.
+func (s *verificationSession) selectedBasis() []protocol.Digest {
+	return slices.Sorted(maps.Keys(s.actionBasis))
 }

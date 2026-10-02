@@ -137,8 +137,7 @@ func TestVerificationSessionAuthenticatesPriorIntentAsDependency(t *testing.T) {
 				return err
 			}
 		}
-		_, err := second.validateSelectedGraph(root.identity)
-		return err
+		return nil
 	}); err != nil {
 		t.Fatalf("authenticate prior intent as a dependency: %v", err)
 	}
@@ -220,6 +219,9 @@ func TestVerificationSessionRelationLookupDoesNotCreateDependency(t *testing.T) 
 	if session.edgeCount != 0 {
 		t.Fatal("verification alone created an authorization edge")
 	}
+	if session.basisContributors != nil || session.actionBasis != nil {
+		t.Fatal("lookup or independent authentication initialized basis accounting")
+	}
 }
 
 func TestVerificationSessionRejectsActiveIdentityCycles(t *testing.T) {
@@ -270,7 +272,7 @@ func TestVerificationSessionRejectsActiveIdentityCycles(t *testing.T) {
 	}
 }
 
-func TestVerificationSessionRejectsGraphCyclesAndBoundsEdgesAndDepth(t *testing.T) {
+func TestVerificationSessionChecksDependencyEndpointsAndBoundsEdgesAndDepth(t *testing.T) {
 	session, a, b := newBareSession(t, limitsWith(verificationLimits{maxEdges: 2, maxDepth: 2}), 3)
 	c := session.catalog.supporting[1]
 	memoizeBareNode(session, a)
@@ -286,13 +288,13 @@ func TestVerificationSessionRejectsGraphCyclesAndBoundsEdgesAndDepth(t *testing.
 	if err := session.recordDependency(a, b); err != nil {
 		t.Fatalf("duplicate edge should be idempotent: %v", err)
 	}
-	if err := session.recordDependency(b, a); err != nil {
-		t.Fatalf("recording the cycle-closing edge should defer cycle detection: %v", err)
+	if err := session.recordDependency(a, "not-verified"); !errors.Is(err, protocol.ErrPolicyReevaluation) {
+		t.Fatalf("unverified endpoint: %v", err)
 	}
-	if _, err := session.validateSelectedGraph(a); !errors.Is(err, errVerificationCycle) {
-		t.Fatalf("final graph validation error = %v, want graph cycle", err)
+	if err := session.recordDependency(b, c); err != nil {
+		t.Fatalf("exact edge limit rejected: %v", err)
 	}
-	if err := session.recordDependency(b, c); !errors.Is(err, errVerificationWorkLimit) {
+	if err := session.recordDependency(a, c); !errors.Is(err, errVerificationWorkLimit) {
 		t.Fatalf("edge-limit error = %v, want work limit", err)
 	}
 
@@ -312,44 +314,6 @@ func TestVerificationSessionRejectsGraphCyclesAndBoundsEdgesAndDepth(t *testing.
 		})
 	}); !errors.Is(err, errVerificationWorkLimit) {
 		t.Fatalf("depth-limit error = %v, want work limit", err)
-	}
-}
-
-func TestVerificationSessionValidatesAcyclicReachableGraphOnce(t *testing.T) {
-	session, root, first := newBareSession(t, defaultVerificationLimits(), 3)
-	second := session.catalog.supporting[1]
-	unselected := session.catalog.supporting[2]
-	for _, identity := range []protocol.Digest{root, first, second, unselected} {
-		memoizeBareNode(session, identity)
-	}
-	for _, edge := range [][2]protocol.Digest{
-		{root, first},
-		{root, second},
-		{first, second},
-	} {
-		if err := session.recordDependency(edge[0], edge[1]); err != nil {
-			t.Fatalf("recordDependency(%s, %s): %v", edge[0], edge[1], err)
-		}
-	}
-
-	reachable, err := session.validateSelectedGraph(root)
-	if err != nil {
-		t.Fatalf("validateSelectedGraph: %v", err)
-	}
-	if len(reachable) != 3 {
-		t.Fatalf("reachable identities = %v, want root and two selected supports", reachable)
-	}
-	seen := make(map[protocol.Digest]bool, len(reachable))
-	for _, identity := range reachable {
-		seen[identity] = true
-	}
-	for _, identity := range []protocol.Digest{root, first, second} {
-		if !seen[identity] {
-			t.Errorf("reachable identities %v omit selected identity %s", reachable, identity)
-		}
-	}
-	if seen[unselected] {
-		t.Fatalf("unselected support %s entered reachable identities %v", unselected, reachable)
 	}
 }
 

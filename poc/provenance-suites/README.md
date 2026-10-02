@@ -224,10 +224,43 @@ continue through the selected profile's `Apply` only when its `Owns` permits the
 Phase 7 sections 2–3 and the section 4 handler behavior are implemented, including
 parsed resource types and the early ordinary checks from section 6. Handlers
 currently return the existing `AppliedDelivery`; ordinary apply consumes that
-derived view without assertion bytes. `AuthorizedAction`, selected evidence-basis
-assembly, and replacement of the existing final graph-validation gate remain
-later phase 7 work. The gate still runs for new ordinary work and suite-owned
-events; completed ordinary retries return before it.
+derived view without assertion bytes. Section 5's session basis accumulation and
+sorted snapshot are also implemented. `AuthorizedAction` construction and carrying
+the basis through ordinary apply and the retained observation remain later phase
+7 work; this increment adds no temporary public result type.
+
+## Selected evidence basis
+
+The per-delivery session accumulates the evidence used by ordinary semantic
+evaluation. After early scope/action/generation checks require work, the root
+contributes its identity and successful normalized validity basis. Each dependency
+contributes after authenticated relationship checks and successful edge recording.
+Its contribution is merged once even when shared or previously authenticated;
+semantic checks still run on every use. Verification success alone, tentative
+lookup, unused cached authentication, and failed profile attempts contribute
+nothing.
+
+Contribution tracking is separate from membership in the basis union. If a
+temporal basis entry already names a relation, selecting that relation must still
+merge its own validity basis. Recovered key-event or other temporal boundary
+identities can be absent from the package; basis accounting does not request new
+lookup, authentication, or occurrence verification for them. Normalized entries
+from dominated constraints remain included.
+
+After successful semantics, the private session snapshot materializes a detached,
+deduplicated, identity-sorted slice. The POC retains sorting for deterministic
+observation; basis order has no authorization role. The snapshot reads the
+accumulated set without walking the recorded dependency edges. Selected edges
+still preserve the relationships used.
+
+Required premises complete semantic evaluation while their consumers remain
+active. `withNode` rejects active identity re-entry, including on authentication-
+cache hits. The final graph-validation helper and both apply gates are removed.
+A required failure rejects the delivery before effects, and its session's partial
+basis is discarded. Suite-owned events, early rejections, and completed ordinary
+retries initialize no common basis accounting. Tests inspect the session snapshot
+through private handler/session seams; applying and observing a full
+`AuthorizedAction` is the next integration step.
 
 ## The naive profile
 
@@ -377,6 +410,11 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Authenticated fulfillment relation presented as the root | Rejected by predicate dispatch; no effects |
 | Original intent reused as a dependency of a later delivery | Same assertion-purpose policy; verified once per identity in each delivery |
 | Cached authentication used for different semantic tenant checks | Matching use succeeds, mismatched use fails; one profile attempt, no edge from the rejected use |
+| Selected root/relation with retained temporal boundary evidence | Session basis includes selected identities and successful normalized boundary basis, without new proofs for retained identities |
+| Independently authenticated but unused evidence, or failed profile attempt | Its distinctive evidence basis is excluded |
+| A temporal basis entry already names a subsequently selected relation | That relation's own validity-basis contribution is still merged |
+| Shared dependencies used repeatedly | One contribution per selected node, one authentication per identity, semantic checks on every use, and a detached sorted snapshot |
+| Circular or invalid required premise, including cached authentication, or an exhausted selected-edge bound | Evaluation rejects before effects despite earlier partial basis accumulation |
 | Deployment item missing manifest media type | Rejected |
 | Resource manager signs a delivery with an unenrolled key | Rejected |
 | Resource manager changes assertion bytes after the user signs | Rejected by content digest binding |

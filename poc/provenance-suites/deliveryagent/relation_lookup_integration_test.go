@@ -81,6 +81,9 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 				if session.edgeCount != 0 || len(agent.applied) != 0 {
 					t.Fatal("failed claim reached dependency accounting or apply")
 				}
+				if len(session.basisContributors) != 1 {
+					t.Fatal("failed selected verification contributed basis")
+				}
 			} else {
 				if err != nil {
 					t.Fatal(err)
@@ -143,6 +146,9 @@ func TestRequestedRelationUsesAuthenticatedContentAfterTentativeLookup(t *testin
 			}
 			if session.edgeCount != 0 || len(agent.applied) != 0 {
 				t.Fatal("tentative assertion became a semantic dependency or reached apply")
+			}
+			if len(session.basisContributors) != 1 {
+				t.Fatal("rejected authenticated relationship contributed basis")
 			}
 		})
 	}
@@ -259,6 +265,9 @@ func TestManagedRootValidatesResourceTypeDespiteNativeProducerBypass(t *testing.
 			if counted.parseCalls != 1 || counted.beginCalls != 1 || len(agent.applied) != 0 {
 				t.Fatal("invalid root reached supporting work or apply")
 			}
+			if session.basisContributors != nil || session.actionBasis != nil {
+				t.Fatal("invalid root initialized basis accounting")
+			}
 		})
 	}
 }
@@ -292,6 +301,9 @@ func TestRequestedRelationPreparationLimitRejectsWithoutFallbackOrApply(t *testi
 	}
 	if logs.calls[session.catalog.supporting[0]] != 0 || logs.calls[session.catalog.supporting[1]] != 0 || session.edgeCount != 0 || len(agent.applied) != 0 {
 		t.Fatal("over-limit preparation reached supporting occurrence, dependency accounting, or apply")
+	}
+	if len(session.basisContributors) != 1 {
+		t.Fatal("over-limit selected attempt contributed basis")
 	}
 }
 
