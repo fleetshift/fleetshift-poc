@@ -148,7 +148,7 @@ func (s *verificationSession) verifyNode(
 	return verified, nil
 }
 
-func (s *verificationSession) supportingRelation(resourceType string) (protocol.Digest, error) {
+func (s *verificationSession) supportingRelation(resourceType protocol.ResourceType) (protocol.Digest, error) {
 	if s.catalog == nil {
 		return "", errUnknownCatalogEvidence
 	}

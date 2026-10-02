@@ -34,7 +34,7 @@ func TestRelationLookupStopsCachesAndResumes(t *testing.T) {
 		{"three.example/Cluster", 3, 4},
 		{"one.example/Cluster", 0, 4},
 	} {
-		got, err := catalog.supportingRelation(step.key)
+		got, err := catalog.supportingRelation(resourceTypeForTest(t, step.key))
 		if err != nil || got != catalog.supporting[step.index] {
 			t.Fatalf("lookup %s = %s, %v; want item %d", step.key, got, err, step.index)
 		}
@@ -43,7 +43,7 @@ func TestRelationLookupStopsCachesAndResumes(t *testing.T) {
 		}
 	}
 	for range 2 {
-		if _, err := catalog.supportingRelation("missing.example/Cluster"); !errors.Is(err, ErrFulfillmentRelationRequired) {
+		if _, err := catalog.supportingRelation(resourceTypeForTest(t, "missing.example/Cluster")); !errors.Is(err, ErrFulfillmentRelationRequired) {
 			t.Fatalf("missing relation: %v", err)
 		}
 	}
@@ -61,13 +61,13 @@ func TestRelationLookupSkipsUnusableCourieredItems(t *testing.T) {
 	items := []protocol.Item{
 		unknown, malformedNative,
 		lookupAssertionItem(t, signer, protocol.TypedAssertion{PredicateType: protocol.PredicateTypeFulfillmentRelationV1, Bytes: []byte("not JSON")}),
-		lookupRelationItem(t, signer, "local-kind", "application/json"),
+		lookupAssertionItem(t, signer, rawRelationAssertion(t, "local-kind", "application/json")),
 		lookupAssertionItem(t, signer, protocol.TypedAssertion{PredicateType: "suite/opaque", Bytes: []byte("opaque event")}),
 		lookupRelationItem(t, signer, "wanted.example/Cluster", ""),
 	}
 	target := &countedTarget{delegate: directkey.NewTarget()}
 	catalog := lookupTestCatalog(t, items, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{target.ProvenanceType(): target}))
-	got, err := catalog.supportingRelation("wanted.example/Cluster")
+	got, err := catalog.supportingRelation(resourceTypeForTest(t, "wanted.example/Cluster"))
 	if err != nil || got != catalog.supporting[5] {
 		t.Fatalf("lookup through unusable support: %s, %v", got, err)
 	}
@@ -76,7 +76,7 @@ func TestRelationLookupSkipsUnusableCourieredItems(t *testing.T) {
 	if target.parseCalls != 5 || target.beginCalls != 0 {
 		t.Fatalf("parse=%d verify=%d", target.parseCalls, target.beginCalls)
 	}
-	if _, err := catalog.supportingRelation("missing.example/Cluster"); !errors.Is(err, ErrFulfillmentRelationRequired) {
+	if _, err := catalog.supportingRelation(resourceTypeForTest(t, "missing.example/Cluster")); !errors.Is(err, ErrFulfillmentRelationRequired) {
 		t.Fatal(err)
 	}
 	if target.parseCalls != 5 {
@@ -106,7 +106,7 @@ func TestRelationLookupRejectsTrustedLookupDefects(t *testing.T) {
 				lookupRelationItem(t, signer, "wanted.example/Cluster", "application/json"),
 			}, lookup)
 			for range 2 {
-				if _, err := catalog.supportingRelation("wanted.example/Cluster"); !errors.Is(err, errInvalidTargetLookup) {
+				if _, err := catalog.supportingRelation(resourceTypeForTest(t, "wanted.example/Cluster")); !errors.Is(err, errInvalidTargetLookup) {
 					t.Fatalf("trusted lookup defect = %v", err)
 				}
 			}
@@ -131,14 +131,14 @@ func TestRelationLookupUsesEachInstalledTypeAndOwnsKeys(t *testing.T) {
 	items[1].Evidence.ProvenanceType = second.kind
 	catalog := lookupTestCatalog(t, items, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{first.kind: first, second.kind: second}))
 	items[0].Evidence.Bytes[0] = 'X'
-	if got, err := catalog.supportingRelation("two.example/Cluster"); err != nil || got != catalog.supporting[1] {
+	if got, err := catalog.supportingRelation(resourceTypeForTest(t, "two.example/Cluster")); err != nil || got != catalog.supporting[1] {
 		t.Fatalf("mixed native lookup: %s, %v", got, err)
 	}
 	// Mutating buffers retained by the native parser cannot rewrite discovered keys.
 	for i := range first.returned.Bytes {
 		first.returned.Bytes[i] = 'X'
 	}
-	if got, err := catalog.supportingRelation("one.example/Cluster"); err != nil || got != catalog.supporting[0] {
+	if got, err := catalog.supportingRelation(resourceTypeForTest(t, "one.example/Cluster")); err != nil || got != catalog.supporting[0] {
 		t.Fatalf("owned lookup key: %s, %v", got, err)
 	}
 	if first.calls != 1 || second.calls != 1 || catalog.item(catalog.supporting[0]).Evidence.Bytes[0] == 'X' {
@@ -155,7 +155,7 @@ func TestRelationLookupCanExhaustTheWholeBoundedPackage(t *testing.T) {
 	}
 	catalog := lookupTestCatalog(t, items, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{target.ProvenanceType(): target}))
 	for _, key := range []string{"types.example/Type1", "types.example/Type254"} {
-		if _, err := catalog.supportingRelation(key); err != nil {
+		if _, err := catalog.supportingRelation(resourceTypeForTest(t, key)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -163,7 +163,7 @@ func TestRelationLookupCanExhaustTheWholeBoundedPackage(t *testing.T) {
 		t.Fatalf("parsed %d, want 255", target.parseCalls)
 	}
 	for range 2 {
-		if _, err := catalog.supportingRelation("missing.example/Cluster"); !errors.Is(err, ErrFulfillmentRelationRequired) {
+		if _, err := catalog.supportingRelation(resourceTypeForTest(t, "missing.example/Cluster")); !errors.Is(err, ErrFulfillmentRelationRequired) {
 			t.Fatal(err)
 		}
 	}
@@ -184,7 +184,7 @@ func TestRelationLookupRejectsMissingCatalogIdentity(t *testing.T) {
 	target := &countedTarget{delegate: directkey.NewTarget()}
 	catalog := lookupTestCatalog(t, []protocol.Item{lookupRelationItem(t, signer, "wanted.example/Cluster", "application/json")}, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{target.ProvenanceType(): target}))
 	delete(catalog.byID, catalog.supporting[0])
-	if _, err := catalog.supportingRelation("wanted.example/Cluster"); !errors.Is(err, errUnknownCatalogEvidence) {
+	if _, err := catalog.supportingRelation(resourceTypeForTest(t, "wanted.example/Cluster")); !errors.Is(err, errUnknownCatalogEvidence) {
 		t.Fatalf("broken catalog invariant=%v", err)
 	}
 	if target.parseCalls != 0 {
@@ -210,7 +210,7 @@ func TestRelationLookupUsesTheCatalogSnapshot(t *testing.T) {
 	item.EvidenceLog.Index = 99
 	item.EvidenceLog.InclusionProof[0] = "mutated proof"
 	update.ConsistencyProof[0] = "mutated consistency"
-	identity, err := catalog.supportingRelation("wanted.example/Cluster")
+	identity, err := catalog.supportingRelation(resourceTypeForTest(t, "wanted.example/Cluster"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestRelationLookupSkipsMissingAssertionPurpose(t *testing.T) {
 	}}
 	catalog := lookupTestCatalog(t, []protocol.Item{lookupRelationItem(t, signer, "wanted.example/Cluster", "application/json")}, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{target.kind: target}))
 	for range 2 {
-		if _, err := catalog.supportingRelation("wanted.example/Cluster"); !errors.Is(err, ErrFulfillmentRelationRequired) {
+		if _, err := catalog.supportingRelation(resourceTypeForTest(t, "wanted.example/Cluster")); !errors.Is(err, ErrFulfillmentRelationRequired) {
 			t.Fatal(err)
 		}
 	}
@@ -250,7 +250,7 @@ func lookupAssertionItem(t *testing.T, signer *directkey.Producer, assertion pro
 
 func lookupRelationItem(t *testing.T, signer *directkey.Producer, kind string, media protocol.MediaType) protocol.Item {
 	t.Helper()
-	assertion, err := (protocol.FulfillmentRelation{ResourceType: kind, MediaType: media}).Assertion()
+	assertion, err := (protocol.FulfillmentRelation{ResourceType: resourceTypeForTest(t, kind), MediaType: media}).Assertion()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,4 +290,27 @@ func (t *hintTarget) ParseHints(evidence protocol.TypedEvidence) (protocol.Tenta
 	}
 	t.returned = hints.Assertion
 	return hints, err
+}
+
+// rawRelationAssertion allows native-producer tests to sign wire values that
+// cannot be constructed as ResourceType, exercising the target parsing boundary.
+func rawRelationAssertion(t *testing.T, kind string, media protocol.MediaType) protocol.TypedAssertion {
+	t.Helper()
+	encoded, err := protocol.MarshalCanonical(struct {
+		ResourceType string             `json:"resource_type"`
+		MediaType    protocol.MediaType `json:"media_type"`
+	}{kind, media})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return protocol.TypedAssertion{PredicateType: protocol.PredicateTypeFulfillmentRelationV1, Bytes: encoded}
+}
+
+func resourceTypeForTest(t *testing.T, value string) protocol.ResourceType {
+	t.Helper()
+	parsed, err := protocol.ParseResourceType(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

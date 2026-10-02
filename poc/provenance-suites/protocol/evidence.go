@@ -244,7 +244,7 @@ func (a DeploymentAuthorization) Assertion() (TypedAssertion, error) {
 // a verified fulfillment relation says how to fulfill it.
 type ManagedResourceAuthorization struct {
 	DeliveryScope
-	ResourceType string          `json:"resource_type"`
+	ResourceType ResourceType    `json:"resource_type"`
 	Spec         json.RawMessage `json:"spec"`
 }
 
@@ -266,8 +266,8 @@ func (a ManagedResourceAuthorization) Assertion() (TypedAssertion, error) {
 // RegisteredSelfTarget: the addon claims this resource type and fulfills
 // it as a payload of MediaType.
 type FulfillmentRelation struct {
-	ResourceType string    `json:"resource_type"`
-	MediaType    MediaType `json:"media_type"`
+	ResourceType ResourceType `json:"resource_type"`
+	MediaType    MediaType    `json:"media_type"`
 }
 
 // Assertion returns the purpose-typed inner content of a fulfillment
@@ -328,6 +328,9 @@ func DecodeManagedResourceAuthorization(assertion TypedAssertion) (ManagedResour
 	if err := json.Unmarshal(assertion.Bytes, &authorization); err != nil {
 		return ManagedResourceAuthorization{}, fmt.Errorf("%w: decode managed-resource authorization: %v", ErrMalformedEvidence, err)
 	}
+	if authorization.ResourceType == (ResourceType{}) {
+		return ManagedResourceAuthorization{}, fmt.Errorf("%w: resource type is required", ErrMalformedEvidence)
+	}
 	return authorization, nil
 }
 
@@ -339,6 +342,9 @@ func DecodeFulfillmentRelation(assertion TypedAssertion) (FulfillmentRelation, e
 	var relation FulfillmentRelation
 	if err := json.Unmarshal(assertion.Bytes, &relation); err != nil {
 		return FulfillmentRelation{}, fmt.Errorf("%w: decode fulfillment relation: %v", ErrMalformedEvidence, err)
+	}
+	if relation.ResourceType == (ResourceType{}) {
+		return FulfillmentRelation{}, fmt.Errorf("%w: resource type is required", ErrMalformedEvidence)
 	}
 	return relation, nil
 }

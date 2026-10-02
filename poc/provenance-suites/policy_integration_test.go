@@ -88,12 +88,12 @@ func TestPoliciesControlLoggingAcrossConsumerAndProviderTenants(t *testing.T) {
 			}
 			root, err := consumer.SignManagedResource(context.Background(), protocol.ManagedResourceAuthorization{
 				DeliveryScope: protocol.DeliveryScope{TargetID: testTarget, FullResourceName: clusterName("cross-tenant"), Generation: 1, Action: protocol.ActionPut},
-				ResourceType:  testResourceType, Spec: []byte(`{"replicas":2}`),
+				ResourceType:  resourceTypeForTest(t, testResourceType), Spec: []byte(`{"replicas":2}`),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			relation, err := provider.SignFulfillmentRelation(context.Background(), protocol.FulfillmentRelation{ResourceType: testResourceType, MediaType: testReplicasMediaType})
+			relation, err := provider.SignFulfillmentRelation(context.Background(), protocol.FulfillmentRelation{ResourceType: resourceTypeForTest(t, testResourceType), MediaType: testReplicasMediaType})
 			if err != nil {
 				t.Fatal(err)
 			}

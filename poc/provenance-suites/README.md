@@ -155,12 +155,17 @@ with a deployment does not change apply.
 ## Fulfillment-relation lookup
 
 Managed-resource and relation `ResourceType` values use the full versionless
-`{service}/{type}` identity, for example `kind.fleetshift.io/Cluster`. Common
-validation requires two nonempty components separated by one slash, without
-whitespace or extra path components. Comparison is exact; there is no service
-normalization, DNS naming policy, or requirement that the type's service equal
-the resource name's service. Producer helpers validate before signing; the
-target also checks signed values because native producers can bypass helpers.
+`{service}/{type}` identity, for example `kind.fleetshift.io/Cluster`.
+`protocol.ParseResourceType` constructs an immutable, comparable value with
+two nonempty components separated by one slash, without whitespace or extra
+path components. Comparison is exact; there is no service normalization, DNS
+naming policy, or requirement that the type's service equal the resource name's
+service. The wire field remains a JSON string. Common predicate decoders reject
+omitted, null, empty, or malformed resource types; assertion encoding rejects
+an unconstructed Go zero value before signing. Producers construct the type,
+and common consumers trust its syntax invariant. Parsing establishes syntax,
+not authenticity: the target decodes the authenticated assertion even when
+lookup has already parsed its tentative key.
 
 The authenticated root's full type names the required relation. The structural
 catalog retains a private map from discovered types to their first usable
@@ -191,9 +196,38 @@ byte and proof limits remain, including structural validation of unused proof
 encodings. There is no separate item scan limit. Context propagation and deadline
 cooperation are deferred to the server / real agent implementation.
 
-This increment implements phase 7 sections 2–3 through the existing managed-
-resource verification path. Final action derivation, evidence-basis assembly,
-and changes to ordinary apply/idempotency remain later phase 7 work.
+## Common handlers and ordinary retries
+
+Authenticated predicate dispatch invokes separate deployment and managed-resource
+handlers. Each decodes the root once and checks required scope fields, supported
+put/remove action, provisioned tenant/target, authenticated principal tenant, and
+retained generation before supporting lookup or manifest derivation. Generation
+zero is valid for previously unseen work. Deployment preserves its exact
+authenticated manifest sequence, media types, and bytes; managed-resource
+fulfillment derives a manifest from the authenticated relation's media type and
+the root's exact spec bytes.
+
+A completed generation is an idempotent no-op. The resource name and provisioned
+tenant/target scope identify immutable work; retries do not compare assertion
+bytes or content digests. They still verify the root and process the evidence-log
+checkpoint, but do no supporting lookup, supporting verification, manifest
+derivation, or ordinary apply. New or higher-generation work still needs its
+complete semantics and required support. Lower generations reject as stale.
+Removal deletes the live view while retaining the generation marker, so repeated
+removal succeeds and a stale put cannot restore the resource. The agent lock
+fences generation checks and the POC's fake effects together.
+
+Fulfillment relations and `trust-config-update/v1` are explicitly reserved root
+predicates and fail closed even if a profile claims ownership. Other predicates
+continue through the selected profile's `Apply` only when its `Owns` permits them.
+
+Phase 7 sections 2–3 and the section 4 handler behavior are implemented, including
+parsed resource types and the early ordinary checks from section 6. Handlers
+currently return the existing `AppliedDelivery`; ordinary apply consumes that
+derived view without assertion bytes. `AuthorizedAction`, selected evidence-basis
+assembly, and replacement of the existing final graph-validation gate remain
+later phase 7 work. The gate still runs for new ordinary work and suite-owned
+events; completed ordinary retries return before it.
 
 ## The naive profile
 
@@ -330,7 +364,7 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Root repeated in support | Omitted from stored support; one leaf |
 | Accept without a registered route, then Dispatch | Evidence is registered; outbox stays pending until the route exists; Dispatch does not append |
 | Acknowledged Dispatch retry | No-op; no new leaf and no repeated authorization |
-| `deployment/v1` and `trust-config-update/v1` | Do not call suite `Apply`; trust-config-update fails closed until the agent handler exists |
+| Common reserved relation or trust-update root, even when a profile claims ownership | Fail closed without suite `Apply` or ordinary effects |
 | Policy-matched predicate the profile does not `Owns` | Fail closed without calling suite `Apply` |
 | Producer signs a `managed-resource/v1` spec with an addon-signed fulfillment relation | Target applies the derived manifest of the relation's media type; supporting items carry inclusions at their canonical indexes |
 | Managed resource with no relation, wrong resource type, or unenrolled relation signer | Rejected |
@@ -353,7 +387,13 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Unsupported provenance type or unreadable predicate encountered during supporting lookup | Skipped; required relation must still be found and fully verified |
 | Trusted lookup missing, or reporting success with nil/the wrong implementation type | Rejected when encountered |
 | Second bootstrap of an initialized verifier | Rejected |
-| Lost acknowledgement then retry | Idempotent apply via DispatchID; manager cache catches up via stale-checkpoint recovery |
+| Lost acknowledgement then retry | Completed resource generation is a no-op; manager cache catches up via stale-checkpoint recovery |
+| Completed put or removal retried without support | Root still verifies; no support lookup or manifest derivation; original live view or removed state is preserved |
+| Invalid signature or scope on a completed key | Rejected before the generation no-op |
+| Scope/action mismatch or stale generation with unusable couriered support | Rejected before support lookup or verification |
+| Higher managed-resource generation without its relation | Rejected without advancing the generation marker |
+| Removal loses its acknowledgement, then retries; a stale put follows | Retry succeeds, checkpoint recovers, and the retained removal generation rejects resurrection |
+| Missing, null, empty, or malformed resource type | Rejected at common predicate decoding; unconstructed producer values cannot be encoded for signing |
 | Lost acknowledgement, other target advances the log, then retry | Agent reports a stale checkpoint; manager rebuilds proofs without appending evidence |
 | Rejected delivery after a verified log update | Log checkpoint advances; retry recovers the manager cache without applying or growing the log |
 | Package constructed from an older `From` than the retained checkpoint | Stale, even when equal-size RFC 6962 consistency against the retained head would no-op, and even when the successor lags or forks that head |
