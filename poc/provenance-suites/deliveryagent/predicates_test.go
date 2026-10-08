@@ -30,7 +30,7 @@ func TestDeploymentHandlerPreservesAuthenticatedManifestSequence(t *testing.T) {
 	counted := &countedTarget{delegate: target}
 	session, logs := relationLookupSession(t, loggedTestPackage(t, root, catalogItem("unused support", "").Evidence), counted)
 	agent := newDispatchTestAgent()
-	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 		t.Fatal(err)
 	}
 	view, ok := agent.Applied(authorization.FullResourceName)
@@ -87,16 +87,16 @@ func TestOrdinaryChecksPrecedeSupportingWork(t *testing.T) {
 				session, logs := relationLookupSession(t, loggedTestPackage(t, root, decoy.Evidence), counted)
 				agent := newDispatchTestAgent()
 				if tc.stale {
-					agent.generations[scope.FullResourceName] = 2
+					agent.memory.generations[scope.FullResourceName] = 2
 				}
-				err = session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+				err = session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) })
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("error=%v, want %v", err, tc.want)
 				}
-				if counted.parseCalls != 1 || counted.beginCalls != 1 || counted.finishCalls != 1 || counted.applyCalls != 0 || session.catalog.cursor != 0 || session.edgeCount != 0 || logs.calls[session.catalog.supporting[0]] != 0 || len(agent.applied) != 0 {
+				if counted.parseCalls != 1 || counted.beginCalls != 1 || counted.finishCalls != 1 || counted.applyCalls != 0 || session.catalog.cursor != 0 || session.edgeCount != 0 || logs.calls[session.catalog.supporting[0]] != 0 || len(agent.memory.applied) != 0 {
 					t.Fatal("rejected root performed supporting work or effects")
 				}
-				if !tc.stale && len(agent.generations) != 0 {
+				if !tc.stale && len(agent.memory.generations) != 0 {
 					t.Fatal("rejection retained a generation")
 				}
 				if session.basisContributors != nil || session.actionBasis != nil {
@@ -151,15 +151,15 @@ func TestCompletedOrdinaryRetriesSkipSupportingAndManifestWork(t *testing.T) {
 				session, logs := relationLookupSession(t, pkg, counted)
 				err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error {
 					if !step.retry {
-						return agent.dispatchApplyLocked(session, root)
+						return agent.dispatchForTest(session, root)
 					}
 					var action AuthorizedAction
 					var required bool
 					var err error
 					if purpose == protocol.PredicateTypeDeploymentV1 {
-						action, required, err = agent.handleDeploymentLocked(session, root)
+						action, required, err = agent.deploymentForTest(session, root)
 					} else {
-						action, required, err = agent.handleManagedResourceLocked(session, root)
+						action, required, err = agent.managedResourceForTest(session, root)
 					}
 					assertAuthorizedAction(t, action, AuthorizedAction{})
 					if required {
@@ -170,7 +170,7 @@ func TestCompletedOrdinaryRetriesSkipSupportingAndManifestWork(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if agent.generations[ordinaryTestScope(0, protocol.ActionPut).FullResourceName] != step.generation {
+				if agent.memory.generations[ordinaryTestScope(0, protocol.ActionPut).FullResourceName] != step.generation {
 					t.Fatal("generation marker lost")
 				}
 				view, applied := agent.Applied(ordinaryTestScope(0, protocol.ActionPut).FullResourceName)
@@ -213,7 +213,7 @@ func TestCompletedOrdinaryKeyStillRequiresRootVerificationAndValidScope(t *testi
 			scope := ordinaryTestScope(1, protocol.ActionPut)
 			root := ordinaryTestEvidence(t, user, purpose, scope)
 			session, _ := relationLookupSession(t, loggedTestPackage(t, root, lookupRelationItem(t, addon, "kind.example/Cluster", "application/json").Evidence), target)
-			if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+			if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 				t.Fatal(err)
 			}
 
@@ -248,12 +248,12 @@ func TestCompletedOrdinaryKeyStillRequiresRootVerificationAndValidScope(t *testi
 					// Inclusion remains valid for the tampered envelope; the native
 					// verifier must reject its signature before the completed-key check.
 					session, _ := relationLookupSession(t, loggedTestPackage(t, retry), target)
-					err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+					err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) })
 					if !errors.Is(err, tc.want) {
 						t.Fatalf("retry error=%v, want %v", err, tc.want)
 					}
 					view, ok := agent.Applied(scope.FullResourceName)
-					if !ok || agent.generations[scope.FullResourceName] != 1 || string(view.Manifests[0].Bytes) != `{"region":"east"}` {
+					if !ok || agent.memory.generations[scope.FullResourceName] != 1 || string(view.Manifests[0].Bytes) != `{"region":"east"}` {
 						t.Fatal("invalid retry changed accepted state")
 					}
 				})
@@ -289,12 +289,12 @@ func TestHigherManagedGenerationStillRequiresRelation(t *testing.T) {
 			pkg = loggedTestPackage(t, root, lookupRelationItem(t, addon, "kind.example/Cluster", "application/json").Evidence)
 		}
 		session, _ := relationLookupSession(t, pkg, target)
-		before, existed := agent.generations[ordinaryTestScope(0, protocol.ActionPut).FullResourceName]
-		err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+		before, existed := agent.memory.generations[ordinaryTestScope(0, protocol.ActionPut).FullResourceName]
+		err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) })
 		if !errors.Is(err, step.want) {
 			t.Fatalf("generation %d/%s: %v, want %v", step.generation, step.action, err, step.want)
 		}
-		current, exists := agent.generations[ordinaryTestScope(0, protocol.ActionPut).FullResourceName]
+		current, exists := agent.memory.generations[ordinaryTestScope(0, protocol.ActionPut).FullResourceName]
 		if step.want != nil && (current != before || exists != existed) {
 			t.Fatal("rejected work changed generation marker")
 		}
@@ -325,11 +325,11 @@ func TestReservedRootPredicatesCannotBeClaimedByProfile(t *testing.T) {
 				authority.DeliveryPolicies = append(authority.DeliveryPolicies, sessionPolicy(purpose, authority.ProvenanceProfiles[0]))
 			}
 			agent := newDispatchTestAgent()
-			err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+			err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) })
 			if !errors.Is(err, protocol.ErrUnknownPredicateType) {
 				t.Fatalf("reserved root: %v", err)
 			}
-			if counted.finishCalls != 1 || counted.applyCalls != 0 || agent.suiteApplyCount != 0 || len(agent.applied) != 0 || len(agent.generations) != 0 {
+			if counted.finishCalls != 1 || counted.applyCalls != 0 || agent.suiteApplyCount != 0 || len(agent.memory.applied) != 0 || len(agent.memory.generations) != 0 {
 				t.Fatal("reserved predicate failed to authenticate or reached effects")
 			}
 			if session.basisContributors != nil || session.actionBasis != nil {

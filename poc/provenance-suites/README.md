@@ -196,59 +196,82 @@ selected edges, or temporal basis.
 The existing 256-statement package cap permits at most 255 supporting items;
 each is examined at most once during lookup across requests. Package/per-item
 byte and proof limits remain, including structural validation of unused proof
-encodings. There is no separate item scan limit. Context propagation and deadline
-cooperation are deferred to the server / real agent implementation.
+encodings. There is no separate item scan limit. `Verify` and `DeliverContext`
+propagate context through verification and application callbacks; full deadline
+cooperation inside bounded lookup and native implementations remains real-agent work.
 
 ## Common handlers and ordinary retries
 
 Authenticated predicate dispatch invokes separate deployment and managed-resource
 handlers. Each decodes the root once and checks required scope fields, supported
-put/remove action, provisioned tenant/target, authenticated principal tenant, and
-retained generation before supporting lookup or manifest derivation. Generation
-zero is valid for previously unseen work. Deployment preserves its exact
-authenticated manifest sequence, media types, and bytes; managed-resource
-fulfillment derives a manifest from the authenticated relation's media type and
-the root's exact spec bytes.
+put/remove action, provisioned tenant/target, and authenticated principal tenant
+before supporting lookup or manifest derivation. Generation zero is valid for
+previously unseen work. Deployment preserves its exact authenticated manifest
+sequence, media types, and bytes; managed-resource fulfillment derives a manifest
+from the authenticated relation's media type and the root's exact spec bytes.
 
-A completed generation is an idempotent no-op. The resource name and provisioned
-tenant/target scope identify immutable work; retries do not compare assertion
-bytes or content digests. They still verify the root and process the evidence-log
-checkpoint, but do no supporting lookup, supporting verification, manifest
-derivation, or ordinary apply. New or higher-generation work still needs its
-complete semantics and required support. Lower generations reject as stale.
-Removal deletes the live view while retaining the generation marker, so repeated
-removal succeeds and a stale put cannot restore the resource. The agent lock
-fences generation checks and the POC's fake effects together.
+`NewVerifier(config, lookup)` constructs the common verifier with an explicit
+installed `TargetLookup`. After authenticated bootstrap, `Verify(ctx, pkg,
+precheck)` returns a `VerifiedDelivery`: an ordinary `AuthorizedAction`, recognition
+of previously completed work, or a verified profile-owned `SuiteEvent`. The
+courier envelope is `protocol.DeliveryPackage`; common evaluation has no RM or
+ordinary application dependency. It retains verification state and checkpoints
+but performs no ordinary effects, profile apply, or acknowledgement.
 
-Fulfillment relations and `trust-config-update/v1` are explicitly reserved root
-predicates and fail closed even if a profile claims ownership. Other predicates
-continue through the selected profile's `Apply` only when its `Owns` permits them.
+The optional generation precheck runs after authenticated scope validation.
+It may reject stale work, recognize completed work, or retain an attempt-local
+version token or transient guard. It cannot admit a generation or authorize
+effects. A cheap precheck is recommended. Without one, an invalid retry that
+omits required support can fail before discovering previous successful completion;
+the earlier result remains intact. An early completed-generation result skips
+supporting lookup, verification, manifest derivation, basis/action construction,
+and ordinary acceptance. Root verification and checkpoint preparation still run.
+New or in-progress work needs its complete semantics and required support.
 
-Phase 7 is implemented. For new work, the common handler produces one
-`deliveryagent.AuthorizedAction` containing the immutable root evidence identity,
-authenticated principal and predicate, exact admitted scope, derived manifests,
-and selected evidence basis. Ordinary apply accepts only that action; it never
-decodes assertions or provenance bytes. An already-completed generation produces
-no replacement action or basis and makes no ordinary apply call.
+For new work, the common handler produces one `deliveryagent.AuthorizedAction`
+containing the immutable root evidence identity, authenticated principal and
+predicate, exact validated scope, derived manifests, and selected evidence basis.
+`NewAgent(verifier, application)` coordinates evaluation with an injected
+`Application`. Its `NewAttempt` creates delivery-local operational state without
+admitting work. An attempt may implement `GenerationPrechecker`; omitting that
+capability defers all progress queries to `Accept(ctx, action)`. Every attempt is
+closed on success or failure to release transient state or guards.
 
-The POC's in-memory application retains put actions through `AppliedDelivery`,
-which embeds `AuthorizedAction`. `Applied` detaches manifest slices and bytes
-and the basis slice for callers. Completed put retries preserve the entire
-accepted action. Removal deletes the live view and retains only the generation
-high-water mark; removal actions are inspected at derivation, not through an
-invented retained removal record. Production agents need not persist every
-action or its basis.
+`Accept` receives only the completed action and enforces generation ordering
+with effects or safe retention of evaluated work. It does not decode assertions
+or provenance bytes. An earlier precheck is not a substitute for this final
+fence. A successful acceptance permits ACK: effects may have finished, or enough
+evaluated work and execution state is retained to resume. Queued applications
+must fence later execution against newer accepted generations, including those
+not yet applied. Accepted/in-progress work is not completed work. No ACK precedes
+evaluation; early completion recognition reuses the prior evaluated result.
 
-`New` still provisions direct-key. Internally, `Deliver` uses the existing
-`TargetLookup` contract, and a real-signature test composes different installed
-types for root and relation through the complete delivery/action/apply flow.
-This proves the common boundary without a public registration framework or
-another production suite.
+`New` composes direct-key verification with the synchronous `MemoryApplication`.
+Its mutex covers final generation checks and fake effects; evaluation holds no
+application lock. The in-memory application retains detached put actions through
+`AppliedDelivery` and clones manifests and basis at acceptance and observation.
+Completed retries preserve the original action. Removal deletes the live view
+but retains its generation high-water mark, preventing a stale put from restoring
+it. The POC has no crash-durable journal. A reusable queued test application
+exercises safe acceptance before effects, resumption from retained actions,
+and fencing against accepted work. Production agents need not persist every
+action or its audit basis.
+
+Fulfillment relations and `trust-config-update/v1` are reserved root predicates
+and fail closed even if a profile claims ownership. Other predicates yield a
+`SuiteEvent` only when the selected profile's `Owns` permits them. Its `Apply(ctx)`
+uses detached authenticated root and finalized temporal facts, and must succeed
+before ACK. Evaluation alone does not apply profile state.
+
+External-package tests compose the public verifier and independent applications
+using real signatures. Mixed-native tests exercise different installed types for
+root and relation through the complete delivery/action/acceptance flow. No registry
+framework is required.
 
 ## Selected evidence basis
 
 The per-delivery session accumulates the evidence used by ordinary semantic
-evaluation. After early scope/action/generation checks require work, the root
+evaluation. After common scope checks and any optional precheck require work, the root
 contributes its identity and successful normalized validity basis. Each dependency
 contributes after authenticated relationship checks and successful edge recording.
 Its contribution is merged once even when shared or previously authenticated;
@@ -274,8 +297,8 @@ Required premises complete semantic evaluation while their consumers remain
 active. `withNode` rejects active identity re-entry, including on authentication-
 cache hits. The final graph-validation helper and both apply gates are removed.
 A required failure rejects the delivery before effects, and its session's partial
-basis is discarded. Suite-owned events, early rejections, and completed ordinary
-retries initialize no common basis accounting. Tests cover both private
+basis is discarded. Suite-owned events, early rejections, and retries recognized
+as completed by the precheck initialize no common basis accounting. Tests cover both private
 handler/session seams and the completed actions retained through ordinary apply.
 The consumer/provider policy integration checks action basis independently of
 inclusion presence across all four logging combinations and ordered policies.
@@ -375,8 +398,11 @@ delivery agent
   - leaves unused supporting inclusions cryptographically unverified
   - derives one AuthorizedAction for ordinary work after all required semantics,
     with exact root identity, principal, scope, manifests, and selected/temporal basis
-  - applies only that action under the generation fence; put observations detach
-    manifests and basis, while removal retains only its generation marker
+  - passes only that action to application-owned acceptance under a final
+    generation fence; optional precheck precedes support; ACK follows evaluation
+    and safe acceptance, which may precede effects in a queued application
+  - the default memory application detaches put manifests/basis and retains
+    only the generation marker after removal
   - projects the **root** `VerificationResult` into `ApplyRequest.Temporal`
     (used-supporting positions stay on that node's result, not in Apply)
   - dispatches on authenticated predicate type: intent apply, profile-owned
@@ -440,7 +466,7 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Complete ordinary action and mutated applied observation | Root identity, principal, scope, predicate, exact manifests, and basis are retained; observation changes cannot alter retained or cached data |
 | Managed-resource spec with internal whitespace and a misleading tentative media type | Final manifest uses exact authenticated spec bytes and the authenticated relation's media type |
 | Removal action | Complete action is derived before apply; afterward only the generation marker remains |
-| Concurrent ordinary deliveries | The agent lock and generation fence retain the newer accepted action |
+| Concurrent ordinary deliveries | The application fence retains the newer accepted action |
 | Root and relation use different installed provenance types | Each uses its own real native verifier/source policy through Deliver and retains the common action |
 | Real suite-owned enrollment or conflicting key replacement | Apply receives authenticated root and finalized temporal facts; real Apply failure rejects before acknowledgement while retaining the verified checkpoint |
 | Deployment item missing manifest media type | Rejected |
@@ -454,9 +480,15 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Trusted lookup missing, or reporting success with nil/the wrong implementation type | Rejected when encountered |
 | Second bootstrap of an initialized verifier | Rejected |
 | Lost acknowledgement then retry | Completed resource generation is a no-op; manager cache catches up via stale-checkpoint recovery |
+| Public verifier with independent application | Verification produces a complete action without effects; acceptance owns the final fence |
+| Optional precheck and invalid completed retry | Early lookup succeeds without support; deferred lookup may reject the retry without changing earlier completion |
+| Generation advances between precheck and acceptance | Final acceptance rejects stale work and preserves newer effects |
+| Queued acceptance before effects | ACK follows full evaluation and retained work; incomplete in-progress retries still require support |
+| Newer accepted generation has no effects yet | Queued execution rejects older work against the accepted high-water mark |
+| Evaluation or acceptance fails | No ACK or accepted-generation advancement; transient guards and attempts are closed |
 | Completed put or removal retried without support | Root still verifies; no support lookup or manifest derivation; original live view or removed state is preserved |
 | Invalid signature or scope on a completed key | Rejected before the generation no-op |
-| Scope/action mismatch or stale generation with unusable couriered support | Rejected before support lookup or verification |
+| Scope/action mismatch, or stale generation found by the default precheck, with unusable support | Rejected before supporting lookup or verification |
 | Higher managed-resource generation without its relation | Rejected without advancing the generation marker |
 | Removal loses its acknowledgement, then retries; a stale put follows | Retry succeeds, checkpoint recovers, and the retained removal generation rejects resurrection |
 | Missing, null, empty, or malformed resource type | Rejected at common predicate decoding; unconstructed producer values cannot be encoded for signing |

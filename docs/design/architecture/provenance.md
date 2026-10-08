@@ -393,7 +393,7 @@ A package designates one root for common semantic evaluation. Each assertion
 is authenticated under the policy for its purpose and principal authority,
 whether it appears as that root or as a dependency. An original resource
 intent therefore uses the same policy when it becomes prior evidence in an
-update chain. The common evaluator checks authenticated relationships and
+update chain. The common verifier checks authenticated relationships and
 requires the selected root to have delivery action semantics or be an admitted
 control event. A fulfillment relation can authenticate successfully while
 being unsuitable as a standalone delivery root.
@@ -573,7 +573,7 @@ graph owns:
 
 Graph selectors, indexes, and outer references locate evidence but confer no
 authority. Every accepted relationship must appear in authenticated content or
-follow from a deterministic transformation checked by the common evaluator.
+follow from a deterministic transformation checked by the common verifier.
 Changing an index or reference cannot substitute a different principal,
 content item, target, fulfillment, or generation.
 
@@ -593,7 +593,7 @@ integrity-checked before untrusted input can cause unbounded work.
 An authenticated root intent may describe desired state rather than the final
 target payload. For example, a user can authenticate a deployment spec and its
 manifest and placement strategies before an addon renders manifests or a
-placement service selects targets. The common evaluator checks that every
+placement service selects targets. The common verifier checks that every
 derived output is permitted by the authenticated intent and supporting
 assertions.
 
@@ -849,7 +849,8 @@ The target or delivery agent:
 - validates the attestation graph and target-local constraints;
 - applies authenticated content through profile-neutral delivery machinery;
 - retains profile and evidence-log state required by its accepted profiles; and
-- acknowledges only after it has durably guaranteed safe progress or retry.
+- acknowledges only after successful evaluation and durable safe acceptance,
+  or recognition of previously evaluated and completed work.
 
 The boundary is conceptual rather than a required pair of protocol methods:
 
@@ -866,6 +867,23 @@ delivery handling
 
 Delivery handling does not reparse raw credentials, signatures, authority
 claims, or profile-specific proofs.
+
+Common evaluation is reusable independently of ordinary application storage,
+generation fencing, and effects. It authenticates the root and validates common
+scope before invoking an optional application-owned generation precheck. A
+cheap precheck is recommended to reject stale work or recognize completed work
+before evaluating support. It may retain a transient guard or version token;
+it does not admit a generation, authorize effects, or permit acknowledgement.
+Omitting it can make an invalid retry fail before discovering prior completion.
+
+The resulting action crosses into application-owned acceptance. The application
+must enforce the final generation fence and either complete effects or durably
+retain enough evaluated work and execution state to resume. It may then
+acknowledge before effects finish. Its execution machinery must fence against
+newer accepted generations, including those not yet applied. Accepted/in-progress
+work cannot use the completed-generation shortcut. Profile-owned lifecycle
+events follow their profile's apply and durability contract after evaluation.
+See [target_delivery_contract.md](target_delivery_contract.md#generation-ordering-and-stale-delivery-prevention).
 
 ## Authority And Profile Lifecycle Operations
 
@@ -937,7 +955,8 @@ meaningful and which depend on acceptance of the current delivery.
 
 The common requirement is crash-consistent, idempotent durable progression:
 
-- before acknowledgement, the target has persisted enough verifier, delivery,
+- acknowledgement follows successful evaluation (or recognition of previously
+  evaluated and completed work) and persistence of enough verifier, delivery,
   or pending-work state to recover or retry safely;
 - partially persisted state cannot make unverified content authoritative;
 - an older or unverified delivery cannot overwrite newer accepted state; and
@@ -1342,7 +1361,7 @@ never makes it an uninitialized verifier.
    Authenticated content must select the same policy entry, and verification
    failure never falls back to a later policy.
 6. **Exact content:** a profile authenticates the exact typed content and
-   purpose consumed by the common evaluator. That inner predicate type is
+   purpose consumed by the common verifier. That inner predicate type is
    distinct from the outer provenance type and media type.
 7. **Typed evidence identity:** an evidence item is identified by a
    domain-separated binding of provenance type, media type, and exact bytes.

@@ -363,7 +363,7 @@ func TestSuiteApplyReceivesDetachedVerificationData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newEvidenceCatalog: %v", err)
 	}
-	agent := &Agent{}
+	agent := newDispatchTestAgent()
 	session := newVerificationSession(catalog, protocol.TrustConfiguration{}, protocol.TemporalVerificationServices{})
 	memoizeBareNode(session, catalog.rootID)
 	root := verifiedNode{
@@ -384,8 +384,8 @@ func TestSuiteApplyReceivesDetachedVerificationData(t *testing.T) {
 			},
 		},
 	}
-	if err := agent.dispatchApplyLocked(session, root); err != nil {
-		t.Fatalf("dispatchApplyLocked: %v", err)
+	if err := agent.dispatchForTest(session, root); err != nil {
+		t.Fatalf("dispatchForTest: %v", err)
 	}
 	if root.result.Authenticated.SatisfiedConstraints[0].Name != "original" || string(root.result.Assertion.Bytes) != "assertion" {
 		t.Fatal("suite Apply mutated the verification result passed to the dispatcher")

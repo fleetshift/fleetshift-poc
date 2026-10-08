@@ -9,12 +9,12 @@ import (
 
 // The common handlers decode authenticated content once. Their boolean result
 // reports whether work is required; completed deliveries derive no action.
-func (a *Agent) handleDeploymentLocked(session *verificationSession, root verifiedNode) (AuthorizedAction, bool, error) {
+func (a *Verifier) handleDeployment(ctx context.Context, session *verificationSession, root verifiedNode, precheck GenerationPrecheck) (AuthorizedAction, bool, error) {
 	authorization, err := protocol.DecodeDeploymentAuthorization(root.result.Assertion)
 	if err != nil {
 		return AuthorizedAction{}, false, err
 	}
-	required, err := a.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
+	required, err := a.ordinaryWorkRequired(ctx, root, authorization.DeliveryScope, precheck)
 	if err != nil || !required {
 		return AuthorizedAction{}, false, err
 	}
@@ -27,17 +27,17 @@ func (a *Agent) handleDeploymentLocked(session *verificationSession, root verifi
 	return session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests), true, nil
 }
 
-func (a *Agent) handleManagedResourceLocked(session *verificationSession, root verifiedNode) (AuthorizedAction, bool, error) {
+func (a *Verifier) handleManagedResource(ctx context.Context, session *verificationSession, root verifiedNode, precheck GenerationPrecheck) (AuthorizedAction, bool, error) {
 	authorization, err := protocol.DecodeManagedResourceAuthorization(root.result.Assertion)
 	if err != nil {
 		return AuthorizedAction{}, false, err
 	}
-	required, err := a.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
+	required, err := a.ordinaryWorkRequired(ctx, root, authorization.DeliveryScope, precheck)
 	if err != nil || !required {
 		return AuthorizedAction{}, false, err
 	}
 	session.addBasisContribution(root)
-	relation, err := a.verifyFulfillmentRelationLocked(session, root.identity, authorization)
+	relation, err := a.verifyFulfillmentRelation(ctx, session, root.identity, authorization)
 	if err != nil {
 		return AuthorizedAction{}, false, err
 	}
@@ -51,10 +51,10 @@ func (a *Agent) handleManagedResourceLocked(session *verificationSession, root v
 	return session.authorizedAction(root, authorization.DeliveryScope, manifests), true, nil
 }
 
-// ordinaryWorkRequiredLocked checks the decoded intent before supporting work
-// or manifest derivation. Authentication is complete even for completed-key
-// no-ops. The agent lock fences this decision and subsequent effects together.
-func (a *Agent) ordinaryWorkRequiredLocked(root verifiedNode, scope protocol.DeliveryScope) (bool, error) {
+// ordinaryWorkRequired validates common scope before any application query.
+// The optional precheck supplies only a progress observation or transient guard;
+// application-owned acceptance still enforces generation ordering with effects.
+func (a *Verifier) ordinaryWorkRequired(ctx context.Context, root verifiedNode, scope protocol.DeliveryScope, precheck GenerationPrecheck) (bool, error) {
 	if scope.Tenant.Scheme == "" || scope.Tenant.Authority == "" || scope.TargetID == "" || scope.FullResourceName == "" || scope.Action == "" {
 		return false, fmt.Errorf("%w: tenant, target, resource name, and action are required", protocol.ErrMalformedEvidence)
 	}
@@ -67,19 +67,23 @@ func (a *Agent) ordinaryWorkRequiredLocked(root verifiedNode, scope protocol.Del
 	if root.result.Authenticated.Principal.Tenant() != a.config.Tenant {
 		return false, fmt.Errorf("%w: root principal does not belong to the provisioned resource tenant", protocol.ErrTenantMismatch)
 	}
-	previous, exists := a.generations[scope.FullResourceName]
-	if exists {
-		if scope.Generation < previous {
-			return false, fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, scope.Generation, previous)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if precheck != nil {
+		completed, err := precheck(ctx, scope)
+		if err != nil {
+			return false, err
 		}
-		if scope.Generation == previous {
-			return false, nil
+		if err := ctx.Err(); err != nil {
+			return false, err
 		}
+		return !completed, nil
 	}
 	return true, nil
 }
 
-func (a *Agent) verifyFulfillmentRelationLocked(session *verificationSession, parent protocol.Digest, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
+func (a *Verifier) verifyFulfillmentRelation(ctx context.Context, session *verificationSession, parent protocol.Digest, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
 	if a.config.ProviderTenant == (protocol.Tenant{}) {
 		return protocol.FulfillmentRelation{}, fmt.Errorf("%w: provider tenant is not provisioned", protocol.ErrTenantMismatch)
 	}
@@ -90,7 +94,7 @@ func (a *Agent) verifyFulfillmentRelationLocked(session *verificationSession, pa
 
 	var relation protocol.FulfillmentRelation
 	err = session.withNode(
-		context.Background(),
+		ctx,
 		identity,
 		func(support verifiedNode) error {
 			if support.result.Authenticated.PredicateType != protocol.PredicateTypeFulfillmentRelationV1 {

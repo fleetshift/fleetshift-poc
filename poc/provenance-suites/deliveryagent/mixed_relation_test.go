@@ -37,19 +37,22 @@ func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.
 	providerPartition := providerPrincipal.TenantPartition
 	authority.DeliveryPolicies[1].Match.TenantPartition = &providerPartition
 	authority.DeliveryPolicies = append(authority.DeliveryPolicies, sessionPolicy(protocol.PredicateTypeManagedResourceV1, authority.ProvenanceProfiles[0]))
-	agent, err := New(Config{Tenant: sessionTenant(), ProviderTenant: providerPrincipal.Tenant(), TargetID: "target-test"})
+	// Compose the public verifier with explicit installed implementations and
+	// independent application state, including preparation and final acceptance.
+	verifier, err := NewVerifier(Config{Tenant: sessionTenant(), ProviderTenant: providerPrincipal.Tenant(), TargetID: "target-test"}, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{
+		rootCounted.ProvenanceType():     rootCounted,
+		relationCounted.ProvenanceType(): relationCounted,
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := agent.Bootstrap(trust); err != nil {
+	if err := verifier.Bootstrap(trust); err != nil {
 		t.Fatal(err)
 	}
-	// Deliver uses the existing installed-implementation contract, including
-	// package preparation and the final action/apply boundary.
-	agent.lookup = catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{
-		rootCounted.ProvenanceType():     rootCounted,
-		relationCounted.ProvenanceType(): relationCounted,
-	})
+	agent, err := NewAgent(verifier, NewMemoryApplication())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := agent.Deliver(pkg); err != nil {
 		t.Fatal(err)
 	}

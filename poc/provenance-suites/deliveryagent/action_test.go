@@ -85,9 +85,9 @@ func TestRemovalActionIsCompleteBeforeApplyAndOnlyGenerationRemains(t *testing.T
 				var required bool
 				var err error
 				if purpose == protocol.PredicateTypeDeploymentV1 {
-					action, required, err = agent.handleDeploymentLocked(session, root)
+					action, required, err = agent.deploymentForTest(session, root)
 				} else {
-					action, required, err = agent.handleManagedResourceLocked(session, root)
+					action, required, err = agent.managedResourceForTest(session, root)
 				}
 				if err == nil && !required {
 					t.Fatal("new removal was treated as completed")
@@ -107,13 +107,13 @@ func TestRemovalActionIsCompleteBeforeApplyAndOnlyGenerationRemains(t *testing.T
 			}
 			slices.Sort(want.Basis)
 			assertAuthorizedAction(t, action, want)
-			if len(agent.generations) != 0 || len(agent.applied) != 0 {
+			if len(agent.memory.generations) != 0 || len(agent.memory.applied) != 0 {
 				t.Fatal("derivation performed effects")
 			}
-			if err := agent.applyLocked(action); err != nil {
+			if err := agent.acceptForTest(action); err != nil {
 				t.Fatal(err)
 			}
-			if _, exists := agent.Applied(scope.FullResourceName); exists || agent.generations[scope.FullResourceName] != scope.Generation || len(agent.applied) != 0 {
+			if _, exists := agent.Applied(scope.FullResourceName); exists || agent.memory.generations[scope.FullResourceName] != scope.Generation || len(agent.memory.applied) != 0 {
 				t.Fatal("removal retained a live action or lost its generation")
 			}
 			// A fresh session authenticates the retry root, but no support is
@@ -124,9 +124,9 @@ func TestRemovalActionIsCompleteBeforeApplyAndOnlyGenerationRemains(t *testing.T
 				var required bool
 				var err error
 				if purpose == protocol.PredicateTypeDeploymentV1 {
-					action, required, err = agent.handleDeploymentLocked(retry, root)
+					action, required, err = agent.deploymentForTest(retry, root)
 				} else {
-					action, required, err = agent.handleManagedResourceLocked(retry, root)
+					action, required, err = agent.managedResourceForTest(retry, root)
 				}
 				assertAuthorizedAction(t, action, AuthorizedAction{})
 				if required || retry.actionBasis != nil {
@@ -151,30 +151,30 @@ func TestActionOnlyApplyFencesGenerationsAndPreservesCompletedAction(t *testing.
 	}
 	// This private seam receives already derived common values; apply has no
 	// assertion or evidence input to decode or compare.
-	if err := agent.applyLocked(action); err != nil {
+	if err := agent.acceptForTest(action); err != nil {
 		t.Fatal(err)
 	}
 	retry := AuthorizedAction{RootEvidence: "different-root", Scope: action.Scope, PredicateType: protocol.PredicateTypeManagedResourceV1}
-	if err := agent.applyLocked(retry); err != nil {
+	if err := agent.acceptForTest(retry); err != nil {
 		t.Fatal(err)
 	}
 	view, _ := agent.Applied(action.Scope.FullResourceName)
 	assertAuthorizedAction(t, view.AuthorizedAction, action)
 	retry.Scope.Generation--
-	if err := agent.applyLocked(retry); !errors.Is(err, ErrGeneration) {
+	if err := agent.acceptForTest(retry); !errors.Is(err, ErrGeneration) {
 		t.Fatalf("stale action: %v", err)
 	}
 	view, _ = agent.Applied(action.Scope.FullResourceName)
 	assertAuthorizedAction(t, view.AuthorizedAction, action)
 	action.Scope.Generation++
 	action.Scope.Action = protocol.ActionRemove
-	if err := agent.applyLocked(action); err != nil {
+	if err := agent.acceptForTest(action); err != nil {
 		t.Fatal(err)
 	}
-	if err := agent.applyLocked(action); err != nil {
+	if err := agent.acceptForTest(action); err != nil {
 		t.Fatal(err)
 	}
-	if len(agent.applied) != 0 || agent.generations[action.Scope.FullResourceName] != 3 {
+	if len(agent.memory.applied) != 0 || agent.memory.generations[action.Scope.FullResourceName] != 3 {
 		t.Fatal("removal failed to preserve only the high-water mark")
 	}
 }
@@ -240,7 +240,7 @@ func TestManagedActionUsesExactAuthenticatedSpecAndRelationMedia(t *testing.T) {
 	}}
 	session, _ := relationLookupSession(t, loggedTestPackage(t, root, relation.Evidence), wrapped)
 	agent := newDispatchTestAgent()
-	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 		t.Fatal(err)
 	}
 	want := AuthorizedAction{

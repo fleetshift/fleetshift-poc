@@ -69,7 +69,7 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 			catalog := session.catalog
 			agent := newDispatchTestAgent()
 			err := session.withNode(context.Background(), catalog.rootID, func(root verifiedNode) error {
-				action, required, err := agent.handleManagedResourceLocked(session, root)
+				action, required, err := agent.managedResourceForTest(session, root)
 				if err != nil {
 					assertAuthorizedAction(t, action, AuthorizedAction{})
 					if required {
@@ -80,7 +80,7 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 				if !required {
 					t.Fatal("new managed resource produced no action")
 				}
-				return agent.applyLocked(action)
+				return agent.acceptForTest(action)
 			})
 			if tc.firstBad {
 				want := protocol.ErrVerificationFailed
@@ -90,7 +90,7 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 				if !errors.Is(err, want) {
 					t.Fatalf("selected failure=%v, want %v", err, want)
 				}
-				if session.edgeCount != 0 || len(agent.applied) != 0 {
+				if session.edgeCount != 0 || len(agent.memory.applied) != 0 {
 					t.Fatal("failed claim reached dependency accounting or apply")
 				}
 				if len(session.basisContributors) != 1 {
@@ -154,7 +154,7 @@ func TestRequestedRelationUsesAuthenticatedContentAfterTentativeLookup(t *testin
 			catalog := session.catalog
 			agent := newDispatchTestAgent()
 			err = session.withNode(context.Background(), catalog.rootID, func(root verifiedNode) error {
-				action, required, err := agent.handleManagedResourceLocked(session, root)
+				action, required, err := agent.managedResourceForTest(session, root)
 				assertAuthorizedAction(t, action, AuthorizedAction{})
 				if required {
 					t.Fatal("failed relationship produced work to apply")
@@ -164,7 +164,7 @@ func TestRequestedRelationUsesAuthenticatedContentAfterTentativeLookup(t *testin
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("semantic failure=%v, want %v", err, tc.want)
 			}
-			if session.edgeCount != 0 || len(agent.applied) != 0 {
+			if session.edgeCount != 0 || len(agent.memory.applied) != 0 {
 				t.Fatal("tentative assertion became a semantic dependency or reached apply")
 			}
 			if len(session.basisContributors) != 1 {
@@ -250,7 +250,7 @@ func TestManagedResourceIgnoresUnusableAndUnrelatedSupport(t *testing.T) {
 				counted := &countedTarget{delegate: target}
 				session, logs := relationLookupSession(t, pkg, counted)
 				agent := newDispatchTestAgent()
-				if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+				if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 					t.Fatal(err)
 				}
 				if _, ok := agent.Applied("//fleetshift.io/clusters/test"); !ok {
@@ -278,11 +278,11 @@ func TestManagedRootValidatesResourceTypeDespiteNativeProducerBypass(t *testing.
 			counted := &countedTarget{delegate: target}
 			session, _ := relationLookupSession(t, loggedTestPackage(t, root), counted)
 			agent := newDispatchTestAgent()
-			err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+			err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) })
 			if !errors.Is(err, protocol.ErrMalformedEvidence) {
 				t.Fatalf("invalid signed root type=%v", err)
 			}
-			if counted.parseCalls != 1 || counted.beginCalls != 1 || len(agent.applied) != 0 {
+			if counted.parseCalls != 1 || counted.beginCalls != 1 || len(agent.memory.applied) != 0 {
 				t.Fatal("invalid root reached supporting work or apply")
 			}
 			if session.basisContributors != nil || session.actionBasis != nil {
@@ -312,14 +312,14 @@ func TestRequestedRelationPreparationLimitRejectsWithoutFallbackOrApply(t *testi
 	authority.DeliveryPolicies[1].Profiles = append(authority.DeliveryPolicies[1].Profiles, profileDigest(laterProfile))
 	session = newVerificationSession(session.catalog, trust, session.temporal)
 	agent := newDispatchTestAgent()
-	err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+	err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) })
 	if !errors.Is(err, protocol.ErrInvalidTimestampBinding) || errors.Is(err, protocol.ErrNoSuccessfulProfile) {
 		t.Fatalf("preparation limit did not propagate directly: %v", err)
 	}
 	if counted.parseCalls != 3 || counted.beginCalls != 2 || counted.finishCalls != 1 || session.catalog.cursor != 1 {
 		t.Fatalf("fallback work: parse=%d begin=%d finish=%d cursor=%d", counted.parseCalls, counted.beginCalls, counted.finishCalls, session.catalog.cursor)
 	}
-	if logs.calls[session.catalog.supporting[0]] != 0 || logs.calls[session.catalog.supporting[1]] != 0 || session.edgeCount != 0 || len(agent.applied) != 0 {
+	if logs.calls[session.catalog.supporting[0]] != 0 || logs.calls[session.catalog.supporting[1]] != 0 || session.edgeCount != 0 || len(agent.memory.applied) != 0 {
 		t.Fatal("over-limit preparation reached supporting occurrence, dependency accounting, or apply")
 	}
 	if len(session.basisContributors) != 1 {

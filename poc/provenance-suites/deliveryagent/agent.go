@@ -1,7 +1,7 @@
 // Package deliveryagent models the target verifier. It begins from
 // bootstrapped trust configuration, verifies provenance under matched
-// delivery policy, applies authenticated content, and acknowledges only
-// after it has retained enough state to retry safely.
+// delivery policy, derives common actions, and delegates progress and effects
+// to an application. Acknowledgement follows evaluation and safe acceptance.
 package deliveryagent
 
 import (
@@ -12,8 +12,6 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/temporal"
 )
 
 var (
@@ -70,120 +68,98 @@ type AppliedDelivery struct {
 	AuthorizedAction
 }
 
-type appliedState struct {
-	view AppliedDelivery
-}
-
-// Agent is the target role.
+// Agent coordinates common verification with an application and transport ACKs.
+// Verifier owns verification state; the application owns ordinary progress,
+// generation fencing, and effects. Agent is safe for concurrent delivery.
 type Agent struct {
+	*Verifier
 	mu sync.Mutex
 
-	config      Config
-	trust       protocol.TrustConfiguration
-	initialized bool
-	profile     *directkey.Target
+	application Application
+	// The default direct-key and memory application expose POC observations.
+	// Custom applications retain and expose their own operational state.
+	profile *directkey.Target
+	memory  *MemoryApplication
 
-	// Installed implementations use the common lookup contract. New currently
-	// provisions direct-key; tests can compose real native verifiers here.
-	lookup   protocol.TargetLookup
-	retained temporal.RetainedState
-
-	applied     map[protocol.FullResourceName]appliedState
-	generations map[protocol.FullResourceName]uint64
-
-	failBeforeAccepting      uint64
-	loseNextAcknowledgement  bool
-	staleCheckpointResponses uint64
-	suiteApplyCount          uint64
+	failBeforeAccepting     uint64
+	loseNextAcknowledgement bool
+	suiteApplyCount         uint64
 }
 
-// New constructs an uninitialized verifier.
+// New constructs the POC agent with direct-key verification and synchronous
+// in-memory application. Use [NewVerifier] and [NewAgent] for explicit composition.
 func New(config Config) (*Agent, error) {
-	if config.Tenant.Scheme == "" || config.Tenant.Authority == "" || config.TargetID == "" {
-		return nil, errors.New("tenant and target are required")
+	profile := directkey.NewTarget()
+	verifier, err := NewVerifier(config, func(kind protocol.ProvenanceType) (protocol.TargetAPI, bool) {
+		return profile, kind == profile.ProvenanceType()
+	})
+	if err != nil {
+		return nil, err
 	}
-	agent := &Agent{
-		config:      config,
-		profile:     directkey.NewTarget(),
-		retained:    temporal.RetainedState{EvidenceLog: protocol.EmptyCheckpoint()},
-		applied:     make(map[protocol.FullResourceName]appliedState),
-		generations: make(map[protocol.FullResourceName]uint64),
+	application := NewMemoryApplication()
+	agent, err := NewAgent(verifier, application)
+	if err != nil {
+		return nil, err
 	}
-	agent.lookup = agent.lookupLocked
+	agent.profile = profile
 	return agent, nil
 }
 
-// Bootstrap installs the initial authenticated trust configuration.
-// An initialized verifier never returns to TOFU.
-func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.initialized {
-		return protocol.ErrAlreadyInitialized
+// NewAgent composes a common verifier with application-owned progress and
+// execution. The application decides whether safe acceptance completes effects
+// or retains evaluated work for later execution. Neither path ACKs before evaluation.
+func NewAgent(verifier *Verifier, application Application) (*Agent, error) {
+	if verifier == nil || application == nil {
+		return nil, errors.New("verifier and application are required")
 	}
-	if err := trust.Validate(); err != nil {
-		return err
-	}
-	a.trust = trust.Clone()
-	a.initialized = true
-	return nil
+	agent := &Agent{Verifier: verifier, application: application}
+	agent.memory, _ = application.(*MemoryApplication)
+	return agent, nil
 }
 
-// Deliver first validates and snapshots package structure, then verifies
-// any supplied package-wide evidence-log consistency and root inclusion through
-// temporal.Prepare. A per-delivery verificationSession selects and verifies
-// the root and any semantically used supporting items. Unused supporting-item
-// inclusions are structurally checked but not cryptographically verified.
-// ApplyRequest.Temporal receives the root VerificationResult only.
-// Authenticated predicate type selects apply: intent predicates use
-// action-only fulfillment apply. Supporting relations and trust-config-update
-// are reserved, and predicates the selected profile Owns call TargetAPI.Apply.
-// Unknown predicates fail closed. A verified evidence-log checkpoint is retained
-// even when the included evidence is later rejected. When the manager
-// constructed proofs from an obsolete checkpoint, Deliver returns the
-// newer retained checkpoint so the manager can retry without applying
-// again.
-func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
+// Deliver verifies the package and delegates ordinary safe acceptance or
+// profile-owned apply before acknowledging. See [Agent.DeliverContext].
+func (a *Agent) Deliver(pkg protocol.DeliveryPackage) error {
+	return a.DeliverContext(context.Background(), pkg)
+}
+
+// DeliverContext verifies a bounded delivery through [Verifier.Verify].
+// An attempt's optional precheck runs only after authenticated scope validation;
+// omitting it defers application progress queries until a complete action exists.
+// Every attempt is closed, including on evaluation or acceptance failure.
+// A nil return acknowledges only previously completed work, successful suite
+// apply, or an application Accept that guarantees safe progress or resumption.
+// The default memory application completes effects before ACK; another application
+// may safely retain evaluated work and ACK before effects. No ACK precedes evaluation.
+func (a *Agent) DeliverContext(ctx context.Context, pkg protocol.DeliveryPackage) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !a.initialized {
-		return protocol.ErrUninitializedVerifier
-	}
 	if a.failBeforeAccepting > 0 {
 		a.failBeforeAccepting--
+		a.mu.Unlock()
 		return ErrDeliveryUnavailable
 	}
-
-	catalog, err := newEvidenceCatalog(pkg, a.lookup, defaultVerificationLimits())
+	a.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	attempt := a.application.NewAttempt()
+	if attempt == nil {
+		return errors.New("application returned no delivery attempt")
+	}
+	defer attempt.Close()
+	var precheck GenerationPrecheck
+	if checker, ok := attempt.(GenerationPrechecker); ok {
+		precheck = checker.Precheck
+	}
+	result, err := a.Verify(ctx, pkg, precheck)
 	if err != nil {
 		return err
 	}
-	root := catalog.item(catalog.rootID)
-	prepared, err := temporal.Prepare(a.retained, catalog.update, root.Evidence, root.EvidenceLog)
-	if err != nil {
-		return a.mapLogError(err)
-	}
-
-	// The log observation is independent of apply. Pinning it here keeps an
-	// inert rejected leaf in the accepted prefix so a later fork cannot omit it.
-	// This POC retains the observed prefix before per-statement policy admission;
-	// it grants no authority to entries and does not satisfy their log requirements.
-	a.retained = prepared.NextState
-
-	services := protocol.TemporalVerificationServices{Log: prepared.Log}
-	session := newVerificationSession(catalog, a.trust, services)
-	// Source policy authenticates every assertion independently of its use.
-	// Common semantics bind intent to this tenant and fulfillment relations to
-	// the platform-wide provider reference provisioned on this agent.
-	if err := session.withNode(
-		context.Background(),
-		catalog.rootID,
-		func(root verifiedNode) error {
-			return a.dispatchApplyLocked(session, root)
-		},
-	); err != nil {
+	if err := a.acceptVerifiedDelivery(ctx, result, attempt); err != nil {
 		return err
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if a.loseNextAcknowledgement {
 		a.loseNextAcknowledgement = false
 		return ErrAcknowledgementLost
@@ -191,34 +167,35 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	return nil
 }
 
-// Applied returns a detached observation of the live accepted put action for
-// the named resource. It returns no view after removal.
+func (a *Agent) acceptVerifiedDelivery(ctx context.Context, result VerifiedDelivery, attempt ApplicationAttempt) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	switch {
+	case result.Completed:
+		return nil
+	case result.Action != nil:
+		return attempt.Accept(ctx, *result.Action)
+	case result.SuiteEvent != nil:
+		a.mu.Lock()
+		a.suiteApplyCount++
+		a.mu.Unlock()
+		return result.SuiteEvent.Apply(ctx)
+	default:
+		return errors.New("verification returned no completed work, action, or suite event")
+	}
+}
+
+// Applied returns a detached observation from the default memory application.
+// Custom applications expose their own progress and target observations.
 func (a *Agent) Applied(name protocol.FullResourceName) (AppliedDelivery, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	state, ok := a.applied[name]
-	if !ok {
+	if a.memory == nil {
 		return AppliedDelivery{}, false
 	}
-	return cloneApplied(state.view), true
+	return a.memory.Applied(name)
 }
 
-// Checkpoint is the retained append-only evidence-log position.
-func (a *Agent) Checkpoint() protocol.Checkpoint {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.retained.EvidenceLog
-}
-
-// StaleCheckpointResponses is the number of times Deliver returned
-// CheckpointStaleError. It is test-observable transport metadata.
-func (a *Agent) StaleCheckpointResponses() uint64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.staleCheckpointResponses
-}
-
-// SuiteApplyCount is the number of times Deliver dispatched to TargetAPI.Apply.
+// SuiteApplyCount is the number of evaluated suite events Deliver sent for apply.
 // Intent, trust-config-update, and unowned predicates do not increment it.
 func (a *Agent) SuiteApplyCount() uint64 {
 	a.mu.Lock()
@@ -228,6 +205,9 @@ func (a *Agent) SuiteApplyCount() uint64 {
 
 // PublicKey returns the retained direct-key mapping for tests.
 func (a *Agent) PublicKey(principal protocol.Principal) ([]byte, bool) {
+	if a.profile == nil {
+		return nil, false
+	}
 	return a.profile.PublicKey(principal)
 }
 
@@ -243,97 +223,6 @@ func (a *Agent) LoseNextAcknowledgement() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.loseNextAcknowledgement = true
-}
-
-func (a *Agent) lookupLocked(pt protocol.ProvenanceType) (protocol.TargetAPI, bool) {
-	if pt == protocol.ProvenanceTypeDirectKeyV1 {
-		return a.profile, true
-	}
-	return nil, false
-}
-
-func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedNode) error {
-	result := root.result
-	switch result.Authenticated.PredicateType {
-	case protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1:
-		var action AuthorizedAction
-		var required bool
-		var err error
-		if result.Authenticated.PredicateType == protocol.PredicateTypeDeploymentV1 {
-			action, required, err = a.handleDeploymentLocked(session, root)
-		} else {
-			action, required, err = a.handleManagedResourceLocked(session, root)
-		}
-		if err != nil {
-			return err
-		}
-		if !required {
-			return nil
-		}
-		return a.applyLocked(action)
-	case protocol.PredicateTypeFulfillmentRelationV1:
-		return fmt.Errorf("%w: fulfillment-relation/v1 is supporting evidence", protocol.ErrUnknownPredicateType)
-	case protocol.PredicateTypeTrustConfigUpdateV1:
-		return fmt.Errorf("%w: trust-config-update/v1 is not implemented", protocol.ErrUnknownPredicateType)
-	default:
-		target, ok := session.catalog.lookup(result.Authenticated.ProvenanceType)
-		if !ok {
-			return fmt.Errorf("%w: %s", protocol.ErrUnknownProvenanceType, result.Authenticated.ProvenanceType)
-		}
-		if !target.Owns(result.Authenticated.PredicateType) {
-			return fmt.Errorf("%w: %s", protocol.ErrUnknownPredicateType, result.Authenticated.PredicateType)
-		}
-		a.suiteApplyCount++
-		return target.Apply(context.Background(), cloneApplyRequest(protocol.ApplyRequest{
-			Authenticated: result.Authenticated,
-			Assertion:     result.Assertion,
-			Statement:     root.statement,
-			Temporal:      result.Temporal,
-		}))
-	}
-}
-
-func (a *Agent) mapLogError(err error) error {
-	var stale *temporal.CheckpointStaleError
-	if errors.As(err, &stale) {
-		a.staleCheckpointResponses++
-		return &CheckpointStaleError{
-			checkpoint: stale.LatestCheckpoint(),
-			cause:      err,
-		}
-	}
-	return fmt.Errorf("%w: %w", ErrLogFork, err)
-}
-
-// applyLocked consumes only the completed common action. The caller retains
-// the agent lock from early admission through these effects. Apply rechecks
-// the retained generation under that same lock before changing target state.
-func (a *Agent) applyLocked(action AuthorizedAction) error {
-	previous, exists := a.generations[action.Scope.FullResourceName]
-	if exists {
-		if action.Scope.Generation < previous {
-			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, action.Scope.Generation, previous)
-		}
-		if action.Scope.Generation == previous {
-			return nil
-		}
-	}
-	a.generations[action.Scope.FullResourceName] = action.Scope.Generation
-	if action.Scope.Action == protocol.ActionRemove {
-		delete(a.applied, action.Scope.FullResourceName)
-		return nil
-	}
-	// Common derivation already owns immutable delivery data; retaining it
-	// shares those values. Applied detaches data for callers outside the agent.
-	a.applied[action.Scope.FullResourceName] = appliedState{view: AppliedDelivery{AuthorizedAction: action}}
-	return nil
-}
-
-func cloneApplied(in AppliedDelivery) AppliedDelivery {
-	out := in
-	out.Manifests = cloneManifests(in.Manifests)
-	out.Basis = cloneSlice(in.Basis)
-	return out
 }
 
 func cloneManifests(in []protocol.TypedManifest) []protocol.TypedManifest {

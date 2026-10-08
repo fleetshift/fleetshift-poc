@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
 )
 
 const (
@@ -111,7 +110,7 @@ type evidenceCatalog struct {
 // replaceable field on the duplicate is byte-for-byte equal. Identity is
 // computed once here for cataloging; the existing protocol and temporal log
 // verifiers still recompute it defensively during occurrence verification.
-func newEvidenceCatalog(pkg resourcemanager.DeliveryPackage, lookup protocol.TargetLookup, limits verificationLimits) (*evidenceCatalog, error) {
+func newEvidenceCatalog(pkg protocol.DeliveryPackage, lookup protocol.TargetLookup, limits verificationLimits) (*evidenceCatalog, error) {
 	limits = normalizeVerificationLimits(limits)
 	if err := validatePackageBounds(pkg, limits); err != nil {
 		return nil, err
@@ -153,7 +152,7 @@ func newEvidenceCatalog(pkg resourcemanager.DeliveryPackage, lookup protocol.Tar
 	return catalog, nil
 }
 
-func validatePackageBounds(pkg resourcemanager.DeliveryPackage, limits verificationLimits) error {
+func validatePackageBounds(pkg protocol.DeliveryPackage, limits verificationLimits) error {
 	statementCount := len(pkg.Supporting) + 1
 	if statementCount > limits.maxStatements {
 		return fmt.Errorf("%w: statement count %d exceeds %d", errVerificationWorkLimit, statementCount, limits.maxStatements)

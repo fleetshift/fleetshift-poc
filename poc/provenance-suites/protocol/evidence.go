@@ -167,6 +167,21 @@ type SignedStatement struct {
 	Support  SupportMaterial `json:"support"`
 }
 
+// DeliveryPackage is the couriered mutation a target verifies. Root and
+// supporting items are the same kind of object: a SignedStatement plus that
+// statement's optional evidence-log inclusion. The inner assertion is
+// extracted from each statement's evidence by the selected profile.
+// EvidenceLog is the shared checkpoint transition and consistency proof;
+// it does not authorize content. Per-item inclusion lives on Item.
+// Common code treats the package and all nested buffers as immutable. A target
+// takes its own snapshot at ingestion; assembling a package can borrow stored
+// immutable evidence.
+type DeliveryPackage struct {
+	Root        Item               `json:"root"`
+	Supporting  []Item             `json:"supporting,omitempty"`
+	EvidenceLog *EvidenceLogUpdate `json:"evidence_log,omitempty"`
+}
+
 // Item is one slot in a couriered delivery package: a SignedStatement plus
 // that statement's optional FleetShift evidence-log inclusion. It is a
 // package slot, not a provenance type. Embedding keeps the JSON object

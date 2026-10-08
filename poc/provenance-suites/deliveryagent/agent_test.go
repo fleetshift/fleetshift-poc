@@ -33,8 +33,8 @@ func TestAgentCatalogFailurePrecedesLogTransitionAndApply(t *testing.T) {
 	if got := agent.Checkpoint(); got != before {
 		t.Fatalf("checkpoint changed on catalog failure: got %+v, want %+v", got, before)
 	}
-	if len(agent.applied) != 0 || agent.suiteApplyCount != 0 {
-		t.Fatalf("catalog failure reached apply: applied=%d suiteApply=%d", len(agent.applied), agent.suiteApplyCount)
+	if len(agent.memory.applied) != 0 || agent.suiteApplyCount != 0 {
+		t.Fatalf("catalog failure reached apply: applied=%d suiteApply=%d", len(agent.memory.applied), agent.suiteApplyCount)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestFulfillmentRelationChecksProviderReferenceAfterAuthentication(t *testin
 			}
 			agent := newDispatchTestAgent()
 			agent.config.ProviderTenant = tc.provider
-			got, err := agent.verifyFulfillmentRelationLocked(session, catalog.rootID, protocol.ManagedResourceAuthorization{ResourceType: want.ResourceType})
+			got, err := agent.relationForTest(session, catalog.rootID, protocol.ManagedResourceAuthorization{ResourceType: want.ResourceType})
 			if tc.matches {
 				if err != nil || got != want {
 					t.Fatalf("relation = %+v, error = %v", got, err)
@@ -136,7 +136,7 @@ func TestIntentTenantBindingPrecedesApply(t *testing.T) {
 				root.result.Authenticated.Principal.TenantPartition = "other"
 			}
 			agent := newDispatchTestAgent()
-			err := agent.dispatchApplyLocked(session, root)
+			err := agent.dispatchForTest(session, root)
 			if tc.scopeMismatch {
 				if !errors.Is(err, protocol.ErrPolicyReevaluation) {
 					t.Fatalf("scope mismatch error = %v", err)
@@ -144,7 +144,7 @@ func TestIntentTenantBindingPrecedesApply(t *testing.T) {
 			} else if !errors.Is(err, protocol.ErrTenantMismatch) {
 				t.Fatalf("principal mismatch error = %v", err)
 			}
-			if len(agent.applied) != 0 || len(agent.generations) != 0 {
+			if len(agent.memory.applied) != 0 || len(agent.memory.generations) != 0 {
 				t.Fatal("tenant mismatch reached apply")
 			}
 		})
@@ -175,8 +175,8 @@ func TestAgentAuthenticatesFulfillmentRelationRootButRejectsApply(t *testing.T) 
 	if err := agent.Deliver(loggedTestPackage(t, evidence)); !errors.Is(err, protocol.ErrUnknownPredicateType) {
 		t.Fatalf("Deliver error = %v, want predicate dispatch to reject the authenticated relation", err)
 	}
-	if len(agent.applied) != 0 || len(agent.generations) != 0 || agent.suiteApplyCount != 0 {
-		t.Fatalf("relation root reached apply: applied=%d generations=%d suiteApply=%d", len(agent.applied), len(agent.generations), agent.suiteApplyCount)
+	if len(agent.memory.applied) != 0 || len(agent.memory.generations) != 0 || agent.suiteApplyCount != 0 {
+		t.Fatalf("relation root reached apply: applied=%d generations=%d suiteApply=%d", len(agent.memory.applied), len(agent.memory.generations), agent.suiteApplyCount)
 	}
 }
 
@@ -211,7 +211,7 @@ func TestSuiteApplyFailureRejectsDeliveryAfterVerifiedCheckpoint(t *testing.T) {
 	if !bytes.Equal(before, after) || counted.beginCalls != 1 || counted.finishCalls != 1 || counted.applyCalls != 1 || agent.SuiteApplyCount() != 1 || !agent.loseNextAcknowledgement {
 		t.Fatal("suite failure changed the key, skipped verification, or reached acknowledgement")
 	}
-	if agent.Checkpoint() != pkg.EvidenceLog.Checkpoint || len(agent.applied) != 0 || len(agent.generations) != 0 {
+	if agent.Checkpoint() != pkg.EvidenceLog.Checkpoint || len(agent.memory.applied) != 0 || len(agent.memory.generations) != 0 {
 		t.Fatal("suite failure lost the verified checkpoint or reached ordinary effects")
 	}
 	request := counted.applyRequests[0]
@@ -220,12 +220,53 @@ func TestSuiteApplyFailureRejectsDeliveryAfterVerifiedCheckpoint(t *testing.T) {
 	}
 }
 
+// These helpers compose the real verifier and application at the unit-test
+// boundary. They let graph fixtures inspect derivation independently of effects.
 func newDispatchTestAgent() *Agent {
+	memory := NewMemoryApplication()
 	return &Agent{
-		config:      Config{Tenant: sessionTenant(), ProviderTenant: sessionTenant(), TargetID: "target-test"},
-		applied:     make(map[protocol.FullResourceName]appliedState),
-		generations: make(map[protocol.FullResourceName]uint64),
+		Verifier:    &Verifier{config: Config{Tenant: sessionTenant(), ProviderTenant: sessionTenant(), TargetID: "target-test"}},
+		application: memory,
+		memory:      memory,
 	}
+}
+
+func (a *Agent) dispatchForTest(session *verificationSession, root verifiedNode) error {
+	attempt := a.application.NewAttempt()
+	defer attempt.Close()
+	result, err := a.evaluateRoot(context.Background(), session, root, attempt.(GenerationPrechecker).Precheck)
+	if err != nil {
+		return err
+	}
+	return a.acceptVerifiedDelivery(context.Background(), result, attempt)
+}
+
+func (a *Agent) deploymentForTest(session *verificationSession, root verifiedNode) (AuthorizedAction, bool, error) {
+	attempt := a.application.NewAttempt()
+	defer attempt.Close()
+	return a.handleDeployment(context.Background(), session, root, attempt.(GenerationPrechecker).Precheck)
+}
+
+func (a *Agent) managedResourceForTest(session *verificationSession, root verifiedNode) (AuthorizedAction, bool, error) {
+	attempt := a.application.NewAttempt()
+	defer attempt.Close()
+	return a.handleManagedResource(context.Background(), session, root, attempt.(GenerationPrechecker).Precheck)
+}
+
+func (a *Agent) workRequiredForTest(root verifiedNode, scope protocol.DeliveryScope) (bool, error) {
+	attempt := a.application.NewAttempt()
+	defer attempt.Close()
+	return a.ordinaryWorkRequired(context.Background(), root, scope, attempt.(GenerationPrechecker).Precheck)
+}
+
+func (a *Agent) relationForTest(session *verificationSession, parent protocol.Digest, authorization protocol.ManagedResourceAuthorization) (protocol.FulfillmentRelation, error) {
+	return a.verifyFulfillmentRelation(context.Background(), session, parent, authorization)
+}
+
+func (a *Agent) acceptForTest(action AuthorizedAction) error {
+	attempt := a.application.NewAttempt()
+	defer attempt.Close()
+	return attempt.Accept(context.Background(), action)
 }
 
 func deploymentRootForDispatchTest(t *testing.T, identity protocol.Digest) verifiedNode {

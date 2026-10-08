@@ -60,7 +60,7 @@ func TestOrdinaryBasisIncludesSelectedAndRetainedEvidence(t *testing.T) {
 			}
 			assertSelectedBasis(t, session)
 			agent := newDispatchTestAgent()
-			if err := session.withNode(context.Background(), rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+			if err := session.withNode(context.Background(), rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 				t.Fatal(err)
 			}
 			want := []protocol.Digest{rootID, userKey, shared}
@@ -131,7 +131,7 @@ func TestOrdinaryBasisIsIndependentOfCurrentInclusions(t *testing.T) {
 					}
 				}
 				agent := newDispatchTestAgent()
-				if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+				if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 					t.Fatal(err)
 				}
 				rootID, relationID := evidenceIdentity(t, root), evidenceIdentity(t, relation.Evidence)
@@ -173,7 +173,7 @@ func TestFailedProfileValidityBasisDoesNotContribute(t *testing.T) {
 		authority.DeliveryPolicies[i].Profiles = []protocol.Digest{profileDigest(first), profileDigest(second)}
 	}
 	agent := newDispatchTestAgent()
-	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 		t.Fatal(err)
 	}
 	assertSelectedBasis(t, session, session.catalog.rootID, accepted)
@@ -226,7 +226,7 @@ func TestSharedDependenciesAccumulateOnceWhileEveryUseChecksSemantics(t *testing
 				if err != nil {
 					return err
 				}
-				required, err := agent.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
+				required, err := agent.workRequiredForTest(root, authorization.DeliveryScope)
 				if err != nil || !required {
 					return err
 				}
@@ -240,7 +240,7 @@ func TestSharedDependenciesAccumulateOnceWhileEveryUseChecksSemantics(t *testing
 						return err
 					}
 				}
-				return agent.applyLocked(session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests))
+				return agent.acceptForTest(session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests))
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -310,7 +310,7 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 					if err != nil {
 						return err
 					}
-					required, err := agent.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
+					required, err := agent.workRequiredForTest(root, authorization.DeliveryScope)
 					if err != nil || !required {
 						return err
 					}
@@ -334,7 +334,7 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 						return err
 					}
 					completed = session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests)
-					return agent.applyLocked(completed)
+					return agent.acceptForTest(completed)
 				})
 				if !errors.Is(err, tc.want) || !evaluated {
 					t.Fatalf("required premise: %v, evaluated=%v", err, evaluated)
@@ -343,7 +343,7 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 				// after selection; the failed session yields no action to apply.
 				assertSelectedBasis(t, session, session.catalog.rootID, firstID)
 				assertAuthorizedAction(t, completed, AuthorizedAction{})
-				if len(agent.applied) != 0 || len(agent.generations) != 0 || counted.applyCalls != 0 || session.edgeCount != 1 || len(session.active) != 0 || len(session.activeSet) != 0 || counted.beginCalls != 3 {
+				if len(agent.memory.applied) != 0 || len(agent.memory.generations) != 0 || counted.applyCalls != 0 || session.edgeCount != 1 || len(session.active) != 0 || len(session.activeSet) != 0 || counted.beginCalls != 3 {
 					t.Fatal("failed premise reached effects or bypassed active evaluation")
 				}
 			})
@@ -363,14 +363,14 @@ func TestSuiteOwnedEnrollmentDoesNotAccumulateCommonBasis(t *testing.T) {
 	authority := &session.trust.AuthorityRegistry[0]
 	authority.DeliveryPolicies = append(authority.DeliveryPolicies, sessionPolicy(directkey.PredicateTypeEnrollmentV1, authority.ProvenanceProfiles[0]))
 	agent := newDispatchTestAgent()
-	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+	if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 		t.Fatal(err)
 	}
 	assertSelectedBasis(t, session)
 	if session.basisContributors != nil || session.actionBasis != nil {
 		t.Fatal("suite-owned event initialized ordinary basis accounting")
 	}
-	if counted.finishCalls != 1 || counted.applyCalls != 1 || agent.suiteApplyCount != 1 || len(agent.applied) != 0 || len(agent.generations) != 0 {
+	if counted.finishCalls != 1 || counted.applyCalls != 1 || agent.suiteApplyCount != 1 || len(agent.memory.applied) != 0 || len(agent.memory.generations) != 0 {
 		t.Fatal("enrollment did not stay on its suite-owned path")
 	}
 	if _, exists := target.PublicKey(user.Principal()); !exists {

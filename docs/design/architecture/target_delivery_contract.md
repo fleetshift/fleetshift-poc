@@ -84,6 +84,15 @@ More precisely, the protocol needs two distinct completion points:
 
 An implementation may collapse these into one response by waiting for convergence, but a prompt acknowledgment cannot safely mean only "held in process memory." If the target acknowledges before apply completes, its own durable reconciliation loop becomes responsible for finishing the accepted level.
 
+An acknowledgement follows successful authorization and common semantic
+evaluation. An agent may acknowledge after completing effects, or after durably
+accepting the evaluated action and enough execution state to finish or resume
+it. This timing belongs to the application agent. Receiving evidence or passing
+an early generation check does not permit acknowledgement. Previously completed
+work may be acknowledged after authenticating and validating the retry's root
+and scope and recognizing its completed generation; it need not repeat
+supporting evaluation.
+
 This is in contrast to a kube controller, like in OCM, which cannot guarantee reliably deliver of removal events from the hub. When its watch is not connected, it may miss them. Thus OCM must sync both ways: from work it knows it has locally, and from work it knows the hub has. In fleetshift this is unnecessary because the server ensures any changes are delivered reliably. So the targets never miss work add or removal.
 
 #### Base protocol for reliable fulfillment
@@ -91,7 +100,7 @@ This is in contrast to a kube controller, like in OCM, which cannot guarantee re
 When an addon starts up, it should:
 
 1. Connect to the fleetshift (in process or through a to-be-built fleetlet)
-2. Wait asynchronously for delivery requests and report `accepted` only after durably persisting the minimal state needed to guarantee progress (see next steps). The quicker the acceptance, the more responsive rollout progression will be. Acceptance should generally be quick (within a typical synchronous RPC response time); terminal `delivered` reporting may take longer.
+2. Wait asynchronously for delivery requests, evaluate authorization, and acknowledge only once enough state is safely retained to guarantee progress (see next steps). Acknowledgement may precede effects after safe acceptance of evaluated work. The quicker the acknowledgement, the more responsive progression will be; it should generally fit within a typical synchronous RPC response time.
 3. Ask for what fulfillments are in progress ("deliveries" not yet terminal)
   - The platform returns `ActiveDelivery` values: the delivery record enriched with full `TargetInfo`, caller `DeliveryAuth`, and (when signed) a re-assembled `Attestation`. This gives the addon everything `Deliver` would have provided.
   - Stale deliveries — where the fulfillment's generation has advanced past the delivery's — are excluded from the response. Their auth and attestation cannot be correctly reconstructed. The orchestration will re-dispatch with the current generation.
@@ -121,6 +130,27 @@ This decomposes into two independent subproblems:
 > NOTE: "The workflow eventually realizes its lock is lost" – we should be careful that within an activity, these races are detected. For example, we don't want an old ack to overwrite a more recent one.
 
 These compose naturally: use a durable generation high-water mark plus either strict at-most-one processing or a target-enforced fence on every effect. In practice, Kubernetes targets often merge generation and optimistic concurrency into a single read-check-write: read the resource (getting `resourceVersion`), check the generation annotation, and apply with the `resourceVersion` for atomic compare-and-swap. For targets without native optimistic concurrency, strict at-most-one processing is the practical choice; ordinary unfenced leader election is not sufficient by itself.
+
+A generation precheck after authenticating and validating the root's scope is
+recommended when it is cheap compared with the remaining evaluation. It may
+reject stale work, recognize completed work, capture a version token, or hold a
+transient guard through evaluation. It must not advance the accepted generation
+or authorize effects before evaluation succeeds. The precheck is optional:
+backing API or storage semantics may favor querying only after the verifier
+returns an authorized action. Without a precheck, an invalid retry, such as one
+omitting required supporting evidence, may fail evaluation before the agent
+discovers that the original work completed successfully. That failure does not
+undo the earlier completion.
+
+Final acceptance must fence generation ordering with effects or safely retained
+execution state, regardless of whether a precheck ran. With optimistic
+concurrency, a conflict requires re-reading and checking the current generation
+before retrying; an early version token alone is insufficient. Accepted work
+that has not finished must remain distinguishable from completed work. If the
+agent acknowledges before effects, its execution machinery must also prevent
+older work from overwriting the newer accepted generation. Checking only an
+already-applied object's annotations is insufficient when newer work is still
+queued.
 
 This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. The FleetShift addon can use a smaller level-based loop because platform-side desired changes are durably delivered; an addon claiming continuous drift reconciliation still needs watch-gap recovery and a periodic rescan or equivalent completeness mechanism.
 

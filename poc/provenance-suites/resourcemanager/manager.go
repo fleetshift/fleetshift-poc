@@ -70,20 +70,9 @@ type StoredDelivery struct {
 	Supporting []protocol.Digest
 }
 
-// DeliveryPackage is the couriered mutation a target verifies. Root and
-// supporting items are the same kind of object: a SignedStatement plus that
-// statement's optional evidence-log inclusion. The inner assertion is
-// extracted from each statement's evidence by the selected profile.
-// EvidenceLog is the shared checkpoint transition and consistency proof;
-// it does not authorize content. Per-item inclusion lives on Item.
-// Common code treats the package and all nested buffers as immutable. A target
-// takes its own snapshot at ingestion; assembling a package can borrow stored
-// immutable evidence.
-type DeliveryPackage struct {
-	Root        protocol.Item               `json:"root"`
-	Supporting  []protocol.Item             `json:"supporting,omitempty"`
-	EvidenceLog *protocol.EvidenceLogUpdate `json:"evidence_log,omitempty"`
-}
+// DeliveryPackage names the common courier envelope assembled by the manager.
+// Its definition lives in [protocol] so evaluators need no manager dependency.
+type DeliveryPackage = protocol.DeliveryPackage
 
 // DeliveryAgent is the manager-side view of a target. A nil error is the
 // acknowledgement that the agent durably accepted the work. Suite-owned
