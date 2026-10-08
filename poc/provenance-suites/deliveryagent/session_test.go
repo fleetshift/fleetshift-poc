@@ -258,17 +258,25 @@ func TestVerificationSessionRejectsActiveIdentityCycles(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			session, root, support := newBareSession(t, defaultVerificationLimits(), 2)
-			memoizeBareNode(session, root)
-			memoizeBareNode(session, support)
-			if err := test.run(session, root, support); !errors.Is(err, errVerificationCycle) {
-				t.Fatalf("cycle error = %v, want identity cycle", err)
-			}
-			if len(session.active) != 0 || len(session.activeSet) != 0 {
-				t.Fatalf("active path leaked after cycle: path=%v active=%v", session.active, session.activeSet)
-			}
-		})
+		for _, cached := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/cached=%t", test.name, cached), func(t *testing.T) {
+				session, _, root, _, _ := newVerificationFixture(t, nil, defaultVerificationLimits())
+				support := session.catalog.supporting[0]
+				if cached {
+					for _, identity := range []protocol.Digest{root, support} {
+						if _, err := session.verifyNode(context.Background(), identity); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if err := test.run(session, root, support); !errors.Is(err, errVerificationCycle) {
+					t.Fatalf("cycle error = %v, want identity cycle", err)
+				}
+				if len(session.active) != 0 || len(session.activeSet) != 0 {
+					t.Fatalf("active path leaked after cycle: path=%v active=%v", session.active, session.activeSet)
+				}
+			})
+		}
 	}
 }
 
@@ -561,13 +569,14 @@ func enrollTestTarget(t *testing.T, target *directkey.Target, producer *directke
 }
 
 type countedTarget struct {
-	delegate    protocol.TargetAPI
-	beginCalls  int
-	finishCalls int
-	parseCalls  int
-	applyCalls  int
-	requests    []protocol.VerifyRequest
-	lastResult  protocol.ProvenanceAuthenticationResult
+	delegate      protocol.TargetAPI
+	beginCalls    int
+	finishCalls   int
+	parseCalls    int
+	applyCalls    int
+	requests      []protocol.VerifyRequest
+	lastResult    protocol.ProvenanceAuthenticationResult
+	applyRequests []protocol.ApplyRequest
 }
 
 type mutatingApplyTarget struct{}
@@ -615,6 +624,9 @@ func (t *countedTarget) Owns(predicate protocol.PredicateType) bool {
 }
 func (t *countedTarget) Apply(ctx context.Context, request protocol.ApplyRequest) error {
 	t.applyCalls++
+	// Retain the actual profile-boundary buffers so mutation tests exercise
+	// common detachment. A fixture copy here would hide request aliasing.
+	t.applyRequests = append(t.applyRequests, request)
 	return t.delegate.Apply(ctx, request)
 }
 

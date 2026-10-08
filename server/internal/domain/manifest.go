@@ -5,7 +5,8 @@ import (
 	"fmt"
 )
 
-// ManifestType is an opaque dispatch label for delivery targets.
+// ManifestType is an opaque content interpretation label for delivery targets,
+// equivalent to the provenance protocol's MediaType.
 // It identifies what kind of payload a [Manifest] carries (e.g.
 // "api.kind.cluster", "idp-trust-bundle") so agents can route and
 // validate without understanding manifest content.

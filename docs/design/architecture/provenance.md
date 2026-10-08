@@ -681,6 +681,13 @@ authenticated and derived updates advance the same lineage; an old assertion
 cannot be replayed over a newer generation merely because its signature still
 verifies.
 
+Deletion leaves a replay risk when creation evidence remains valid and the
+verifier has no record rejecting it. Signed creation nonces, retained by the
+verifier after revocation, are one option for addressing this risk. The
+[target delivery contract](target_delivery_contract.md#replay-after-deletion)
+describes the conditions, proposed nonce approach, retention tradeoff, and
+storage estimates.
+
 Dynamic-scope assertions may intentionally omit one concrete generation when
 they authorize a standing or selector-based relationship. The applicable
 predicate type and constraints must define whether authorization is standing,
@@ -1158,6 +1165,23 @@ If the RM omits an event body, old Bundle, retained target, or refreshable
 proof, verification pauses or fails closed. Missing historical material is
 denial of service, never permission to switch to an unrelated profile or
 authority.
+
+### Optional execution secret
+
+An authorization may require a fresh random execution secret. The client signs
+its hash with the intent; that hash may also serve as the creation nonce. Every
+new execution, including derived deliveries, must present a secret matching the
+signed hash alongside the usual provenance checks.
+
+Store the secret separately from signed evidence, evidence-log entries, and
+historical records. Keep it while the authorization is active, including for
+future placements. Purge it as soon as final deletion and pending work are
+settled. The retained signed content and historical verification material still
+prove who authorized what. If all usable copies of the secret are purged, that
+historical evidence alone cannot authorize replay.
+
+This option could complement the proposed revoked-nonce retention in the
+[target delivery contract](target_delivery_contract.md#retention-and-storage).
 
 ## Profile Mappings And Guarantees
 

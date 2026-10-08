@@ -63,11 +63,11 @@ type Config struct {
 	TargetID string
 }
 
-// AppliedDelivery is the agent's retained view of an accepted delivery.
+// AppliedDelivery exposes the accepted put action retained by the POC's fake
+// target application. Removal deletes this view and retains only its generation.
+// Production delivery agents need not persist the complete action or its basis.
 type AppliedDelivery struct {
-	Scope         protocol.DeliveryScope
-	PredicateType protocol.PredicateType
-	Manifests     []protocol.TypedManifest
+	AuthorizedAction
 }
 
 type appliedState struct {
@@ -82,7 +82,11 @@ type Agent struct {
 	trust       protocol.TrustConfiguration
 	initialized bool
 	profile     *directkey.Target
-	retained    temporal.RetainedState
+
+	// Installed implementations use the common lookup contract. New currently
+	// provisions direct-key; tests can compose real native verifiers here.
+	lookup   protocol.TargetLookup
+	retained temporal.RetainedState
 
 	applied     map[protocol.FullResourceName]appliedState
 	generations map[protocol.FullResourceName]uint64
@@ -98,13 +102,15 @@ func New(config Config) (*Agent, error) {
 	if config.Tenant.Scheme == "" || config.Tenant.Authority == "" || config.TargetID == "" {
 		return nil, errors.New("tenant and target are required")
 	}
-	return &Agent{
+	agent := &Agent{
 		config:      config,
 		profile:     directkey.NewTarget(),
 		retained:    temporal.RetainedState{EvidenceLog: protocol.EmptyCheckpoint()},
 		applied:     make(map[protocol.FullResourceName]appliedState),
 		generations: make(map[protocol.FullResourceName]uint64),
-	}, nil
+	}
+	agent.lookup = agent.lookupLocked
+	return agent, nil
 }
 
 // Bootstrap installs the initial authenticated trust configuration.
@@ -130,9 +136,9 @@ func (a *Agent) Bootstrap(trust protocol.TrustConfiguration) error {
 // inclusions are structurally checked but not cryptographically verified.
 // ApplyRequest.Temporal receives the root VerificationResult only.
 // Authenticated predicate type selects apply: intent predicates use
-// fulfillment apply, supporting relations and trust-config-update are reserved, and
-// predicates the selected profile Owns call TargetAPI.Apply. Unknown
-// predicates fail closed. A verified evidence-log checkpoint is retained
+// action-only fulfillment apply. Supporting relations and trust-config-update
+// are reserved, and predicates the selected profile Owns call TargetAPI.Apply.
+// Unknown predicates fail closed. A verified evidence-log checkpoint is retained
 // even when the included evidence is later rejected. When the manager
 // constructed proofs from an obsolete checkpoint, Deliver returns the
 // newer retained checkpoint so the manager can retry without applying
@@ -148,7 +154,7 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 		return ErrDeliveryUnavailable
 	}
 
-	catalog, err := newEvidenceCatalog(pkg, a.lookupLocked, defaultVerificationLimits())
+	catalog, err := newEvidenceCatalog(pkg, a.lookup, defaultVerificationLimits())
 	if err != nil {
 		return err
 	}
@@ -185,7 +191,8 @@ func (a *Agent) Deliver(pkg resourcemanager.DeliveryPackage) error {
 	return nil
 }
 
-// Applied returns the last accepted delivery for the named resource.
+// Applied returns a detached observation of the live accepted put action for
+// the named resource. It returns no view after removal.
 func (a *Agent) Applied(name protocol.FullResourceName) (AppliedDelivery, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -249,13 +256,13 @@ func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedN
 	result := root.result
 	switch result.Authenticated.PredicateType {
 	case protocol.PredicateTypeDeploymentV1, protocol.PredicateTypeManagedResourceV1:
-		var view AppliedDelivery
+		var action AuthorizedAction
 		var required bool
 		var err error
 		if result.Authenticated.PredicateType == protocol.PredicateTypeDeploymentV1 {
-			view, required, err = a.handleDeploymentLocked(session, root)
+			action, required, err = a.handleDeploymentLocked(session, root)
 		} else {
-			view, required, err = a.handleManagedResourceLocked(session, root)
+			action, required, err = a.handleManagedResourceLocked(session, root)
 		}
 		if err != nil {
 			return err
@@ -263,7 +270,7 @@ func (a *Agent) dispatchApplyLocked(session *verificationSession, root verifiedN
 		if !required {
 			return nil
 		}
-		return a.applyLocked(view)
+		return a.applyLocked(action)
 	case protocol.PredicateTypeFulfillmentRelationV1:
 		return fmt.Errorf("%w: fulfillment-relation/v1 is supporting evidence", protocol.ErrUnknownPredicateType)
 	case protocol.PredicateTypeTrustConfigUpdateV1:
@@ -298,30 +305,34 @@ func (a *Agent) mapLogError(err error) error {
 	return fmt.Errorf("%w: %w", ErrLogFork, err)
 }
 
-func (a *Agent) applyLocked(view AppliedDelivery) error {
-	previous, exists := a.generations[view.Scope.FullResourceName]
+// applyLocked consumes only the completed common action. The caller retains
+// the agent lock from early admission through these effects. Apply rechecks
+// the retained generation under that same lock before changing target state.
+func (a *Agent) applyLocked(action AuthorizedAction) error {
+	previous, exists := a.generations[action.Scope.FullResourceName]
 	if exists {
-		if view.Scope.Generation < previous {
-			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, view.Scope.Generation, previous)
+		if action.Scope.Generation < previous {
+			return fmt.Errorf("%w: generation %d is older than %d", ErrGeneration, action.Scope.Generation, previous)
 		}
-		if view.Scope.Generation == previous {
+		if action.Scope.Generation == previous {
 			return nil
 		}
 	}
-	a.generations[view.Scope.FullResourceName] = view.Scope.Generation
-	if view.Scope.Action == protocol.ActionRemove {
-		delete(a.applied, view.Scope.FullResourceName)
+	a.generations[action.Scope.FullResourceName] = action.Scope.Generation
+	if action.Scope.Action == protocol.ActionRemove {
+		delete(a.applied, action.Scope.FullResourceName)
 		return nil
 	}
 	// Common derivation already owns immutable delivery data; retaining it
 	// shares those values. Applied detaches data for callers outside the agent.
-	a.applied[view.Scope.FullResourceName] = appliedState{view: view}
+	a.applied[action.Scope.FullResourceName] = appliedState{view: AppliedDelivery{AuthorizedAction: action}}
 	return nil
 }
 
 func cloneApplied(in AppliedDelivery) AppliedDelivery {
 	out := in
 	out.Manifests = cloneManifests(in.Manifests)
+	out.Basis = cloneSlice(in.Basis)
 	return out
 }
 

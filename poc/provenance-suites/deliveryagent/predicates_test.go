@@ -115,6 +115,7 @@ func TestCompletedOrdinaryRetriesSkipSupportingAndManifestWork(t *testing.T) {
 			enrollTestTarget(t, target, user)
 			enrollTestTarget(t, target, addon)
 			agent := newDispatchTestAgent()
+			var accepted AuthorizedAction
 			for _, step := range []struct {
 				generation uint64
 				action     string
@@ -148,7 +149,24 @@ func TestCompletedOrdinaryRetriesSkipSupportingAndManifestWork(t *testing.T) {
 				}
 				counted := &countedTarget{delegate: target}
 				session, logs := relationLookupSession(t, pkg, counted)
-				err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) })
+				err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error {
+					if !step.retry {
+						return agent.dispatchApplyLocked(session, root)
+					}
+					var action AuthorizedAction
+					var required bool
+					var err error
+					if purpose == protocol.PredicateTypeDeploymentV1 {
+						action, required, err = agent.handleDeploymentLocked(session, root)
+					} else {
+						action, required, err = agent.handleManagedResourceLocked(session, root)
+					}
+					assertAuthorizedAction(t, action, AuthorizedAction{})
+					if required {
+						t.Fatal("completed key returned work to apply")
+					}
+					return err
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -161,6 +179,13 @@ func TestCompletedOrdinaryRetriesSkipSupportingAndManifestWork(t *testing.T) {
 				}
 				if applied && (len(view.Manifests) != 1 || string(view.Manifests[0].Bytes) != `{"region":"east"}`) {
 					t.Fatal("retry replaced accepted content")
+				}
+				if applied {
+					if step.retry {
+						assertAuthorizedAction(t, view.AuthorizedAction, accepted)
+					} else {
+						accepted = view.AuthorizedAction
+					}
 				}
 				if step.retry && (counted.parseCalls != 1 || counted.beginCalls != 1 || counted.finishCalls != 1 || session.catalog.cursor != 0 || session.edgeCount != 0 || logs.calls[session.catalog.supporting[0]] != 0) {
 					t.Fatal("retry performed supporting work")

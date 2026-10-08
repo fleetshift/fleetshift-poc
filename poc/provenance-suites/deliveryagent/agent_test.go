@@ -1,6 +1,7 @@
 package deliveryagent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -176,6 +177,46 @@ func TestAgentAuthenticatesFulfillmentRelationRootButRejectsApply(t *testing.T) 
 	}
 	if len(agent.applied) != 0 || len(agent.generations) != 0 || agent.suiteApplyCount != 0 {
 		t.Fatalf("relation root reached apply: applied=%d generations=%d suiteApply=%d", len(agent.applied), len(agent.generations), agent.suiteApplyCount)
+	}
+}
+
+func TestSuiteApplyFailureRejectsDeliveryAfterVerifiedCheckpoint(t *testing.T) {
+	agent, err := New(Config{Tenant: sessionTenant(), TargetID: "target-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust := sessionTestTrust()
+	authority := &trust.AuthorityRegistry[0]
+	authority.DeliveryPolicies = append(authority.DeliveryPolicies, sessionPolicy(directkey.PredicateTypeEnrollmentV1, authority.ProvenanceProfiles[0]))
+	if err := agent.Bootstrap(trust); err != nil {
+		t.Fatal(err)
+	}
+	existing, replacement := testProducer(t, "user"), testProducer(t, "user")
+	enrollTestTarget(t, agent.profile, existing)
+	before, _ := agent.PublicKey(existing.Principal())
+	root, err := replacement.CreateEnrollment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	counted := &countedTarget{delegate: agent.profile}
+	agent.lookup = catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{counted.ProvenanceType(): counted})
+	pkg := loggedTestPackage(t, root)
+	agent.LoseNextAcknowledgement()
+	// Native enrollment authentication succeeds, but the real Apply refuses
+	// to replace an established key. Failure must precede acknowledgement.
+	if err := agent.Deliver(pkg); !errors.Is(err, protocol.ErrVerificationFailed) {
+		t.Fatalf("suite apply failure: %v", err)
+	}
+	after, _ := agent.PublicKey(existing.Principal())
+	if !bytes.Equal(before, after) || counted.beginCalls != 1 || counted.finishCalls != 1 || counted.applyCalls != 1 || agent.SuiteApplyCount() != 1 || !agent.loseNextAcknowledgement {
+		t.Fatal("suite failure changed the key, skipped verification, or reached acknowledgement")
+	}
+	if agent.Checkpoint() != pkg.EvidenceLog.Checkpoint || len(agent.applied) != 0 || len(agent.generations) != 0 {
+		t.Fatal("suite failure lost the verified checkpoint or reached ordinary effects")
+	}
+	request := counted.applyRequests[0]
+	if request.Temporal.LogPosition == nil || request.Temporal.LogPosition.Index != pkg.Root.EvidenceLog.Index || request.Authenticated.Principal != replacement.Principal() {
+		t.Fatal("suite apply did not receive finalized root verification facts")
 	}
 }
 

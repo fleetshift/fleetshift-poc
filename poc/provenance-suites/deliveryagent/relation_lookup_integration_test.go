@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
@@ -68,7 +69,18 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 			catalog := session.catalog
 			agent := newDispatchTestAgent()
 			err := session.withNode(context.Background(), catalog.rootID, func(root verifiedNode) error {
-				return agent.dispatchApplyLocked(session, root)
+				action, required, err := agent.handleManagedResourceLocked(session, root)
+				if err != nil {
+					assertAuthorizedAction(t, action, AuthorizedAction{})
+					if required {
+						t.Fatal("failed relation produced work to apply")
+					}
+					return err
+				}
+				if !required {
+					t.Fatal("new managed resource produced no action")
+				}
+				return agent.applyLocked(action)
 			})
 			if tc.firstBad {
 				want := protocol.ErrVerificationFailed
@@ -94,6 +106,9 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 				}
 				if session.edgeCount != 1 {
 					t.Fatal("requested relation did not become the sole dependency")
+				}
+				if !slices.Equal(view.Basis, session.selectedBasis()) {
+					t.Fatal("completed action included a later unselected claim")
 				}
 			}
 			if counted.parseCalls != 3 || counted.beginCalls != 2 || logs.calls[catalog.supporting[1]] != 0 {
@@ -139,7 +154,12 @@ func TestRequestedRelationUsesAuthenticatedContentAfterTentativeLookup(t *testin
 			catalog := session.catalog
 			agent := newDispatchTestAgent()
 			err = session.withNode(context.Background(), catalog.rootID, func(root verifiedNode) error {
-				return agent.dispatchApplyLocked(session, root)
+				action, required, err := agent.handleManagedResourceLocked(session, root)
+				assertAuthorizedAction(t, action, AuthorizedAction{})
+				if required {
+					t.Fatal("failed relationship produced work to apply")
+				}
+				return err
 			})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("semantic failure=%v, want %v", err, tc.want)

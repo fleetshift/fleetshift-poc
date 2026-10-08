@@ -3,6 +3,8 @@ package provenancesuites
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/deliveryagent"
@@ -102,6 +104,10 @@ func TestPoliciesControlLoggingAcrossConsumerAndProviderTenants(t *testing.T) {
 			if err != deliveryagent.ErrAcknowledgementLost && !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 				t.Fatalf("lost acknowledgement error = %v", err)
 			}
+			accepted, ok := agent.Applied(clusterName("cross-tenant"))
+			if !ok {
+				t.Fatal("lost acknowledgement happened before the action was retained")
+			}
 			if err := manager.Dispatch(context.Background(), onlyDispatch(t, receipt)); err != nil {
 				t.Fatal(err)
 			}
@@ -130,8 +136,20 @@ func TestPoliciesControlLoggingAcrossConsumerAndProviderTenants(t *testing.T) {
 			if (pkg.EvidenceLog != nil) != (tc.rootLog || tc.relationLog) {
 				t.Fatal("package log update presence disagrees with registered items")
 			}
-			if _, ok := agent.Applied(clusterName("cross-tenant")); !ok {
+			view, ok := agent.Applied(clusterName("cross-tenant"))
+			if !ok {
 				t.Fatal("cross-tenant managed resource was not applied")
+			}
+			want := deliveryagent.AuthorizedAction{
+				RootEvidence: rootID, Principal: consumer.Principal(),
+				Scope:         protocol.DeliveryScope{Tenant: consumerTenant, TargetID: testTarget, FullResourceName: clusterName("cross-tenant"), Generation: 1, Action: protocol.ActionPut},
+				PredicateType: protocol.PredicateTypeManagedResourceV1,
+				Manifests:     []protocol.TypedManifest{{MediaType: testReplicasMediaType, Bytes: []byte(`{"replicas":2}`)}},
+				Basis:         []protocol.Digest{rootID, relationID},
+			}
+			slices.Sort(want.Basis)
+			if !reflect.DeepEqual(view.AuthorizedAction, want) || !reflect.DeepEqual(view, accepted) {
+				t.Fatal("logging policy or lost-ack retry changed the complete accepted action")
 			}
 		})
 	}

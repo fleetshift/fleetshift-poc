@@ -129,9 +129,10 @@ These identifiers are not interchangeable:
   accompanies; a manifest is a payload item inside an authenticated
   deployment. `TypedAssertion` is not Encoded — predicate type is purpose,
   not a media type.
-- **Media type** is how those bytes are encoded (proof encoding such as the
-  direct-key signature stand-in for Sigstore Bundle v0.3, or payload encoding
-  such as `application/vnd.example.replicas+json`).
+- **Media type** is an opaque content interpretation label, identifying meaning
+  and encoding for reader or payload-handler dispatch (for example,
+  `application/vnd.example.replicas+json`). It serves the same role as the
+  server's `ManifestType`.
 - **Predicate type** is the inner assertion purpose. Policy matches the
   authenticated value after `Finish`. `ParseHints` and `DecodeAssertion`
   may expose it earlier as an untrusted hint used only to locate policy or
@@ -149,6 +150,8 @@ name of the Deployment or ManagedResource (1-1 with its fulfillment; not an
 RM-assigned fulfillment ID), a `TargetID` stand-in for static placement,
 generation, and action. The agent applies a managed resource only after
 verifying a couriered fulfillment relation that names the derived payload
+media type. For `RegisteredSelfTarget`, the API resource type and manifest media
+type denote equivalent interpretations of the same spec; apply needs only the
 media type. Unused supporting evidence is not authority: a relation couriered
 with a deployment does not change apply.
 
@@ -221,13 +224,26 @@ Fulfillment relations and `trust-config-update/v1` are explicitly reserved root
 predicates and fail closed even if a profile claims ownership. Other predicates
 continue through the selected profile's `Apply` only when its `Owns` permits them.
 
-Phase 7 sections 2–3 and the section 4 handler behavior are implemented, including
-parsed resource types and the early ordinary checks from section 6. Handlers
-currently return the existing `AppliedDelivery`; ordinary apply consumes that
-derived view without assertion bytes. Section 5's session basis accumulation and
-sorted snapshot are also implemented. `AuthorizedAction` construction and carrying
-the basis through ordinary apply and the retained observation remain later phase
-7 work; this increment adds no temporary public result type.
+Phase 7 is implemented. For new work, the common handler produces one
+`deliveryagent.AuthorizedAction` containing the immutable root evidence identity,
+authenticated principal and predicate, exact admitted scope, derived manifests,
+and selected evidence basis. Ordinary apply accepts only that action; it never
+decodes assertions or provenance bytes. An already-completed generation produces
+no replacement action or basis and makes no ordinary apply call.
+
+The POC's in-memory application retains put actions through `AppliedDelivery`,
+which embeds `AuthorizedAction`. `Applied` detaches manifest slices and bytes
+and the basis slice for callers. Completed put retries preserve the entire
+accepted action. Removal deletes the live view and retains only the generation
+high-water mark; removal actions are inspected at derivation, not through an
+invented retained removal record. Production agents need not persist every
+action or its basis.
+
+`New` still provisions direct-key. Internally, `Deliver` uses the existing
+`TargetLookup` contract, and a real-signature test composes different installed
+types for root and relation through the complete delivery/action/apply flow.
+This proves the common boundary without a public registration framework or
+another production suite.
 
 ## Selected evidence basis
 
@@ -247,9 +263,10 @@ identities can be absent from the package; basis accounting does not request new
 lookup, authentication, or occurrence verification for them. Normalized entries
 from dominated constraints remain included.
 
-After successful semantics, the private session snapshot materializes a detached,
-deduplicated, identity-sorted slice. The POC retains sorting for deterministic
-observation; basis order has no authorization role. The snapshot reads the
+After successful semantics, action construction materializes a detached,
+deduplicated, identity-sorted basis slice from the private session. The POC
+retains sorting for deterministic observation; basis order has no authorization
+role. The snapshot reads the
 accumulated set without walking the recorded dependency edges. Selected edges
 still preserve the relationships used.
 
@@ -258,9 +275,10 @@ active. `withNode` rejects active identity re-entry, including on authentication
 cache hits. The final graph-validation helper and both apply gates are removed.
 A required failure rejects the delivery before effects, and its session's partial
 basis is discarded. Suite-owned events, early rejections, and completed ordinary
-retries initialize no common basis accounting. Tests inspect the session snapshot
-through private handler/session seams; applying and observing a full
-`AuthorizedAction` is the next integration step.
+retries initialize no common basis accounting. Tests cover both private
+handler/session seams and the completed actions retained through ordinary apply.
+The consumer/provider policy integration checks action basis independently of
+inclusion presence across all four logging combinations and ordered policies.
 
 ## The naive profile
 
@@ -355,6 +373,10 @@ delivery agent
     lookup stops at its requested key and grants no authority or dependency edge
   - verifies only that selected relation, with no alternative-relation fallback
   - leaves unused supporting inclusions cryptographically unverified
+  - derives one AuthorizedAction for ordinary work after all required semantics,
+    with exact root identity, principal, scope, manifests, and selected/temporal basis
+  - applies only that action under the generation fence; put observations detach
+    manifests and basis, while removal retains only its generation marker
   - projects the **root** `VerificationResult` into `ApplyRequest.Temporal`
     (used-supporting positions stay on that node's result, not in Apply)
   - dispatches on authenticated predicate type: intent apply, profile-owned
@@ -410,11 +432,17 @@ yet. Those belong to the hybrid attestation POC and the mature profiles. This su
 | Authenticated fulfillment relation presented as the root | Rejected by predicate dispatch; no effects |
 | Original intent reused as a dependency of a later delivery | Same assertion-purpose policy; verified once per identity in each delivery |
 | Cached authentication used for different semantic tenant checks | Matching use succeeds, mismatched use fails; one profile attempt, no edge from the rejected use |
-| Selected root/relation with retained temporal boundary evidence | Session basis includes selected identities and successful normalized boundary basis, without new proofs for retained identities |
+| Selected root/relation with retained temporal boundary evidence | Completed action includes selected identities and successful normalized boundary basis, without new proofs for retained identities |
 | Independently authenticated but unused evidence, or failed profile attempt | Its distinctive evidence basis is excluded |
 | A temporal basis entry already names a subsequently selected relation | That relation's own validity-basis contribution is still merged |
 | Shared dependencies used repeatedly | One contribution per selected node, one authentication per identity, semantic checks on every use, and a detached sorted snapshot |
-| Circular or invalid required premise, including cached authentication, or an exhausted selected-edge bound | Evaluation rejects before effects despite earlier partial basis accumulation |
+| Circular or invalid required premise, including cached authentication, or an exhausted active-depth/selected-edge bound | Evaluation rejects without an action or effects despite earlier partial basis accumulation |
+| Complete ordinary action and mutated applied observation | Root identity, principal, scope, predicate, exact manifests, and basis are retained; observation changes cannot alter retained or cached data |
+| Managed-resource spec with internal whitespace and a misleading tentative media type | Final manifest uses exact authenticated spec bytes and the authenticated relation's media type |
+| Removal action | Complete action is derived before apply; afterward only the generation marker remains |
+| Concurrent ordinary deliveries | The agent lock and generation fence retain the newer accepted action |
+| Root and relation use different installed provenance types | Each uses its own real native verifier/source policy through Deliver and retains the common action |
+| Real suite-owned enrollment or conflicting key replacement | Apply receives authenticated root and finalized temporal facts; real Apply failure rejects before acknowledgement while retaining the verified checkpoint |
 | Deployment item missing manifest media type | Rejected |
 | Resource manager signs a delivery with an unenrolled key | Rejected |
 | Resource manager changes assertion bytes after the user signs | Rejected by content digest binding |

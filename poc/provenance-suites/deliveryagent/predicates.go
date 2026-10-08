@@ -8,54 +8,47 @@ import (
 )
 
 // The common handlers decode authenticated content once. Their boolean result
-// reports whether work is required; completed deliveries derive no new view.
-func (a *Agent) handleDeploymentLocked(session *verificationSession, root verifiedNode) (AppliedDelivery, bool, error) {
+// reports whether work is required; completed deliveries derive no action.
+func (a *Agent) handleDeploymentLocked(session *verificationSession, root verifiedNode) (AuthorizedAction, bool, error) {
 	authorization, err := protocol.DecodeDeploymentAuthorization(root.result.Assertion)
 	if err != nil {
-		return AppliedDelivery{}, false, err
+		return AuthorizedAction{}, false, err
 	}
 	required, err := a.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
 	if err != nil || !required {
-		return AppliedDelivery{}, false, err
+		return AuthorizedAction{}, false, err
 	}
 	session.addBasisContribution(root)
 	for i, manifest := range authorization.Manifests {
 		if manifest.MediaType == "" {
-			return AppliedDelivery{}, false, fmt.Errorf("%w: manifest %d media type is required", protocol.ErrMalformedEvidence, i)
+			return AuthorizedAction{}, false, fmt.Errorf("%w: manifest %d media type is required", protocol.ErrMalformedEvidence, i)
 		}
 	}
-	return AppliedDelivery{
-		Scope:         authorization.DeliveryScope,
-		PredicateType: protocol.PredicateTypeDeploymentV1,
-		Manifests:     authorization.Manifests,
-	}, true, nil
+	return session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests), true, nil
 }
 
-func (a *Agent) handleManagedResourceLocked(session *verificationSession, root verifiedNode) (AppliedDelivery, bool, error) {
+func (a *Agent) handleManagedResourceLocked(session *verificationSession, root verifiedNode) (AuthorizedAction, bool, error) {
 	authorization, err := protocol.DecodeManagedResourceAuthorization(root.result.Assertion)
 	if err != nil {
-		return AppliedDelivery{}, false, err
+		return AuthorizedAction{}, false, err
 	}
 	required, err := a.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
 	if err != nil || !required {
-		return AppliedDelivery{}, false, err
+		return AuthorizedAction{}, false, err
 	}
 	session.addBasisContribution(root)
 	relation, err := a.verifyFulfillmentRelationLocked(session, root.identity, authorization)
 	if err != nil {
-		return AppliedDelivery{}, false, err
+		return AuthorizedAction{}, false, err
 	}
 	// RegisteredSelfTarget: the named delivery target is the addon itself.
 	// TargetID is this POC's static-placement stand-in; early checks have
 	// already required it to equal this agent's ID before supporting work.
-	return AppliedDelivery{
-		Scope:         authorization.DeliveryScope,
-		PredicateType: protocol.PredicateTypeManagedResourceV1,
-		Manifests: []protocol.TypedManifest{{
-			MediaType: relation.MediaType,
-			Bytes:     authorization.Spec,
-		}},
-	}, true, nil
+	manifests := []protocol.TypedManifest{{
+		MediaType: relation.MediaType,
+		Bytes:     authorization.Spec,
+	}}
+	return session.authorizedAction(root, authorization.DeliveryScope, manifests), true, nil
 }
 
 // ordinaryWorkRequiredLocked checks the decoded intent before supporting work

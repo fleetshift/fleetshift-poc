@@ -16,9 +16,9 @@ const (
 	ProvenanceTypeDirectKeyV1 ProvenanceType = "direct-key/v1"
 )
 
-// MediaType is how a blob of bytes is encoded. Encoded carries it together
-// with those bytes. It is used for proof encodings, replaceable support
-// material, and delivered payload items.
+// MediaType is an opaque label for how to interpret content, including its
+// meaning and encoding. It selects the reader or payload handler for proof
+// encodings, replaceable support material, and delivered payload items.
 type MediaType string
 
 // Encoded is media-typed bytes. TypedEvidence, SupportMaterial, and
@@ -216,7 +216,7 @@ type DeliveryScope struct {
 }
 
 // TypedManifest is one delivered payload item. It is Encoded: a payload
-// media type and the exact bytes of that encoding.
+// interpretation label and the exact bytes to interpret.
 type TypedManifest Encoded
 
 // DeploymentAuthorization is the exact inner assertion for a deployment/v1
@@ -264,7 +264,8 @@ func (a ManagedResourceAuthorization) Assertion() (TypedAssertion, error) {
 // FulfillmentRelation is the exact inner assertion for a
 // fulfillment-relation/v1 predicate. This POC implements only
 // RegisteredSelfTarget: the addon claims this resource type and fulfills
-// it as a payload of MediaType.
+// it as a payload of MediaType. The media type must denote the same resource-spec
+// interpretation as ResourceType, so apply can use the media type alone.
 type FulfillmentRelation struct {
 	ResourceType ResourceType `json:"resource_type"`
 	MediaType    MediaType    `json:"media_type"`

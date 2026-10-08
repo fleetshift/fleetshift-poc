@@ -3,11 +3,11 @@ package deliveryagent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
 	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/temporal"
 )
 
 func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.T) {
@@ -29,17 +29,6 @@ func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.
 	support := lookupRelationItem(t, addon, "kind.example/Cluster", "application/json")
 	support.Evidence.ProvenanceType = alternate.ProvenanceType()
 	pkg := loggedTestPackage(t, root, support.Evidence)
-	catalog, err := newEvidenceCatalog(pkg, catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{
-		rootCounted.ProvenanceType():     rootCounted,
-		relationCounted.ProvenanceType(): relationCounted,
-	}), defaultVerificationLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := temporal.Prepare(temporal.RetainedState{EvidenceLog: protocol.EmptyCheckpoint()}, catalog.update, root, pkg.Root.EvidenceLog)
-	if err != nil {
-		t.Fatal(err)
-	}
 	trust := sessionTestTrust()
 	profile := protocol.ProfileConfig{ProvenanceType: alternate.ProvenanceType()}
 	authority := &trust.AuthorityRegistry[0]
@@ -48,22 +37,42 @@ func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.
 	providerPartition := providerPrincipal.TenantPartition
 	authority.DeliveryPolicies[1].Match.TenantPartition = &providerPartition
 	authority.DeliveryPolicies = append(authority.DeliveryPolicies, sessionPolicy(protocol.PredicateTypeManagedResourceV1, authority.ProvenanceProfiles[0]))
-	session := newVerificationSession(catalog, trust, protocol.TemporalVerificationServices{Log: prepared.Log})
-	agent := newDispatchTestAgent()
-	agent.config.ProviderTenant = providerPrincipal.Tenant()
-	if err := session.withNode(context.Background(), catalog.rootID, func(root verifiedNode) error { return agent.dispatchApplyLocked(session, root) }); err != nil {
+	agent, err := New(Config{Tenant: sessionTenant(), ProviderTenant: providerPrincipal.Tenant(), TargetID: "target-test"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := agent.Applied("//fleetshift.io/clusters/test"); !ok {
+	if err := agent.Bootstrap(trust); err != nil {
+		t.Fatal(err)
+	}
+	// Deliver uses the existing installed-implementation contract, including
+	// package preparation and the final action/apply boundary.
+	agent.lookup = catalogLookup(map[protocol.ProvenanceType]protocol.TargetAPI{
+		rootCounted.ProvenanceType():     rootCounted,
+		relationCounted.ProvenanceType(): relationCounted,
+	})
+	if err := agent.Deliver(pkg); err != nil {
+		t.Fatal(err)
+	}
+	view, ok := agent.Applied("//fleetshift.io/clusters/test")
+	if !ok {
 		t.Fatal("mixed provenance delivery did not apply")
 	}
-	if rootCounted.beginCalls != 1 || relationCounted.beginCalls != 1 || relationCounted.finishCalls != 1 || session.edgeCount != 1 {
-		t.Fatalf("root begin=%d relation begin=%d finish=%d edges=%d", rootCounted.beginCalls, relationCounted.beginCalls, relationCounted.finishCalls, session.edgeCount)
+	if rootCounted.beginCalls != 1 || relationCounted.beginCalls != 1 || relationCounted.finishCalls != 1 || rootCounted.applyCalls != 0 || relationCounted.applyCalls != 0 {
+		t.Fatalf("root begin=%d relation begin=%d finish=%d", rootCounted.beginCalls, relationCounted.beginCalls, relationCounted.finishCalls)
 	}
 	if relationCounted.requests[0].DeliveryContext.TenantPartition != providerPartition || relationCounted.requests[0].ProfileConfig.ProvenanceType != profile.ProvenanceType {
 		t.Fatal("relation verification used the root's policy context")
 	}
-	assertSelectedBasis(t, session, catalog.rootID, catalog.supporting[0])
+	rootID, relationID := evidenceIdentity(t, root), evidenceIdentity(t, support.Evidence)
+	want := AuthorizedAction{
+		RootEvidence: rootID, Principal: user.Principal(),
+		Scope:         protocol.DeliveryScope{Tenant: sessionTenant(), TargetID: "target-test", FullResourceName: "//fleetshift.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
+		PredicateType: protocol.PredicateTypeManagedResourceV1,
+		Manifests:     []protocol.TypedManifest{{MediaType: "application/json", Bytes: []byte(`{"region":"east"}`)}},
+		Basis:         []protocol.Digest{rootID, relationID},
+	}
+	slices.Sort(want.Basis)
+	assertAuthorizedAction(t, view.AuthorizedAction, want)
 }
 
 // relationTestProfile uses real direct-key signatures and retained keys under a

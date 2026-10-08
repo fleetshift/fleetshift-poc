@@ -71,6 +71,10 @@ func TestOrdinaryBasisIncludesSelectedAndRetainedEvidence(t *testing.T) {
 			}
 			cached := slices.Clone(session.memo[rootID].verified.result.Validity.Basis)
 			assertSelectedBasis(t, session, want...)
+			view, ok := agent.Applied(ordinaryTestScope(0, protocol.ActionPut).FullResourceName)
+			if !ok || view.RootEvidence != rootID || view.Principal != user.Principal() || !slices.Equal(view.Basis, session.selectedBasis()) {
+				t.Fatal("the completed action did not carry the selected and retained basis through apply")
+			}
 			if len(session.basisContributors) != wantEdges+1 {
 				t.Fatal("temporal basis membership was mistaken for a merged node contribution")
 			}
@@ -87,7 +91,12 @@ func TestOrdinaryBasisIncludesSelectedAndRetainedEvidence(t *testing.T) {
 			}
 			basis := session.selectedBasis()
 			basis[0] = protocol.DigestBytes([]byte("caller mutation"))
+			view.Basis[0] = protocol.DigestBytes([]byte("observation mutation"))
 			assertSelectedBasis(t, session, want...)
+			again, _ := agent.Applied(view.Scope.FullResourceName)
+			if !slices.Equal(again.Basis, session.selectedBasis()) {
+				t.Fatal("observation mutation changed the retained action basis")
+			}
 			if !slices.Equal(cached, session.memo[rootID].verified.result.Validity.Basis) {
 				t.Fatal("basis finalization mutated cached validity")
 			}
@@ -127,6 +136,10 @@ func TestOrdinaryBasisIsIndependentOfCurrentInclusions(t *testing.T) {
 				}
 				rootID, relationID := evidenceIdentity(t, root), evidenceIdentity(t, relation.Evidence)
 				assertSelectedBasis(t, session, rootID, relationID)
+				view, ok := agent.Applied(ordinaryTestScope(0, protocol.ActionPut).FullResourceName)
+				if !ok || !slices.Equal(view.Basis, session.selectedBasis()) {
+					t.Fatal("action basis depends on the presence of current inclusions")
+				}
 				if (logs.calls[rootID] == 1) != rootRequired || (logs.calls[relationID] == 1) != relationRequired {
 					t.Fatal("basis changed current log requirements")
 				}
@@ -164,6 +177,10 @@ func TestFailedProfileValidityBasisDoesNotContribute(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSelectedBasis(t, session, session.catalog.rootID, accepted)
+	view, ok := agent.Applied(ordinaryTestScope(0, protocol.ActionPut).FullResourceName)
+	if !ok || !slices.Equal(view.Basis, session.selectedBasis()) {
+		t.Fatal("completed action did not retain only the successful profile's basis")
+	}
 	if counted.beginCalls != 2 || counted.finishCalls != 2 || session.memo[session.catalog.rootID].verified.result.Authenticated.ProfileConfigDigest != profileDigest(second) {
 		t.Fatal("test did not exercise a rejected real profile attempt followed by success")
 	}
@@ -205,10 +222,15 @@ func TestSharedDependenciesAccumulateOnceWhileEveryUseChecksSemantics(t *testing
 				})
 			}
 			err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error {
-				view, required, err := agent.handleDeploymentLocked(session, root)
+				authorization, err := protocol.DecodeDeploymentAuthorization(root.result.Assertion)
+				if err != nil {
+					return err
+				}
+				required, err := agent.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
 				if err != nil || !required {
 					return err
 				}
+				session.addBasisContribution(root)
 				order := []protocol.Digest{firstID, sharedID, firstID}
 				if reverse {
 					order = []protocol.Digest{sharedID, firstID, firstID}
@@ -218,12 +240,16 @@ func TestSharedDependenciesAccumulateOnceWhileEveryUseChecksSemantics(t *testing
 						return err
 					}
 				}
-				return agent.applyLocked(view)
+				return agent.applyLocked(session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests))
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertSelectedBasis(t, session, session.catalog.rootID, firstID, sharedID)
+			view, _ := agent.Applied(ordinaryTestScope(0, protocol.ActionPut).FullResourceName)
+			if !slices.Equal(view.Basis, session.selectedBasis()) {
+				t.Fatal("action was constructed before its required premises completed")
+			}
 			basis := session.selectedBasis()
 			if baseline == nil {
 				baseline = basis
@@ -249,6 +275,7 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 			{"tenant mismatch", protocol.ErrTenantMismatch},
 			{"cycle", errVerificationCycle},
 			{"edge limit", errVerificationWorkLimit},
+			{"depth limit", errVerificationWorkLimit},
 		} {
 			t.Run(fmt.Sprintf("cached=%t/%s", cached, tc.name), func(t *testing.T) {
 				user := testProducer(t, "user")
@@ -262,6 +289,9 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 				if tc.name == "edge limit" {
 					session.limits.maxEdges = 1
 				}
+				if tc.name == "depth limit" {
+					session.limits.maxDepth = 2
+				}
 				firstID, secondID := evidenceIdentity(t, first.Evidence), evidenceIdentity(t, second.Evidence)
 				if cached {
 					for _, id := range []protocol.Digest{session.catalog.rootID, firstID, secondID} {
@@ -272,11 +302,19 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 				}
 				agent := newDispatchTestAgent()
 				evaluated := false
+				var completed AuthorizedAction
 				err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error {
-					view, required, err := agent.handleDeploymentLocked(session, root)
+					// As above, this test-only common evaluator completes its
+					// extra premises before it constructs any action.
+					authorization, err := protocol.DecodeDeploymentAuthorization(root.result.Assertion)
+					if err != nil {
+						return err
+					}
+					required, err := agent.ordinaryWorkRequiredLocked(root, authorization.DeliveryScope)
 					if err != nil || !required {
 						return err
 					}
+					session.addBasisContribution(root)
 					if err := session.withNode(context.Background(), firstID, func(node verifiedNode) error { return session.recordDependency(root.identity, node.identity) }); err != nil {
 						return err
 					}
@@ -285,6 +323,9 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 						if tc.name == "cycle" {
 							return session.withNode(context.Background(), root.identity, nil)
 						}
+						if tc.name == "depth limit" {
+							return session.withNode(context.Background(), firstID, nil)
+						}
 						if tc.name == "tenant mismatch" && node.result.Authenticated.Principal.Tenant() != otherSessionTenant() {
 							return protocol.ErrTenantMismatch
 						}
@@ -292,7 +333,8 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 					}); err != nil {
 						return err
 					}
-					return agent.applyLocked(view)
+					completed = session.authorizedAction(root, authorization.DeliveryScope, authorization.Manifests)
+					return agent.applyLocked(completed)
 				})
 				if !errors.Is(err, tc.want) || !evaluated {
 					t.Fatalf("required premise: %v, evaluated=%v", err, evaluated)
@@ -300,6 +342,7 @@ func TestRequiredPremiseFailurePreventsEffectsAfterPartialAccumulation(t *testin
 				// Inspect partial accounting only to prove this was a failure
 				// after selection; the failed session yields no action to apply.
 				assertSelectedBasis(t, session, session.catalog.rootID, firstID)
+				assertAuthorizedAction(t, completed, AuthorizedAction{})
 				if len(agent.applied) != 0 || len(agent.generations) != 0 || counted.applyCalls != 0 || session.edgeCount != 1 || len(session.active) != 0 || len(session.activeSet) != 0 || counted.beginCalls != 3 {
 					t.Fatal("failed premise reached effects or bypassed active evaluation")
 				}
@@ -332,6 +375,17 @@ func TestSuiteOwnedEnrollmentDoesNotAccumulateCommonBasis(t *testing.T) {
 	}
 	if _, exists := target.PublicKey(user.Principal()); !exists {
 		t.Fatal("real enrollment mapping was not applied")
+	}
+	request := counted.applyRequests[0]
+	if request.Authenticated.Principal != user.Principal() || request.Assertion.PredicateType != directkey.PredicateTypeEnrollmentV1 || evidenceIdentity(t, request.Statement.Evidence) != session.catalog.rootID || request.Temporal.LogPosition == nil || request.Temporal.LogPosition.Index != 0 || request.Temporal.LogPosition.Domain != protocol.LogDomainTenantEvidenceV1 {
+		t.Fatal("suite-owned apply did not receive the authenticated root and finalized temporal facts")
+	}
+	request.Assertion.Bytes[0] ^= 1
+	request.Statement.Evidence.Bytes[0] ^= 1
+	request.Temporal.LogPosition.Index++
+	cached := session.memo[session.catalog.rootID].verified
+	if cached.result.Temporal.LogPosition.Index != 0 || evidenceIdentity(t, cached.statement.Evidence) != session.catalog.rootID || slices.Equal(request.Assertion.Bytes, cached.result.Assertion.Bytes) {
+		t.Fatal("suite observation aliases cached root verification data")
 	}
 }
 

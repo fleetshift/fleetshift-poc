@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -331,7 +332,8 @@ func TestRetryAfterLostAcknowledgementIsIdempotent(t *testing.T) {
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
 	}
-	if _, ok := s.agent.Applied(deploymentName("lost-ack")); !ok {
+	accepted, ok := s.agent.Applied(deploymentName("lost-ack"))
+	if !ok {
 		t.Fatal("agent did not apply before losing the acknowledgement")
 	}
 	cached, ok := s.manager.AgentCheckpoint(testTarget)
@@ -347,6 +349,10 @@ func TestRetryAfterLostAcknowledgementIsIdempotent(t *testing.T) {
 	}
 	if got, want := s.agent.StaleCheckpointResponses(), uint64(1); got != want {
 		t.Fatalf("agent stale-checkpoint responses = %d, want %d", got, want)
+	}
+	view, _ := s.agent.Applied(deploymentName("lost-ack"))
+	if !reflect.DeepEqual(view, accepted) {
+		t.Fatal("lost-ack retry replaced the accepted action")
 	}
 }
 
@@ -409,6 +415,10 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 	if !errors.Is(err, deliveryagent.ErrAcknowledgementLost) {
 		t.Fatalf("error = %v, want ErrAcknowledgementLost", err)
 	}
+	accepted, ok := s.agent.Applied(clusterName("cluster-retry"))
+	if !ok {
+		t.Fatal("managed resource was not retained before the lost acknowledgement")
+	}
 	if err := s.manager.Dispatch(context.Background(), onlyDispatch(t, receipt)); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -418,6 +428,9 @@ func TestRetryManagedResourceAfterLostAcknowledgementReusesRelation(t *testing.T
 	}
 	if applied.Manifests[0].MediaType != testClusterSpecMediaType {
 		t.Fatalf("retry dropped the fulfillment relation: media type = %s", applied.Manifests[0].MediaType)
+	}
+	if !reflect.DeepEqual(applied, accepted) {
+		t.Fatal("managed-resource retry replaced the accepted action")
 	}
 }
 

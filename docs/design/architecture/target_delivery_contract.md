@@ -8,6 +8,7 @@ The detailed delivery protocol between the platform and targets:
 - the fulfillment delivery protocol and its reliability guarantees
 - generation ordering and stale delivery prevention
 - delivery authorization at the target protocol level
+- creation replay risk and retention options
 - idempotent removal
 - journaling for addon state continuity
 - reporting: drift detection, properties, observations, and conditions
@@ -136,6 +137,66 @@ rejected and never acknowledged as accepted work.
 
 > NOTE: We may be able to offload attestation to the common fleetlet. We should try to. At the very least, it would have to be reusable via libraries.
 
+#### Replay after deletion
+
+Deleting a resource does not invalidate its signed creation evidence. Replaying
+that evidence can recreate the deleted instance when all of these hold:
+
+- Someone retains its creation evidence and any required execution material.
+- The evidence still satisfies current authorization, fulfillment-relation,
+  and placement checks.
+- The receiving verifier has no retained revocation or generation fence that
+  rejects it, for example after forgetting its retirement record or before
+  learning of deletion.
+
+#### Option: signed creation nonce
+
+One option is to bind a fresh client-generated creation nonce (a random
+identifier) to the signed resource name and intent. Retries, updates, and derived
+fulfillments would preserve that identity; recreation under the same name would
+use a new nonce. The identity must come from signed content, so an RM-assigned
+fulfillment or delivery ID cannot substitute for it.
+
+With this approach, final deletion revokes that resource instance's
+authorization. Before acknowledging deletion, the verifier durably retains the
+revoked nonce or its scoped hash as a tombstone and rejects further creation
+from that instance. Temporary removal from a target preserves standing
+placement authority and its generation fence.
+
+#### Retention and storage
+
+For the nonce option, an authenticated retention policy could bound historical
+evidence and revoked nonce retention to an agreed window after final deletion.
+The RM would purge evidence that could recreate the instance before the verifier
+permits its nonce to be forgotten. An RM compromised while that evidence is
+available can copy it and retain it beyond the window; accepting replay after
+the nonce is forgotten is the explicit tradeoff for bounded storage.
+
+An authenticated journal may offload tombstones from the verifier. The verifier
+retains a durable commitment that lets it detect omitted or rolled-back records.
+The journal format and proof mechanism remain unspecified.
+
+Under this option, storage grows with distinct resource instances retired per
+target, rather than with every update or delivered manifest. A compact record
+could hold a scoped nonce key, generation, and retirement time. Using **256 bytes
+per record** as a planning estimate:
+
+| New retired instances per target per day | One year without forgetting | 90-day retention, steady state |
+| ---: | ---: | ---: |
+| 100 | 9.3 MB | 2.3 MB |
+| 1,000 | 93 MB | 23 MB |
+| 10,000 | 934 MB | 230 MB |
+| 100,000 | 9.34 GB | 2.30 GB |
+
+These estimates use decimal units and 365-day years, and exclude evidence
+payloads, journal proof storage, and backups. Storage is approximately daily
+retirement rate × retained days × bytes per record. A verifier serving multiple
+targets sums their rates.
+
+An optional [execution secret](provenance.md#optional-execution-secret) lets the
+RM purge execution material immediately after final deletion while keeping
+signed historical evidence for the chosen retention window.
+
 #### Idempotent removal
 
 `Remove` must be idempotent. If a removal partially completes (3 of 5 resources deleted) and the addon crashes, either the platform retries because acceptance was not durable or the target resumes from its durable accepted intent. In either case, the addon must handle "delete something already gone" as a no-op. For Kubernetes targets, delete of a missing resource returns 404 which is treated as success. For cloud provider APIs, the same pattern applies (delete of a nonexistent resource returns success or a "not found" error that is safe to ignore).
@@ -173,7 +234,7 @@ It is possible the platform could eliminate the need for addon journaling due to
 
 The journal must be a write-ahead recovery record rather than only a post-apply inventory snapshot. For a non-atomic multi-resource apply it needs to retain the previous committed inventory, the new desired inventory, generation/fencing information, and in-progress phase (or equivalent per-operation records) until apply and cleanup complete. Overwriting the old inventory with the new inventory before acting can itself lose cleanup information if the addon then crashes. This is a small target-side saga or durable reconciliation state machine.
 
-**IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
+**IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed or otherwise authenticated entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
 
 ## Reporting: drift, properties, observations, and conditions
 
