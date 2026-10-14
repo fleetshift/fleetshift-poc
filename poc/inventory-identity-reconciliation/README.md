@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > The server implementation that shipped (see
-> `fleetshift-server/internal/infrastructure/postgres/resource_identity_repo.go`'s
+> `server/internal/infrastructure/postgres/resource_identity_repo.go`'s
 > `GetRepresentation` and
 > `docs/design/architecture/resource_identity_and_api.md`) took a narrower slice
 > of what's explored here. It kept "reported aliases are a pending assertion,

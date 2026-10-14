@@ -1,4 +1,4 @@
-name: Tests
+name: Unit/Integration Tests
 
 on:
   push:
@@ -8,55 +8,64 @@ on:
 
 env:
   TESTCONTAINERS_PROVIDER: docker
+  NX_DAEMON: "false"
 
 jobs:
-  test:
-    name: Test (${{ matrix.module }})
+  test-backend:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      GOTESTSUM_FORMAT: github-actions
 
     strategy:
       fail-fast: false
       matrix:
-        module: [fleetshift-server, fleetshift-cli]
+        include:
+          - project: server
+            name: Test (server)
+            go-mod: server
+          - project: cli
+            name: CLI unit tests
+          - project: deploy-aio
+            name: Test (deploy-aio)
+            go-mod: deploy/aio
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Set up Go
+        if: matrix.go-mod != ''
         uses: actions/setup-go@v6
         with:
-          go-version-file: ${{ matrix.module }}/go.mod
+          go-version-file: ${{ matrix.go-mod }}/go.mod
           cache: true
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
       - name: Detect Docker host address for kind OIDC tests
-        if: matrix.module == 'fleetshift-server'
+        if: matrix.project == 'server'
         run: echo "KIND_HOST_ADDR=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')" >> "$GITHUB_ENV"
 
-      - name: Run all unit tests
-        working-directory: ${{ matrix.module }}
-        run: go test -count=1 -timeout 15m ./...
+      - name: Run unit tests
+        run: npx nx test ${{ matrix.project }}
 
-      - name: Run kind docker integration tests
-        if: matrix.module == 'fleetshift-server'
-        working-directory: ${{ matrix.module }}
-        run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/
+      - name: Run integration tests
+        if: matrix.project == 'server'
+        run: npx nx test-integration server
 
-      - name: Run kubernetes docker integration tests
-        if: matrix.module == 'fleetshift-server'
-        working-directory: ${{ matrix.module }}
-        run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kubernetes/
-
-      - name: Run kubernetes race tests
-        if: matrix.module == 'fleetshift-server'
-        working-directory: ${{ matrix.module }}
-        run: go test -race -count=1 ./internal/addon/kubernetes/
-
-  deploy-scripts:
-    name: Deploy script contracts
+  test-ui:
+    name: UI Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,5 +74,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Run deploy contract tests
-        run: bash deploy/scripts/test-gcphcp-defaults.sh
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build common library
+        run: npx nx run common:build
+
+      - name: Unit tests (vitest)
+        run: npx nx run common:test
+
+      - name: Unit tests for e2e-cli (vitest)
+        run: npx nx run e2e-cli:test
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Component tests (web)
+        run: npx nx run web:test:ct
+
+      - name: Component tests (plugins)
+        run: npx nx run plugins:test:ct

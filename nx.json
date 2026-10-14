@@ -1,0 +1,66 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "analytics": true,
+  "tui": {
+    "enabled": false
+  },
+  "plugins": [
+    {
+      "plugin": "@nx/docker",
+      "options": {
+        "buildTarget": {
+          "name": "docker:build"
+        },
+        "runTarget": {
+          "name": "docker:run"
+        }
+      }
+    },
+    {
+      "plugin": "@nx/playwright/plugin",
+      "options": {
+        "targetName": "test:ct",
+        "ciTargetName": "test:ct:ci"
+      }
+    }
+  ],
+  "namedInputs": {
+    "uiSource": [
+      "{projectRoot}/src/**/*.{ts,tsx,js,jsx}",
+      "{projectRoot}/tsconfig*.json"
+    ],
+    "uiStyles": [
+      "{projectRoot}/src/**/*.{css,scss}"
+    ],
+    "eslintConfig": [
+      "{workspaceRoot}/eslint.config.mjs"
+    ]
+  },
+  "targetDefaults": {
+    "build": {
+      "cache": true
+    },
+    "test": {
+      "cache": true
+    },
+    "lint": {
+      "cache": true,
+      "inputs": [
+        "uiSource",
+        "eslintConfig"
+      ]
+    },
+    "lint:css": {
+      "cache": true,
+      "inputs": [
+        "uiStyles"
+      ]
+    },
+    "test:ct": {
+      "cache": true,
+      "dependsOn": [
+        "^build"
+      ]
+    }
+  }
+}

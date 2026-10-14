@@ -1,0 +1,34 @@
+{
+  "name": "@fleetshift/gcphcp-server",
+  "root": "extensions/gcphcp/server",
+  "projectType": "library",
+  "tags": ["lang:go", "scope:backend", "type:extension"],
+  "implicitDependencies": ["server"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'no-op: gcphcp server plugin not yet implemented'",
+        "cwd": "extensions/gcphcp/server"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'no-op: gcphcp server plugin not yet implemented'",
+        "cwd": "extensions/gcphcp/server"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    }
+  }
+}

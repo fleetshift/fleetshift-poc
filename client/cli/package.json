@@ -1,0 +1,37 @@
+{
+  "name": "@fleetshift/cli",
+  "description": "FleetShift TypeScript command-line client.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "bin/fleetctl",
+    "README.md"
+  ],
+  "bin": {
+    "fleetctl": "bin/fleetctl"
+  },
+  "scripts": {
+    "start": "bin/fleetctl"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
+    "ink": "^6.0.1",
+    "ink-table": "^3.1.0",
+    "install": "^0.13.0",
+    "protobufjs": "^8.8.0",
+    "react": "^19.1.0",
+    "undici": "^7.16.0",
+    "yargs-parser": "^22.0.0"
+  },
+  "devDependencies": {
+    "@rspack/cli": "^2.0.8",
+    "@rspack/core": "^2.0.8",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.1.0",
+    "@types/yargs-parser": "^21.0.3",
+    "execa": "^9.6.0",
+    "ink-testing-library": "^4.0.0"
+  }
+}

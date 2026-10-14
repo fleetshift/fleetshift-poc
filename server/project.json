@@ -1,0 +1,60 @@
+{
+  "name": "server",
+  "root": "server",
+  "projectType": "application",
+  "tags": ["lang:go", "scope:backend"],
+  "implicitDependencies": ["proto"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build -o ../bin/fleetshift ./cmd/fleetshift",
+        "cwd": "server"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ],
+      "outputs": ["{workspaceRoot}/bin/fleetshift"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 ./...",
+        "cwd": "server"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ]
+    },
+    "test-stress": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "systemctl --user restart podman.socket 2>/dev/null || true",
+          "go test -tags stress -count=1 -run TestStress -v -timeout 0 ./internal/application/"
+        ],
+        "parallel": false,
+        "cwd": "server"
+      },
+      "cache": false
+    },
+    "test-integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "server",
+        "parallel": false,
+        "commands": [
+          "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 -tags integration -timeout 15m ./internal/addon/kind/",
+          "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 -tags integration -timeout 15m ./internal/addon/kubernetes/",
+          "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 -race ./internal/addon/kubernetes/"
+        ]
+      },
+      "cache": false
+    }
+  }
+}

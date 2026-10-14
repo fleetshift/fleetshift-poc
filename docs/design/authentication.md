@@ -442,6 +442,14 @@ at the IdP. The IdP controls policy (which exchanges are allowed, for which
 audiences). This avoids per-cluster client IDs but requires IdP support
 (Keycloak, Dex have it; Auth0/Okta partial).
 
+### IdP bootstrap and recovery
+
+The first provider-tenant IdP is installed through runtime authority before
+opening the public API. Later IdP changes use the authenticated admin API.
+An out-of-band local administrative channel is still needed for recovery when
+the IdP is unavailable, compromised, or misconfigured. See
+[idp_bootstrap.md](idp_bootstrap.md) for the bootstrap and recovery model.
+
 ## Open Questions
 
 - What request-signature representation and replay cache should the first

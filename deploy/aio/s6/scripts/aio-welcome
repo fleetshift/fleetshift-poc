@@ -1,0 +1,60 @@
+#!/command/with-contenv sh
+# Print the sandbox welcome after the public /readyz endpoint succeeds.
+set -eu
+
+# shellcheck disable=SC1091
+. /run/fleetshift/public.env
+
+url="${PUBLIC_ORIGIN}/readyz"
+i=0
+while [ "$i" -lt 30 ]; do
+	if curl -sf --max-time 2 \
+		--cacert /data/sandbox/pki/ca.crt \
+		--noproxy "${PUBLIC_HOST}" \
+		"${url}" \
+		>/dev/null 2>&1; then
+		break
+	fi
+	i=$((i + 1))
+	sleep 1
+done
+if [ "$i" -ge 30 ]; then
+	echo "aio-welcome: public readiness timed out at ${url}" >&2
+	exit 1
+fi
+
+if [ -f /run/fleetshift/dex.enabled ]; then
+	cat <<EOF
+
+
+Welcome to FleetShift
+╔══════════════════════════════════════════════════════════════════════╗
+║               ░█▀▀░█░░░█▀▀░█▀▀░▀█▀░█▀▀░█░█░▀█▀░█▀▀░▀█▀               ║
+║               ░█▀▀░█░░░█▀▀░█▀▀░░█░░▀▀█░█▀█░░█░░█▀▀░░█░               ║
+║               ░▀░░░▀▀▀░▀▀▀░▀▀▀░░▀░░▀▀▀░▀░▀░▀▀▀░▀░░░░▀░               ║
+╠══════════════════════════════════════════════════════════════════════╣
+║ [CONTAINER INITIALIZED]                                       v0.0.0 ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Open ${PUBLIC_ORIGIN}
+
+Demo login:
+  Email:    ops@fleetshift.local
+  Password: fleetshift-ops
+
+Alternate developer login:
+  Email:    dev@fleetshift.local
+  Password: fleetshift-dev
+
+The sandbox uses a local certificate. Your browser may ask you to accept it.
+Press Ctrl+C to stop FleetShift.
+EOF
+else
+	cat <<EOF
+Open ${PUBLIC_ORIGIN}
+
+Login uses the configured external identity provider.
+The sandbox uses a local certificate. Your browser may ask you to accept it.
+Press Ctrl+C to stop FleetShift.
+EOF
+fi

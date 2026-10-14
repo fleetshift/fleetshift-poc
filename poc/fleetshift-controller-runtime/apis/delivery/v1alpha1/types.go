@@ -1,7 +1,8 @@
 // Package v1alpha1 defines the Delivery CR that controllers reconcile.
 // Desired state arrives via the FleetShift delivery contract and is
-// projected into these objects by the provider; status updates flow
-// back out as DeliveryReporter calls.
+// projected into these objects by the provider; controllers write status
+// through the kube client, and the provider mirrors status to
+// DeliveryReporter.
 package v1alpha1
 
 import (
@@ -31,7 +32,8 @@ func init() {
 
 // Delivery is the controller-runtime view of a FleetShift delivery.
 // Spec is desired state from the platform; Status is observed state
-// written by the reconciler and mirrored back via DeliveryReporter.
+// written by the reconciler. The provider status mirror translates
+// Status writes into DeliveryReporter calls.
 type Delivery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -62,14 +64,13 @@ type DeliverySpec struct {
 
 // DeliveryStatus is the observed delivery state.
 type DeliveryStatus struct {
-	// Phase mirrors contract.DeliveryState.
+	// Phase mirrors contract.DeliveryState. Terminal phases trigger
+	// ReportResult; non-terminal phases trigger ReportEvent.
 	Phase string `json:"phase,omitempty"`
 	// Message is a human-readable progress or error string.
 	Message string `json:"message,omitempty"`
 	// ObservedGeneration is the last Spec.Generation the reconciler acted on.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Reported marks that a terminal ReportResult was sent to the platform.
-	Reported bool `json:"reported,omitempty"`
 }
 
 // DeliveryList is a list of Delivery.

@@ -13,9 +13,9 @@ Everything runs in the `keycloak-prod` namespace.
 ## Deploy
 
 ```bash
-task kc:deploy ACME_EMAIL=you@example.com
-task kc:deploy ACME_EMAIL=you@example.com BASE_DOMAIN=example.com
-task kc:deploy ACME_EMAIL=you@example.com FRESH_CERT=true
+npx nx run kc:deploy -- ACME_EMAIL=you@example.com
+npx nx run kc:deploy -- ACME_EMAIL=you@example.com BASE_DOMAIN=example.com
+npx nx run kc:deploy -- ACME_EMAIL=you@example.com FRESH_CERT=true
 ```
 
 The deploy is idempotent — safe to re-run. On completion, it prints the Keycloak URL, admin credentials, and test user passwords.
@@ -25,7 +25,7 @@ The deploy is idempotent — safe to re-run. On completion, it prints the Keyclo
 Before provisioning AWS clusters with OIDC console access, register each cluster's redirect URI. Keycloak does not support wildcard subdomain patterns, so each cluster needs an explicit entry:
 
 ```bash
-task kc:add-base-domain BASE_DOMAIN=example.com CLUSTER_NAME=my-cluster
+npx nx run kc:add-base-domain -- BASE_DOMAIN=example.com CLUSTER_NAME=my-cluster
 ```
 
 ## Retrieve Console Client Secret
@@ -35,22 +35,18 @@ oc get secret ocp-console-client-secret -n keycloak-prod \
   -o jsonpath='{.data.clientSecret}' | base64 -d
 ```
 
-Set this as `OIDC_CONSOLE_CLIENT_SECRET` in `.env` for the local podman stack, or `OCP_CONSOLE_CLIENT_SECRET` for the fleetshift server.
+This is the `ocp-console` client secret (cluster console OIDC), not the FleetShift UI.
 
 ## Add Users
 
 ```bash
-# OpenShift Keycloak (auto-discovers credentials via oc):
-task kc:add-user USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev
-
-# Local podman Keycloak (pass admin password from podman:up output):
-task kc:add-user USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev ADMIN_PASSWORD=<from-output>
+npx nx run kc:add-user -- USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev
 ```
 
 ## Teardown
 
 ```bash
-task kc:teardown
+npx nx run kc:teardown
 ```
 
 Prompts for confirmation. Optionally uninstalls cert-manager and RHBK operators.

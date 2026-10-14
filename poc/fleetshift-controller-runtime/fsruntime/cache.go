@@ -3,16 +3,17 @@ package fsruntime
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,6 +21,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/poc/fleetshift-controller-runtime/store"
 )
 
+// fsCache is a controller-runtime cache.Cache backed by stock
+// SharedIndexInformer instances. Each informer is driven by a
+// store.ListerWatcher; Reflector owns relist, watch restart, and
+// indexer population.
 type fsCache struct {
 	scheme     *runtime.Scheme
 	store      *store.Store
@@ -27,7 +32,7 @@ type fsCache struct {
 	logger     logr.Logger
 
 	mu        sync.Mutex
-	informers map[schema.GroupVersionKind]*fsInformer
+	informers map[schema.GroupVersionKind]toolscache.SharedIndexInformer
 	started   bool
 	ctx       context.Context
 }
@@ -39,12 +44,61 @@ func (c *fsCache) Get(ctx context.Context, key client.ObjectKey, obj client.Obje
 	if err != nil {
 		return err
 	}
-	return c.store.Get(gvk, key.Namespace, key.Name, obj)
+	inf, err := c.getOrCreateInformer(gvk)
+	if err != nil {
+		return err
+	}
+	storeKey := types.NamespacedName{Namespace: key.Namespace, Name: key.Name}.String()
+	item, exists, err := inf.GetStore().GetByKey(storeKey)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return apierrors.NewNotFound(schema.GroupResource{Group: gvk.Group, Resource: gvk.Kind}, key.Name)
+	}
+	return copyIntoObject(item.(runtime.Object), obj, gvk)
 }
 
 func (c *fsCache) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	cl := &fsClient{scheme: c.scheme, store: c.store, restMapper: c.restMapper}
-	return cl.List(ctx, list, opts...)
+	listOpts := client.ListOptions{}
+	for _, o := range opts {
+		o.ApplyToList(&listOpts)
+	}
+	listGVK, err := resolveGVK(c.scheme, list)
+	if err != nil {
+		return err
+	}
+	itemGVK := itemGVKFromListGVK(listGVK)
+	inf, err := c.getOrCreateInformer(itemGVK)
+	if err != nil {
+		return err
+	}
+
+	var raw []interface{}
+	if listOpts.Namespace != "" {
+		raw, err = inf.GetIndexer().ByIndex(toolscache.NamespaceIndex, listOpts.Namespace)
+	} else {
+		raw = inf.GetStore().List()
+	}
+	if err != nil {
+		return err
+	}
+
+	items := make([]client.Object, 0, len(raw))
+	for _, item := range raw {
+		obj, ok := item.(client.Object)
+		if !ok {
+			return fmt.Errorf("fsruntime: cache contained %T, not client.Object", item)
+		}
+		if listOpts.LabelSelector != nil && !listOpts.LabelSelector.Matches(labels.Set(obj.GetLabels())) {
+			continue
+		}
+		items = append(items, obj.DeepCopyObject().(client.Object))
+	}
+	if err := setListItems(list, items); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *fsCache) GetInformer(ctx context.Context, obj client.Object, opts ...cache.InformerGetOption) (cache.Informer, error) {
@@ -67,7 +121,7 @@ func (c *fsCache) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.started = true
 	c.ctx = ctx
-	informers := make([]*fsInformer, 0, len(c.informers))
+	informers := make([]toolscache.SharedIndexInformer, 0, len(c.informers))
 	for _, inf := range c.informers {
 		informers = append(informers, inf)
 	}
@@ -76,9 +130,9 @@ func (c *fsCache) Start(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for _, inf := range informers {
 		wg.Add(1)
-		go func(inf *fsInformer) {
+		go func(inf toolscache.SharedIndexInformer) {
 			defer wg.Done()
-			inf.run(ctx)
+			inf.RunWithContext(ctx)
 		}(inf)
 	}
 	<-ctx.Done()
@@ -112,184 +166,30 @@ func (c *fsCache) IndexField(ctx context.Context, obj client.Object, field strin
 	return nil
 }
 
-func (c *fsCache) getOrCreateInformer(gvk schema.GroupVersionKind) (cache.Informer, error) {
+func (c *fsCache) getOrCreateInformer(gvk schema.GroupVersionKind) (toolscache.SharedIndexInformer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if inf, ok := c.informers[gvk]; ok {
 		return inf, nil
 	}
-	inf := &fsInformer{
-		gvk:      gvk,
-		store:    c.store,
-		scheme:   c.scheme,
-		logger:   c.logger.WithValues("gvk", gvk.String()),
-		storeMap: make(map[types.NamespacedName]client.Object),
+
+	example, err := c.scheme.New(gvk)
+	if err != nil {
+		return nil, fmt.Errorf("fsruntime: no type for %s: %w", gvk, err)
 	}
+
+	lw := store.NewListerWatcher(c.store, gvk)
+	inf := toolscache.NewSharedIndexInformer(
+		lw,
+		example,
+		0,
+		toolscache.Indexers{toolscache.NamespaceIndex: toolscache.MetaNamespaceIndexFunc},
+	)
 	c.informers[gvk] = inf
 	if c.started && c.ctx != nil {
-		go inf.run(c.ctx)
+		go inf.RunWithContext(c.ctx)
 	}
 	return inf, nil
-}
-
-type handlerEntry struct {
-	handler toolscache.ResourceEventHandler
-	reg     *handlerReg
-}
-
-type fsInformer struct {
-	gvk    schema.GroupVersionKind
-	store  *store.Store
-	scheme *runtime.Scheme
-	logger logr.Logger
-
-	synced  atomic.Bool
-	stopped atomic.Bool
-
-	mu       sync.Mutex
-	handlers []handlerEntry
-	storeMap map[types.NamespacedName]client.Object
-}
-
-var _ cache.Informer = (*fsInformer)(nil)
-
-func (i *fsInformer) AddEventHandler(handler toolscache.ResourceEventHandler) (toolscache.ResourceEventHandlerRegistration, error) {
-	return i.AddEventHandlerWithResyncPeriod(handler, 0)
-}
-
-func (i *fsInformer) AddEventHandlerWithResyncPeriod(handler toolscache.ResourceEventHandler, _ time.Duration) (toolscache.ResourceEventHandlerRegistration, error) {
-	reg := &handlerReg{}
-	i.mu.Lock()
-	i.handlers = append(i.handlers, handlerEntry{handler: handler, reg: reg})
-	alreadySynced := i.synced.Load()
-	var snapshot []client.Object
-	if alreadySynced {
-		for _, obj := range i.storeMap {
-			snapshot = append(snapshot, obj)
-		}
-	}
-	i.mu.Unlock()
-
-	if alreadySynced {
-		for _, obj := range snapshot {
-			handler.OnAdd(obj, true)
-		}
-		reg.synced.Store(true)
-	}
-	return reg, nil
-}
-
-func (i *fsInformer) AddEventHandlerWithOptions(handler toolscache.ResourceEventHandler, _ toolscache.HandlerOptions) (toolscache.ResourceEventHandlerRegistration, error) {
-	return i.AddEventHandler(handler)
-}
-
-func (i *fsInformer) RemoveEventHandler(handle toolscache.ResourceEventHandlerRegistration) error {
-	return nil
-}
-
-func (i *fsInformer) AddIndexers(indexers toolscache.Indexers) error { return nil }
-
-func (i *fsInformer) HasSynced() bool { return i.synced.Load() }
-
-func (i *fsInformer) HasSyncedChecker() toolscache.DoneChecker {
-	return &doneChecker{name: "fsInformer:" + i.gvk.String(), flag: &i.synced}
-}
-
-func (i *fsInformer) IsStopped() bool { return i.stopped.Load() }
-
-func (i *fsInformer) run(ctx context.Context) {
-	defer i.stopped.Store(true)
-
-	items, _, err := i.store.List(i.gvk, "")
-	if err != nil {
-		i.logger.Error(err, "initial list failed")
-		return
-	}
-
-	i.mu.Lock()
-	for _, obj := range items {
-		nn := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
-		i.storeMap[nn] = obj
-		for _, h := range i.handlers {
-			h.handler.OnAdd(obj, true)
-		}
-	}
-	for _, h := range i.handlers {
-		h.reg.synced.Store(true)
-	}
-	i.mu.Unlock()
-	i.synced.Store(true)
-
-	ch, cancel := i.store.Watch(i.gvk)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ev, ok := <-ch:
-			if !ok {
-				return
-			}
-			i.handleEvent(ev)
-		}
-	}
-}
-
-func (i *fsInformer) handleEvent(ev store.Event) {
-	i.mu.Lock()
-	handlers := append([]handlerEntry(nil), i.handlers...)
-	nn := types.NamespacedName{Namespace: ev.Object.GetNamespace(), Name: ev.Object.GetName()}
-	old := i.storeMap[nn]
-	switch ev.Type {
-	case watch.Added, watch.Modified:
-		i.storeMap[nn] = ev.Object
-	case watch.Deleted:
-		delete(i.storeMap, nn)
-	}
-	i.mu.Unlock()
-
-	for _, h := range handlers {
-		switch ev.Type {
-		case watch.Added:
-			h.handler.OnAdd(ev.Object, false)
-		case watch.Modified:
-			if old == nil {
-				h.handler.OnAdd(ev.Object, false)
-			} else {
-				h.handler.OnUpdate(old, ev.Object)
-			}
-		case watch.Deleted:
-			h.handler.OnDelete(ev.Object)
-		}
-	}
-}
-
-type handlerReg struct {
-	synced atomic.Bool
-}
-
-var _ toolscache.ResourceEventHandlerRegistration = (*handlerReg)(nil)
-
-func (r *handlerReg) HasSynced() bool { return r.synced.Load() }
-
-func (r *handlerReg) HasSyncedChecker() toolscache.DoneChecker {
-	return &doneChecker{name: "fsHandlerRegistration", flag: &r.synced}
-}
-
-type doneChecker struct {
-	name string
-	flag *atomic.Bool
-}
-
-func (d *doneChecker) Name() string { return d.name }
-
-func (d *doneChecker) Done() <-chan struct{} {
-	ch := make(chan struct{})
-	if d.flag.Load() {
-		close(ch)
-	}
-	return ch
 }
 
 func resolveGVK(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
@@ -300,5 +200,26 @@ func resolveGVK(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersion
 	if len(gvks) == 0 {
 		return schema.GroupVersionKind{}, fmt.Errorf("fsruntime: no GVK for %T", obj)
 	}
+	for _, gvk := range gvks {
+		if gvk.Kind != "" && !isListKind(gvk.Kind) {
+			return gvk, nil
+		}
+	}
 	return gvks[0], nil
+}
+
+func isListKind(kind string) bool {
+	return len(kind) >= 4 && kind[len(kind)-4:] == "List"
+}
+
+func copyIntoObject(src runtime.Object, dst client.Object, gvk schema.GroupVersionKind) error {
+	copied := src.DeepCopyObject()
+	outVal := reflect.ValueOf(dst)
+	objVal := reflect.ValueOf(copied)
+	if !objVal.Type().AssignableTo(outVal.Type()) {
+		return fmt.Errorf("fsruntime: cache had type %s, but %s was asked for", objVal.Type(), outVal.Type())
+	}
+	reflect.Indirect(outVal).Set(reflect.Indirect(objVal))
+	dst.GetObjectKind().SetGroupVersionKind(gvk)
+	return nil
 }

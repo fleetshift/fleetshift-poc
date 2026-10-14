@@ -1,0 +1,44 @@
+{
+  "name": "deploy-aio",
+  "root": "deploy/aio",
+  "projectType": "application",
+  "tags": ["lang:go", "scope:deploy"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "go build -o ../../bin/aio-init ./cmd/aio-init",
+          "go build -o ../../bin/aio-proxy ./cmd/aio-proxy",
+          "go build -o ../../bin/kind-loopback-forward ./cmd/kind-loopback-forward"
+        ],
+        "parallel": false,
+        "cwd": "deploy/aio"
+      },
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum"
+      ],
+      "outputs": [
+        "{workspaceRoot}/bin/aio-init",
+        "{workspaceRoot}/bin/aio-proxy",
+        "{workspaceRoot}/bin/kind-loopback-forward"
+      ]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "GOTESTSUM_FORMAT=\"${GOTESTSUM_FORMAT:-pkgname-and-test-fails}\" go tool gotestsum --format-icons hivis --format-hide-empty-pkg -- -count=1 ./...",
+        "cwd": "deploy/aio"
+      },
+      "cache": false,
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "{projectRoot}/go.mod",
+        "{projectRoot}/go.sum",
+        "{workspaceRoot}/Dockerfile.fleetshift"
+      ]
+    }
+  }
+}

@@ -1,7 +1,0 @@
-services:
-  fleetshift-server:
-    volumes:
-      - fleetshift-data:/data
-
-volumes:
-  fleetshift-data:

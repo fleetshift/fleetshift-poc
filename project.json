@@ -1,0 +1,329 @@
+{
+  "name": "fleetshift-poc",
+  "root": ".",
+  "targets": {
+    "fleetctl": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["cli:build"],
+      "options": {
+        "command": "test -x bin/fleetctl"
+      },
+      "cache": false
+    },
+    "image:build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "podman build -t localhost/fleetshift-server:latest .",
+          "podman build -f Dockerfile.local -t localhost/fleetshift-server-local:latest .",
+          "podman build --ulimit nofile=65536:65536 -f Dockerfile.web -t localhost/fleetshift-web:latest ."
+        ],
+        "parallel": false
+      },
+      "cache": false
+    },
+    "image:aio": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "podman build -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest --build-arg WEB_IMAGE=localhost/fleetshift-web:latest -t localhost/fleetshift:latest -t quay.io/stolostron/fleetshift:latest ."
+      },
+      "cache": false,
+      "dependsOn": ["image:build"]
+    },
+    "image:push": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
+          "podman tag localhost/fleetshift-server:latest ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
+          "podman tag localhost/fleetshift-server-local:latest ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
+          "podman tag localhost/fleetshift-web:latest ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}"
+        ],
+        "parallel": false
+      },
+      "cache": false
+    },
+    "image:push:aio": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
+          "podman tag localhost/fleetshift:latest ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}"
+        ],
+        "parallel": false
+      },
+      "cache": false
+    },
+    "web:generate-icons": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/generate-icons.mjs"
+      },
+      "cache": true,
+      "inputs": ["{workspaceRoot}/tools/generate-icons.mjs"],
+      "outputs": ["{workspaceRoot}/sdk/common/src/generated/pf-icons.json"]
+    },
+    "web:generate-registry": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/generate-plugin-registry.mjs"
+      },
+      "dependsOn": [
+        "plugins:build",
+        "@fleetshift/gcphcp-plugin:build",
+        "@fleetshift/kind-plugin:build"
+      ],
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/tools/generate-plugin-registry.mjs",
+        "{workspaceRoot}/extensions/core/client/dist/**/*",
+        "{workspaceRoot}/extensions/gcphcp/client/dist/**/*",
+        "{workspaceRoot}/extensions/kind/client/dist/**/*"
+      ]
+    },
+    "web:merge": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/merge-web.mjs"
+      },
+      "dependsOn": ["web:build", "web:generate-registry"],
+      "cache": false,
+      "outputs": ["{workspaceRoot}/web"]
+    },
+    "lint:deploy": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "lintFilePatterns": [
+          "{workspaceRoot}/deploy/**/*.mjs",
+          "{workspaceRoot}/scripts/**/*.mjs"
+        ]
+      }
+    },
+    "pd:up": {
+      "executor": "nx:run-commands",
+      "options": { "command": "./deploy/podman/scripts/start.mjs" },
+      "cache": false
+    },
+    "pd:dev": {
+      "executor": "nx:run-commands",
+      "options": { "command": "DEV=true ./deploy/podman/scripts/start.mjs" },
+      "cache": false
+    },
+    "pd:down": {
+      "executor": "nx:run-commands",
+      "options": { "command": "./deploy/podman/scripts/stop.mjs" },
+      "cache": false
+    },
+    "pd:clean": {
+      "executor": "nx:run-commands",
+      "options": { "command": "./deploy/podman/scripts/stop.mjs --clean" },
+      "cache": false
+    },
+    "pd:logs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "./deploy/podman/scripts/compose-command.mjs logs -f"
+      },
+      "cache": false
+    },
+    "pd:status": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "./deploy/podman/scripts/compose-command.mjs ps"
+      },
+      "cache": false
+    },
+    "pd:rebuild": {
+      "executor": "nx:run-commands",
+      "options": { "command": "./deploy/podman/scripts/rebuild.mjs" },
+      "cache": false
+    },
+    "pd:pull": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "./deploy/podman/scripts/compose-command.mjs pull --ignore-buildable"
+      },
+      "cache": false
+    },
+    "pd:clock-drift": {
+      "executor": "nx:run-commands",
+      "options": { "command": "./deploy/podman/scripts/check-clock-drift.mjs" },
+      "cache": false
+    },
+    "kc:deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs deploy",
+        "cwd": "deploy/keycloak",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "kc:teardown": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs teardown",
+        "cwd": "deploy/keycloak",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "kc:reset-realm": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs reset-realm",
+        "cwd": "deploy/keycloak",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "kc:add-user": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs add-user",
+        "cwd": "deploy/keycloak",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "kc:add-base-domain": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs add-base-domain",
+        "cwd": "deploy/keycloak",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs deploy",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:teardown": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs teardown",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:status": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs status",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:logs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs logs",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:set-image": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs set-image",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:reset-image": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs reset-image",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:import-images": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs import-images",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:register-redirect": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs register-redirect",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:grpc-cert:deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs grpc-route-cert-deploy",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "k8s:grpc-cert:teardown": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs grpc-route-cert-teardown",
+        "cwd": "deploy/kubernetes",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "minio:deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs deploy",
+        "cwd": "deploy/minio-nx-cache",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "minio:teardown": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs teardown",
+        "cwd": "deploy/minio-nx-cache",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "minio:status": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs status",
+        "cwd": "deploy/minio-nx-cache",
+        "envFile": ".env"
+      },
+      "cache": false
+    },
+    "minio:credentials": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node ./scripts/nx-run.mjs credentials",
+        "cwd": "deploy/minio-nx-cache",
+        "envFile": ".env"
+      },
+      "cache": false
+    }
+  }
+}

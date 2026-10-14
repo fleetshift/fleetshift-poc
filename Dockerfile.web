@@ -1,0 +1,79 @@
+# Frontend builder — produces /srv/web with all static assets.
+#
+# Build context must be the monorepo root (contains package.json,
+# package-lock.json, and workspace declarations).
+#
+# Used as an init container in the compose stack:
+#   command: ["cp", "-a", "/srv/web/.", "/output/"]
+
+# ── Stage 1: build ──────────────────────────────────────────────
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS builder
+
+USER 0
+WORKDIR /build
+
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
+# Copy package manifests and Nx config for layer caching
+COPY package.json package-lock.json nx.json project.json ./
+COPY sdk/common/package.json sdk/common/project.json sdk/common/
+COPY sdk/build-utils/package.json sdk/build-utils/project.json sdk/build-utils/
+COPY client/web/package.json client/web/project.json client/web/
+COPY extensions/core/client/package.json extensions/core/client/project.json extensions/core/client/
+COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/project.json extensions/gcphcp/client/
+COPY extensions/gcphcp/server/project.json extensions/gcphcp/server/
+COPY extensions/kind/client/package.json extensions/kind/client/project.json extensions/kind/client/
+COPY extensions/kind/server/project.json extensions/kind/server/
+# Non-UI project.json files needed for Nx project graph resolution.
+COPY server/project.json server/
+COPY proto/project.json proto/
+
+# Copy tsconfig chain
+COPY tsconfig.json ./
+
+# Copy all source
+COPY sdk/common/ sdk/common/
+COPY sdk/build-utils/ sdk/build-utils/
+COPY client/web/ client/web/
+COPY extensions/core/client/ extensions/core/client/
+COPY extensions/gcphcp/client/ extensions/gcphcp/client/
+COPY extensions/kind/client/ extensions/kind/client/
+COPY tools/merge-web.mjs tools/merge-web.mjs
+COPY tools/generate-plugin-registry.mjs tools/generate-plugin-registry.mjs
+COPY tools/generate-icons.mjs tools/generate-icons.mjs
+
+# Remote cache (optional): speeds up builds by pulling cached Nx task outputs from MinIO.
+#   podman build --build-arg NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://nx-cache.example.com \
+#                --build-arg NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=<read-token> \
+#                -f Dockerfile.web .
+ARG NX_SELF_HOSTED_REMOTE_CACHE_SERVER=""
+ARG NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=""
+ENV NX_SELF_HOSTED_REMOTE_CACHE_SERVER=${NX_SELF_HOSTED_REMOTE_CACHE_SERVER} \
+    NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN}
+
+# Install + build in one RUN so node_modules cache mount is available throughout.
+# Raise nofile so rspack cannot EMFILE on the default 1024 cap. podman build
+# --ulimit nofile=65536:65536 must match so this ulimit can raise.
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/build/node_modules \
+    npm install --include-workspace-root \
+    -w @fleetshift/common \
+    -w @fleetshift/build-utils \
+    -w @fleetshift/web \
+    -w @fleetshift/mock-ui-plugins \
+    -w @fleetshift/gcphcp-plugin \
+    -w @fleetshift/kind-plugin \
+    && ulimit -n 65536 \
+    && NX=./node_modules/.bin/nx \
+    && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
+    && $NX run-many --target=build --projects=plugins,@fleetshift/gcphcp-plugin,@fleetshift/kind-plugin \
+    && node tools/generate-plugin-registry.mjs \
+    && $NX run web:build \
+    && node tools/merge-web.mjs
+
+# ── Stage 2: runtime (static assets only) ───────────────────────
+FROM registry.access.redhat.com/ubi9-micro:latest
+
+COPY --from=builder /build/web/ /srv/web/
+
+CMD ["cp", "-a", "/srv/web/.", "/output/"]

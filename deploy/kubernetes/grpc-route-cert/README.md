@@ -10,7 +10,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> fleetshift-server 
 
 ## What this does
 
-`scripts/deploy.sh`:
+`scripts/deploy.mjs`:
 
 1. Enables HTTP/2 on the default ingress controller if needed
 2. Installs cert-manager if needed
@@ -22,7 +22,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> fleetshift-server 
 8. Verifies ALPN `h2`, HTTP/2, and gRPC access
 9. Refreshes the TLS Secret backup
 
-`scripts/teardown.sh`:
+`scripts/teardown.mjs`:
 
 1. Removes the Route certificate integration
 2. Backs up the Route TLS Secret to avoid unnecessary ACME reissuance on redeploy
@@ -64,8 +64,8 @@ The base Kubernetes deploy still applies the plain `route-grpc.yaml` from `deplo
 That means this workflow should be treated as a repeatable **post-deploy** step:
 
 ```bash
-task kubernetes:deploy
-task kubernetes:grpc-route-cert:deploy ACME_EMAIL=you@example.com
+npx nx run k8s:deploy
+npx nx run k8s:grpc-cert:deploy -- ACME_EMAIL=you@example.com
 ```
 
 If a future base deploy overwrites the Route fields, just rerun the Route-cert deploy script.
@@ -75,13 +75,13 @@ If a future base deploy overwrites the Route fields, just rerun the Route-cert d
 ### Direct script
 
 ```bash
-./scripts/deploy.sh --acme-email you@example.com
+node ./scripts/deploy.mjs --acme-email you@example.com
 ```
 
 Optional flags:
 
 ```bash
-./scripts/deploy.sh \
+node ./scripts/deploy.mjs \
   --acme-email you@example.com \
   --namespace fleetshift \
   --route-name grpc \
@@ -92,7 +92,7 @@ Optional flags:
 Force a fresh certificate request instead of restoring the saved backup:
 
 ```bash
-./scripts/deploy.sh --acme-email you@example.com --fresh-cert
+node ./scripts/deploy.mjs --acme-email you@example.com --fresh-cert
 ```
 
 The script auto-detects the current Route host from:
@@ -112,7 +112,7 @@ grpc-fleetshift.apps.sno-1-6c5z7.aws-acm-cluster-virt.devcluster.openshift.com
 From the repo root:
 
 ```bash
-task kubernetes:grpc-route-cert:deploy ACME_EMAIL=you@example.com
+npx nx run k8s:grpc-cert:deploy -- ACME_EMAIL=you@example.com
 ```
 
 ## Expected success state
@@ -130,19 +130,19 @@ After a successful deploy:
 ### Direct script
 
 ```bash
-./scripts/teardown.sh
+node ./scripts/teardown.mjs
 ```
 
 Optional cleanup flags:
 
 ```bash
-./scripts/teardown.sh --namespace fleetshift --route-name grpc
+node ./scripts/teardown.mjs --namespace fleetshift --route-name grpc
 ```
 
 ### Task wrapper
 
 ```bash
-task kubernetes:grpc-route-cert:teardown
+npx nx run k8s:grpc-cert:teardown
 ```
 
 ## Safe cleanup defaults

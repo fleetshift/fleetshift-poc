@@ -58,10 +58,29 @@ data/
 
 # Local test certs
 *.pem
+*.crt
+*.key
 
 .claude_state
 keycloak/certs/
 .worktrees/
 
-# Local mkcert certificates
+# Local podman certificates
 deploy/podman/.certs/
+
+# Nx
+.nx/
+
+# Claude Code
+.claude/worktrees
+.claude/settings.local.json
+
+# JS / UI build artifacts
+node_modules/
+**/dist/
+/web/
+.cache
+test-results/
+playwright-report/
+.mf/
+sdk/common/src/generated/pf-icons.json

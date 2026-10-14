@@ -58,7 +58,7 @@ func TestDeliveryReconcileViaMulticlusterProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := (&controllers.DeliveryReconciler{Reporter: fake}).SetupWithManager(mcMgr); err != nil {
+	if err := (&controllers.DeliveryReconciler{}).SetupWithManager(mcMgr); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +133,7 @@ func TestStaleGenerationDiscarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&controllers.DeliveryReconciler{Reporter: fake}).SetupWithManagerNamed(mcMgr, "delivery-stale"); err != nil {
+	if err := (&controllers.DeliveryReconciler{}).SetupWithManagerNamed(mcMgr, "delivery-stale"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -197,7 +197,7 @@ func TestAuthFailureReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&controllers.DeliveryReconciler{Reporter: fake}).SetupWithManagerNamed(mcMgr, "delivery-auth"); err != nil {
+	if err := (&controllers.DeliveryReconciler{}).SetupWithManagerNamed(mcMgr, "delivery-auth"); err != nil {
 		t.Fatal(err)
 	}
 

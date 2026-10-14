@@ -65,7 +65,7 @@ If FleetShift wants to keep the in-memory `ManifestWork` view and the minimal jo
 - No CloudEvents workload driver
 - No full OCM status scraping or availability watching
 - No Kubernetes API server for `ManifestWork`
-- No direct imports from `fleetshift-server/internal/...`
+- No direct imports from `server/internal/...`
 
 That last point is intentional: this POC lives under top-level `poc/`, so it cannot legally import FleetShift internal packages. Instead it uses a tiny copied FleetShift-shaped interface and payload model as demonstration glue.
 

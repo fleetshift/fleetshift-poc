@@ -155,6 +155,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 - [docs/design/architecture/provenance.md](architecture/provenance.md): authority configuration and pluggable provenance verification beneath the common attestation and delivery model
 - [docs/design/authentication.md](authentication.md): request authentication, target credential presentation, request signing, and `PausedAuth`
 - [docs/design/trust_model_v3.md](trust_model_v3.md): proposal for OIDC-bound user key continuity, authenticated trust distribution, and delivery ordering beneath the existing attestation model
+- [docs/design/idp_bootstrap.md](idp_bootstrap.md): how the platform installs its first provider-tenant IdP before the public API can authenticate anyone
 - [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to fulfillments
 - [docs/design/addon-ui-architecture.md](addon-ui-architecture.md): addon bundle model, OCI artifact distribution, shell integration, and UI plugin capability
 - [docs/design/provider_consumer_model.md](provider_consumer_model.md): provider/consumer/factory topology built on top of the core architecture

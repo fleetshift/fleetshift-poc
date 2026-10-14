@@ -1,0 +1,332 @@
+package domain
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// Workflow types are organized as follows:
+//
+//   - workflow.go: shared primitives (Activity, Record, Execution, Signal,
+//     RunActivity, AwaitSignal, NewActivity) and the engine contract
+//     (Registry, per-workflow interfaces).
+//
+//   - Per-workflow file (orchestration.go, create_deployment.go): the
+//     workflow spec struct. Naming:
+//     • XWorkflowSpec = workflow definition with dependencies and Run body.
+//     • XWorkflow     = registered workflow (returned by Registry); Start
+//       creates an Execution.
+
+// Activity is a named, typed, idempotent operation. Implementations must
+// be safe for at-least-once invocation.
+type Activity[I any, O any] interface {
+	Name() string
+	Run(ctx context.Context, in I) (O, error)
+}
+
+// Record is the durable execution record provided to a running
+// workflow. It records activity invocations and their results so
+// the engine can replay the workflow deterministically after a crash.
+type Record interface {
+	ID() string
+
+	// Context returns a fully detached execution context
+	// (context.Background). The workflow may execute at an arbitrary
+	// later time, so nothing from the caller's request context —
+	// values, deadlines, or cancellation — is inherited. Any
+	// cross-cutting data (e.g. trace context) must be explicitly
+	// persisted and reconstructed by the engine, not carried on the
+	// Go context.
+	Context() context.Context
+
+	// Run durably runs an activity. The engine provides the activity's
+	// context internally; callers should use [RunActivity] for type safety.
+	Run(activity Activity[any, any], in any) (any, error)
+
+	// Await blocks until the named signal arrives. It uses the engine's
+	// internal execution context (e.g. workflow.Context in go-workflows)
+	// rather than a context.Context parameter. This avoids accidentally
+	// carrying request-scoped cancellation into a durable await — the
+	// engine controls the lifecycle, not the caller.
+	Await(signalName string) (any, error)
+
+	// AwaitWithTimeout blocks until the named signal arrives or the
+	// timeout expires. Returns [ErrSignalTimeout] if the timeout fires
+	// before a signal is received. A zero timeout is non-blocking: if
+	// no signal is buffered, it returns [ErrSignalTimeout] immediately.
+	AwaitWithTimeout(signalName string, timeout time.Duration) (any, error)
+
+	// Sleep durably pauses the workflow for at least the given duration.
+	// After replay the engine fast-forwards past completed sleeps.
+	Sleep(d time.Duration) error
+}
+
+// ErrSignalTimeout is returned by [Record.AwaitWithTimeout] when the
+// timeout expires before a signal arrives.
+var ErrSignalTimeout = errors.New("signal timeout")
+
+// Signal is a named, typed channel for cross-workflow communication.
+// Created once as a package-level variable and shared between send
+// ([Registry.SignalFulfillmentEvent]) and receive ([AwaitSignal]) sides.
+type Signal[T any] struct {
+	Name string
+}
+
+// FulfillmentEventSignal is the signal used for delivery-completion
+// and lifecycle events sent to orchestration workflows.
+var FulfillmentEventSignal = Signal[FulfillmentEvent]{Name: "fulfillment-event"}
+
+// DeleteCleanupCompleteSignal is sent by orchestration to a
+// fulfillment-scoped cleanup workflow after delivery data has been
+// cleaned up, indicating the cleanup workflow may hard-delete its
+// abstraction-specific rows.
+var DeleteCleanupCompleteSignal = Signal[DeleteCleanupCompleteEvent]{Name: "delete-cleanup-complete"}
+
+// DeleteCleanupCompleteEvent carries the fulfillment ID whose delivery
+// data has been cleaned up by orchestration.
+type DeleteCleanupCompleteEvent struct {
+	FulfillmentID FulfillmentID
+}
+
+// DeleteDeploymentCleanupInput identifies the deployment and
+// fulfillment rows that the [DeleteDeploymentCleanupWorkflow] will
+// hard-delete after receiving a [DeleteCleanupCompleteSignal].
+type DeleteDeploymentCleanupInput struct {
+	Name          ResourceName
+	FulfillmentID FulfillmentID
+}
+
+// DeleteCleanupWorkflowID returns the deterministic workflow instance
+// ID shared by abstraction-specific cleanup workflows for a single
+// fulfillment. Only one cleanup workflow should exist for a given
+// fulfillment at a time.
+func DeleteCleanupWorkflowID(fulfillmentID FulfillmentID) string {
+	return "cleanup-" + string(fulfillmentID)
+}
+
+// DeleteManagedResourceCleanupInput identifies the managed resource and
+// fulfillment rows that the [DeleteManagedResourceCleanupWorkflow] will
+// hard-delete after orchestration confirms delivery-side cleanup.
+type DeleteManagedResourceCleanupInput struct {
+	ResourceType  ResourceType
+	Name          ResourceName
+	FulfillmentID FulfillmentID
+}
+
+// CreateManagedResourceWorkflowID returns the deterministic workflow
+// instance ID for creating a managed resource. It embeds the full
+// resource name (e.g. "//kind.fleetshift.io/clusters/prod") for
+// readability in tracing and debugging.
+func CreateManagedResourceWorkflowID(name FullResourceName) string {
+	return fmt.Sprintf("create-mr-%s", name)
+}
+
+// DeleteManagedResourceWorkflowID returns the deterministic workflow
+// instance ID for deleting a managed resource.
+func DeleteManagedResourceWorkflowID(name FullResourceName) string {
+	return fmt.Sprintf("delete-mr-%s", name)
+}
+
+// RunActivity provides type-safe durable activity execution from within
+// a workflow body. It is a thin wrapper around [Record.Run].
+func RunActivity[I any, O any](record Record, activity Activity[I, O], in I) (O, error) {
+	result, err := record.Run(&activityAdapter[I, O]{activity: activity}, in)
+	if err != nil {
+		var zero O
+		return zero, err
+	}
+	return result.(O), nil
+}
+
+// AwaitSignal provides type-safe signal reception from within a
+// workflow body. It is a thin wrapper around [Record.Await],
+// mirroring how [RunActivity] wraps [Record.Run].
+func AwaitSignal[T any](record Record, sig Signal[T]) (T, error) {
+	val, err := record.Await(sig.Name)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return val.(T), nil
+}
+
+// AwaitSignalWithTimeout provides type-safe signal reception with a
+// timeout. Returns [ErrSignalTimeout] if the timeout expires before a
+// signal arrives. A zero timeout is non-blocking.
+func AwaitSignalWithTimeout[T any](record Record, sig Signal[T], timeout time.Duration) (T, error) {
+	val, err := record.AwaitWithTimeout(sig.Name, timeout)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return val.(T), nil
+}
+
+// Execution is a handle to a running or completed workflow instance.
+type Execution[T any] interface {
+	WorkflowID() string
+	AwaitResult(ctx context.Context) (T, error)
+}
+
+// FulfillmentSignaler sends signals to running fulfillment workflows.
+// [Registry] implements this interface. Application-layer services
+// that need to signal workflows accept this narrow interface rather
+// than the full [Registry].
+type FulfillmentSignaler interface {
+	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
+}
+
+// DeleteCleanupSignaler sends a completion signal to a running
+// delete-cleanup workflow. [Registry] implements this interface.
+type DeleteCleanupSignaler interface {
+	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
+}
+
+// Registry registers workflow specs, provides cross-workflow signaling,
+// and owns the engine's start/wait/close lifecycle. All workflows must be
+// registered before Start. Workflow specs receive the registry at
+// construction so engine capabilities are available without lazy field
+// assignment.
+type Registry interface {
+	FulfillmentSignaler
+	DeleteCleanupSignaler
+	RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
+	RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
+	RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
+	RegisterDeleteDeploymentCleanup(spec *DeleteDeploymentCleanupWorkflowSpec) (DeleteDeploymentCleanupWorkflow, error)
+	RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
+	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
+	RegisterCreateManagedResource(spec *CreateManagedResourceWorkflowSpec) (CreateManagedResourceWorkflow, error)
+	RegisterDeleteManagedResource(spec *DeleteManagedResourceWorkflowSpec) (DeleteManagedResourceWorkflow, error)
+	RegisterDeleteManagedResourceCleanup(spec *DeleteManagedResourceCleanupWorkflowSpec) (DeleteManagedResourceCleanupWorkflow, error)
+	RegisterResumeManagedResource(spec *ResumeManagedResourceWorkflowSpec) (ResumeManagedResourceWorkflow, error)
+
+	// Start begins background workflow processing. Call only after all
+	// workflows have been registered.
+	Start(ctx context.Context) error
+	// Wait blocks until the registry has stopped or ctx is cancelled.
+	// A stop caused by Close is not reported as an error.
+	Wait(ctx context.Context) error
+	// Close performs bounded shutdown. Callers supply the deadline via ctx.
+	Close(ctx context.Context) error
+}
+
+// OrchestrationWorkflow is a registered orchestration workflow that
+// can start new instances. Returned by [Registry.RegisterOrchestration].
+//
+// If a workflow for the given fulfillment is already active the engine
+// may return an [Execution] handle for the running workflow, or an
+// [ErrAlreadyRunning] error.
+type OrchestrationWorkflow interface {
+	Start(ctx context.Context, fulfillmentID FulfillmentID) (Execution[struct{}], error)
+}
+
+// CreateDeploymentWorkflow is a registered create-deployment workflow
+// that can start new instances. Returned by [Registry.RegisterCreateDeployment].
+type CreateDeploymentWorkflow interface {
+	Start(ctx context.Context, input CreateDeploymentInput) (Execution[DeploymentView], error)
+}
+
+// ProvisionIdPWorkflow is a registered provision-idp workflow that can
+// start new instances. Returned by [Registry.RegisterProvisionIdP].
+type ProvisionIdPWorkflow interface {
+	Start(ctx context.Context, input ProvisionIdPInput) (Execution[AuthMethod], error)
+}
+
+// DeleteDeploymentWorkflow is a registered delete-deployment workflow.
+// Returned by [Registry.RegisterDeleteDeployment]. The observedGen
+// parameter is used by the adapter to derive a generation-qualified
+// instance ID for same-type dedup.
+type DeleteDeploymentWorkflow interface {
+	Start(ctx context.Context, input DeleteDeploymentInput, observedGen Generation) (Execution[DeploymentView], error)
+}
+
+// DeleteDeploymentCleanupWorkflow is a registered deployment cleanup
+// workflow. Returned by [Registry.RegisterDeleteDeploymentCleanup].
+// It runs in the background, awaiting a
+// [DeleteCleanupCompleteSignal] from orchestration before
+// hard-deleting the deployment row and the fulfillment row. The
+// instance ID is deterministic: cleanup-{fulfillmentID}.
+type DeleteDeploymentCleanupWorkflow interface {
+	Start(ctx context.Context, input DeleteDeploymentCleanupInput) (Execution[struct{}], error)
+}
+
+// ResumeDeploymentWorkflow is a registered resume-deployment workflow.
+// Returned by [Registry.RegisterResumeDeployment]. The observedGen
+// parameter is used by the adapter to derive a generation-qualified
+// instance ID for same-type dedup.
+type ResumeDeploymentWorkflow interface {
+	Start(ctx context.Context, input ResumeDeploymentInput, observedGen Generation) (Execution[DeploymentView], error)
+}
+
+// CreateManagedResourceWorkflow is a registered create-managed-resource
+// workflow. Returned by [Registry.RegisterCreateManagedResource].
+type CreateManagedResourceWorkflow interface {
+	Start(ctx context.Context, input CreateManagedResourceInput) (Execution[ExtensionResourceView], error)
+}
+
+// DeleteManagedResourceWorkflow is a registered delete-managed-resource
+// workflow. Returned by [Registry.RegisterDeleteManagedResource].
+type DeleteManagedResourceWorkflow interface {
+	Start(ctx context.Context, input DeleteManagedResourceInput) (Execution[ExtensionResourceView], error)
+}
+
+// DeleteManagedResourceCleanupWorkflow is a registered managed resource
+// cleanup workflow. Returned by
+// [Registry.RegisterDeleteManagedResourceCleanup]. It runs in the
+// background, awaiting a [DeleteCleanupCompleteSignal] from
+// orchestration before hard-deleting the fulfillment row for a
+// managed resource whose HEAD record has already been removed. The
+// instance ID is deterministic: cleanup-{fulfillmentID}.
+type DeleteManagedResourceCleanupWorkflow interface {
+	Start(ctx context.Context, input DeleteManagedResourceCleanupInput) (Execution[struct{}], error)
+}
+
+// ResumeManagedResourceWorkflow is a registered resume-managed-resource
+// workflow. Returned by [Registry.RegisterResumeManagedResource]. The
+// observedGen parameter derives a generation-qualified instance ID for
+// same-type dedup.
+type ResumeManagedResourceWorkflow interface {
+	Start(ctx context.Context, input ResumeManagedResourceInput, observedGen Generation) (Execution[ExtensionResourceView], error)
+}
+
+// ContinueAsNewError is returned by a workflow body to request that
+// the engine restart the workflow with a fresh history and the given
+// input. This keeps history bounded for long-running or retrying
+// workflows while preserving the same logical workflow instance.
+type ContinueAsNewError struct {
+	Input any
+}
+
+func (e *ContinueAsNewError) Error() string { return "continue as new" }
+
+// ContinueAsNew returns a [ContinueAsNewError] that workflow adapters
+// intercept to restart the workflow with the given input.
+func ContinueAsNew(input any) error {
+	return &ContinueAsNewError{Input: input}
+}
+
+// NewActivity creates an [Activity] from a stable name and a function.
+// Workflow spec types use this to define their activities as methods.
+func NewActivity[I, O any](name string, fn func(context.Context, I) (O, error)) Activity[I, O] {
+	return &activityFunc[I, O]{name: name, fn: fn}
+}
+
+type activityFunc[I, O any] struct {
+	name string
+	fn   func(context.Context, I) (O, error)
+}
+
+func (a *activityFunc[I, O]) Name() string                             { return a.name }
+func (a *activityFunc[I, O]) Run(ctx context.Context, in I) (O, error) { return a.fn(ctx, in) }
+
+// activityAdapter bridges a typed [Activity] to the any-typed
+// [Record.Run] interface.
+type activityAdapter[I any, O any] struct{ activity Activity[I, O] }
+
+func (a *activityAdapter[I, O]) Name() string { return a.activity.Name() }
+func (a *activityAdapter[I, O]) Run(ctx context.Context, in any) (any, error) {
+	return a.activity.Run(ctx, in.(I))
+}

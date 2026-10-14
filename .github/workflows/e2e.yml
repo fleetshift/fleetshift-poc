@@ -1,0 +1,78 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Single cache writer. Test jobs restore the same multi-image tar and do
+  # not race this key. Kind host setup (user podman.socket, kind network) lives
+  # in setup-e2e for the Playwright matrix. Matrix entries do not share a
+  # container.
+  aio-image:
+    name: AIO image
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up E2E
+        uses: ./.github/actions/setup-e2e
+        with:
+          role: cache
+
+  e2e-playwright:
+    name: E2E (${{ matrix.name }})
+    needs: [aio-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: UI
+            project: e2e-web
+            arguments: "-- --project=chromium"
+            artifact_name: e2e-test-results
+            artifact_paths: |
+              e2e/web/test-results/
+              e2e/web/playwright-report/
+          - name: CLI
+            project: e2e-cli
+            arguments: ""
+            artifact_name: e2e-cli-test-results
+            artifact_paths: e2e/cli/test-results/
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up E2E
+        uses: ./.github/actions/setup-e2e
+        with:
+          role: e2e
+
+      - name: Run ${{ matrix.name }} e2e tests
+        env:
+          FLEETSHIFT_E2E_AIO_PREBUILT: "1"
+          LOG_LEVEL: debug
+          NX_DAEMON: "false"
+        run: npx nx test:e2e ${{ matrix.project }} ${{ matrix.arguments }}
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: warn
+          retention-days: 7

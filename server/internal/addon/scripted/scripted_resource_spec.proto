@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package addons.scripted.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+
+// ScriptedResourceSpec defines a resource whose delivery and removal
+// behavior is declared in its own spec. Tests create these through the
+// normal public API; the scripted delivery agent interprets the spec
+// without a side channel or external control API.
+message ScriptedResourceSpec {
+  // Behavior configures how the scripted delivery agent handles
+  // delivery and removal operations. Omitted fields default to
+  // immediate success.
+  OperationBehavior behavior = 1;
+
+  // Inventory configures the labels and observation to project onto
+  // this resource after a successful delivery. Omitted inventory
+  // produces an empty same-resource projection so a later successful
+  // generation clears older scripted inventory.
+  InventorySpec inventory = 2;
+}
+
+// OperationBehavior configures delivery and removal operations
+// independently.
+message OperationBehavior {
+  // Delivery configures the behavior when the resource is delivered.
+  PhasePair delivery = 1;
+
+  // Removal configures the behavior when the resource is removed.
+  PhasePair removal = 2;
+}
+
+// PhasePair configures the two phases of an operation:
+// acknowledgement (synchronous) and completion (asynchronous).
+message PhasePair {
+  // Acknowledgement controls latency and outcome before the
+  // DeliveryAgent.Deliver or Remove method returns.
+  PhaseSpec acknowledgement = 1;
+
+  // Completion controls latency and outcome of the asynchronous
+  // terminal delivery result reported through DeliveryReporter.
+  PhaseSpec completion = 2;
+}
+
+// PhaseSpec configures one phase's latency and outcome.
+message PhaseSpec {
+  // Latency to wait before this phase's outcome is determined.
+  // Omitted latency means zero delay.
+  Latency latency = 1;
+
+  // Outcome to produce for this phase. Omitted outcome means SUCCESS.
+  Outcome outcome = 2;
+}
+
+// Latency configures how long a phase waits before producing its
+// outcome. The tagged union supports future stochastic arms without
+// changing the existing constant contract.
+message Latency {
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+
+    // Constant delay applied on every attempt.
+    google.protobuf.Duration constant = 1 [(buf.validate.field).duration = {
+      gte: {seconds: 0}
+      lte: {seconds: 300}
+    }];
+
+    // Gaussian-distributed delay sampled per attempt.
+    // Each sample is drawn from N(mean=(min+max)/2, sigma=(max-min)/6)
+    // and clamped to [min, max]. When min == max the delay is constant.
+    BoundedNormalLatency bounded_normal = 2;
+  }
+}
+
+// BoundedNormalLatency configures a bounded normal (Gaussian) delay.
+message BoundedNormalLatency {
+  google.protobuf.Duration min = 1 [(buf.validate.field).duration = {
+    gte: {seconds: 0}
+    lte: {seconds: 3600}
+  }];
+  google.protobuf.Duration max = 2 [(buf.validate.field).duration = {
+    gte: {seconds: 0}
+    lte: {seconds: 3600}
+  }];
+  // Invariant enforced at normalization: min <= max.
+}
+
+// Outcome configures the result of a phase.
+message Outcome {
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+
+    // Constant outcome applied on every attempt.
+    OutcomeValue constant = 1 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+
+    // Deterministic sequence of outcomes. The sequence repeats its
+    // final value after exhaustion (e.g. [FAILURE, FAILURE, SUCCESS]
+    // means fail twice then succeed on every subsequent attempt).
+    OutcomeSequence sequence = 2;
+
+    // Stochastic outcome: each attempt independently fails with the
+    // given probability. Stateless -- no cursor advancement needed.
+    ProbabilisticOutcome probabilistic = 3;
+  }
+}
+
+// ProbabilisticOutcome configures a probabilistic failure outcome.
+message ProbabilisticOutcome {
+  // Probability of FAILURE on each attempt, in [0.0, 1.0].
+  double failure_rate = 1 [(buf.validate.field).double = {
+    gte: 0.0
+    lte: 1.0
+  }];
+}
+
+// OutcomeValue is the result of a single phase attempt.
+enum OutcomeValue {
+  OUTCOME_VALUE_UNSPECIFIED = 0;
+  SUCCESS = 1;
+  FAILURE = 2;
+}
+
+// OutcomeSequence is a nonempty deterministic sequence of outcomes.
+message OutcomeSequence {
+  repeated OutcomeValue values = 1 [
+    (buf.validate.field).repeated = {
+      min_items: 1
+      items: {
+        enum: {
+          defined_only: true
+          not_in: [0]
+        }
+      }
+    }
+  ];
+}
+
+// InventorySpec configures the labels and observation to project onto
+// the managed resource after a successful delivery.
+message InventorySpec {
+  // Labels to set on the managed resource's inventory projection.
+  map<string, string> labels = 1;
+
+  // Observation to set on the managed resource's inventory projection.
+  // Arbitrary JSON structure.
+  google.protobuf.Struct observation = 2;
+}

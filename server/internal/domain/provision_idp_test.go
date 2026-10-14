@@ -1,0 +1,264 @@
+package domain_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+)
+
+func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
+	var savedMethod domain.AuthMethod
+	var startedInput domain.CreateDeploymentInput
+	sink := &recordingProvisionIdPEventSink{}
+
+	spec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods: &fakeAuthMethodRepo{saveFn: func(_ context.Context, m domain.AuthMethod) error {
+			savedMethod = m
+			return nil
+		}},
+		Discovery: fakeDiscovery{},
+		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
+			startedInput = in
+			return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
+				Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{Name: in.Name}),
+			}}, nil
+		}},
+		TrustBundlePlacement: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-local"},
+		},
+		EventSink: sink,
+	}
+
+	input := domain.ProvisionIdPInput{
+		AuthMethodID: "test-idp",
+		AuthMethod: domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+			Type: domain.AuthMethodTypeOIDC,
+			OIDC: &domain.OIDCConfig{
+				IssuerURL:             "https://issuer.example.com",
+				Audience:              "fleetshift",
+				KeyEnrollmentAudience: "fleetshift-enroll",
+				RegistrySubjectMapping: &domain.RegistrySubjectMapping{
+					RegistryID: "github.com",
+					Expression: "claims.preferred_username",
+				},
+			},
+		}),
+	}
+
+	record := &provisionSyncRecord{}
+	result, err := spec.Run(record, input)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.ID() != "test-idp" {
+		t.Errorf("result.ID = %q, want %q", result.ID(), "test-idp")
+	}
+	if result.OIDC().JWKSURI != "https://issuer.example.com/jwks" {
+		t.Errorf("JWKSURI = %q, want discovery-resolved value", result.OIDC().JWKSURI)
+	}
+
+	if savedMethod.ID() != "test-idp" {
+		t.Errorf("saved method ID = %q, want %q", savedMethod.ID(), "test-idp")
+	}
+
+	if startedInput.Name != "deployments/idp-trust-test-idp" {
+		t.Errorf("deployment Name = %q, want %q", startedInput.Name, "deployments/idp-trust-test-idp")
+	}
+	if len(startedInput.ManifestStrategy.Manifests) != 1 {
+		t.Fatalf("manifests len = %d, want 1", len(startedInput.ManifestStrategy.Manifests))
+	}
+	m := startedInput.ManifestStrategy.Manifests[0]
+	if m.ManifestType != domain.TrustBundleManifestType {
+		t.Errorf("manifest type = %q, want %q", m.ManifestType, domain.TrustBundleManifestType)
+	}
+
+	var entry domain.TrustBundleEntry
+	if err := json.Unmarshal(m.Raw, &entry); err != nil {
+		t.Fatalf("unmarshal trust bundle: %v", err)
+	}
+	if entry.IssuerURL != "https://issuer.example.com" {
+		t.Errorf("trust bundle issuer = %q", entry.IssuerURL)
+	}
+	if entry.JWKSURI != "https://issuer.example.com/jwks" {
+		t.Errorf("trust bundle JWKSURI = %q", entry.JWKSURI)
+	}
+	if entry.EnrollmentAudience != "fleetshift-enroll" {
+		t.Errorf("trust bundle enrollment audience = %q", entry.EnrollmentAudience)
+	}
+	if entry.RegistrySubjectMapping == nil || entry.RegistrySubjectMapping.Expression != "claims.preferred_username" {
+		t.Errorf("trust bundle registry subject mapping = %+v", entry.RegistrySubjectMapping)
+	}
+
+	if startedInput.PlacementStrategy.Type != domain.PlacementStrategyStatic {
+		t.Errorf("placement type = %q, want static", startedInput.PlacementStrategy.Type)
+	}
+	if len(sink.created) != 1 {
+		t.Fatalf("created events = %d, want 1", len(sink.created))
+	}
+	if sink.created[0].ID() != result.ID() {
+		t.Errorf("created event ID = %q, want %q", sink.created[0].ID(), result.ID())
+	}
+	if len(sink.failed) != 0 {
+		t.Errorf("failed events = %d, want 0", len(sink.failed))
+	}
+}
+
+func TestProvisionIdPWorkflowSpec_Run_InvalidMethod(t *testing.T) {
+	sink := &recordingProvisionIdPEventSink{}
+	spec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods: &fakeAuthMethodRepo{},
+		Discovery:   fakeDiscovery{},
+		EventSink:   sink,
+	}
+
+	input := domain.ProvisionIdPInput{
+		AuthMethodID: "bad",
+		AuthMethod:   domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{Type: "unknown"}),
+	}
+
+	record := &provisionSyncRecord{}
+	_, err := spec.Run(record, input)
+	if err == nil {
+		t.Fatal("expected error for invalid auth method")
+	}
+	if len(sink.created) != 0 {
+		t.Errorf("created events = %d, want 0", len(sink.created))
+	}
+	if len(sink.failed) != 1 {
+		t.Fatalf("failed events = %d, want 1", len(sink.failed))
+	}
+}
+
+func TestProvisionIdPWorkflowSpec_Run_SkipsTrustBundleDeploymentWhenPlacementUnset(t *testing.T) {
+	var savedMethod domain.AuthMethod
+	startCalled := false
+
+	spec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods: &fakeAuthMethodRepo{saveFn: func(_ context.Context, m domain.AuthMethod) error {
+			savedMethod = m
+			return nil
+		}},
+		Discovery: fakeDiscovery{},
+		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, _ domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
+			startCalled = true
+			return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{}}, nil
+		}},
+	}
+
+	input := domain.ProvisionIdPInput{
+		AuthMethodID: "test-idp",
+		AuthMethod: domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+			Type: domain.AuthMethodTypeOIDC,
+			OIDC: &domain.OIDCConfig{
+				IssuerURL:             "https://issuer.example.com",
+				Audience:              "fleetshift",
+				KeyEnrollmentAudience: "fleetshift-enroll",
+			},
+		}),
+	}
+
+	record := &provisionSyncRecord{}
+	result, err := spec.Run(record, input)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.ID() != "test-idp" {
+		t.Errorf("result.ID = %q, want %q", result.ID(), "test-idp")
+	}
+	if savedMethod.ID() != "test-idp" {
+		t.Errorf("saved method ID = %q, want %q", savedMethod.ID(), "test-idp")
+	}
+	if startCalled {
+		t.Fatal("expected trust-bundle deployment to be skipped when placement is unset")
+	}
+}
+
+// --- test doubles ---
+
+type fakeAuthMethodRepo struct {
+	saveFn func(context.Context, domain.AuthMethod) error
+}
+
+func (f *fakeAuthMethodRepo) Save(ctx context.Context, m domain.AuthMethod) error {
+	if f.saveFn != nil {
+		if err := f.saveFn(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fakeAuthMethodRepo) Get(_ context.Context, _ domain.AuthMethodID) (domain.AuthMethod, error) {
+	return domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{}), domain.ErrNotFound
+}
+
+func (f *fakeAuthMethodRepo) List(_ context.Context) ([]domain.AuthMethod, error) {
+	return nil, nil
+}
+
+type fakeDiscovery struct{}
+
+func (fakeDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL) (domain.OIDCMetadata, error) {
+	return domain.OIDCMetadata{
+		Issuer:                issuerURL,
+		AuthorizationEndpoint: domain.EndpointURL(string(issuerURL) + "/authorize"),
+		TokenEndpoint:         domain.EndpointURL(string(issuerURL) + "/token"),
+		JWKSURI:               domain.EndpointURL(string(issuerURL) + "/jwks"),
+	}, nil
+}
+
+type fakeCreateDeploymentWF struct {
+	startFn func(context.Context, domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error)
+}
+
+func (f *fakeCreateDeploymentWF) Start(ctx context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
+	if f.startFn != nil {
+		return f.startFn(ctx, in)
+	}
+	return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
+		Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{Name: in.Name}),
+	}}, nil
+}
+
+type recordingProvisionIdPEventSink struct {
+	created []domain.AuthMethod
+	failed  []error
+}
+
+func (s *recordingProvisionIdPEventSink) AuthMethodCreated(method domain.AuthMethod) {
+	s.created = append(s.created, method)
+}
+
+func (s *recordingProvisionIdPEventSink) AuthMethodFailed(err error) {
+	s.failed = append(s.failed, err)
+}
+
+// provisionSyncRecord is a synchronous [domain.Record] that runs
+// activities inline for unit testing workflow specs.
+type provisionSyncRecord struct {
+	id string
+}
+
+func (r *provisionSyncRecord) ID() string               { return r.id }
+func (r *provisionSyncRecord) Context() context.Context { return context.Background() }
+
+func (r *provisionSyncRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(context.Background(), in)
+}
+
+func (r *provisionSyncRecord) Await(_ string) (any, error) {
+	return nil, fmt.Errorf("provisionSyncRecord: Await not supported")
+}
+func (r *provisionSyncRecord) AwaitWithTimeout(_ string, _ time.Duration) (any, error) {
+	return nil, domain.ErrSignalTimeout
+}
+func (r *provisionSyncRecord) Sleep(_ time.Duration) error {
+	return nil
+}

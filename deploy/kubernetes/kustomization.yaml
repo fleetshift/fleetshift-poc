@@ -11,7 +11,6 @@ resources:
   - fleetshift-server/route-http.yaml
   - fleetshift-server/route-grpc.yaml
   - fleetshift-server/imagestreams.yaml
-  - auth-setup/job.yaml
 configMapGenerator:
   - name: fleetshift-server-config
     envs:

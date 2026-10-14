@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      # OpenShift's restricted-v2 SCC auto-injects a random UID and an fsGroup
+      # from the namespace's allocated range. The kubelet recursively chowns the
+      # mounted volume to fsGroup and makes it group-writable, so MinIO (running
+      # as the injected UID within that group) can write to /data. No permission-
+      # fixing initContainer is needed — a chgrp/chmod initContainer would fail
+      # anyway, since the non-root UID lacks CAP_CHOWN on files it doesn't own.
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+          # Use a subdirectory, not the volume root: an ext4 PV has a
+          # `lost+found` at its root that MinIO would otherwise surface as a
+          # stray bucket. MinIO creates the subdir on first start.
+          args: ["server", "/data/minio", "--console-address", ":9001"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+          envFrom:
+            - secretRef:
+                name: minio-credentials
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: api
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  labels:
+    app: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
