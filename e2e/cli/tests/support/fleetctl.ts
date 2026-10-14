@@ -19,7 +19,7 @@ const LOGIN_TIMEOUT_MS = 60_000;
 
 export function buildFleetctlArgs(
   configDir: string,
-  grpcTarget: string,
+  serverTarget: string,
   args: readonly string[],
 ): string[] {
   return [
@@ -27,7 +27,7 @@ export function buildFleetctlArgs(
     configDir,
     "--insecure-storage",
     "--server",
-    grpcTarget,
+    serverTarget,
     "--output",
     "json",
     ...args,
@@ -77,17 +77,20 @@ interface FleetctlRunOptions {
 
 export class FleetctlClient {
   readonly #binary: string;
+  readonly #prefixArgs: readonly string[];
   readonly configDir: string;
   readonly #browser: Browser;
   readonly #sandbox: Sandbox;
 
   constructor(options: {
     binary: string;
+    prefixArgs: readonly string[];
     browser: Browser;
     configDir: string;
     sandbox: Sandbox;
   }) {
     this.#binary = options.binary;
+    this.#prefixArgs = options.prefixArgs;
     this.#browser = options.browser;
     this.configDir = options.configDir;
     this.#sandbox = options.sandbox;
@@ -97,14 +100,14 @@ export class FleetctlClient {
     args: readonly string[],
     options: FleetctlRunOptions = {},
   ): Promise<CommandResult> {
-    return runCommand(
-      this.#binary,
-      buildFleetctlArgs(
+    return runCommand(this.#binary, [
+      ...this.#prefixArgs,
+      ...buildFleetctlArgs(
         options.configDir ?? this.configDir,
-        this.#sandbox.grpcTarget,
+        this.#sandbox.uiOrigin,
         args,
       ),
-    );
+    ]);
   }
 
   async succeed(
@@ -171,11 +174,14 @@ export class FleetctlClient {
   }
 
   async #loginNoBrowser(configDir: string, persona: Persona): Promise<void> {
-    const args = buildFleetctlArgs(configDir, this.#sandbox.grpcTarget, [
-      "auth",
-      "login",
-      "--no-browser",
-    ]);
+    const args = [
+      ...this.#prefixArgs,
+      ...buildFleetctlArgs(configDir, this.#sandbox.uiOrigin, [
+        "auth",
+        "login",
+        "--no-browser",
+      ]),
+    ];
     const child = spawn(this.#binary, args, {
       stdio: ["ignore", "pipe", "pipe"],
     });

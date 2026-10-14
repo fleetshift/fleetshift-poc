@@ -2,6 +2,14 @@
   "name": "fleetshift-poc",
   "root": ".",
   "targets": {
+    "fleetctl": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["cli:build"],
+      "options": {
+        "command": "test -x bin/fleetctl"
+      },
+      "cache": false
+    },
     "image:build": {
       "executor": "nx:run-commands",
       "options": {

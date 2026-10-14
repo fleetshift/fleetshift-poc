@@ -5,6 +5,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@fleetshift/common": path.resolve(__dirname, "sdk/common/src"),
+      "ink-table": path.resolve(
+        __dirname,
+        "client/cli/src/test-helpers/ink-table.tsx",
+      ),
     },
   },
   test: {

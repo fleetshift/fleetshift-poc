@@ -3,29 +3,27 @@
 # Override with --build-arg HYPERSHIFT_IMAGE=... when needed.
 ARG HYPERSHIFT_IMAGE=quay.io/acm-d/rhtap-hypershift-operator:65839bbab12247d630a498e487af6f30d7788620
 
-FROM golang:1.25 AS fleetshift-builder
+FROM golang:1.26.6 AS fleetshift-builder
 
 WORKDIR /src
 
-# Copy go.mod/go.sum for both modules to cache deps
-# CLI has a replace directive pointing to ../server
+# Copy server module manifests to cache dependencies.
 COPY server/go.mod server/go.sum ./server/
-COPY cli/go.mod cli/go.sum ./cli/
 RUN --mount=type=cache,target=/go/pkg/mod \
-    cd server && go mod download && \
-    cd ../cli && go mod download
+    cd server && \
+    for attempt in 1 2 3 4 5; do \
+        if GODEBUG=http2client=0 go mod download; then exit 0; fi; \
+        sleep "$((attempt * 5))"; \
+    done; \
+    exit 1
 
-# Copy all source (server, cli)
+# Copy server source.
 COPY server/ ./server/
-COPY cli/ ./cli/
 
-# Build both binaries
+# Build server binary.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd server && CGO_ENABLED=0 go build -o /bin/fleetshift ./cmd/fleetshift
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    cd cli && CGO_ENABLED=0 go build -o /bin/fleetctl ./cmd/fleetctl
 
 FROM ${HYPERSHIFT_IMAGE} AS hypershift
 
@@ -36,7 +34,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=fleetshift-builder /bin/fleetshift /usr/local/bin/fleetshift
-COPY --from=fleetshift-builder /bin/fleetctl /usr/local/bin/fleetctl
 COPY --from=hypershift /usr/bin/hypershift /usr/local/bin/hypershift
 
 EXPOSE 50051 8085

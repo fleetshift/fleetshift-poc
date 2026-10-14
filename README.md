@@ -117,7 +117,8 @@ Projects: `server`, `cli`, `deploy-aio`, `proto`, `web`, `common`, `build-utils`
 
 ```bash
 npx nx run server:build     # server
-npx nx run cli:build        # fleetctl CLI
+npx nx run cli:build        # package build; also updates bin/fleetctl
+npx nx run fleetctl         # shortcut for the package build
 npx nx run deploy-aio:build # AIO packaging binaries
 npx nx run common:build     # shared UI types/helpers
 npx nx run plugins:build    # all MF remote plugins
@@ -127,6 +128,8 @@ npx nx run-many -t build    # build all (parallel, cached)
 ```
 
 Builds are cached — unchanged sources skip recompilation entirely.
+
+CLI guide: [client/cli/README.md](client/cli/README.md).
 
 ### UI development
 

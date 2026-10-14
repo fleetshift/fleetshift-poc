@@ -24,9 +24,8 @@ COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/project.json
 COPY extensions/gcphcp/server/project.json extensions/gcphcp/server/
 COPY extensions/kind/client/package.json extensions/kind/client/project.json extensions/kind/client/
 COPY extensions/kind/server/project.json extensions/kind/server/
-# Non-UI project.json files needed for Nx project graph resolution
+# Non-UI project.json files needed for Nx project graph resolution.
 COPY server/project.json server/
-COPY cli/project.json cli/
 COPY proto/project.json proto/
 
 # Copy tsconfig chain

@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/rules-of-hooks -- Playwright fixture `use` is not a React hook. */
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -29,6 +30,14 @@ import {
   pooledKindClusterIdPrefix,
 } from "./support/kind-pool";
 import { readSandboxEnvironment, type Sandbox } from "./support/sandbox";
+
+function fleetctlBinaryPath(): string {
+  const candidates = [
+    path.resolve(process.cwd(), "../../client/cli/bin/fleetctl"),
+    path.resolve(process.cwd(), "client/cli/bin/fleetctl"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
 
 interface Suite {
   fleetctl: FleetctlClient;
@@ -96,7 +105,8 @@ const fixtures = base.extend<TestArgs, { suite: Suite }>({
       const configDir = path.join(workDir, "fleetctl-ops");
       await mkdir(configDir, { mode: 0o700, recursive: true });
       const fleetctl = new FleetctlClient({
-        binary: path.resolve(process.cwd(), "../../bin/fleetctl"),
+        binary: process.execPath,
+        prefixArgs: [fleetctlBinaryPath()],
         browser,
         configDir,
         sandbox,

@@ -28,7 +28,7 @@ npx nx test:e2e e2e-web -- --ui
 npx nx test:e2e e2e-web -- --project=chromium
 npx nx test:e2e e2e-web -- tests/login.spec.ts
 
-# CLI: builds fleetctl and the packaged AIO image
+# CLI: builds TypeScript fleetctl and the packaged AIO image
 npx nx test:e2e e2e-cli
 npx nx test:e2e e2e-cli -- tests/scenarios/gateway.spec.ts
 ```
@@ -41,7 +41,7 @@ Short UI cheat sheet: [e2e/web/README.md](../../e2e/web/README.md).
 
 ## Prerequisites
 
-- `podman`, `npx`, `go` on `PATH`, and `npm ci` at the repo root
+- `podman`, `npx`, and `npm ci` at the repo root
 - `fleetshift-sandbox.localhost` resolving to loopback (a `.localhost` name;
   do not add `/etc/hosts`)
 - Linux: `systemctl --user enable --now podman.socket` so Kind can use the
@@ -325,15 +325,16 @@ republish the published image.
 The Playwright matrix entries restore the same tree-keyed tar and run in
 parallel. They do not share a running container.
 
-`setup-e2e` is the only place that should install Go, Node, or Playwright,
+`setup-e2e` is the only place that should install Node or Playwright,
 load or pull the image, start user `podman.socket`, and ensure the `kind`
 network. The `cache` role never starts FleetShift. The `e2e` role never
 rebuilds the image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`.
 The `published` role never restores the checkout tar; it pulls the published
 tag. The test job sets `FLEETSHIFT_E2E_AIO_PULL=1` and runs Playwright
 `chromium-sanity` only (not the full UI project). Both e2e jobs set
-`LOG_LEVEL=debug` so the sandbox runner forwards it into the AIO. Go is installed on
-`e2e` so the CLI suite can build fleetctl, not on `published`.
+`LOG_LEVEL=debug` so the sandbox runner forwards it into the AIO. The CLI suite
+uses the TypeScript fleetctl build; the `published` job only exercises the
+published image.
 
 The shared runner starts unique UI and CLI sandboxes and uploads Playwright
 artifacts through their jobs. Do not add `podman run`, log dump, or

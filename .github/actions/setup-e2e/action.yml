@@ -21,8 +21,8 @@ description: |
   The caller runs a UI sanity (`chromium-sanity`), not the full UI e2e suite.
   A failure is a live product incident (users run that tag), not a branch bug.
 
-  Go (from `server/go.mod`), Node 24, and Playwright Chromium follow from
-  `role`. Do not install those in the workflow.
+  Node 24 and Playwright Chromium follow from `role`. Do not install those in
+  the workflow.
 
   `e2e` and `published` also start the user `podman.socket` and ensure the
   `kind` network exists. Each test job still uses a separate AIO container.
@@ -33,16 +33,16 @@ inputs:
       Which job is calling this action. Toolchain and image steps follow from
       the value; there are no separate go/playwright inputs.
 
-      cache — `aio-image` job, cache writer. Restore the tar. On a miss: install
-      Go and Node, run `npx nx run image:aio`, save the four
+       cache — `aio-image` job, cache writer. Restore the tar. On a miss: install
+       Node, run `npx nx run image:aio`, save the four
       tags, write the cache, upload the artifact. On a hit: restore the tar and
-      stop (no Node, Go, or Playwright). Never podman-runs FleetShift.
+       stop (no Node or Playwright). Never podman-runs FleetShift.
 
-      e2e — the `e2e-playwright` matrix. Restore (or download) the tar, podman
-      load, install Go, Node, and Playwright, start user podman.socket and
+       e2e — the `e2e-playwright` matrix. Restore (or download) the tar, podman
+       load, install Node and Playwright, start user podman.socket and
       ensure the kind network. Set FLEETSHIFT_E2E_AIO_PREBUILT=1 when invoking
       the UI and CLI targets so their shared Node runner does not rebuild the
-      restored image. Go is required so the CLI suite can build fleetctl.
+       restored image.
 
       published — pull quay.io/stolostron/fleetshift:latest, the already
       published Quay AIO, never this checkout's image. Used by the published
@@ -81,13 +81,6 @@ runs:
       with:
         path: ${{ runner.temp }}/aio-images.tar
         key: ${{ steps.aio-key.outputs.key }}
-
-    - name: Set up Go
-      if: ${{ inputs.role == 'e2e' }}
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: server/go.mod
-        cache-dependency-path: "**/go.sum"
 
     # Node is required for nx (image:aio on cache miss, test:e2e) and Playwright.
     # The cache job skips this entirely on a tar cache hit.

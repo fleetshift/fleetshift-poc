@@ -45,15 +45,22 @@
     },
     "lint": {
       "cache": true,
-      "inputs": ["uiSource", "eslintConfig"]
+      "inputs": [
+        "uiSource",
+        "eslintConfig"
+      ]
     },
     "lint:css": {
       "cache": true,
-      "inputs": ["uiStyles"]
+      "inputs": [
+        "uiStyles"
+      ]
     },
     "test:ct": {
       "cache": true,
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     }
   }
 }

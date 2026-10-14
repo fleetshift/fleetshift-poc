@@ -32,7 +32,7 @@ Create the kind network once: `podman network create kind`. Linux rootless:
 
 ```bash
 cp .env.template .env         # leave OIDC_ISSUER_URL unset for peer Dex
-  npx nx run cli:build          # build fleetctl Go binaries
+  npx nx run cli:build          # build TypeScript fleetctl
   npx nx run pd:dev             # build AIO from source and start
 ```
 

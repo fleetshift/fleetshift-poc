@@ -4,6 +4,8 @@
 
 **Related issue:** [OME-313](https://redhat.atlassian.net/browse/OME-313)
 
+This document defines browser asset delivery, ownership, and trust boundaries. See [Client Source Sharing](client-source-sharing.md) for source sharing and runtime boundaries between CLI and Web clients.
+
 ## Summary
 
 Resource Manager currently serves shell, manifests, and plugin JavaScript from one merged local directory. This makes Resource Manager an authority over client code; a compromise can alter browser code and defeat client trust assumptions.

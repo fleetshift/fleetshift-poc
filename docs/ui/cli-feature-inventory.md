@@ -1,8 +1,8 @@
 # CLI Feature Inventory
 
 **Related Jira:** OME-305
-**Status:** Current implementation baseline
-**Scope:** `cli/`
+**Status:** Historical Go CLI baseline; superseded by `client/cli/`
+**Scope:** Historical `cli/`
 
 This document inventories what the current `fleetctl` CLI can do. It is input
 for the shared CLI/Web UI client architecture. It describes feature behavior,
@@ -15,8 +15,12 @@ in the source paths listed below.
 
 ## Important Baseline
 
-The current CLI in `cli/` is a Go application built with Cobra. It is not the
-older TypeScript/Ink proof of concept described by these documents:
+This document records the removed Go CLI implementation. The Go source under
+`cli/` was removed as part of OME-306. Current CLI implementation lives under
+`client/cli/`; see [client/cli/README.md](../../client/cli/README.md).
+
+The historical Go CLI was a Cobra application. It was not the older
+TypeScript/Ink proof of concept described by these documents:
 
 - `docs/ui/spikes/009-cli-framework.md`
 - `docs/ui/spikes/010-cli-plugin-system.md`
@@ -26,9 +30,9 @@ older TypeScript/Ink proof of concept described by these documents:
 Those documents describe useful prior exploration, but some paths and claims
 are stale. Current source code is authoritative.
 
-The current CLI has no JavaScript Module Federation plugin loader. Its dynamic
-behavior comes from gRPC reflection and dynamically constructed protobuf
-messages for addon-provided resource services. OME-306 proposes moving this
+The historical CLI had no JavaScript Module Federation plugin loader. Its
+dynamic behavior came from gRPC reflection and dynamically constructed
+protobuf messages for addon-provided resource services. OME-306 moved this
 client to TypeScript so it can share client and plugin infrastructure with the
 Web UI.
 

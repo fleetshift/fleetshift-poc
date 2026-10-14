@@ -11,7 +11,7 @@
     "@fleetshift/common": "*",
     "@orama/orama": "^3.1.18",
     "@patternfly/react-charts": "^8.5.1",
-    "@patternfly/react-code-editor": "^6.5.1",
+    "@patternfly/react-code-editor": "^6.6.1",
     "@patternfly/react-component-groups": "^6.5.0",
     "@patternfly/react-core": "^6.5.1",
     "@patternfly/react-data-view": "^6.6.0-prerelease.1",
@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "@fleetshift/build-utils": "*",
-    "@module-federation/enhanced": "^2.8.1",
+    "@module-federation/enhanced": "^2.9.0",
     "@openshift/dynamic-plugin-sdk": "^9.1.0",
     "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",
     "@rspack/cli": "^2.0.8",

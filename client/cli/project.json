@@ -1,0 +1,37 @@
+{
+  "name": "cli",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "client/cli/src",
+  "projectType": "application",
+  "tags": ["lang:typescript", "scope:cli"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/bin", "{workspaceRoot}/bin/fleetctl"],
+      "inputs": [
+        "{projectRoot}/src/**/*",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/rspack.config.ts"
+      ],
+      "options": {
+        "command": "NODE_ENV=production rspack --config rspack.config.ts && chmod +x bin/fleetctl && mkdir -p ../../bin && ln -sfn ../client/cli/bin/fleetctl ../../bin/fleetctl",
+        "cwd": "client/cli"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/vitest.config.ts"],
+      "options": {
+        "command": "vitest run --config vitest.config.ts",
+        "cwd": "client/cli"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint \"client/cli/src/**/*.{ts,tsx}\"",
+        "cwd": "."
+      }
+    }
+  }
+}
