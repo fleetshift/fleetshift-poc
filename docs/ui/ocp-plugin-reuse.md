@@ -1,6 +1,6 @@
 # OpenShift Console Plugin Re-use
 
-Re-using existing OpenShift console plugins in FleetShift is a priority. These plugins already contain mature, production-tested UI for cluster capabilities (monitoring, networking, storage, etc.) and rewriting them from scratch would be wasteful.
+Re-using existing OpenShift console plugins in FleetShift is an optional integration under the common capability model. These plugins already contain mature, production-tested UI for cluster capabilities (monitoring, networking, storage, etc.) and rewriting them from scratch would be wasteful.
 
 ## The Problem
 

@@ -134,7 +134,7 @@ How indexing integrates with addon registration, producers, and server compositi
 - **Connect** registers the delivery agent and the inventory-only schema for `kubernetes.fleetshift.io/Object`. Indexing lifecycle is not part of Connect
 - **Indexing runtime** is composed in server wiring, not the addon manager. It builds Kubernetes clients, runs discovery readiness, then hosts one indexer per target
 - **Ensure / stop** are the lifecycle operations. Ensure is generation-fenced and fingerprint-aware (API server, CA, credential identity, index-config digest). Stop is idempotent and does **not** delete inventory
-- **Producers** (Kind, GCP HCP) ensure an indexer before reporting delivery success (with a local retry envelope) and stop it at cluster teardown. Kubernetes delivery itself does not require a running indexer
+- **Producers** (Kind) ensure an indexer before reporting delivery success (with a local retry envelope) and stop it at cluster teardown. Kubernetes delivery itself does not require a running indexer
 - **Startup replay**: after Connect, a one-shot pass lists persisted kubernetes targets with resolvable credentials and ensures indexers. It does not poll afterward
 - **Unexpected-exit restart**: vault-backed local restart (bounded attempts) when a secret ref is present; raw credential bytes are not retained after start handoff
 - **Modularity boundary**: the inventory reporter is the seam between in-process and external agent models. Target-scoped indexed inventory cleanup after target deletion is currently deferred
@@ -153,7 +153,7 @@ flowchart TD
 
     replay["Startup replay\n(one-shot, after Connect)"]
 
-    subgraph producers["Producers (Kind / GCP HCP)"]
+    subgraph producers["Producers (Kind)"]
         ensure["Ensure indexer\nbefore Delivered"]
         stop["Stop indexer\nat teardown"]
     end

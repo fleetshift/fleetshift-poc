@@ -598,9 +598,9 @@ func TestDynamicHTTPMux_ReregisterAfterDeregister(t *testing.T) {
 
 func TestDynamicHTTPMux_KeyedByFullPrefix(t *testing.T) {
 	kindCfg := clusterConfig(t)
-	gcpCfg := clusterConfig(t)
-	gcpCfg.ResourceType = "gcphcp.fleetshift.io/Cluster"
-	gcpCfg.ProtoPackage = "gcphcp.fleetshift.v1"
+	secondaryCfg := clusterConfig(t)
+	secondaryCfg.ResourceType = "secondary.kind.fleetshift.io/Cluster"
+	secondaryCfg.ProtoPackage = "secondary.kind.fleetshift.v1"
 
 	validator, err := protovalidate.New()
 	if err != nil {
@@ -610,17 +610,17 @@ func TestDynamicHTTPMux_KeyedByFullPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build kind: %v", err)
 	}
-	gcpSvc, err := extensionresource.Build(gcpCfg, extensionresource.Deps{Validator: validator})
+	secondarySvc, err := extensionresource.Build(secondaryCfg, extensionresource.Deps{Validator: validator})
 	if err != nil {
-		t.Fatalf("Build gcp: %v", err)
+		t.Fatalf("Build secondary: %v", err)
 	}
 
 	httpMux := dynamicapi.NewDynamicHTTPMux(nil, dummyGRPCConn(t))
 	if err := registerHTTPService(httpMux, kindSvc); err != nil {
 		t.Fatalf("Register kind: %v", err)
 	}
-	if err := registerHTTPService(httpMux, gcpSvc); err != nil {
-		t.Fatalf("Register gcp should succeed (different canonical prefix): %v", err)
+	if err := registerHTTPService(httpMux, secondarySvc); err != nil {
+		t.Fatalf("Register secondary should succeed (different canonical prefix): %v", err)
 	}
 }
 

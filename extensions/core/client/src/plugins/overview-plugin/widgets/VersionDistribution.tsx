@@ -31,7 +31,7 @@ export default function VersionDistribution(_props: { widgetId: string }) {
         data={chartData}
         title={`${clusters.length}`}
         subTitle="clusters"
-        labels={({ datum }) => `OCP ${datum.x}: ${datum.y}`}
+        labels={({ datum }) => `${datum.x}: ${datum.y}`}
         legendData={legendData}
         legendOrientation="vertical"
         legendPosition="right"

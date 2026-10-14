@@ -5,7 +5,6 @@ import { fileURLToPath } from "url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const distDirs = [
   resolve(root, "extensions/core/client/dist"),
-  resolve(root, "extensions/gcphcp/client/dist"),
   resolve(root, "extensions/kind/client/dist"),
 ];
 const outputDir = process.argv[2] ? resolve(process.argv[2]) : distDirs[0];
@@ -16,7 +15,6 @@ const pluginMeta = [
   { name: "kind-plugin", key: "kind", label: "Kind", persona: "ops" },
   { name: "signing-plugin", key: "signing", label: "Signing Keys", persona: "ops" },
   { name: "routing-plugin", key: "routing", label: "Routing", persona: "ops" },
-  { name: "gcphcp-plugin", key: "gcphcp", label: "GCP HCP", persona: "ops" },
   { name: "setup-plugin", key: "setup", label: "Setup", persona: "ops" },
   { name: "overview-plugin", key: "overview", label: "Overview", persona: "ops" },
   { name: "configuration-plugin", key: "configuration", label: "Configuration", persona: "obs" },

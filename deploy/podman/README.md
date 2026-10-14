@@ -65,9 +65,6 @@ Point at an external issuer by setting `OIDC_ISSUER_URL` in `.env` (peer Dex
 then parks). Register `https://fleetshift-sandbox.localhost:8085`,
 `/app/auth/callback`, and `/app/silent-renew.html` on that IdP.
 
-AIO enables `gcphcp` from `GCPHCP_GATEWAY_URL` alone. Set it in `.env` when
-needed. Do not commit a concrete CLS gateway URL.
-
 ## Tasks
 
 All local deployment commands use Nx `pd:*` targets.

@@ -1,6 +1,6 @@
 # fleetshift-poc
 
-This repository represents both a **prototype** for a next generation k8s/OpenShift cluster management vision, alongside **individual POCs** for exploration of isolated concepts.
+This repository represents both a **prototype** for a next generation Kubernetes cluster management vision, alongside **individual POCs** for exploration of isolated concepts.
 
 ## Start here
 
@@ -45,25 +45,6 @@ podman run \
   quay.io/stolostron/fleetshift:latest
 ```
 
-### With GCP HCP
-
-Peer Dex cannot back this addon. Set an external issuer and the CLS gateway;
-packaging turns `gcphcp` on. Register
-`https://fleetshift-sandbox.localhost:8085`, `/app/auth/callback`, and
-`/app/silent-renew.html` on that IdP.
-
-```bash
-podman run \
-  -p 127.0.0.1:8085:8085 \
-  -p 127.0.0.1:50051:50051 \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
-  -e GCPHCP_GATEWAY_URL=https://your-cls-gateway \
-  quay.io/stolostron/fleetshift:latest
-```
-
-Add the kind flags from above when you also want local clusters (keep
-`OIDC_ISSUER_URL`).
-
 Build the image from this repo with `npx nx run image:aio`. Env defaults, Dex-off,
 fleetctl, and packaging internals:
 [deploy/aio/README.md](deploy/aio/README.md).
@@ -73,7 +54,7 @@ fleetctl, and packaging internals:
 | Path | What you launch | Guide |
 |------|-----------------|-------|
 | Local compose stack | All-in-one image via compose/Nx (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
-| Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
+| OpenShift example | Cluster deployment using Routes and ImageStreams | [deploy/kubernetes/](deploy/kubernetes/README.md) |
 | Keycloak (OpenShift) | External OIDC for cluster deploy or AIO compose (`OIDC_ISSUER_URL` in `.env`) | [deploy/keycloak/](deploy/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
 

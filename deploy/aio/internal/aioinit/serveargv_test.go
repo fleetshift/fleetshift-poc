@@ -31,6 +31,7 @@ func TestServeArgs_PeerDexDefaultsForbidSandboxFlags(t *testing.T) {
 		"--oidc-registry-subject-expression\x00claims.preferred_username",
 		"--oidc-ca-file\x00/data/sandbox/pki/ca.crt",
 		"--log-level\x00error",
+		"--addons\x00kind,kubernetes",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q in %v", want, args)
@@ -40,6 +41,13 @@ func TestServeArgs_PeerDexDefaultsForbidSandboxFlags(t *testing.T) {
 		if strings.Contains(joined, bad) {
 			t.Fatalf("forbidden flag %s present", bad)
 		}
+	}
+}
+
+func TestApplyServeDefaults_ExplicitAddonsWin(t *testing.T) {
+	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{Addons: "kubernetes,scripted"})
+	if in.Addons != "kubernetes,scripted" {
+		t.Fatalf("Addons = %q, want explicit addon selection", in.Addons)
 	}
 }
 

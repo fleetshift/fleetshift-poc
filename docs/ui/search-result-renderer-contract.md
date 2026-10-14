@@ -7,7 +7,7 @@
 
 ## Problem
 
-The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.fleetshift.io/Cluster`, `gcphcp.fleetshift.io/Cluster`) and a `name` in AIP-123 format (e.g., `//kind.fleetshift.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
+The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.fleetshift.io/Cluster`, `kubernetes.fleetshift.io/Object`) and a `name` in AIP-123 format (e.g., `//kind.fleetshift.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
 
 - Where each resource type links to (route)
 - What icon to show
@@ -144,18 +144,7 @@ export function resolveKindCluster(resource: InventoryResource): SearchResultRen
 }
 ```
 
-```typescript
-// rspack.config.ts — gcphcp-plugin extensions array
-createSearchResultRenderer({
-  id: "gcphcp-cluster-renderer",
-  label: "GCP HCP Cluster",
-  resourceType: "gcphcp.fleetshift.io/Cluster",
-  resolve: { $codeRef: "GcpHcpSearchResult.resolveGcpHcpCluster" },
-  icon: { $codeRef: "GcpHcpSearchResult.GcpHcpClusterIcon" },
-}),
-```
-
-Both addons route to `ClustersModule` in `core-plugin` — the clusters detail page handles all cluster types. An addon with its own detail page would reference its own scope/module instead.
+The Kind addon routes to `ClustersModule` in `core-plugin`. An addon with its own detail page would reference its own scope/module instead.
 
 ## Layer 2: Extension Discovery
 
@@ -383,7 +372,7 @@ The renderer map is keyed by `resourceType` directly — no encoding step. The `
 
 ### Category grouping
 
-All inventory results go under a single **"Resources"** group. The `label` from the renderer extension (e.g., "Kind Cluster", "GCP HCP Cluster") is not used for category splitting — too many small groups creates clutter when results are sparse. The label is available for future use (e.g., sub-headers within the Resources group).
+All inventory results go under a single **"Resources"** group. The `label` from the renderer extension (e.g., "Kind Cluster", "Kubernetes Object") is not used for category splitting — too many small groups creates clutter when results are sparse. The label is available for future use (e.g., sub-headers within the Resources group).
 
 ### `resolve` is synchronous
 
@@ -413,7 +402,6 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
 | `web/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
 | `extensions/kind/client/src/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
-| `extensions/gcphcp/client/src/GcpHcpSearchResult.tsx` | Plugin | `resolveGcpHcpCluster`, `GcpHcpClusterIcon` re-export |
 
 ### Modified
 
@@ -422,7 +410,7 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `build-utils/src/extensions/validate.ts` | Build | `case RENDER_SEARCH_TYPE` in validation switch |
 | `build-utils/src/extensions/index.ts` | Build | Re-export builder, type constant, types |
 | `common/src/index.ts` | Common | Re-export `SearchResultRender`, `InventoryResource`, `SearchResultResolve` |
-| `extensions/kind/client/rspack.config.ts`, `extensions/gcphcp/client/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` per plugin |
+| `extensions/kind/client/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` per plugin |
 | `web/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
 | `web/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
 

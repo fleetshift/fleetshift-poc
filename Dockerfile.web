@@ -20,8 +20,6 @@ COPY sdk/common/package.json sdk/common/project.json sdk/common/
 COPY sdk/build-utils/package.json sdk/build-utils/project.json sdk/build-utils/
 COPY client/web/package.json client/web/project.json client/web/
 COPY extensions/core/client/package.json extensions/core/client/project.json extensions/core/client/
-COPY extensions/gcphcp/client/package.json extensions/gcphcp/client/project.json extensions/gcphcp/client/
-COPY extensions/gcphcp/server/project.json extensions/gcphcp/server/
 COPY extensions/kind/client/package.json extensions/kind/client/project.json extensions/kind/client/
 COPY extensions/kind/server/project.json extensions/kind/server/
 # Non-UI project.json files needed for Nx project graph resolution.
@@ -36,7 +34,6 @@ COPY sdk/common/ sdk/common/
 COPY sdk/build-utils/ sdk/build-utils/
 COPY client/web/ client/web/
 COPY extensions/core/client/ extensions/core/client/
-COPY extensions/gcphcp/client/ extensions/gcphcp/client/
 COPY extensions/kind/client/ extensions/kind/client/
 COPY tools/merge-web.mjs tools/merge-web.mjs
 COPY tools/generate-plugin-registry.mjs tools/generate-plugin-registry.mjs
@@ -61,12 +58,11 @@ RUN --mount=type=cache,target=/root/.npm \
     -w @fleetshift/build-utils \
     -w @fleetshift/web \
     -w @fleetshift/mock-ui-plugins \
-    -w @fleetshift/gcphcp-plugin \
     -w @fleetshift/kind-plugin \
     && ulimit -n 65536 \
     && NX=./node_modules/.bin/nx \
     && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
-    && $NX run-many --target=build --projects=plugins,@fleetshift/gcphcp-plugin,@fleetshift/kind-plugin \
+    && $NX run-many --target=build --projects=plugins,@fleetshift/kind-plugin \
     && node tools/generate-plugin-registry.mjs \
     && $NX run web:build \
     && node tools/merge-web.mjs

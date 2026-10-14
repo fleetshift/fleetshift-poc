@@ -41,7 +41,7 @@ Read this when you need to understand how multiple extensions can model the same
 
 Today, a managed resource extends a common gRPC service under a single proto package (`fleetshift.v1`). There is no separation between a canonical resource identity and the extension that manages it. Once inventory reporting introduces multiple extensions that model some aspect of the same resource — read or write — this breaks down. Either resource paths collide, or the resource is named something else despite logically sharing a common identity.
 
-For example: a cluster may be provisioned by HyperShift, managed by ACS, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
+For example: a cluster may be provisioned by Kind, managed by ACS, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
 
 ### Solution: two layers
 
@@ -50,7 +50,7 @@ The platform introduces API separation at both the transport (HTTP and gRPC) and
 1. **Platform API layer** — defines the canonical resource hierarchy and identity. Resource types have a place in this hierarchy regardless of which extension defines them. At this layer, the representation is generic: it tracks relationships, aggregates metadata, and correlates aliases. It is mostly read-only (labels are user-writable).
 2. **Extension API layer** — implements resource functionality through typed, extension-specific schemas. Extensions can observe, manage (mapping to a fulfillment), or provide delivery connectivity. Each extension registers services in its own proto package, differentiated at the transport level.
 
-The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource. `//gcphcp.fleetshift.io/clusters/foo` and `//fleetshift.io/clusters/foo` refer to the same logical resource through different APIs.
+The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource. `//kind.fleetshift.io/clusters/foo` and `//fleetshift.io/clusters/foo` refer to the same logical resource through different APIs.
 
 ```mermaid
 graph TB
@@ -60,7 +60,7 @@ graph TB
     end
 
     subgraph extLayer ["Extension Representations"]
-        gcphcp["//gcphcp.fleetshift.io/clusters/foo"]
+        kind["//kind.fleetshift.io/clusters/foo"]
         k8s["//kubernetes.fleetshift.io/clusters/foo"]
         acs["//acs.fleetshift.io/clusters/foo"]
         hyperv["//hyperv.fleetshift.io/vms/bar"]
@@ -72,11 +72,11 @@ graph TB
         target["target"]
     end
 
-    platformCluster -->|representation| gcphcp
+    platformCluster -->|representation| kind
     platformCluster -->|representation| k8s
     platformCluster -->|representation| acs
-    gcphcp -.->|roles| managed
-    gcphcp -.->|roles| inventory
+    kind -.->|roles| managed
+    kind -.->|roles| inventory
     k8s -.->|roles| target
     k8s -.->|roles| inventory
     acs -.->|roles| inventory
@@ -141,7 +141,7 @@ The **service name** is the identifier used in full resource names. It is versio
 
 Examples:
 
-- `gcphcp.fleetshift.io` — first-party GCP HCP addon
+- `kind.fleetshift.io` — first-party Kind addon
 - `kubernetes.fleetshift.io` — first-party Kubernetes addon
 - `clusters.acme.com` — third-party addon
 
@@ -149,18 +149,18 @@ Examples:
 
 The **proto package** follows standard proto conventions and includes the version:
 
-- `gcphcp.fleetshift.v1`
+- `kind.fleetshift.v1`
 - `kubernetes.fleetshift.v1`
 - `acme.clusters.v1`
 
-gRPC service names follow proto conventions: `{proto_package}.{Singular}Service` (e.g., `gcphcp.fleetshift.v1.ClusterService`).
+gRPC service names follow proto conventions: `{proto_package}.{Singular}Service` (e.g., `kind.fleetshift.v1.ClusterService`).
 
 ### Full resource names (AIP-122)
 
 Full resource names use the versionless service name:
 
 ```
-//gcphcp.fleetshift.io/clusters/foo
+//kind.fleetshift.io/clusters/foo
 //kubernetes.fleetshift.io/clusters/foo
 //fleetshift.io/clusters/foo
 ```
@@ -172,7 +172,7 @@ The resource name (`clusters/foo`) is identity-equivalent across services when r
 URLs include the version per AIP-127 transcoding:
 
 ```
-/apis/gcphcp.fleetshift.io/v1/clusters/foo
+/apis/kind.fleetshift.io/v1/clusters/foo
 /apis/kubernetes.fleetshift.io/v1/clusters/foo
 /apis/fleetshift.io/v1/clusters/foo
 ```
@@ -193,7 +193,7 @@ The implementation's naming types mirror AIP-122 terminology:
 | ------------------ | ---------------------------------- | --------------------------------------------------------------------- |
 | `ResourceID`       | `foo`                              | Leaf segment identifier (rarely used in isolation)                    |
 | `ResourceName`     | `clusters/foo`                     | Collection-qualified resource name; the primary identity type         |
-| `FullResourceName` | `//gcphcp.fleetshift.io/clusters/foo` | Globally unique including service; used in attestation and cross-service references |
+| `FullResourceName` | `//kind.fleetshift.io/clusters/foo` | Globally unique including service; used in attestation and cross-service references |
 | `CollectionID`     | `clusters`                         | Single collection segment (rarely used in isolation)                  |
 | `CollectionName`   | `clusters`                         | Full path to a collection; generalizes to hierarchical names          |
 
@@ -267,7 +267,7 @@ For example, `//kubernetes.fleetshift.io/clusters/foo` might declare roles: `tar
 
 Example: platform resource `clusters/foo` has representations:
 
-- `//gcphcp.fleetshift.io/clusters/foo` — roles: `managed`, `inventory`
+- `//kind.fleetshift.io/clusters/foo` — roles: `managed`, `inventory`
 - `//kubernetes.fleetshift.io/clusters/foo` — roles: `target`, `inventory`
 - `//acs.fleetshift.io/clusters/foo` — roles: `inventory`
 
@@ -330,7 +330,7 @@ Multiple extension services coexist on one HTTP server. Since different proto pa
 
 Examples:
 
-- `/apis/gcphcp.fleetshift.io/v1/clusters/foo`
+- `/apis/kind.fleetshift.io/v1/clusters/foo`
 - `/apis/kubernetes.fleetshift.io/v1/clusters/foo`
 - `/apis/fleetshift.io/v1/clusters/foo`
 

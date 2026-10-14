@@ -31,7 +31,6 @@ func TestLoadServeConfig(t *testing.T) {
 		name    string
 		flags   serveFlags
 		sel     serveSelections
-		envGCP  string
 		want    bootstrap.Config
 		wantErr string
 	}{
@@ -88,23 +87,6 @@ func TestLoadServeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "resolves GCPHCP config from env",
-			flags: serveFlags{
-				grpcAddr: ":50051",
-				httpAddr: ":8080",
-				dbPath:   bootstrap.DefaultSQLitePath,
-				addons:   "gcphcp",
-			},
-			envGCP: "/env/gcphcp.yaml",
-			want: bootstrap.Config{
-				GRPCAddr:         ":50051",
-				HTTPAddr:         ":8080",
-				Database:         bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
-				Addons:           []bootstrap.AddonName{bootstrap.AddonGCPHCP},
-				GCPHCPConfigPath: "/env/gcphcp.yaml",
-			},
-		},
-		{
 			name: "unknown addon rejected before resource I/O",
 			flags: serveFlags{
 				grpcAddr: ":50051",
@@ -133,16 +115,6 @@ func TestLoadServeConfig(t *testing.T) {
 				oidcCAFile: writeTempFile(t, "bad.pem", []byte("not-pem")),
 			},
 			wantErr: "invalid OIDC CA data",
-		},
-		{
-			name: "gcphcp without config rejected",
-			flags: serveFlags{
-				grpcAddr: ":50051",
-				httpAddr: ":8080",
-				dbPath:   bootstrap.DefaultSQLitePath,
-				addons:   "gcphcp",
-			},
-			wantErr: "GCPHCP_CONFIG",
 		},
 		{
 			name: "explicit db conflicts with URL",
@@ -194,7 +166,6 @@ func TestLoadServeConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("GCPHCP_CONFIG", tt.envGCP)
 			flags := tt.flags
 			originalURL := flags.databaseURL
 			originalDB := flags.dbPath
@@ -291,7 +262,6 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 		got.OIDCRegistryID != want.OIDCRegistryID ||
 		got.OIDCRegistrySubjectExpression != want.OIDCRegistrySubjectExpression ||
 		got.OIDCPublicKeyClaimExpression != want.OIDCPublicKeyClaimExpression ||
-		got.GCPHCPConfigPath != want.GCPHCPConfigPath ||
 		string(got.OIDCCABundle) != string(want.OIDCCABundle) {
 		t.Fatalf("config mismatch:\n got: %#v\nwant: %#v", got, want)
 	}

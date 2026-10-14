@@ -7,7 +7,6 @@
     "sdk/common",
     "sdk/build-utils",
     "extensions/core/client",
-    "extensions/gcphcp/client",
     "extensions/kind/client"
   ],
   "devDependencies": {

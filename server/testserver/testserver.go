@@ -11,12 +11,10 @@ import (
 	"testing"
 	"time"
 
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 // stubVerifier returns a fixed test identity for any token.
@@ -65,9 +63,7 @@ func Start(t *testing.T) string {
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://test-issuer.example",
 		OIDCResourceAudience: "fleetshift",
-		// kind alone drives trust-bundle placement for provision-IdP;
-		// gcphcp is assembled via WithAddonAssembly without requiring a
-		// production gcphcp config file.
+		// Kind drives trust-bundle placement for provision-IdP.
 		Addons: "kind",
 	})
 	if err != nil {
@@ -100,17 +96,12 @@ func Start(t *testing.T) string {
 	return srv.Endpoints().GRPC.Dial
 }
 
-// testAddonAssembly preserves focused Kind/GCP HCP create/read semantics
+// testAddonAssembly preserves focused Kind create/read semantics
 // for sibling CLI tests.
 //
 // Kind omits DeliveryCapability so Connect.Agent may be nil: schemas/targets
 // stay live, resources remain CREATING, and delete does not wait on delivery.
-// GCP HCP keeps DeliveryCapability with a recording agent and no Reporter so
-// the target type is routable while deliveries stay incomplete.
-func testAddonAssembly(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
-	// No Reporter: deliveries stay incomplete so create/read tests observe CREATING.
-	recording := &sqlite.RecordingDeliveryService{Store: deps.Store}
-
+func testAddonAssembly(_ context.Context, _ bootstrap.AddonDeps) ([]bootstrap.AddonSpec, error) {
 	kindDesc := kindaddon.Descriptor()
 	kindDesc.Capabilities = []domain.Capability{
 		domain.ManagedResourceCapability{ResourceType: kindaddon.ClusterResourceType},
@@ -132,21 +123,6 @@ func testAddonAssembly(_ context.Context, deps bootstrap.AddonDeps) ([]bootstrap
 					},
 				})},
 				Schemas: []domain.ExtensionResourceSchema{kindaddon.Schema(), kindaddon.NodeSchema()},
-			},
-		},
-		{
-			Descriptor: gcphcpaddon.Descriptor(),
-			Connect: application.ConnectInput{
-				Agent: recording,
-				Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-					ID:   "gcphcp-test",
-					Type: gcphcpaddon.TargetType,
-					Name: "Test GCP HCP Provider",
-					AcceptedManifestTypes: []domain.ManifestType{
-						gcphcpaddon.ClusterManifestType,
-					},
-				})},
-				Schemas: []domain.ExtensionResourceSchema{gcphcpaddon.Schema("gcphcp-test")},
 			},
 		},
 	}, nil

@@ -116,7 +116,7 @@ func (p *Provider) Start(ctx context.Context, aware multicluster.Aware) error {
 		}
 	}
 
-	// Recover in-progress work, mirroring gcphcp.RecoverActiveDeliveries.
+	// Recover in-progress work through the delivery contract.
 	if err := p.recoverActive(ctx); err != nil {
 		p.logger.Error(err, "recover active deliveries")
 	}

@@ -3,9 +3,9 @@ import { createConnectionForm } from "../shared/GenericConnectionForm";
 import { createOnboardingCard } from "../shared/GenericOnboardingCard";
 
 export const VsphereOnboardingCard = createOnboardingCard({
-  title: "Connect to vSphere",
+  title: "vSphere connection demo",
   description:
-    "Link your VMware vSphere environment to deploy and manage clusters.",
+    "Explore vSphere connection setup. Demonstration only; no connection is created.",
   icon: VsphereIcon,
 });
 

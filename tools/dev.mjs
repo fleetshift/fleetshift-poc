@@ -9,7 +9,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wsRoot = root;
 const guiDist = resolve(root, "client/web/dist");
 const corePluginsDist = resolve(root, "extensions/core/client/dist");
-const gcphcpPluginsDist = resolve(root, "extensions/gcphcp/client/dist");
 const kindPluginsDist = resolve(root, "extensions/kind/client/dist");
 const watchOnly = process.argv.includes("--watch");
 
@@ -35,7 +34,6 @@ function merge() {
 if (!watchOnly) {
   console.log("Running initial build...");
   nx("plugins:build");
-  nx("@fleetshift/gcphcp-plugin:build");
   nx("@fleetshift/kind-plugin:build");
   nx("web:generate-registry");
   nx("web:build");
@@ -57,21 +55,18 @@ function spawnRspack(cwd) {
 }
 
 const corePluginsCwd = resolve(root, "extensions/core/client");
-const gcphcpPluginsCwd = resolve(root, "extensions/gcphcp/client");
 const kindPluginsCwd = resolve(root, "extensions/kind/client");
 const guiCwd = resolve(root, "client/web");
 
 let corePluginsWatch = spawnRspack(corePluginsCwd);
-let gcphcpPluginsWatch = spawnRspack(gcphcpPluginsCwd);
 let kindPluginsWatch = spawnRspack(kindPluginsCwd);
 let guiWatch = spawnRspack(guiCwd);
 
 const corePluginsConfig = resolve(corePluginsCwd, "rspack.config.ts");
-const gcphcpPluginsConfig = resolve(gcphcpPluginsCwd, "rspack.config.ts");
 const kindPluginsConfig = resolve(kindPluginsCwd, "rspack.config.ts");
 const guiConfig = resolve(guiCwd, "rspack.config.ts");
 const configWatcher = new Watchpack({ aggregateTimeout: 300 });
-configWatcher.watch({ files: [corePluginsConfig, gcphcpPluginsConfig, kindPluginsConfig, guiConfig] });
+configWatcher.watch({ files: [corePluginsConfig, kindPluginsConfig, guiConfig] });
 configWatcher.on("change", (changedFile) => {
   if (changedFile === corePluginsConfig) {
     console.log("\ncore plugins rspack.config.ts changed — restarting build...\n");
@@ -79,13 +74,6 @@ configWatcher.on("change", (changedFile) => {
     prev.kill();
     prev.on("close", () => {
       corePluginsWatch = spawnRspack(corePluginsCwd);
-    });
-  } else if (changedFile === gcphcpPluginsConfig) {
-    console.log("\ngcphcp plugins rspack.config.ts changed — restarting build...\n");
-    const prev = gcphcpPluginsWatch;
-    prev.kill();
-    prev.on("close", () => {
-      gcphcpPluginsWatch = spawnRspack(gcphcpPluginsCwd);
     });
   } else if (changedFile === kindPluginsConfig) {
     console.log("\nkind plugins rspack.config.ts changed — restarting build...\n");
@@ -106,15 +94,13 @@ configWatcher.on("change", (changedFile) => {
 
 mkdirSync(guiDist, { recursive: true });
 mkdirSync(corePluginsDist, { recursive: true });
-mkdirSync(gcphcpPluginsDist, { recursive: true });
 mkdirSync(kindPluginsDist, { recursive: true });
 const distWatcher = new Watchpack({ aggregateTimeout: 1500 });
-distWatcher.watch({ directories: [guiDist, corePluginsDist, gcphcpPluginsDist, kindPluginsDist] });
+distWatcher.watch({ directories: [guiDist, corePluginsDist, kindPluginsDist] });
 distWatcher.on("aggregated", merge);
 
 process.on("SIGINT", () => {
   corePluginsWatch.kill();
-  gcphcpPluginsWatch.kill();
   kindPluginsWatch.kill();
   guiWatch.kill();
   configWatcher.close();

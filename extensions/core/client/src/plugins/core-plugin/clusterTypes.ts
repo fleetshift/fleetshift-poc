@@ -4,7 +4,6 @@ export interface ClusterRow {
   result: ResourceResult<ClusterResource>;
   id: string;
   service: string;
-  nodePoolCount: number;
 }
 
 const STATE_LABELS: Record<
@@ -62,7 +61,6 @@ export function extractService(canonicalName: string): string {
 }
 
 const SERVICE_LABELS: Record<string, string> = {
-  "gcphcp.fleetshift.io": "GCP HCP",
   "kind.fleetshift.io": "Kind",
   "kubernetes.fleetshift.io": "Kubernetes",
 };

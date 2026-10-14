@@ -107,7 +107,7 @@ func newER(rt domain.ResourceType, name domain.ResourceName, fID domain.Fulfillm
 		domain.NewExtensionResourceUID(), rt, name, fixedTime,
 		domain.WithManagedState(fID),
 	)
-	r.RecordIntent(json.RawMessage(`{"provider":"rosa"}`), fixedTime)
+	r.RecordIntent(json.RawMessage(`{"provider":"kind"}`), fixedTime)
 	return r
 }
 
@@ -605,8 +605,8 @@ func runIntentTests(t *testing.T, factory Factory) {
 			t.Fatalf("GetIntent: %v", err)
 		}
 		assertEqual(t, "Version", got.Version, domain.IntentVersion(1))
-		if string(got.Spec) != `{"provider":"rosa"}` {
-			t.Errorf("Spec = %s, want {\"provider\":\"rosa\"}", got.Spec)
+		if string(got.Spec) != `{"provider":"kind"}` {
+			t.Errorf("Spec = %s, want {\"provider\":\"kind\"}", got.Spec)
 		}
 	})
 
@@ -676,7 +676,7 @@ func runViewTests(t *testing.T, factory Factory) {
 		if v.Intent == nil {
 			t.Fatal("Intent is nil, want non-nil")
 		}
-		if string(v.Intent.Spec) != `{"provider":"rosa"}` {
+		if string(v.Intent.Spec) != `{"provider":"kind"}` {
 			t.Errorf("Intent.Spec = %s", v.Intent.Spec)
 		}
 		if v.Fulfillment == nil {

@@ -36,12 +36,6 @@ export default {
       },
     },
     {
-      files: ["mock-ui-plugins/src/plugins/gcphcp-plugin/**/*.{scss,css}"],
-      rules: {
-        "selector-class-pattern": pluginPattern("ome-gcphcp-", "ome-gcphcp-wizard, ome-gcphcp-wizard__step"),
-      },
-    },
-    {
       files: ["mock-ui-plugins/src/plugins/day-one-plugin/**/*.{scss,css}"],
       rules: {
         "selector-class-pattern": pluginPattern("ome-day-one-", "ome-day-one-welcome, ome-day-one-welcome__card"),

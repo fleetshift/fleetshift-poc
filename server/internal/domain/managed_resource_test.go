@@ -21,9 +21,9 @@ func TestNewResourceType(t *testing.T) {
 		},
 		{
 			name:     "multi-segment service name",
-			service:  "gcphcp.fleetshift.io",
+			service:  "kind.fleetshift.io",
 			typeName: "Cluster",
-			want:     "gcphcp.fleetshift.io/Cluster",
+			want:     "kind.fleetshift.io/Cluster",
 		},
 		{
 			name:     "empty type name rejected",
@@ -76,9 +76,9 @@ func TestParseResourceType(t *testing.T) {
 			want:  "kind.fleetshift.io/Cluster",
 		},
 		{
-			name:  "valid gcphcp cluster",
-			input: "gcphcp.fleetshift.io/Cluster",
-			want:  "gcphcp.fleetshift.io/Cluster",
+			name:  "valid kind cluster",
+			input: "kind.fleetshift.io/Cluster",
+			want:  "kind.fleetshift.io/Cluster",
 		},
 		{
 			name:    "empty rejected",

@@ -5,8 +5,8 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
@@ -51,9 +51,9 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 	return descs.File
 }
 
-func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
+func buildScriptedFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 	t.Helper()
-	schema := gcphcpaddon.Schema("gcphcp-example")
+	schema := scripted.Schema()
 	spec, err := dynamicapi.CompileInline(
 		t.Context(),
 		schema.ProtoFiles,
@@ -71,7 +71,7 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType: gcphcpaddon.ClusterResourceType,
+		ResourceType: scripted.ResourceType,
 		ProtoPackage: schema.ProtoPackage,
 		Capabilities: extensionresource.ResourceCapabilities{
 			Management: &extensionresource.ManagementCapabilityConfig{
@@ -117,18 +117,18 @@ func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
 func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.T) {
 	reg := dynamicapi.NewDynamicFileRegistry()
 	kindFD := buildClusterFileDescriptor(t)
-	gcphcpFD := buildGCPHCPClusterFileDescriptor(t)
+	scriptedFD := buildScriptedFileDescriptor(t)
 
 	if err := reg.Register(kindFD); err != nil {
 		t.Fatalf("Register(kind): %v", err)
 	}
-	if err := reg.Register(gcphcpFD); err != nil {
-		t.Fatalf("Register(gcphcp): %v", err)
+	if err := reg.Register(scriptedFD); err != nil {
+		t.Fatalf("Register(scripted): %v", err)
 	}
 
 	for _, svcName := range []protoreflect.FullName{
 		"kind.fleetshift.v1.ClusterService",
-		"gcphcp.fleetshift.v1.ClusterService",
+		"addons.scripted.v1.ScriptedResourceService",
 	} {
 		desc, err := reg.FindDescriptorByName(svcName)
 		if err != nil {

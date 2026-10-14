@@ -69,7 +69,7 @@ func TestBuildSignedInputEnvelope_OmitsZeroGeneration(t *testing.T) {
 }
 
 func TestBuildManagedResourceEnvelope_Deterministic(t *testing.T) {
-	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
+	spec := json.RawMessage(`{"provider":"kind","version":"4.16.2"}`)
 
 	a, err := domain.BuildManagedResourceEnvelope("clusters", "prod-us-east-1", spec, testValidUntil, nil, 1)
 	if err != nil {

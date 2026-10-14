@@ -299,7 +299,6 @@ const crossTypePatterns = {
     { expression: 'resource.observation.extracted.phase == "Active"', description: "Find active Namespaces" },
     { expression: 'resource.observation.kind == "CustomResourceDefinition"', description: "Find all CRDs" },
     { expression: 'resourceType == "kind.fleetshift.io/Cluster"', description: "Find Kind clusters" },
-    { expression: 'resourceType == "gcphcp.fleetshift.io/Cluster"', description: "Find GCP HCP clusters" },
     { expression: 'name.startsWith("//kubernetes.fleetshift.io/clusters/")', description: "Find all K8s objects" },
   ],
 

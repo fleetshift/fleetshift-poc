@@ -13,9 +13,8 @@ const VirtualizationPage = () => {
     <PageSection>
       <Title headingLevel="h1">Virtualization</Title>
       <Content component="p">
-        Run and manage virtual machines alongside containers across your fleet.
-        Migrate workloads from legacy infrastructure with live migration and
-        snapshot support.
+        Demonstration of virtual machine management with KubeVirt. VM operations
+        are not implemented.
       </Content>
       <Button variant="secondary" isDanger onClick={handleUninstall}>
         Disable extension

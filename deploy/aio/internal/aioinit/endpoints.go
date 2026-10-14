@@ -1,5 +1,5 @@
 // Package aioinit holds FleetShift AIO packaging helpers: public origin and
-// listen addresses, sandbox PKI, peer Dex config, serve argv, GCP HCP intent,
+// listen addresses, sandbox PKI, peer Dex config, serve argv,
 // and kind networking.
 package aioinit
 

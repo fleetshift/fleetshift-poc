@@ -52,10 +52,9 @@ type ServeConfig struct {
 	WebDir             string
 	LogLevel           string
 	Addons             string
-	GCPHCPConfig       string
 }
 
-// ApplyServeDefaults fills packaging defaults for omitted AuthMethod/UI fields.
+// ApplyServeDefaults fills packaging defaults for omitted serve fields.
 // Omitted UIScope uses DefaultPeerDexUIScope when Issuer is PeerDexIssuer,
 // otherwise DefaultExternalIssuerUIScope. OIDC wire invariants (issuer URL, CA,
 // registry pairing) are enforced by fleetshift serve when the generated argv
@@ -80,6 +79,9 @@ func ApplyServeDefaults(in ServeConfig) ServeConfig {
 		if in.RegistryExpr == "" {
 			in.RegistryExpr = DefaultRegistrySubjectExpression
 		}
+	}
+	if in.Addons == "" {
+		in.Addons = "kind,kubernetes"
 	}
 	if in.DBPath == "" {
 		in.DBPath = defaultServeDB
@@ -148,9 +150,6 @@ func ServeArgs(in ServeConfig) []string {
 	}
 	if in.Addons != "" {
 		args = append(args, "--addons", in.Addons)
-	}
-	if in.GCPHCPConfig != "" {
-		args = append(args, "--gcphcp-config", in.GCPHCPConfig)
 	}
 	return args
 }

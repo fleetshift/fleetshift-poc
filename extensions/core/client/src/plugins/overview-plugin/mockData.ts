@@ -36,7 +36,7 @@ export const incidents: MockIncident[] = [
     blastRadius: "Single cluster, zero downtime",
     customerImpact: "0 users affected",
     duration: "Scheduled",
-    affectedClusters: ["ocp-aws-west2"],
+    affectedClusters: ["aws-us-west-2"],
   },
 ];
 

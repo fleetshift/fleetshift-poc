@@ -32,14 +32,12 @@ type AddonName string
 const (
 	AddonKind       AddonName = "kind"
 	AddonKubernetes AddonName = "kubernetes"
-	AddonGCPHCP     AddonName = "gcphcp"
 	AddonScripted   AddonName = "scripted"
 )
 
 var knownAddons = map[AddonName]struct{}{
 	AddonKind:       {},
 	AddonKubernetes: {},
-	AddonGCPHCP:     {},
 	AddonScripted:   {},
 }
 
@@ -120,7 +118,6 @@ type ConfigInput struct {
 	OIDCRegistrySubjectExpression string
 	OIDCPublicKeyClaimExpression  string
 	Addons                        string
-	GCPHCPConfigPath              string
 }
 
 // Config is the normalized typed production configuration accepted by
@@ -157,14 +154,11 @@ type Config struct {
 
 	// Addons is the enabled addon name list (order preserved, duplicates removed).
 	Addons []AddonName
-
-	// GCPHCPConfigPath is required when AddonGCPHCP is enabled.
-	GCPHCPConfigPath string
 }
 
 // NewConfig parses resolved edge input into a normalized Config. It performs
 // no I/O or resource acquisition. On success the returned Config satisfies
-// listen-address, database-selection, URL, CA, addon, and GCP path invariants.
+// listen-address, database-selection, URL, CA, and addon invariants.
 func NewConfig(in ConfigInput) (Config, error) {
 	if in.DatabaseURLFileSet && in.DatabaseURL != "" {
 		return Config{}, fmt.Errorf("--database-url-file and --database-url are mutually exclusive")
@@ -215,7 +209,6 @@ func NewConfig(in ConfigInput) (Config, error) {
 		OIDCRegistrySubjectExpression: strings.TrimSpace(in.OIDCRegistrySubjectExpression),
 		OIDCPublicKeyClaimExpression:  strings.TrimSpace(in.OIDCPublicKeyClaimExpression),
 		Addons:                        normalizeAddonList(in.Addons),
-		GCPHCPConfigPath:              in.GCPHCPConfigPath,
 	}
 	if err := cfg.checkInvariants(); err != nil {
 		return Config{}, err
@@ -284,17 +277,10 @@ func (c Config) checkInvariants() error {
 		return fmt.Errorf("oidc public-key claim expression and registry subject mapping are mutually exclusive")
 	}
 
-	gcphcpEnabled := false
 	for _, name := range c.Addons {
 		if _, ok := knownAddons[name]; !ok {
 			return fmt.Errorf("unknown addon %q", name)
 		}
-		if name == AddonGCPHCP {
-			gcphcpEnabled = true
-		}
-	}
-	if gcphcpEnabled && c.GCPHCPConfigPath == "" {
-		return fmt.Errorf("gcphcp addon is enabled but no config was provided; set --gcphcp-config or GCPHCP_CONFIG to a gcphcp.yaml path")
 	}
 
 	return nil

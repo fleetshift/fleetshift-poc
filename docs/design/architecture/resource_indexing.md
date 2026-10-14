@@ -122,7 +122,7 @@ Condition transitions are to be modeled as historical condition events, but that
 
 Resource identity for inventoried resources follows the two-layer API model defined in [resource_identity_and_api.md](resource_identity_and_api.md).
 
-Inventoried resources are extension resources in their addon's own package, with a corresponding platform resource for canonical identity. For example, when the ACS addon reports cluster status, it creates an extension resource at `//acs.fleetshift.io/clusters/foo` which links to the same platform identity as `//gcphcp.fleetshift.io/clusters/foo` or `//kubernetes.fleetshift.io/clusters/foo`.
+Inventoried resources are extension resources in their addon's own package, with a corresponding platform resource for canonical identity. For example, when the ACS addon reports cluster status, it creates an extension resource at `//acs.fleetshift.io/clusters/foo` which links to the same platform identity as `//kind.fleetshift.io/clusters/foo` or `//kubernetes.fleetshift.io/clusters/foo`.
 
 Identity correlation across extensions works through:
 

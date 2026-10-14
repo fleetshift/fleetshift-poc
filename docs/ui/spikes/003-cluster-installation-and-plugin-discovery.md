@@ -2,11 +2,11 @@
 
 **Jira**: FM-TBD (pending approval to create)
 **Epic**: SPIKE - User Interface (Web UI)
-**Status**: Done
+**Status**: Done (historical discovery exploration; distribution-specific integrations are optional)
 
 ## Problem
 
-When a user adds a cluster to FleetShift, the UI needs to figure out two things: how to connect to it, and what plugins are relevant for it. Different clusters have different things installed — one might have Prometheus, another might have cert-manager, a third might be a plain OpenShift with nothing extra. The UI needs to discover what is available and load the right plugins automatically, without the user having to manually configure what features to show.
+When a user adds a cluster to FleetShift, the UI needs to figure out two things: how to connect to it, and what plugins are relevant for it. Different clusters have different things installed — one might have Prometheus, another might have cert-manager, a third might be a plain Kubernetes cluster with nothing extra. The UI needs to discover what is available and load the right plugins automatically, without the user having to manually configure what features to show.
 
 On top of that, different Kubernetes distributions come with different built-in capabilities. OpenShift has Routes and ConsolePlugins. Vanilla Kubernetes does not. Some things like pods, nodes, and storage are always there regardless of distribution. The discovery system needs to handle all of this.
 
@@ -43,7 +43,7 @@ Some capabilities register as API groups without CRDs. The metrics-server is the
 
 #### OpenShift ConsolePlugins
 
-OpenShift has a purpose-built mechanism for this. Operators can register a `ConsolePlugin` custom resource (under `console.openshift.io/v1`) that declares a UI plugin — its name, which service serves its frontend assets, and what backend endpoints it proxies. This is the cleanest discovery path available because it was designed specifically for frontend plugin registration.
+OpenShift has a purpose-built mechanism for this. Operators can register a `ConsolePlugin` custom resource (under `console.openshift.io/v1`) that declares a UI plugin — its name, which service serves its frontend assets, and what backend endpoints it proxies. This optional discovery signal was designed specifically for frontend plugin registration.
 
 When we detect that a cluster is OpenShift, we list all ConsolePlugin resources and use them as an additional discovery signal.
 

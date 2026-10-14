@@ -1,5 +1,6 @@
 import {
   Button,
+  Content,
   PageSection,
   Split,
   SplitItem,
@@ -24,6 +25,7 @@ const SecurityPage = () => {
 
   return (
     <PageSection>
+      <Content component="p">Demonstration using sample data.</Content>
       <WelcomeModal />
       <Split className="pf-v6-u-mb-md">
         <SplitItem isFilled>

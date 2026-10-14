@@ -303,7 +303,7 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 		t.Fatalf("PlatformKeyForOwner = (%v, %v), want %v", ownerKey, ok, key)
 	}
 
-	created, err = r.AddPlatformOwner(key, "gcphcp.ClusterService", extensionresource.ActivePlatformRegistration{})
+	created, err = r.AddPlatformOwner(key, "secondary.kind.ClusterService", extensionresource.ActivePlatformRegistration{})
 	if err != nil {
 		t.Fatalf("AddPlatformOwner second: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 		t.Fatal("PlatformKeyForOwner after remove: still present")
 	}
 
-	dropped, last = r.RemovePlatformOwner(key, "gcphcp.ClusterService")
+	dropped, last = r.RemovePlatformOwner(key, "secondary.kind.ClusterService")
 	if !last {
 		t.Fatal("RemovePlatformOwner last owner: last=false, want true")
 	}

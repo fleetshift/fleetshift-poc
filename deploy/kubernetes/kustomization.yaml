@@ -20,9 +20,5 @@ secretGenerator:
     envs:
       - secrets.env
     type: Opaque
-  - name: gcphcp-config
-    files:
-      - gcphcp.yaml=gcphcp.yaml
-    type: Opaque
 generatorOptions:
   disableNameSuffixHash: true

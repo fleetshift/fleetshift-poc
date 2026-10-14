@@ -146,6 +146,28 @@ function deriveStatus(
   return "healthy";
 }
 
+export function toDashboardCluster(
+  c: ResourceResult<ClusterResource>,
+  enrichment: EnrichmentData,
+): DashboardCluster {
+  const id = extractClusterId(c.name);
+  return {
+    id,
+    name: id,
+    provider: "kind",
+    region: enrichment.region,
+    environment: enrichment.environment,
+    status: deriveStatus(c.resource),
+    version: "unknown",
+    state: c.resource.state ?? "unknown",
+    reconciling: c.resource.reconciling ?? false,
+    lat: enrichment.lat,
+    lng: enrichment.lng,
+    cpuPercent: enrichment.cpuPercent,
+    memoryPercent: enrichment.memoryPercent,
+  };
+}
+
 function mapClusters(
   raw: ResourceResult<ClusterResource>[],
 ): DashboardCluster[] {
@@ -153,21 +175,7 @@ function mapClusters(
   const clusters = raw.map((c): DashboardCluster => {
     const id = extractClusterId(c.name);
     const enrichment = getOrCreateEnrichment(store, id);
-    return {
-      id,
-      name: id,
-      provider: "gcp",
-      region: enrichment.region,
-      environment: enrichment.environment,
-      status: deriveStatus(c.resource),
-      version: c.resource.spec?.releaseVersion ?? "unknown",
-      state: c.resource.state ?? "unknown",
-      reconciling: c.resource.reconciling ?? false,
-      lat: enrichment.lat,
-      lng: enrichment.lng,
-      cpuPercent: enrichment.cpuPercent,
-      memoryPercent: enrichment.memoryPercent,
-    };
+    return toDashboardCluster(c, enrichment);
   });
   // prune stale entries
   const liveIds = new Set(clusters.map((c) => c.id));
@@ -188,8 +196,7 @@ export function useFleetData(): FleetData {
     async function load() {
       try {
         const raw = await clusterApi.searchAll({
-          filter:
-            'resourceType == "gcphcp.fleetshift.io/Cluster" || resourceType == "kind.fleetshift.io/Cluster"',
+          filter: 'resourceType == "kind.fleetshift.io/Cluster"',
         });
         if (!cancelled) {
           setClusters(mapClusters(raw));

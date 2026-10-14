@@ -34,7 +34,6 @@ func registerWorkflows(
 	oidcDeps OIDCDeps,
 	setupHub *transporthttp.SetupHub,
 	enabledAddons map[AddonName]bool,
-	gcphcpTargetID string,
 	keyResolver *domain.KeyResolver,
 	logger *slog.Logger,
 ) (registeredWorkflows, error) {
@@ -96,10 +95,10 @@ func registerWorkflows(
 		CreateDeployment: out.createWf,
 		EventSink:        setupHub,
 	}
-	if placement := buildTrustBundlePlacement(enabledAddons, gcphcpTargetID); placement.Type != "" {
+	if placement := buildTrustBundlePlacement(enabledAddons); placement.Type != "" {
 		provSpec.TrustBundlePlacement = placement
 	}
-	// Facade assemblies may enable kind/gcphcp without Config.Addons; trust
+	// Facade assemblies may enable Kind without Config.Addons; trust
 	// placement for those is handled when the facade sets Config.Addons to match.
 	provWf, err := reg.RegisterProvisionIdP(provSpec)
 	if err != nil {

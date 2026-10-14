@@ -26,11 +26,9 @@ function buildSummary(rows: ClusterRow[]): SummaryCard[] {
   const needsAttention = rows.filter((r) =>
     isFailureState(r.result.resource.state),
   ).length;
-  const totalNodePools = rows.reduce((sum, r) => sum + r.nodePoolCount, 0);
 
   return [
     { label: "Total Clusters", value: rows.length },
-    { label: "Total Node Pools", value: totalNodePools },
     {
       label: "Healthy",
       value: healthy,
@@ -53,7 +51,7 @@ export default function ClusterSummaryCards({ rows }: { rows: ClusterRow[] }) {
   return (
     <Grid hasGutter>
       {cards.map((card) => (
-        <GridItem key={card.label} span={3}>
+        <GridItem key={card.label} span={4}>
           <Card isPlain isCompact>
             <CardBody>
               <Content component="p">{card.label}</Content>

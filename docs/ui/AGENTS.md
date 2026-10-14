@@ -10,7 +10,6 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 - `client/web` (`@fleetshift/web`) — Shell SPA (routing, auth, search, layout). No business logic.
 - `extensions/core/client` (`@fleetshift/mock-ui-plugins`) — Core plugins under `src/plugins/<name>-plugin/`.
-- `extensions/gcphcp/client` (`@fleetshift/gcphcp-plugin`) — GCP HCP cluster provider plugin (separated from core).
 - `extensions/kind/client` (`@fleetshift/kind-plugin`) — Kind local cluster provider plugin (separated from core).
 - `sdk/common` (`@fleetshift/common`) — Shared types, utils, cross-plugin hooks. Dual CJS/ESM.
 - `sdk/build-utils` (`@fleetshift/build-utils`) — Rspack helpers (PF transforms, FleetshiftPlugin). No build step.
@@ -35,24 +34,13 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 - Unit tests for edge cases and bug candidates, not happy-path snapshots.
 - Tests next to code (`__tests__/` or `.test.ts`). Vitest + `@testing-library/react`.
-- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `client/web/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` and `extensions/gcphcp/client/src/__tests__/` for patterns.
+- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (routers). See `client/web/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` for patterns.
 - E2E in `e2e`, Playwright.
 
 ### Playwright CT notes
 
-- Components mounted via `mount()` must be **imported**, not defined in the test file. For components requiring wrappers (FormRenderer, providers), create harness components in a separate `harnesses.tsx` file.
+- Components mounted via `mount()` must be **imported**, not defined in the test file. For components requiring wrappers (providers), create harness components in a separate `harnesses.tsx` file.
 - Bootstrap files: `playwright/index.html` + `playwright/index.tsx` (imports PF CSS).
-- DDF CJS/ESM dual-import issue: deep imports (`@data-driven-forms/pf4-component-mapper/form-template`) resolve CJS by default. Alias them to ESM paths in `ctViteConfig.resolve.alias` and dedupe `react-form-renderer` + `react-final-form` to prevent `FormRenderer` duplicate declaration errors.
-
-## Data Driven Forms (DDF)
-
-Schema-driven forms using `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`. See `extensions/gcphcp/client/src/CreateGcpHcpWizard.tsx` for reference implementation.
-
-- **Custom components**: DDF's pf4-component-mapper components are PF4-era. For PF6 controls (FormSelect, etc.), create custom DDF components using `useFieldApi` from `react-form-renderer`. Register in `componentMapper` with a custom string key. See `ddfComponents/DdfFormSelect.tsx`.
-- **Wizard steps**: Use `nextStep: "step-name"` to chain steps (without it, DDF shows "Submit" instead of "Next"). The DDF wizard step template uses PF4 class `pf-c-form`. Override with `StepTemplate` using `<div className="pf-v6-c-form">` — not `<Form>` to avoid form-in-form since `FormTemplate` already wraps in `<form>`.
-- **Async validators**: Must **throw** error strings. `composeValidators` catches via `.catch(error => error)`. Sync validators return error strings.
-- **Reactive updates in custom components**: Each field component must register via `useFieldApi(props)`. `useFormApi().getState().values` is a snapshot that won't re-render. For read-only access to all values, use `FormSpy` with `subscription={{ values: true }}`.
-- **Wrapping existing components**: To progressively migrate, wrap existing step components as DDF fields. Use `useFieldApi` to bridge DDF form state to component props. See `ddfComponents/DdfNodePoolsStep.tsx` and `ddfComponents/DdfReviewStep.tsx`.
 
 ## Style
 
@@ -70,7 +58,6 @@ All CSS classes are scoped with a prefix to prevent collisions across MF boundar
 | Shell (web) | `ome-` | `ome-search`, `ome-search__menu`, `ome-search__menu--open` |
 | Core plugin | `ome-core-` | `ome-core-clusters`, `ome-core-clusters__toolbar` |
 | Overview plugin | `ome-overview-` | `ome-overview-dashboard`, `ome-overview-capacity__bar` |
-| GCP HCP plugin | `ome-gcphcp-` | `ome-gcphcp-wizard`, `ome-gcphcp-wizard__step` |
 | Day One plugin | `ome-day-one-` | `ome-day-one-welcome`, `ome-day-one-welcome__card` |
 | Signing plugin | `ome-signing-` | `ome-signing-keys`, `ome-signing-keys__form` |
 | Management plugin | `ome-mgmt-` | `ome-mgmt-targets`, `ome-mgmt-targets__row` |
@@ -107,7 +94,7 @@ import clsx from "clsx";
 ## Plugins
 
 - Registered as `DynamicRemotePlugin` in `rspack.config.ts`.
-- Core plugins: `extensions/core/client/src/plugins/<name>-plugin/`. Separated plugins (gcphcp, kind): `extensions/<name>/client/src/` with own `rspack.config.ts` and `package.json`.
+- Core plugins: `extensions/core/client/src/plugins/<name>-plugin/`. Separated plugins (Kind): `extensions/<name>/client/src/` with own `rspack.config.ts` and `package.json`.
 - Extensions declare UI capabilities; Go backend reads manifests for navigation.
 - Shared deps (react, PF, scalprum, oidc) are MF singletons. New shared dep → update `sharedModules`.
 - `ScalprumComponent` `module` must match `exposedModules` key exactly — no `./` prefix.

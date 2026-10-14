@@ -12,7 +12,7 @@ import (
 
 func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	store, _ := setupStore(t)
-	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
+	spec := json.RawMessage(`{"provider":"kind","version":"4.16.2"}`)
 	erUID := seedIntent(t, store, "test.fleetshift.io/Cluster", "resources/prod-us-east-1", spec)
 
 	s := &domain.ManagedResourceManifestStrategy{

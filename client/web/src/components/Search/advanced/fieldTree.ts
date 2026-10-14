@@ -56,7 +56,6 @@ function conditionNode(name: string): FieldNode {
 }
 
 const RESOURCE_TYPE_VALUES = [
-  "gcphcp.fleetshift.io/Cluster",
   "kind.fleetshift.io/Cluster",
   "kind.fleetshift.io/Node",
   "kubernetes.fleetshift.io/Object",
@@ -104,20 +103,6 @@ const NAMESPACE_VALUES = [
   "kube-public",
   "kube-system",
   "local-path-storage",
-  "openshift",
-  "openshift-authentication",
-  "openshift-cluster-version",
-  "openshift-config",
-  "openshift-config-managed",
-  "openshift-dns",
-  "openshift-etcd",
-  "openshift-infra",
-  "openshift-marketplace",
-  "openshift-monitoring",
-  "openshift-multus",
-  "openshift-network-operator",
-  "openshift-operators",
-  "openshift-ovn-kubernetes",
 ];
 
 const API_GROUP_VALUES = [
@@ -127,17 +112,12 @@ const API_GROUP_VALUES = [
   "apps",
   "batch",
   "certificates.k8s.io",
-  "config.openshift.io",
   "core",
   "flowcontrol.apiserver.k8s.io",
-  "image.openshift.io",
   "monitoring.coreos.com",
   "networking.k8s.io",
-  "operator.openshift.io",
   "rbac.authorization.k8s.io",
-  "security.openshift.io",
   "storage.k8s.io",
-  "template.openshift.io",
 ];
 
 export const FIELD_TREE: FieldNode[] = [

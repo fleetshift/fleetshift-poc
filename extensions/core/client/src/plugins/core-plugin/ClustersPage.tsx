@@ -66,15 +66,7 @@ interface ClusterFilters {
   name: string;
 }
 
-const columns: DataViewTh[] = [
-  "Name",
-  "Provider",
-  "Status",
-  "Version",
-  "Node Pools",
-  "Created",
-  "",
-];
+const columns: DataViewTh[] = ["Name", "Provider", "Status", "Created", ""];
 
 const PER_PAGE_OPTIONS = [
   { title: "10", value: 10 },
@@ -90,7 +82,6 @@ export default function ClustersPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ClusterRow | null>(null);
-  const [resuming, setResuming] = useState<string | null>(null);
   const [silentFailCount, setSilentFailCount] = useState(0);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -125,17 +116,13 @@ export default function ClustersPage() {
     if (!silent) setLoading(true);
     try {
       const results = await clusterApi.searchAll({
-        filter:
-          'resourceType == "gcphcp.fleetshift.io/Cluster" || resourceType == "kind.fleetshift.io/Cluster"',
+        filter: 'resourceType == "kind.fleetshift.io/Cluster"',
       });
       setRows(
         results.map((r) => ({
           result: r,
           id: extractClusterId(r.resource.name),
           service: extractService(r.name),
-          nodePoolCount: Array.isArray(r.resource.spec?.nodepools)
-            ? r.resource.spec.nodepools.length
-            : 0,
         })),
       );
       setError(null);
@@ -203,22 +190,6 @@ export default function ClustersPage() {
     }
   };
 
-  const handleResume = useCallback(
-    async (row: ClusterRow) => {
-      setResuming(row.id);
-      try {
-        const client = createApiClient(buildAddonBasePath(row.service));
-        await client.post(`/clusters/${row.id}:resume`);
-        await fetchClusters();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Resume failed");
-      } finally {
-        setResuming(null);
-      }
-    },
-    [fetchClusters],
-  );
-
   const pageRows: DataViewTr[] = useMemo(
     () =>
       filtered
@@ -228,10 +199,6 @@ export default function ClustersPage() {
           const sl = stateLabel(state, r.result.resource.state);
           const isDeleting = deleting === r.id;
           const isPaused = state === "PAUSED_AUTH";
-          const canResume =
-            r.service === "gcphcp.fleetshift.io" &&
-            (isPaused || state === "FAILED");
-          const isResuming = resuming === r.id;
           return [
             {
               cell: (
@@ -263,23 +230,12 @@ export default function ClustersPage() {
                 </Label>
               ),
             },
-            r.result.resource.spec?.releaseVersion || "—",
-            r.nodePoolCount,
             formatTime(r.result.resource.createTime),
             {
               cell:
                 state !== "DELETING" ? (
                   <ActionsColumn
                     items={[
-                      ...(canResume
-                        ? [
-                            {
-                              title: isResuming ? "Resuming..." : "Resume",
-                              onClick: () => handleResume(r),
-                              isDisabled: isResuming,
-                            },
-                          ]
-                        : []),
                       {
                         title: isDeleting ? "Deleting..." : "Delete",
                         onClick: () => setDeleteTarget(r),
@@ -292,7 +248,7 @@ export default function ClustersPage() {
             },
           ];
         }),
-    [filtered, page, perPage, deleting, resuming, handleResume],
+    [filtered, page, perPage, deleting],
   );
   const activeState = loading
     ? DataViewState.loading
@@ -360,7 +316,7 @@ export default function ClustersPage() {
         <div>
           <Title headingLevel="h1">Clusters</Title>
           <Content component="p">
-            Manage and monitor your OpenShift clusters
+            Manage and monitor your Kubernetes clusters
           </Content>
         </div>
       </StackItem>

@@ -17,22 +17,23 @@ export function createProviderWizard(config: ProviderWizardConfig) {
   return function ProviderWizard({ onClose }: ClusterProviderWizardProps) {
     return (
       <Wizard
-        title={`Create ${config.providerName} Cluster`}
+        title={`${config.providerName} cluster demo`}
         onClose={onClose}
         height={600}
       >
         <WizardStep name="Configuration" id="config">
           <EmptyState headingLevel="h2" titleText="Configuration">
             <EmptyStateBody>
-              {config.providerName} cluster configuration is coming soon.
+              This demonstrates {config.providerName} cluster configuration.
+              Provisioning is not implemented.
             </EmptyStateBody>
           </EmptyState>
         </WizardStep>
         <WizardStep name="Networking" id="networking">
           <EmptyState headingLevel="h2" titleText="Networking">
             <EmptyStateBody>
-              Network settings for {config.providerName} clusters will be
-              available in a future release.
+              Network settings for {config.providerName} clusters are shown as a
+              placeholder.
             </EmptyStateBody>
           </EmptyState>
         </WizardStep>
@@ -40,14 +41,14 @@ export function createProviderWizard(config: ProviderWizardConfig) {
           name="Review"
           id="review"
           footer={{
-            nextButtonText: "Create cluster",
+            nextButtonText: "Close demo",
             onNext: onClose,
           }}
         >
           <EmptyState headingLevel="h2" titleText="Review">
             <EmptyStateBody>
-              Review your {config.providerName} cluster settings before
-              creating.
+              This {config.providerName} demonstration does not create a
+              cluster.
             </EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>

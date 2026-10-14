@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { FIELD_TREE } from "../fieldTree";
+import { FIELD_TREE, getNodeAt } from "../fieldTree";
 import { validateFieldTree } from "../fieldTreeSchema";
 
 describe("fieldTree schema", () => {
+  it("suggests retained resource types and neutral namespace defaults", () => {
+    expect(getNodeAt("resourceType")?.enumValues).toEqual([
+      "kind.fleetshift.io/Cluster",
+      "kind.fleetshift.io/Node",
+      "kubernetes.fleetshift.io/Object",
+    ]);
+    expect(
+      getNodeAt("resource.observation.metadata.namespace")?.enumValues,
+    ).toEqual([
+      "default",
+      "kube-node-lease",
+      "kube-public",
+      "kube-system",
+      "local-path-storage",
+    ]);
+  });
+
   it("validates FIELD_TREE structure", () => {
     expect(() => validateFieldTree(FIELD_TREE)).not.toThrow();
   });

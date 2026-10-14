@@ -1,11 +1,11 @@
-# Kubernetes / OpenShift Deployment
+# OpenShift Deployment Example
 
-Deploy FleetShift to an OpenShift cluster using Kustomize manifests. Everything runs in the `fleetshift` namespace.
+Deploy FleetShift to an OpenShift cluster using Kustomize manifests. Everything runs in the `fleetshift` namespace. For local Kubernetes provisioning, use the [Podman/Kind quick start](../podman/README.md).
 
 ## What gets deployed
 
 - **PostgreSQL** — StatefulSet with PVC (5Gi), headless Service, file-based secret mounting (`_FILE` convention)
-- **FleetShift server** — Deployment with web UI init container, `--database-url-file` for credentials, env-driven addon selection, optional mounted `gcphcp.yaml`, and serve OIDC bootstrap flags that install the first AuthMethod when the store is empty
+- **FleetShift server** — Deployment with web UI init container, `--database-url-file` for credentials, the generic Kubernetes addon, and serve OIDC bootstrap flags that install the first AuthMethod when the store is empty
 - **Networking** — OpenShift Routes (edge TLS) for HTTP/UI and gRPC, Service with ports 8085 (http) and 50051 (grpc)
 - **ImageStreams** — Pull from quay.io with scheduled import and deployment triggers
 - **ConfigMap + Secret** — Generated from `.env` at deploy time via Kustomize generators
@@ -25,7 +25,7 @@ npx nx run k8s:status            # check pods, services, routes
 npx nx run k8s:teardown          # remove everything
 ```
 
-The deploy script generates `config.env`, `secrets.env`, and `gcphcp.yaml`
+The deploy script generates `config.env` and `secrets.env`
 from the root `.env`, applies Kustomize manifests, waits for PostgreSQL and the
 server, and imports images. On completion it prints the frontend and gRPC URLs.
 First-trust AuthMethod install is performed by `fleetshift serve` from the
@@ -35,41 +35,32 @@ local Fleetctl OIDC client config via issuer discovery.
 
 ## Tasks
 
-All tasks use the `kubernetes:` namespace (alias `k8:`).
+All tasks use the `k8s:*` Nx targets.
 
 | Task | Description |
 |------|-------------|
-| `kubernetes:deploy` | Deploy FleetShift (manifests and images) |
-| `kubernetes:teardown` | Remove all resources and namespace |
-| `kubernetes:status` | Show pods, services, routes; warn if image override is active |
-| `kubernetes:logs` | Tail logs from fleetshift-server (all containers) |
-| `kubernetes:logs:<pod>` | Tail logs from a specific pod (e.g. `kubernetes:logs:postgres-0`) |
-| `kubernetes:set-image TAG=<tag>` | Override the server image via ImageStream (e.g. PR testing) |
-| `kubernetes:reset-image` | Restore default `:latest` tag with scheduled import |
-| `kubernetes:import-images` | Force reimport of images from quay.io |
-| `kubernetes:register-redirect USER=<u> PASSWORD=<p>` | Register UI redirect URI in Keycloak |
+| `k8s:deploy` | Deploy FleetShift (manifests and images) |
+| `k8s:teardown` | Remove all resources and namespace |
+| `k8s:status` | Show pods, services, routes; warn if image override is active |
+| `k8s:logs` | Tail logs from fleetshift-server (all containers) |
+| `k8s:set-image TAG=<tag>` | Override the server image via ImageStream (e.g. PR testing) |
+| `k8s:reset-image` | Restore default `:latest` tag with scheduled import |
+| `k8s:import-images` | Force reimport of images from quay.io |
+| `k8s:register-redirect USER=<u> PASSWORD=<p>` | Register UI redirect URI in Keycloak |
 
 ## Configuration
 
-The deploy script reads the root `.env` and generates three files consumed by
+The deploy script reads the root `.env` and generates two files consumed by
 Kustomize generators. Values already exported in the process environment take
-precedence over `.env` (so `GCPHCP_GATEWAY_URL=... npx nx run k8s:deploy` wins).
+precedence over `.env` (so `OIDC_ISSUER_URL=... npx nx run k8s:deploy` wins).
 
 **`config.env`** (ConfigMap) — OIDC issuer URL, client IDs, audience, key
-enrollment settings, log level, resolved addon list, and optional
-`GCPHCP_CONFIG_PATH`.
+enrollment settings, log level, and the `kubernetes` addon selection.
 
 **`secrets.env`** (Secret) — PostgreSQL user, password, database name, and `DATABASE_URL`.
 
-**`gcphcp.yaml`** (Secret) — rendered from the `GCPHCP_*` values via the shared
-`deploy/scripts/render-gcphcp-config.sh`. When `GCPHCP_ENABLED=true`, only
-`GCPHCP_GATEWAY_URL` is required; the seven optional settings use renderer
-defaults when empty. The file is stored as a Kubernetes Secret rather than a
-ConfigMap. When `false`, the generated file is a disabled placeholder and the
-addon list stays `kubernetes`.
-
 Use the root `.env.template` for the authoritative input keys. The exact
-generated `config.env`, `secrets.env`, and `gcphcp.yaml` shapes are defined by
+generated `config.env` and `secrets.env` shapes are defined by
 `deploy/kubernetes/scripts/deploy.mjs`.
 
 ## Image Management

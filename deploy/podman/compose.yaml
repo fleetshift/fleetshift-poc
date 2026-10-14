@@ -11,7 +11,7 @@ x-fleetshift-aio: &fleetshift-aio
   privileged: true
   # s6 starts as root, then drops to fleetshift 1000 / dex 1001 / aio-proxy 1002.
   user: "0:0"
-  # aio-init reads OIDC_*, GCPHCP_*, FLEETSHIFT_* and ignores the rest.
+  # aio-init reads OIDC_* and FLEETSHIFT_* and ignores the rest.
   env_file:
     - ../../.env
   ports:

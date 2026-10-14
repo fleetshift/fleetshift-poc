@@ -145,8 +145,8 @@ describe("extractClusterId", () => {
 
 describe("extractService", () => {
   it("extracts service from canonical name", () => {
-    expect(extractService("//gcphcp.fleetshift.io/clusters/c1")).toBe(
-      "gcphcp.fleetshift.io",
+    expect(extractService("//kind.fleetshift.io/clusters/c1")).toBe(
+      "kind.fleetshift.io",
     );
   });
 
@@ -157,7 +157,7 @@ describe("extractService", () => {
 
 describe("serviceLabel", () => {
   it("maps known services", () => {
-    expect(serviceLabel("gcphcp.fleetshift.io")).toBe("GCP HCP");
+    expect(serviceLabel("kubernetes.fleetshift.io")).toBe("Kubernetes");
     expect(serviceLabel("kind.fleetshift.io")).toBe("Kind");
   });
 
@@ -167,9 +167,15 @@ describe("serviceLabel", () => {
 });
 
 describe("buildAddonBasePath", () => {
+  it("rejects the omitted provider service", () => {
+    expect(() => buildAddonBasePath("gcphcp.fleetshift.io")).toThrow(
+      "Unsupported cluster service",
+    );
+  });
+
   it("builds path for known services", () => {
-    expect(buildAddonBasePath("gcphcp.fleetshift.io")).toBe(
-      "/apis/gcphcp.fleetshift.io/v1",
+    expect(buildAddonBasePath("kind.fleetshift.io")).toBe(
+      "/apis/kind.fleetshift.io/v1",
     );
   });
 

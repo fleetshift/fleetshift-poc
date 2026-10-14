@@ -65,8 +65,7 @@ import {
 
 const clusterApi = createResourceApi<ClusterResource>("-");
 
-const CLUSTER_TYPE_FILTER =
-  'resourceType == "gcphcp.fleetshift.io/Cluster" || resourceType == "kind.fleetshift.io/Cluster"';
+const CLUSTER_TYPE_FILTER = 'resourceType == "kind.fleetshift.io/Cluster"';
 
 interface ResolvedTab {
   id: string;
@@ -95,14 +94,12 @@ function OverviewTab({
   const cluster = result.resource;
   const state = deriveClusterState(cluster);
   const sl = stateLabel(state, cluster.state);
-  const { spec } = cluster;
-  const isGcpHcp = service === "gcphcp.fleetshift.io";
   const isKind = service === "kind.fleetshift.io";
 
   return (
     <div className="ome-core-overview-layout">
       <Grid hasGutter>
-        <GridItem span={3}>
+        <GridItem span={4}>
           <Card isCompact isFullHeight>
             <CardBody>
               <Content component="p">Status</Content>
@@ -115,44 +112,22 @@ function OverviewTab({
             </CardBody>
           </Card>
         </GridItem>
-        <GridItem span={3}>
+        <GridItem span={4}>
           <Card isCompact isFullHeight>
             <CardBody>
-              <Content component="p">
-                {isGcpHcp ? "Node Pools" : "Provider"}
-              </Content>
+              <Content component="p">Provider</Content>
               <Title headingLevel="h2" size="2xl">
-                {isGcpHcp
-                  ? (spec?.nodepools?.length ?? 0)
-                  : isKind
-                    ? "Kind"
-                    : "—"}
+                {isKind ? "Kind" : "—"}
               </Title>
             </CardBody>
           </Card>
         </GridItem>
-        <GridItem span={3}>
+        <GridItem span={4}>
           <Card isCompact isFullHeight>
             <CardBody>
-              <Content component="p">Version</Content>
-              <Title headingLevel="h2" size="2xl">
-                {spec?.releaseVersion || "—"}
-              </Title>
-            </CardBody>
-          </Card>
-        </GridItem>
-        <GridItem span={3}>
-          <Card isCompact isFullHeight>
-            <CardBody>
-              <Content component="p">
-                {isGcpHcp ? "Endpoint Access" : "API Server"}
-              </Content>
+              <Content component="p">API Server</Content>
               <div className="pf-v6-u-mt-sm">
-                {isGcpHcp ? (
-                  <Label color="blue" isCompact>
-                    {spec?.endpointAccess || "—"}
-                  </Label>
-                ) : isKind ? (
+                {isKind ? (
                   <Label
                     color={
                       cluster.conditions?.APIServerAvailable?.status === "True"
@@ -202,51 +177,16 @@ function OverviewTab({
                     {formatTime(cluster.createTime)}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
-                {isGcpHcp && (
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Channel Group</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {spec?.channelGroup || "—"}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                )}
               </DescriptionList>
             </GridItem>
             <GridItem span={6}>
               <DescriptionList>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>Version</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    {spec?.releaseVersion || "—"}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
                 <DescriptionListGroup>
                   <DescriptionListTerm>Updated</DescriptionListTerm>
                   <DescriptionListDescription>
                     {formatTime(cluster.updateTime)}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
-                {isGcpHcp && spec?.endpointAccess && (
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Endpoint Access</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {spec.endpointAccess}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                )}
-                {isGcpHcp && spec?.nodepools && spec.nodepools.length > 0 && (
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Node Pools</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {spec.nodepools
-                        .map(
-                          (np) =>
-                            `${np.id} (${np.replicas}x ${np.instanceType})`,
-                        )
-                        .join(", ")}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                )}
               </DescriptionList>
             </GridItem>
           </Grid>
@@ -325,7 +265,6 @@ export default function ClusterDetailPage() {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isResuming, setIsResuming] = useState(false);
   const requestIdRef = useRef(0);
 
   const tabExtensionCandidates = useExtensions(isClusterDetailTabExtension);
@@ -404,8 +343,6 @@ export default function ClusterDetailPage() {
 
   const clusterName = useMemo(() => clusterId ?? "", [clusterId]);
 
-  const isGcpHcp = service === "gcphcp.fleetshift.io";
-  const canResume = isGcpHcp && (state === "PAUSED_AUTH" || state === "FAILED");
   const canDelete = state !== "DELETING";
 
   const handleDelete = async () => {
@@ -419,21 +356,6 @@ export default function ClusterDetailPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
       setIsDeleting(false);
-    }
-  };
-
-  const handleResume = async () => {
-    if (!clusterId || !service) return;
-    setIsResuming(true);
-    setActionsOpen(false);
-    try {
-      const client = createApiClient(buildAddonBasePath(service));
-      await client.post(`/clusters/${clusterId}:resume`);
-      await fetchCluster();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Resume failed");
-    } finally {
-      setIsResuming(false);
     }
   };
 
@@ -513,7 +435,7 @@ export default function ClusterDetailPage() {
                 ref={toggleRef}
                 onClick={() => setActionsOpen((prev) => !prev)}
                 variant="primary"
-                isDisabled={isDeleting || isResuming}
+                isDisabled={isDeleting}
               >
                 Actions
               </MenuToggle>
@@ -521,15 +443,6 @@ export default function ClusterDetailPage() {
             popperProps={{ position: "end" }}
           >
             <DropdownList>
-              {canResume && (
-                <DropdownItem
-                  key="resume"
-                  onClick={handleResume}
-                  isDisabled={isResuming}
-                >
-                  {isResuming ? "Resuming..." : "Resume cluster"}
-                </DropdownItem>
-              )}
               {canDelete && (
                 <DropdownItem
                   key="delete"

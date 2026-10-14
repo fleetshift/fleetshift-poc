@@ -54,8 +54,7 @@ const COLUMNS: GsColumnConfig[] = [
   {
     title: "Feature highlights",
     color: "purple",
-    description:
-      "Read about the latest Advanced Cluster Security capabilities and security workflows.",
+    description: "Explore security capabilities and workflows.",
     links: [
       {
         text: "Prioritize CVEs with EPSS and CVSS context",
@@ -76,9 +75,9 @@ const COLUMNS: GsColumnConfig[] = [
     description:
       "Extend security coverage with operators that integrate into your fleet management workflow.",
     links: [
-      { text: "Advanced Cluster Security Operator" },
-      { text: "Compliance Operator" },
-      { text: "Red Hat Quay vulnerability scanning" },
+      { text: "Image vulnerability scanning" },
+      { text: "Compliance reporting" },
+      { text: "Workload policy enforcement" },
     ],
     footerText: "Learn more about Operators",
   },

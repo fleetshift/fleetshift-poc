@@ -133,7 +133,7 @@ export function useInventorySearch(): {
       try {
         const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         const clusterFilter = [
-          `(resourceType == "gcphcp.fleetshift.io/Cluster" || resourceType == "kind.fleetshift.io/Cluster")`,
+          `(resourceType == "kind.fleetshift.io/Cluster")`,
           `&& (resource.name.startsWith("${escaped}") || resource.name.startsWith("clusters/${escaped}"))`,
         ].join(" ");
         const k8sFilter = [

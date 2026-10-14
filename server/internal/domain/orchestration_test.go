@@ -1349,29 +1349,29 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:      2,
-		ResolvedTargets: []domain.TargetID{"gcphcp-provider"},
+		ResolvedTargets: []domain.TargetID{"kind-provider"},
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{
-				ManifestType: "api.gcphcp.cluster",
+				ManifestType: "api.kind.cluster",
 				Raw:          json.RawMessage(`{"name":"guest-cluster"}`),
 			}},
 		},
 		PlacementStrategy: domain.PlacementStrategySpec{
 			Type:    domain.PlacementStrategyStatic,
-			Targets: []domain.TargetID{"gcphcp-provider"},
+			Targets: []domain.TargetID{"kind-provider"},
 		},
 		State: domain.FulfillmentStateDeleting,
 	})
-	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "gcphcp-provider", Name: "gcphcp-provider", Type: "gcphcp"}))
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "kind-provider", Name: "kind-provider", Type: "kind"}))
 
-	deliveryID := domain.DeliveryID("deployments/d1:gcphcp-provider")
+	deliveryID := domain.DeliveryID("deployments/d1:kind-provider")
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID:            deliveryID,
 		FulfillmentID: domain.FulfillmentID("deployments/d1"),
-		TargetID:      "gcphcp-provider",
+		TargetID:      "kind-provider",
 		Manifests: []domain.Manifest{{
-			ManifestType: "api.gcphcp.cluster",
+			ManifestType: "api.kind.cluster",
 			Raw:          json.RawMessage(`{"name":"guest-cluster"}`),
 		}},
 		State: domain.DeliveryStateDelivered,
@@ -1427,7 +1427,7 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 		t.Fatalf("Run: %v", err)
 	}
 
-	_ = getTarget(t, store, "gcphcp-provider")
+	_ = getTarget(t, store, "kind-provider")
 
 	readTx, err := store.BeginReadOnly(ctx)
 	if err != nil {
@@ -1472,29 +1472,29 @@ func TestOrchestration_DeletePipeline_MissingTargetRowForOwnedInventoryItem_Skip
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:      2,
-		ResolvedTargets: []domain.TargetID{"gcphcp-provider"},
+		ResolvedTargets: []domain.TargetID{"kind-provider"},
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{
-				ManifestType: "api.gcphcp.cluster",
+				ManifestType: "api.kind.cluster",
 				Raw:          json.RawMessage(`{"name":"guest-cluster"}`),
 			}},
 		},
 		PlacementStrategy: domain.PlacementStrategySpec{
 			Type:    domain.PlacementStrategyStatic,
-			Targets: []domain.TargetID{"gcphcp-provider"},
+			Targets: []domain.TargetID{"kind-provider"},
 		},
 		State: domain.FulfillmentStateDeleting,
 	})
-	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "gcphcp-provider", Name: "gcphcp-provider", Type: "gcphcp"}))
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "kind-provider", Name: "kind-provider", Type: "kind"}))
 
-	deliveryID := domain.DeliveryID("deployments/d1:gcphcp-provider")
+	deliveryID := domain.DeliveryID("deployments/d1:kind-provider")
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID:            deliveryID,
 		FulfillmentID: domain.FulfillmentID("deployments/d1"),
-		TargetID:      "gcphcp-provider",
+		TargetID:      "kind-provider",
 		Manifests: []domain.Manifest{{
-			ManifestType: "api.gcphcp.cluster",
+			ManifestType: "api.kind.cluster",
 			Raw:          json.RawMessage(`{"name":"guest-cluster"}`),
 		}},
 		State: domain.DeliveryStateDelivered,
@@ -1510,7 +1510,7 @@ func TestOrchestration_DeletePipeline_MissingTargetRowForOwnedInventoryItem_Skip
 	// inventory item's target row is already gone through some other path.
 	if err := tx.Inventory().Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
 		ID:               "target:ghost-target",
-		Type:             "gcphcp",
+		Type:             "kind",
 		Name:             "ghost",
 		SourceDeliveryID: &deliveryID,
 	})); err != nil {

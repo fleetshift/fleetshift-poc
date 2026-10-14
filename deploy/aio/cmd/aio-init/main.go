@@ -47,11 +47,6 @@ func run() error {
 	}
 	endpoints := aioinit.FixedEndpoints
 
-	gcp, err := aioinit.ResolveGCPHCP()
-	if err != nil {
-		return err
-	}
-
 	issuerEnv := strings.TrimSpace(os.Getenv("OIDC_ISSUER_URL"))
 	dexOn := issuerEnv == ""
 
@@ -70,8 +65,7 @@ func run() error {
 		RegistryExpr:       strings.TrimSpace(os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION")),
 		PublicKeyExpr:      strings.TrimSpace(os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION")),
 		LogLevel:           logLevel,
-		Addons:             gcp.Addons,
-		GCPHCPConfig:       gcp.GCPHCPConfig,
+		Addons:             strings.TrimSpace(os.Getenv("FLEETSHIFT_SERVER_ADDONS")),
 	}
 
 	sandboxPKI := aioinit.DefaultSandboxPKIPaths()

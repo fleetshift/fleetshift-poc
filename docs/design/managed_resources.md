@@ -6,9 +6,9 @@ How do we offer an extensible core, but allow addons to offer "managed resource"
 
 Example: imagine a full featured cluster management addon. It should handle many domain specific use cases:
 
-- Provision & configure managed clusters directly targeting managed provider APIs, likely with passthrough auth (e.g. ROSA or ARO clusters)
-- Provision & configure clusters through native self managed options (e.g. wrapping openshift assisted installer)
-- Provision & configure clusters through operators like CAPI or HyperShift
+- Provision & configure managed clusters directly targeting managed provider APIs, likely with passthrough auth (e.g. managed Kubernetes clusters)
+- Provision & configure clusters through native self managed options (e.g. bootstrapping nodes with kubeadm)
+- Provision & configure clusters through operators like CAPI
 - Import existing clusters
 - Upgrade these clusters (either individually or through a campaign, see [https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81](https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81) )
 - Full exploitation of the core placement and rollout strategy abstractions for progressive delivery, maintenance windows, etc., encoding specific cluster management best practices
@@ -35,7 +35,7 @@ These are the consumer-facing "nouns" of the platform, in contrast to the addon-
 
 Managed resources are driven by the core Fulfillment abstraction. A managed resource is a *registered resource type* (as in, a manifest resource type). An addon defines how Fulfillments are derived from managed resources. In a typical case, a managed resource maps to a single, immediate placement with the addon itself as the target.
 
-Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a ROSA cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1/clusters`, while the shared platform identity lives separately at `//fleetshift.io/clusters/{id}`.**)
+Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a managed Kubernetes cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1/clusters`, while the shared platform identity lives separately at `//fleetshift.io/clusters/{id}`.**)
 
 #### Consumer-facing managed resource
 
@@ -44,7 +44,7 @@ POST /apis/kind.fleetshift.io/v1/clusters
 {
   "name": "prod-us-east-1",
   "spec": {
-    "provider": "rosa",
+    "provider": "example",
     "version": "4.16.2",
     "region": "us-east-1",
     "compute_pools": [
@@ -81,7 +81,7 @@ The consumer's agent signs this request. The platform validates the spec against
     {
       "type": "Provisioning",
       "status": "True",
-      "message": "Creating ROSA cluster infrastructure"
+      "message": "Creating cluster infrastructure"
     }
   ],
   "create_time": "2026-04-21T14:30:00Z",
@@ -207,7 +207,7 @@ sequenceDiagram
     participant Pipeline as Orchestration Pipeline
     participant Fleetlet as Addon Fleetlet
     participant Addon as Cluster Mgmt Addon
-    participant Cloud as Cloud Provider (ROSA API)
+    participant Cloud as Cloud Provider API
 
     User->>User: Sign managed resource spec
     User->>Platform: POST /apis/kind.fleetshift.io/v1/clusters (signed)
@@ -224,7 +224,7 @@ sequenceDiagram
     Fleetlet->>Addon: Delivery channel
 
     Addon->>Addon: Interpret resource spec
-    Addon->>Cloud: Create ROSA HostedCluster,<br/>configure networking, KMS, etc.
+    Addon->>Cloud: Create cluster,<br/>configure networking, KMS, etc.
     Cloud-->>Addon: Cluster provisioning started
 
     Addon-->>Fleetlet: State: PROVISIONING
@@ -248,7 +248,7 @@ sequenceDiagram
 
 
 
-The key property: the platform is a courier throughout. It stores the user's signed intent, mechanically derives a Fulfillment, and delivers the resource spec to the addon through the standard pipeline. The addon — a separate process with its own identity — is the only component that interprets the spec and interacts with the cloud provider. Provenance chains from the user's signature through the managed resource to the derived Fulfillment to the delivery attestation, without the platform ever needing to understand what a "ROSA cluster" is.
+The key property: the platform is a courier throughout. It stores the user's signed intent, mechanically derives a Fulfillment, and delivers the resource spec to the addon through the standard pipeline. The addon — a separate process with its own identity — is the only component that interprets the spec and interacts with the cloud provider. Provenance chains from the user's signature through the managed resource to the derived Fulfillment to the delivery attestation, without the platform ever needing to understand what a "managed cluster" is.
 
 ### Architectural layering
 

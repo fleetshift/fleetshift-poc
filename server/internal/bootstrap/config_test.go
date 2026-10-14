@@ -95,23 +95,6 @@ func TestNewConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "gcphcp with config path",
-			in: bootstrap.ConfigInput{
-				GRPCAddr:         ":50051",
-				HTTPAddr:         ":8080",
-				DBPath:           bootstrap.DefaultSQLitePath,
-				Addons:           "gcphcp",
-				GCPHCPConfigPath: "/tmp/gcphcp.yaml",
-			},
-			want: bootstrap.Config{
-				GRPCAddr:         ":50051",
-				HTTPAddr:         ":8080",
-				Database:         bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
-				Addons:           []bootstrap.AddonName{bootstrap.AddonGCPHCP},
-				GCPHCPConfigPath: "/tmp/gcphcp.yaml",
-			},
-		},
-		{
 			name: "addon whitespace and duplicates normalized",
 			in: bootstrap.ConfigInput{
 				GRPCAddr: ":50051",
@@ -266,16 +249,6 @@ func TestNewConfig(t *testing.T) {
 				Addons:   "not-an-addon",
 			},
 			wantErr: `unknown addon "not-an-addon"`,
-		},
-		{
-			name: "gcphcp without config path",
-			in: bootstrap.ConfigInput{
-				GRPCAddr: ":50051",
-				HTTPAddr: ":8080",
-				DBPath:   bootstrap.DefaultSQLitePath,
-				Addons:   "gcphcp",
-			},
-			wantErr: "GCPHCP_CONFIG",
 		},
 		{
 			name: "invalid OIDC issuer",
@@ -475,19 +448,30 @@ func TestNewConfig(t *testing.T) {
 	}
 }
 
+func TestOmittedAddonRejected(t *testing.T) {
+	_, err := bootstrap.NewConfig(bootstrap.ConfigInput{
+		GRPCAddr: ":50051",
+		HTTPAddr: ":8080",
+		DBPath:   bootstrap.DefaultSQLitePath,
+		Addons:   "gcphcp",
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown addon "gcphcp"`) {
+		t.Fatalf("NewConfig() error = %v, want omitted addon rejection", err)
+	}
+}
+
 func TestConfigAddonSet(t *testing.T) {
 	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
-		GRPCAddr:         ":50051",
-		HTTPAddr:         ":8080",
-		DBPath:           bootstrap.DefaultSQLitePath,
-		Addons:           "kind,gcphcp",
-		GCPHCPConfigPath: "/tmp/gcphcp.yaml",
+		GRPCAddr: ":50051",
+		HTTPAddr: ":8080",
+		DBPath:   bootstrap.DefaultSQLitePath,
+		Addons:   "kind,scripted",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := cfg.AddonSet()
-	if !got[bootstrap.AddonKind] || !got[bootstrap.AddonGCPHCP] || got[bootstrap.AddonKubernetes] {
+	if !got[bootstrap.AddonKind] || !got[bootstrap.AddonScripted] || got[bootstrap.AddonKubernetes] {
 		t.Fatalf("AddonSet() = %#v", got)
 	}
 }
@@ -505,7 +489,6 @@ func assertConfigEqual(t *testing.T, got, want bootstrap.Config) {
 		got.OIDCRegistryID != want.OIDCRegistryID ||
 		got.OIDCRegistrySubjectExpression != want.OIDCRegistrySubjectExpression ||
 		got.OIDCPublicKeyClaimExpression != want.OIDCPublicKeyClaimExpression ||
-		got.GCPHCPConfigPath != want.GCPHCPConfigPath ||
 		string(got.OIDCCABundle) != string(want.OIDCCABundle) {
 		t.Fatalf("config mismatch:\n got: %#v\nwant: %#v", got, want)
 	}

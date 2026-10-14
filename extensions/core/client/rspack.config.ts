@@ -374,7 +374,7 @@ const ConfigurationPlugin = new FleetshiftPlugin({
       component: { $codeRef: "ConfigurationPage.default" },
       icon: { $codeRef: "ConfigurationIcon.default" },
       description:
-        "Deploy and manage applications across your OpenShift fleet using GitOps and Helm. Keep workloads consistent as you scale from a single cluster to many.",
+        "Demonstration of GitOps and Helm configuration across Kubernetes clusters. Deployment operations are not implemented.",
       keywords: ["configuration", "gitops", "helm", "deploy", "applications"],
     }),
   ],
@@ -406,7 +406,7 @@ const VirtualizationPlugin = new FleetshiftPlugin({
       component: { $codeRef: "VirtualizationPage.default" },
       icon: { $codeRef: "VirtualizationIcon.default" },
       description:
-        "Run and manage virtual machines alongside containers across your fleet with live migration and snapshot support.",
+        "Demonstration of virtual machine management with KubeVirt. VM operations are not implemented.",
       keywords: [
         "virtualization",
         "vm",
@@ -443,7 +443,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       id: "eks",
       label: "Amazon EKS",
       description:
-        "Create a managed Kubernetes cluster on Amazon Elastic Kubernetes Service.",
+        "Explore an Amazon EKS cluster wizard. Demonstration only; provisioning is not implemented.",
       keywords: ["eks", "aws", "amazon", "elastic kubernetes"],
       to: { search: "?create=eks" },
       icon: { $codeRef: "EksProvider.EksIcon" },
@@ -452,50 +452,10 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       searchIcon: { $codeRef: "EksIcon.default" },
     }),
     createClusterProvider({
-      id: "assisted-installer",
-      label: "Assisted Installer",
-      description:
-        "Create an OpenShift cluster on bare-metal or on-premise infrastructure using the Assisted Installer.",
-      keywords: ["assisted installer", "bare-metal", "on-premise", "openshift"],
-      to: { search: "?create=assisted-installer" },
-      icon: { $codeRef: "AssistedInstallerProvider.AssistedInstallerIcon" },
-      card: {
-        $codeRef: "AssistedInstallerProvider.AssistedInstallerProviderCard",
-      },
-      wizard: {
-        $codeRef: "AssistedInstallerProvider.AssistedInstallerWizard",
-      },
-      searchIcon: { $codeRef: "AssistedInstallerIcon.default" },
-    }),
-    createClusterProvider({
-      id: "aro",
-      label: "Azure Red Hat OpenShift",
-      description:
-        "Create a managed OpenShift cluster on Azure Red Hat OpenShift (ARO).",
-      keywords: ["aro", "azure", "openshift", "red hat"],
-      to: { search: "?create=aro" },
-      icon: { $codeRef: "AroProvider.AroIcon" },
-      card: { $codeRef: "AroProvider.AroProviderCard" },
-      wizard: { $codeRef: "AroProvider.AroWizard" },
-      searchIcon: { $codeRef: "AroIcon.default" },
-    }),
-    createClusterProvider({
-      id: "rosa",
-      label: "ROSA",
-      description:
-        "Create a Red Hat OpenShift Service on AWS (ROSA) managed cluster.",
-      keywords: ["rosa", "openshift", "red hat", "aws"],
-      to: { search: "?create=rosa" },
-      icon: { $codeRef: "RosaProvider.RosaIcon" },
-      card: { $codeRef: "RosaProvider.RosaProviderCard" },
-      wizard: { $codeRef: "RosaProvider.RosaWizard" },
-      searchIcon: { $codeRef: "RosaIcon.default" },
-    }),
-    createClusterProvider({
       id: "vsphere",
       label: "vSphere",
       description:
-        "Create an OpenShift cluster on VMware vSphere infrastructure.",
+        "Explore a Kubernetes cluster wizard for VMware vSphere. Demonstration only; provisioning is not implemented.",
       keywords: ["vsphere", "vmware", "on-premise", "datacenter"],
       to: { search: "?create=vsphere" },
       icon: { $codeRef: "VsphereProvider.VsphereIcon" },
@@ -508,51 +468,18 @@ const AddonDemoPlugin = new FleetshiftPlugin({
     createOnboardingAction({
       id: "eks-connect",
       label: "Amazon EKS",
-      description: "Link your AWS account to import and manage EKS clusters.",
+      description:
+        "Explore EKS connection setup. Demonstration only; no connection is created.",
       icon: { $codeRef: "EksIcon.default" },
       card: { $codeRef: "EksOnboarding.EksOnboardingCard" },
       form: { $codeRef: "EksOnboarding.EksOnboardingForm" },
       category: "fleetshift.cluster-provider",
     }),
     createOnboardingAction({
-      id: "assisted-installer-connect",
-      label: "Assisted Installer",
-      description:
-        "Link your infrastructure to deploy and manage bare-metal OpenShift clusters.",
-      icon: { $codeRef: "AssistedInstallerIcon.default" },
-      card: {
-        $codeRef: "AssistedInstallerOnboarding.AssistedInstallerOnboardingCard",
-      },
-      form: {
-        $codeRef: "AssistedInstallerOnboarding.AssistedInstallerOnboardingForm",
-      },
-      category: "fleetshift.cluster-provider",
-    }),
-    createOnboardingAction({
-      id: "aro-connect",
-      label: "Azure Red Hat OpenShift",
-      description:
-        "Link your Azure subscription to deploy and manage ARO clusters.",
-      icon: { $codeRef: "AroIcon.default" },
-      card: { $codeRef: "AroOnboarding.AroOnboardingCard" },
-      form: { $codeRef: "AroOnboarding.AroOnboardingForm" },
-      category: "fleetshift.cluster-provider",
-    }),
-    createOnboardingAction({
-      id: "rosa-connect",
-      label: "ROSA",
-      description:
-        "Link your Red Hat OpenShift on AWS account to manage ROSA clusters.",
-      icon: { $codeRef: "RosaIcon.default" },
-      card: { $codeRef: "RosaOnboarding.RosaOnboardingCard" },
-      form: { $codeRef: "RosaOnboarding.RosaOnboardingForm" },
-      category: "fleetshift.cluster-provider",
-    }),
-    createOnboardingAction({
       id: "vsphere-connect",
       label: "vSphere",
       description:
-        "Link your VMware vSphere environment to deploy and manage clusters.",
+        "Explore vSphere connection setup. Demonstration only; no connection is created.",
       icon: { $codeRef: "VsphereIcon.default" },
       card: { $codeRef: "VsphereOnboarding.VsphereOnboardingCard" },
       form: { $codeRef: "VsphereOnboarding.VsphereOnboardingForm" },
@@ -657,38 +584,15 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       EksProvider: p(
         "./src/plugins/addon-demo-plugin/providers/EksProvider.tsx",
       ),
-      AssistedInstallerProvider: p(
-        "./src/plugins/addon-demo-plugin/providers/AssistedInstallerProvider.tsx",
-      ),
-      AroProvider: p(
-        "./src/plugins/addon-demo-plugin/providers/AroProvider.tsx",
-      ),
-      RosaProvider: p(
-        "./src/plugins/addon-demo-plugin/providers/RosaProvider.tsx",
-      ),
       VsphereProvider: p(
         "./src/plugins/addon-demo-plugin/providers/VsphereProvider.tsx",
       ),
       // Provider icons
       EksIcon: p("./src/plugins/addon-demo-plugin/icons/EksIcon.tsx"),
-      AssistedInstallerIcon: p(
-        "./src/plugins/addon-demo-plugin/icons/AssistedInstallerIcon.tsx",
-      ),
-      AroIcon: p("./src/plugins/addon-demo-plugin/icons/AroIcon.tsx"),
-      RosaIcon: p("./src/plugins/addon-demo-plugin/icons/RosaIcon.tsx"),
       VsphereIcon: p("./src/plugins/addon-demo-plugin/icons/VsphereIcon.tsx"),
       // Provider onboarding
       EksOnboarding: p(
         "./src/plugins/addon-demo-plugin/providers/EksOnboarding.tsx",
-      ),
-      AssistedInstallerOnboarding: p(
-        "./src/plugins/addon-demo-plugin/providers/AssistedInstallerOnboarding.tsx",
-      ),
-      AroOnboarding: p(
-        "./src/plugins/addon-demo-plugin/providers/AroOnboarding.tsx",
-      ),
-      RosaOnboarding: p(
-        "./src/plugins/addon-demo-plugin/providers/RosaOnboarding.tsx",
       ),
       VsphereOnboarding: p(
         "./src/plugins/addon-demo-plugin/providers/VsphereOnboarding.tsx",

@@ -38,7 +38,6 @@ type serveFlags struct {
 	oidcRegistrySubjectExpression string
 	oidcPublicKeyClaimExpression  string
 	addons                        string
-	gcphcpConfig                  string
 }
 
 // newServeCmd builds the serve Cobra command and passes explicit --db selection
@@ -72,7 +71,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.oidcRegistrySubjectExpression, "oidc-registry-subject-expression", os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION"), "CEL expression mapping ID token claims to a registry subject")
 	cmd.Flags().StringVar(&f.oidcPublicKeyClaimExpression, "oidc-public-key-claim-expression", os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION"), "CEL expression extracting signer SPKI from ID token claims (mutually exclusive with registry mapping)")
 	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
-	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
 	return cmd
 }
 
@@ -209,12 +207,4 @@ func envOrDefault(key, fallback string) string {
 // remains authoritative over FLEETSHIFT_SERVER_ADDONS.
 func defaultAddons() string {
 	return envOrDefault("FLEETSHIFT_SERVER_ADDONS", "kind,kubernetes")
-}
-
-// resolveGCPHCPConfigPath returns flagPath when set; otherwise GCPHCP_CONFIG.
-func resolveGCPHCPConfigPath(flagPath string) string {
-	if flagPath != "" {
-		return flagPath
-	}
-	return os.Getenv("GCPHCP_CONFIG")
 }
