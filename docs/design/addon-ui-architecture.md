@@ -662,18 +662,18 @@ What addons *cannot* safely do:
 
 ## Pre-Installed Plugins
 
-Not every UI surface requires an addon backend. Products that ship with
-OpenShift or are installed independently (ACS/StackRox, Service Mesh,
-Serverless, etc.) install CRDs and expose data through the standard
-Kubernetes API. Their UI plugins can communicate with the cluster
-directly — the same way the classic OpenShift console plugin model works.
+Not every UI surface requires an addon backend. Independently installed
+software (e.g., security, service mesh, or serverless operators) can install
+CRDs and expose configuration through the standard Kubernetes API. Their
+UI plugins can communicate with the cluster directly — an approach also
+used by the classic OpenShift console plugin model.
 
 These **pre-installed plugins** sit between core plugins and full addons:
 
 | Type | Backend dependency | Data path | Example |
 |------|-------------------|-----------|---------|
 | **Core plugin** | None (core K8s APIs) | fleetlet → K8s API | Pods, Namespaces, Nodes |
-| **Pre-installed plugin** | None (pre-existing CRDs) | fleetlet → K8s API (custom resources) | ACS, Service Mesh, Serverless |
+| **Pre-installed plugin** | None (pre-existing CRDs) | fleetlet → K8s API (custom resources) | Security, service mesh, serverless |
 | **Addon plugin** | Addon backend (deployed by OME) | fleetlet → addon sidecar → OME | Custom monitoring, custom dashboards |
 
 ### From the UI, all plugins are the same
@@ -688,7 +688,7 @@ and CLI perspective, installation is identical for all plugin types:
 3. Scalprum loads and renders it
 
 The federated module itself knows how to obtain its data. It makes HTTP
-calls to whatever API it needs — core K8s, OpenShift CRDs, or an addon
+calls to whatever API it needs — core K8s, custom resources, or an addon
 aggregation endpoint. The shell does not know or care where the data comes
 from. This means there is no separate "install" vs "import" flow for the UI
 layer. Whether the backend was deployed by OME, pre-installed by an
@@ -703,7 +703,7 @@ graph TD
 
     subgraph Data["Data Sources (all HTTP)"]
         K8S["Core K8s API<br/><i>pods, namespaces</i>"]
-        CRD["OpenShift CRDs<br/><i>ACS, Service Mesh</i>"]
+        CRD["Custom Resource APIs<br/><i>security, service mesh</i>"]
         ADDON["Addon Backend<br/><i>fleet aggregation</i>"]
     end
 
@@ -727,14 +727,15 @@ knows exactly what exists — pre-installed plugins are set up by operators
 or product installers. OME needs to **discover** them.
 
 The catalog drives this. Each pre-installed plugin entry declares what to
-look for:
+look for. For example, an ACS/StackRox operator plugin could discover its
+[configuration resources](https://github.com/stackrox/stackrox/blob/master/operator/install/README.md):
 
 ```yaml
 name: acs-plugin
 type: pre-installed
 discovery:
   crds:
-    - stackrox.io/v1alpha1/CentralInstance
+    - platform.stackrox.io/v1alpha1/Central
     - platform.stackrox.io/v1alpha1/SecuredCluster
 ```
 
@@ -749,8 +750,8 @@ sequenceDiagram
     participant Fleetlet as Fleetlet (Cluster A)
 
     OME->>Fleetlet: "Check for these CRDs"
-    Fleetlet->>Fleetlet: kubectl get crd stackrox.io/...
-    Fleetlet-->>OME: "CRDs present: [CentralInstance, SecuredCluster]"
+    Fleetlet->>Fleetlet: kubectl get crd centrals.platform.stackrox.io securedclusters.platform.stackrox.io
+    Fleetlet-->>OME: "CRDs present: [Central, SecuredCluster]"
     OME->>OME: Mark "Cluster A has acs-plugin"
     OME-->>Catalog: Plugin visible for Cluster A
 ```
@@ -763,12 +764,12 @@ relevant CRDs, and is hidden when none do.
 ### The fleet aggregation boundary
 
 The single-cluster view works without any addon backend — the UI can query
-one cluster's K8s API for its ACS violations, Service Mesh configs, etc.,
-just like the classic OCP console does.
+one cluster's K8s API for its ACS operator configuration, service mesh
+configs, etc., just like the classic OCP console does.
 
 However, once OME manages multiple clusters with the same pre-installed plugin,
-a new need emerges: **fleet-wide aggregation**. Viewing all ACS violations
-across 50 clusters, comparing Service Mesh configurations across
+a new need emerges: **fleet-wide aggregation**. Viewing ACS operator configuration
+across 50 clusters, comparing service mesh configurations across
 environments, or rolling out a policy change fleet-wide — these operations
 cannot be served by querying one cluster at a time.
 

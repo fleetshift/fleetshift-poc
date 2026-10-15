@@ -243,7 +243,7 @@ model {
 
     managedResources = component 'Managed Resource Types' {
       description '''
-        Addon-registered, consumer-facing resource types: clusters, VMs, Argo instances.
+        Addon-registered, consumer-facing resource types: clusters, VMs, GitOps instances (e.g., Argo CD).
         The addon defines the schema, delivery target (self), and status projection.
         The platform mechanically derives a Fulfillment and delivers through the
         standard orchestration pipeline — same as any other deployment.

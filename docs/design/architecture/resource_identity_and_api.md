@@ -41,7 +41,7 @@ Read this when you need to understand how multiple extensions can model the same
 
 Today, a managed resource extends a common gRPC service under a single proto package (`fleetshift.v1`). There is no separation between a canonical resource identity and the extension that manages it. Once inventory reporting introduces multiple extensions that model some aspect of the same resource — read or write — this breaks down. Either resource paths collide, or the resource is named something else despite logically sharing a common identity.
 
-For example: a cluster may be provisioned by Kind, managed by ACS, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
+For example: a cluster may be provisioned by Kind, scanned by a security addon such as ACS, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
 
 ### Solution: two layers
 

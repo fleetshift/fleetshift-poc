@@ -15,12 +15,12 @@ Example: imagine a full featured cluster management addon. It should handle many
 - Assist in knowable operational issues in the course of provisioning, upgrades, or other configuration changes
 - Manage cluster pooling strategies
 - View the state of clusters and their underlying nodes (inventory)
-- Integration with other cluster-related addons, like ACS, MCOA, ODF, ...
+- Integration with other cluster-related addons for security, observability, or storage (e.g., ACS, MCOA, ODF)
 
 You could imagine similar domain specific experiences for other managed resource types:
 
 - VMs
-- Argo instances
+- GitOps instances (e.g., Argo CD)
 - Model serving
 - ...
 
