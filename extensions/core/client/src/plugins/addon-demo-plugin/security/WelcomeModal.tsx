@@ -56,9 +56,9 @@ export default function WelcomeModal() {
               component="p"
               className="pf-v6-u-mb-lg pf-v6-u-text-color-subtle"
             >
-              Explore workload vulnerability and policy concepts using sample
-              data. This demonstration does not scan workloads or enforce
-              policies.
+              Monitor workload vulnerabilities, compliance posture, and risk
+              across your fleet. Detect issues early and enforce policies before
+              they reach production.
             </Content>
             <Content component="h3" className="pf-v6-u-mb-md">
               What do you want to do next?

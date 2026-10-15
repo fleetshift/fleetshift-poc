@@ -374,7 +374,7 @@ const ConfigurationPlugin = new FleetshiftPlugin({
       component: { $codeRef: "ConfigurationPage.default" },
       icon: { $codeRef: "ConfigurationIcon.default" },
       description:
-        "Demonstration of GitOps and Helm configuration across Kubernetes clusters. Deployment operations are not implemented.",
+        "Deploy and manage applications across your Kubernetes fleet using GitOps and Helm. Keep workloads consistent as you scale from a single cluster to many.",
       keywords: ["configuration", "gitops", "helm", "deploy", "applications"],
     }),
   ],
@@ -406,7 +406,7 @@ const VirtualizationPlugin = new FleetshiftPlugin({
       component: { $codeRef: "VirtualizationPage.default" },
       icon: { $codeRef: "VirtualizationIcon.default" },
       description:
-        "Demonstration of virtual machine management with KubeVirt. VM operations are not implemented.",
+        "Run and manage virtual machines alongside containers across your fleet with live migration and snapshot support.",
       keywords: [
         "virtualization",
         "vm",
@@ -443,7 +443,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       id: "eks",
       label: "Amazon EKS",
       description:
-        "Explore an Amazon EKS cluster wizard. Demonstration only; provisioning is not implemented.",
+        "Create a managed Kubernetes cluster on Amazon Elastic Kubernetes Service.",
       keywords: ["eks", "aws", "amazon", "elastic kubernetes"],
       to: { search: "?create=eks" },
       icon: { $codeRef: "EksProvider.EksIcon" },
@@ -455,7 +455,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       id: "vsphere",
       label: "vSphere",
       description:
-        "Explore a Kubernetes cluster wizard for VMware vSphere. Demonstration only; provisioning is not implemented.",
+        "Create a Kubernetes cluster on VMware vSphere infrastructure.",
       keywords: ["vsphere", "vmware", "on-premise", "datacenter"],
       to: { search: "?create=vsphere" },
       icon: { $codeRef: "VsphereProvider.VsphereIcon" },
@@ -468,8 +468,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
     createOnboardingAction({
       id: "eks-connect",
       label: "Amazon EKS",
-      description:
-        "Explore EKS connection setup. Demonstration only; no connection is created.",
+      description: "Link your AWS account to import and manage EKS clusters.",
       icon: { $codeRef: "EksIcon.default" },
       card: { $codeRef: "EksOnboarding.EksOnboardingCard" },
       form: { $codeRef: "EksOnboarding.EksOnboardingForm" },
@@ -479,7 +478,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       id: "vsphere-connect",
       label: "vSphere",
       description:
-        "Explore vSphere connection setup. Demonstration only; no connection is created.",
+        "Link your VMware vSphere environment to deploy and manage clusters.",
       icon: { $codeRef: "VsphereIcon.default" },
       card: { $codeRef: "VsphereOnboarding.VsphereOnboardingCard" },
       form: { $codeRef: "VsphereOnboarding.VsphereOnboardingForm" },

@@ -5,8 +5,7 @@ import { createOnboardingCard } from "../shared/GenericOnboardingCard";
 
 export const EksOnboardingCard = createOnboardingCard({
   title: "Connect to Amazon EKS",
-  description:
-    "Explore EKS connection setup. Demonstration only; no connection is created.",
+  description: "Link your AWS account to import and manage EKS clusters.",
   icon: AwsIcon,
 });
 

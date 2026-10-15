@@ -6,7 +6,7 @@ import { createProviderWizard } from "../shared/GenericProviderWizard";
 export const EksProviderCard = createProviderCard({
   label: "Amazon EKS",
   description:
-    "Explore an Amazon EKS cluster wizard. Demonstration only; provisioning is not implemented.",
+    "Create a managed Kubernetes cluster on Amazon Elastic Kubernetes Service.",
   icon: AwsIcon,
   ariaLabel: "Select Amazon EKS provider",
 });

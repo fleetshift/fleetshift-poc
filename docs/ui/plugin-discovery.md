@@ -1,6 +1,6 @@
 # Plugin Discovery
 
-This document records an earlier discovery prototype. Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
+Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
 
 FleetShift dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
 

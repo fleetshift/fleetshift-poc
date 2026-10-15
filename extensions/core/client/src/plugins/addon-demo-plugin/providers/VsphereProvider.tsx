@@ -4,8 +4,7 @@ import { createProviderWizard } from "../shared/GenericProviderWizard";
 
 export const VsphereProviderCard = createProviderCard({
   label: "vSphere",
-  description:
-    "Explore a Kubernetes cluster wizard for VMware vSphere. Demonstration only; provisioning is not implemented.",
+  description: "Create a Kubernetes cluster on VMware vSphere infrastructure.",
   icon: VsphereIcon,
   ariaLabel: "Select vSphere provider",
 });

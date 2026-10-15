@@ -2,7 +2,7 @@
 
 **Jira**: FM-TBD (pending approval to create)
 **Epic**: SPIKE - User Interface (Web UI)
-**Status**: Done (historical discovery exploration; distribution-specific integrations are optional)
+**Status**: Done
 
 ## Problem
 
