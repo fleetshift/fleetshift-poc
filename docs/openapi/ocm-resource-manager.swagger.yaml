@@ -1,0 +1,876 @@
+swagger: "2.0"
+info:
+  title: ocm/resource_manager/v1alpha/manifest.proto
+  version: version not set
+tags:
+  - name: AuthMethodService
+    description: AuthMethodService manages authentication methods.
+  - name: DeploymentService
+    description: DeploymentService manages deployment resources.
+  - name: FleetletService
+    description: |-
+      FleetletService is the platform-side API that fleetlets connect to.
+      Authentication is per-fleetlet at the transport level; the platform
+      identifies the caller from gRPC metadata on stream creation.
+  - name: ResourceQueryService
+    description: |-
+      ResourceQueryService provides fleet-wide queries over managed
+      extension resources.
+  - name: SignerEnrollmentService
+    description: SignerEnrollmentService manages user signer enrollments.
+consumes:
+  - application/json
+produces:
+  - application/json
+paths:
+  /apis/resource-manager.open-cluster-management.io/v1alpha/{scope}:queryResources:
+    get:
+      summary: |-
+        QueryResources returns managed extension resources matching a CEL
+        filter within the given scope.
+      description: |-
+        In v0, scope must be `-` (whole platform). The returned resource
+        bodies match the dynamic managed-resource Get/List shape encoded as
+        google.protobuf.Struct (no labels/inventory fields).
+      operationId: ResourceQueryService_QueryResources
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaQueryResourcesResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: scope
+          description: |-
+            Required. Query scope. Format is a resource-hierarchy path segment
+            sequence. The only accepted value in v0 is `-` (whole platform
+            wildcard per AIP-159). Future increments may accept concrete
+            collection scopes without reshaping this field.
+          in: path
+          required: true
+          type: string
+          pattern: .+
+        - name: filter
+          description: |-
+            Optional CEL filter evaluated against the canonical ProtoJSON-shaped
+            query envelope and resource body. Empty matches all resources in scope.
+
+            This is a strict subset of CEL (the repository's documented subset),
+            not AIP-160 list-filter syntax. Message fields use their canonical
+            JSON names only (normally lowerCamelCase, or an explicit json_name).
+            Map and Struct keys are exact and case-sensitive. Filter input is
+            never case-normalized and has no proto-name/JSON-name aliases.
+            Copy field names from the JSON response; use brackets when an exact
+            map key is not a legal CEL selector.
+
+            Example: resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" &&
+            resource.spec.apiServerPort == "6443" &&
+            resource.labels["node-role.kubernetes.io/worker"] == ""
+
+            Note: order_by (below) is a separate non-CEL convention and may
+            still use resource_type,name spelling.
+          in: query
+          required: false
+          type: string
+        - name: pageSize
+          description: |-
+            The maximum number of resources to return. The service may return
+            fewer than this value. If unspecified, the server applies its
+            default page size. Values above the server maximum are clamped.
+          in: query
+          required: false
+          type: integer
+          format: int32
+        - name: pageToken
+          description: |-
+            A page token received from a previous QueryResources call. Provide
+            this to retrieve the subsequent page. Tokens are opaque and bound
+            to the filter and order_by used when they were issued; mismatched
+            arguments return INVALID_ARGUMENT.
+          in: query
+          required: false
+          type: string
+        - name: orderBy
+          description: |-
+            Optional ordering. Empty selects the server default stable order.
+            The only other supported value in v0 is `resource_type,name`.
+            Unsupported values return INVALID_ARGUMENT.
+          in: query
+          required: false
+          type: string
+      tags:
+        - ResourceQueryService
+  /v1alpha/authMethods:
+    post:
+      summary: CreateAuthMethod creates a new authentication method.
+      operationId: AuthMethodService_CreateAuthMethod
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaAuthMethod'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: authMethod
+          description: The auth method to create.
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/v1alphaAuthMethod'
+        - name: authMethodId
+          description: |-
+            The ID to use for the auth method, which becomes the final component
+            of the auth method's resource name.
+          in: query
+          required: true
+          type: string
+      tags:
+        - AuthMethodService
+  /v1alpha/deployments:
+    get:
+      summary: ListDeployments lists deployments.
+      operationId: DeploymentService_ListDeployments
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaListDeploymentsResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: pageSize
+          description: |-
+            The maximum number of deployments to return. The service may return
+            fewer than this value. If unspecified, at most 50 deployments are
+            returned.
+          in: query
+          required: false
+          type: integer
+          format: int32
+        - name: pageToken
+          description: |-
+            A page token received from a previous ListDeployments call. Provide
+            this to retrieve the subsequent page.
+          in: query
+          required: false
+          type: string
+      tags:
+        - DeploymentService
+    post:
+      summary: CreateDeployment creates a new deployment and begins orchestration.
+      operationId: DeploymentService_CreateDeployment
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaDeployment'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: deployment
+          description: The deployment to create.
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/v1alphaDeployment'
+        - name: deploymentId
+          description: |-
+            The ID to use for the deployment, which becomes the final component
+            of the deployment's resource name.
+
+            This value should be 4-63 characters, and valid characters
+            are /[a-z][0-9]-/.
+          in: query
+          required: true
+          type: string
+        - name: userSignature
+          description: |-
+            ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+            When set, the server reconstructs the envelope from the deployment
+            fields, verifies the signature, and attaches Provenance.
+          in: query
+          required: false
+          type: string
+          format: byte
+        - name: validUntil
+          description: |-
+            Client-supplied attestation expiry. The server uses this timestamp
+            to reconstruct the identical signed envelope (avoiding clock skew).
+          in: query
+          required: false
+          type: string
+          format: date-time
+      tags:
+        - DeploymentService
+  /v1alpha/signerEnrollments:
+    post:
+      summary: |-
+        CreateSignerEnrollment enrolls a signer by verifying the ID token
+        and deriving the registry subject via CEL claim mapping.
+      operationId: SignerEnrollmentService_CreateSignerEnrollment
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaSignerEnrollment'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: body
+          description: |-
+            Request message for
+            [SignerEnrollmentService.CreateSignerEnrollment][ocm.resource_manager.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
+
+            The caller provides a purpose-scoped ID token. The server verifies
+            the token, evaluates the configured CEL claim mapping to derive the
+            registry subject, and persists the enrollment.
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/v1alphaCreateSignerEnrollmentRequest'
+      tags:
+        - SignerEnrollmentService
+  /v1alpha/{name_1}:
+    get:
+      summary: GetDeployment retrieves a deployment by resource name.
+      operationId: DeploymentService_GetDeployment
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaDeployment'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: name_1
+          description: |-
+            The resource name of the deployment to retrieve.
+            Format: deployments/{deployment}
+          in: path
+          required: true
+          type: string
+          pattern: deployments/[^/]+
+      tags:
+        - DeploymentService
+  /v1alpha/{name}:
+    get:
+      summary: GetAuthMethod retrieves an authentication method by resource name.
+      operationId: AuthMethodService_GetAuthMethod
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaAuthMethod'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: name
+          description: |-
+            The resource name of the auth method to retrieve.
+            Format: authMethods/{auth_method}
+          in: path
+          required: true
+          type: string
+          pattern: authMethods/[^/]+
+      tags:
+        - AuthMethodService
+    delete:
+      summary: DeleteDeployment marks a deployment for deletion and begins teardown.
+      operationId: DeploymentService_DeleteDeployment
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaDeployment'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: name
+          description: |-
+            The resource name of the deployment to delete.
+            Format: deployments/{deployment}
+          in: path
+          required: true
+          type: string
+          pattern: deployments/[^/]+
+      tags:
+        - DeploymentService
+  /v1alpha/{name}:resume:
+    post:
+      summary: |-
+        ResumeDeployment resumes a deployment that is paused for authentication.
+        The caller's fresh Bearer token is captured and used for subsequent
+        deliveries. Any authorized user may resume; this gives approval-gate
+        semantics for free.
+      operationId: DeploymentService_ResumeDeployment
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1alphaDeployment'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: name
+          description: |-
+            The resource name of the deployment to resume.
+            Format: deployments/{deployment}
+          in: path
+          required: true
+          type: string
+          pattern: deployments/[^/]+
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/DeploymentServiceResumeDeploymentBody'
+      tags:
+        - DeploymentService
+definitions:
+  DeploymentServiceResumeDeploymentBody:
+    type: object
+    properties:
+      userSignature:
+        type: string
+        format: byte
+        description: |-
+          ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+          Required when the deployment has Provenance (re-signing).
+      validUntil:
+        type: string
+        format: date-time
+        description: Client-supplied attestation expiry for envelope reconstruction.
+      etag:
+        type: string
+        description: |-
+          Concurrency control token from the most recent GET. When non-empty,
+          the server verifies the resource has not been modified since the
+          client last observed it, failing with ABORTED if stale.
+      expectedGeneration:
+        type: string
+        format: int64
+        description: |-
+          The generation the client expects this mutation to produce
+          (current generation + 1). When user_signature is present the
+          server requires this field and signs it into provenance for
+          anti-replay verification by delivery agents. When absent and
+          unsigned, the server infers next-generation server-side.
+    description: |-
+      Request message for
+      [DeploymentService.ResumeDeployment][ocm.resource_manager.v1alpha.DeploymentService.ResumeDeployment].
+  protobufAny:
+    type: object
+    properties:
+      '@type':
+        type: string
+    additionalProperties: true
+  protobufNullValue:
+    type: string
+    enum:
+      - NULL_VALUE
+    default: NULL_VALUE
+    description: |-
+      Represents a JSON `null`.
+
+      `NullValue` is a sentinel, using an enum with only one value to represent
+      the null value for the `Value` type union.
+
+      A field of type `NullValue` with any value other than `0` is considered
+      invalid. Most ProtoJSON serializers will emit a Value with a `null_value` set
+      as a JSON `null` regardless of the integer value, and so will round trip to
+      a `0` value.
+
+       - NULL_VALUE: Null value.
+  rpcStatus:
+    type: object
+    properties:
+      code:
+        type: integer
+        format: int32
+      message:
+        type: string
+      details:
+        type: array
+        items:
+          type: object
+          $ref: '#/definitions/protobufAny'
+  v1alphaAuthMethod:
+    type: object
+    properties:
+      name:
+        type: string
+        title: 'Resource name. Format: authMethods/{auth_method}'
+      type:
+        $ref: '#/definitions/v1alphaAuthMethodType'
+        description: The type of authentication method.
+      oidcConfig:
+        $ref: '#/definitions/v1alphaOIDCConfig'
+        description: OIDC-specific configuration. Set when type is TYPE_OIDC.
+    description: AuthMethod is a configured authentication method.
+  v1alphaAuthMethodType:
+    type: string
+    enum:
+      - TYPE_UNSPECIFIED
+      - TYPE_OIDC
+    default: TYPE_UNSPECIFIED
+    description: |-
+      The type of authentication method.
+
+       - TYPE_UNSPECIFIED: Default value. Not used.
+       - TYPE_OIDC: OpenID Connect token-based authentication.
+  v1alphaCreateSignerEnrollmentRequest:
+    type: object
+    properties:
+      signerEnrollmentId:
+        type: string
+        description: |-
+          Client-assigned ID for the signer enrollment, which becomes
+          the final component of the resource name.
+      identityToken:
+        type: string
+        description: |-
+          Purpose-scoped ID token from the tenant IdP, obtained via a
+          dedicated OIDC client for signer enrollment.
+    description: |-
+      Request message for
+      [SignerEnrollmentService.CreateSignerEnrollment][ocm.resource_manager.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
+
+      The caller provides a purpose-scoped ID token. The server verifies
+      the token, evaluates the configured CEL claim mapping to derive the
+      registry subject, and persists the enrollment.
+    required:
+      - signerEnrollmentId
+      - identityToken
+  v1alphaDeployment:
+    type: object
+    properties:
+      name:
+        type: string
+        title: 'Resource name. Format: deployments/{deployment}'
+      uid:
+        type: string
+        description: System-assigned UUID.
+        readOnly: true
+      manifestStrategy:
+        $ref: '#/definitions/v1alphaManifestStrategy'
+        description: Strategy for generating manifests.
+      placementStrategy:
+        $ref: '#/definitions/v1alphaPlacementStrategy'
+        description: Strategy for selecting targets.
+      rolloutStrategy:
+        $ref: '#/definitions/v1alphaRolloutStrategy'
+        description: Strategy for pacing the rollout. If omitted, immediate rollout is used.
+      resolvedTargetIds:
+        type: array
+        items:
+          type: string
+        description: Target IDs resolved by placement.
+        readOnly: true
+      state:
+        $ref: '#/definitions/v1alphaDeploymentState'
+        description: Lifecycle state of the deployment.
+        readOnly: true
+      reconciling:
+        type: boolean
+        description: True while the resource is reconciling toward desired state.
+        readOnly: true
+      createTime:
+        type: string
+        format: date-time
+        description: When the deployment was created.
+        readOnly: true
+      updateTime:
+        type: string
+        format: date-time
+        description: When the deployment was last updated.
+        readOnly: true
+      etag:
+        type: string
+        description: |-
+          Weak domain-state concurrency token (AIP-154, RFC 9110 Section 8.8.1).
+          Changes whenever any API-visible state changes, not just on
+          generation-advancing mutations. Clients send this on mutation
+          requests to abort if the resource has been modified since their
+          last read.
+      provenance:
+        $ref: '#/definitions/v1alphaProvenance'
+        description: |-
+          Cryptographic proof that a user authorized this deployment.
+          Present when the deployment was created with a user signature.
+          Carries only proof material — content is in the strategy fields above.
+        readOnly: true
+      generation:
+        type: string
+        format: int64
+        description: |-
+          Monotonically increasing version counter. Increments exactly once
+          per generation-advancing mutation (create, resume, delete). Clients
+          supply generation + 1 as expected_generation when signing a resume
+          request; delivery agents verify this for anti-replay. Unlike etag,
+          generation only advances on logical mutations, not on reconciliation
+          state changes.
+        readOnly: true
+      pauseReason:
+        type: string
+        description: |-
+          Non-empty when reconciliation is paused (e.g. expired delivery
+          credentials). Contains the reason for the pause. The lifecycle
+          state is preserved independently.
+        readOnly: true
+    description: |-
+      Deployment is the composition of manifest, placement, and rollout strategies.
+
+      A declarative-friendly resource (AIP-128): the `state` and `reconciling`
+      fields communicate reconciliation progress to declarative clients.
+    required:
+      - manifestStrategy
+      - placementStrategy
+  v1alphaDeploymentState:
+    type: string
+    enum:
+      - STATE_UNSPECIFIED
+      - STATE_CREATING
+      - STATE_ACTIVE
+      - STATE_DELETING
+      - STATE_FAILED
+    default: STATE_UNSPECIFIED
+    description: |-
+      Lifecycle state of a deployment.
+
+       - STATE_UNSPECIFIED: Default value. Not used.
+       - STATE_CREATING: Orchestration is in progress.
+       - STATE_ACTIVE: Reconciled and operational.
+       - STATE_DELETING: Removal is in progress.
+       - STATE_FAILED: Orchestration failed permanently.
+  v1alphaFederatedIdentity:
+    type: object
+    properties:
+      subject:
+        type: string
+      issuer:
+        type: string
+    description: |-
+      FederatedIdentity unambiguously identifies a subject by pairing
+      the issuer-scoped subject ID with the issuer URL that vouches for it.
+  v1alphaListDeploymentsResponse:
+    type: object
+    properties:
+      deployments:
+        type: array
+        items:
+          type: object
+          $ref: '#/definitions/v1alphaDeployment'
+        description: The deployments.
+      nextPageToken:
+        type: string
+        description: A token for the next page. If empty, there are no more results.
+    description: |-
+      Response message for
+      [DeploymentService.ListDeployments][ocm.resource_manager.v1alpha.DeploymentService.ListDeployments].
+  v1alphaManifest:
+    type: object
+    properties:
+      manifestType:
+        type: string
+        description: Opaque dispatch label identifying the manifest kind (e.g. "api.kind.cluster").
+      raw:
+        type: string
+        format: byte
+        description: Opaque content of the manifest.
+    description: Manifest is an opaque declarative payload delivered to a target.
+    required:
+      - manifestType
+      - raw
+  v1alphaManifestStrategy:
+    type: object
+    properties:
+      type:
+        $ref: '#/definitions/v1alphaManifestStrategyType'
+        description: Type of manifest strategy.
+      manifests:
+        type: array
+        items:
+          type: object
+          $ref: '#/definitions/v1alphaManifest'
+        description: Manifests to deliver verbatim. Required when type is TYPE_INLINE.
+    description: ManifestStrategy specifies how manifests are generated.
+    required:
+      - type
+  v1alphaManifestStrategyType:
+    type: string
+    enum:
+      - TYPE_UNSPECIFIED
+      - TYPE_INLINE
+    default: TYPE_UNSPECIFIED
+    description: |-
+      Type of manifest strategy.
+
+       - TYPE_UNSPECIFIED: Default value. Not used.
+       - TYPE_INLINE: Deliver manifests verbatim from the spec.
+  v1alphaOIDCConfig:
+    type: object
+    properties:
+      issuerUrl:
+        type: string
+        description: The OIDC issuer URL (e.g. "https://accounts.google.com").
+      audience:
+        type: string
+        description: The expected audience claim in tokens.
+      authorizationEndpoint:
+        type: string
+        description: Server-resolved from OIDC discovery (output only).
+        readOnly: true
+      tokenEndpoint:
+        type: string
+        description: Server-resolved from OIDC discovery (output only).
+        readOnly: true
+      jwksUri:
+        type: string
+        description: Server-resolved from OIDC discovery (output only).
+        readOnly: true
+      keyEnrollmentAudience:
+        type: string
+        description: |-
+          Expected audience for signing key enrollment ID tokens. When set,
+          the server verifies that key binding bundles carry an ID token
+          with this audience, isolating enrollment tokens from platform
+          access tokens and managed cluster tokens.
+      publicKeyClaimExpression:
+        type: string
+        description: |-
+          CEL expression evaluated over ID token claims to extract the
+          signer's base64-encoded SPKI/PKIX public key (for OIDC key
+          registries). Example: "claims.signing_public_key".
+      registrySubjectMapping:
+        $ref: '#/definitions/v1alphaRegistrySubjectMapping'
+        description: |-
+          Maps ID token claims to a key registry subject. When set, the
+          delivery agent derives the registry subject from the signer's
+          identity token using this mapping.
+    description: OIDCConfig holds OIDC-specific configuration for an authentication method.
+  v1alphaOutputConstraint:
+    type: object
+    properties:
+      name:
+        type: string
+      expression:
+        type: string
+    description: |-
+      OutputConstraint is a CEL predicate the delivery output must satisfy.
+      Matches the hybrid PoC's OutputConstraint. Empty for Cap 7.
+  v1alphaPlacementStrategy:
+    type: object
+    properties:
+      type:
+        $ref: '#/definitions/v1alphaPlacementStrategyType'
+        description: Type of placement strategy.
+      targetIds:
+        type: array
+        items:
+          type: string
+        description: Target IDs for static placement. Used when type is TYPE_STATIC.
+      targetSelector:
+        $ref: '#/definitions/v1alphaTargetSelector'
+        description: Label selector for target matching. Used when type is TYPE_SELECTOR.
+    description: PlacementStrategy specifies how targets are selected.
+    required:
+      - type
+  v1alphaPlacementStrategyType:
+    type: string
+    enum:
+      - TYPE_UNSPECIFIED
+      - TYPE_STATIC
+      - TYPE_ALL
+      - TYPE_SELECTOR
+    default: TYPE_UNSPECIFIED
+    description: |-
+      Type of placement strategy.
+
+       - TYPE_UNSPECIFIED: Default value. Not used.
+       - TYPE_STATIC: Place on an explicit set of targets.
+       - TYPE_ALL: Place on all eligible targets.
+       - TYPE_SELECTOR: Place on targets matching a label selector.
+  v1alphaProvenance:
+    type: object
+    properties:
+      signature:
+        $ref: '#/definitions/v1alphaSignature'
+      validUntil:
+        type: string
+        format: date-time
+      expectedGeneration:
+        type: string
+        format: int64
+      outputConstraints:
+        type: array
+        items:
+          type: object
+          $ref: '#/definitions/v1alphaOutputConstraint'
+    description: |-
+      Provenance carries the cryptographic proof that a user authorized
+      a deployment. Does NOT carry deployment content or the full key
+      binding bundle — the issuer needed for delivery-time key binding
+      lookup is carried inside Signature.signer.
+  v1alphaQueryResourcesResponse:
+    type: object
+    properties:
+      resources:
+        type: array
+        items:
+          type: object
+          $ref: '#/definitions/v1alphaResourceResult'
+        description: The resources matching the query, in the applied order.
+      nextPageToken:
+        type: string
+        description: A token for the next page. If empty, there are no more results.
+    description: |-
+      Response message for
+      [ResourceQueryService.QueryResources][ocm.resource_manager.v1alpha.ResourceQueryService.QueryResources].
+  v1alphaRegistrySubjectMapping:
+    type: object
+    properties:
+      registryId:
+        type: string
+        description: Identifies the external key registry (e.g. "github.com").
+      expression:
+        type: string
+        description: |-
+          CEL expression evaluated over the token claims map. The input
+          variable is "claims" (map<string, dynamic>) and the result must
+          be a string. Example: "claims.preferred_username".
+    description: |-
+      RegistrySubjectMapping configures how an ID token's claims are mapped
+      to a key registry subject (e.g. a GitHub username). The CEL expression
+      is evaluated over the token's claims map and must produce a string.
+  v1alphaResourceResult:
+    type: object
+    properties:
+      name:
+        type: string
+        description: |-
+          Canonical full resource name.
+          Format: `//{service}/{collection}/{id}`.
+        readOnly: true
+      resourceType:
+        type: string
+        description: |-
+          Stable type identity.
+          Format: `{service}/{type}` (e.g. `kind.resource-manager.open-cluster-management.io/Cluster`).
+        readOnly: true
+      resource:
+        type: object
+        description: |-
+          Managed-resource Get/List body encoded as Struct. Field names follow
+          the dynamic managed-resource message (protojson casing). This is not
+          a typed AIP resource message; typed bodies are deferred.
+        readOnly: true
+    description: |-
+      ResourceResult is one row returned by
+      [ResourceQueryService.QueryResources][ocm.resource_manager.v1alpha.ResourceQueryService.QueryResources].
+  v1alphaRolloutStrategy:
+    type: object
+    properties:
+      type:
+        $ref: '#/definitions/v1alphaRolloutStrategyType'
+        description: Type of rollout strategy.
+    description: RolloutStrategy specifies how the rollout is paced.
+    required:
+      - type
+  v1alphaRolloutStrategyType:
+    type: string
+    enum:
+      - TYPE_UNSPECIFIED
+      - TYPE_IMMEDIATE
+    default: TYPE_UNSPECIFIED
+    description: |-
+      Type of rollout strategy.
+
+       - TYPE_UNSPECIFIED: Default value. Not used.
+       - TYPE_IMMEDIATE: Deliver to all targets simultaneously.
+  v1alphaSignature:
+    type: object
+    properties:
+      signer:
+        $ref: '#/definitions/v1alphaFederatedIdentity'
+      contentHash:
+        type: string
+        format: byte
+      signatureBytes:
+        type: string
+        format: byte
+    description: Signature is a detached signature over a canonical content hash.
+  v1alphaSignerEnrollment:
+    type: object
+    properties:
+      name:
+        type: string
+        title: 'Resource name. Format: signerEnrollments/{signer_enrollment}'
+      subject:
+        type: string
+        description: Subject identifier from the identity token (jwt.sub).
+        readOnly: true
+      issuer:
+        type: string
+        description: OIDC issuer URL from the identity token (jwt.iss).
+        readOnly: true
+      identityToken:
+        type: string
+        description: |-
+          Purpose-scoped ID token from the tenant IdP, included in the
+          enrollment for delivery agent verification.
+        readOnly: true
+      registrySubject:
+        type: string
+        description: |-
+          Registry subject derived from CEL claim mapping at enrollment time
+          (e.g. a GitHub username).
+        readOnly: true
+      registryId:
+        type: string
+        description: Which external key registry holds the user's signing keys.
+        readOnly: true
+      createTime:
+        type: string
+        format: date-time
+        description: When the enrollment was created.
+        readOnly: true
+      expireTime:
+        type: string
+        format: date-time
+        description: When the enrollment expires.
+        readOnly: true
+    description: |-
+      SignerEnrollment records that a user enrolled their signing identity
+      with the platform. The external key registry (identified by
+      registry_id) is the authority for the user's public keys.
+  v1alphaTargetSelector:
+    type: object
+    properties:
+      matchLabels:
+        type: object
+        additionalProperties:
+          type: string
+        description: Labels that must all match for a target to be selected.
+    description: TargetSelector selects targets by label matching.
+    required:
+      - matchLabels

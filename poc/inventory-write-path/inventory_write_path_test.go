@@ -98,11 +98,11 @@ func TestInventoryWritePathPlans(t *testing.T) {
 
 	t.Run("scenario_correctness_assertions", func(t *testing.T) {
 		assertCount(ctx, t, db, "delta patched labels",
-			`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.fleetshift.io' AND er.resource_id BETWEEN 'r-00003001' AND 'r-00004000' AND inv.labels @> '{"patched":"true"}'::jsonb`,
+			`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io' AND er.resource_id BETWEEN 'r-00003001' AND 'r-00004000' AND inv.labels @> '{"patched":"true"}'::jsonb`,
 			1_000,
 		)
 		assertCount(ctx, t, db, "replace changed observations",
-			`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.fleetshift.io' AND er.resource_id BETWEEN 'r-00004001' AND 'r-00005000' AND inv.observation @> '{"generation":2}'::jsonb`,
+			`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io' AND er.resource_id BETWEEN 'r-00004001' AND 'r-00005000' AND inv.observation @> '{"generation":2}'::jsonb`,
 			1_000,
 		)
 		assertCount(ctx, t, db, "new secondary alias claims",
@@ -131,7 +131,7 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
-		 WHERE er.service_name = 'bench.fleetshift.io'
+		 WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io'
 		   AND er.resource_id BETWEEN 'r-00067001' AND 'r-00068000'
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'source-id'
@@ -156,7 +156,7 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
-		 WHERE er.service_name = 'bench.fleetshift.io'
+		 WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io'
 		   AND er.resource_id BETWEEN 'r-00082001' AND 'r-00083000'
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'source-id'
@@ -168,7 +168,7 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
-		 WHERE er.service_name = 'bench-b.fleetshift.io'
+		 WHERE er.service_name = 'bench-b.resource-manager.open-cluster-management.io'
 		   AND er.resource_id BETWEEN 'r-00082001' AND 'r-00083000'
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'source-id'
@@ -179,7 +179,7 @@ func TestInventoryWritePathPlans(t *testing.T) {
 			`SELECT count(*)
 		 FROM extension_resource_inventory inv
 		 JOIN extension_resources er ON er.uid = inv.extension_resource_uid
-		 WHERE er.service_name = 'bench.fleetshift.io'
+		 WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io'
 		   AND er.resource_id BETWEEN 'r-00084001' AND 'r-00084600'
 		   AND inv.observation @> '{"generation":3}'::jsonb`,
 			600,
@@ -210,7 +210,7 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
-		 WHERE er.service_name = 'bench.fleetshift.io'
+		 WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io'
 		   AND er.resource_id BETWEEN 'r-00084501' AND 'r-00084600'
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'reuse-id'
@@ -234,7 +234,7 @@ func TestInventoryWritePathPlans(t *testing.T) {
 			`SELECT count(*)
 		 FROM extension_resource_inventory inv
 		 JOIN extension_resources er ON er.uid = inv.extension_resource_uid
-		 WHERE er.service_name = 'bench.fleetshift.io'
+		 WHERE er.service_name = 'bench.resource-manager.open-cluster-management.io'
 		   AND er.resource_id BETWEEN 'r-00083001' AND 'r-00083200'
 		   AND inv.observation @> '{"generation":4}'::jsonb`,
 			200,
@@ -1096,7 +1096,7 @@ func buildProductionShapeBatch(iteration int, specs ...productionRangeSpec) prod
 			resourceID := resourceID(g)
 
 			b.idx = append(b.idx, idx)
-			b.serviceNames = append(b.serviceNames, "bench.fleetshift.io")
+			b.serviceNames = append(b.serviceNames, "bench.resource-manager.open-cluster-management.io")
 			b.typeNames = append(b.typeNames, "Widget")
 			b.collectionNames = append(b.collectionNames, "widgets")
 			b.resourceIDs = append(b.resourceIDs, resourceID)
@@ -1464,47 +1464,47 @@ var scenarios = []scenario{
 	},
 	{
 		name: "replace_latest_same_no_aliases",
-		sql:  replaceLatestSQL(1_001, 2_000, "bench.fleetshift.io", 1),
+		sql:  replaceLatestSQL(1_001, 2_000, "bench.resource-manager.open-cluster-management.io", 1),
 	},
 	{
 		name: "delta_heartbeat_existing_no_payload_changes",
-		sql:  deltaHeartbeatSQL(2_001, 3_000, "bench.fleetshift.io"),
+		sql:  deltaHeartbeatSQL(2_001, 3_000, "bench.resource-manager.open-cluster-management.io"),
 	},
 	{
 		name: "delta_heartbeat_upsert_existing_no_payload_changes",
-		sql:  deltaHeartbeatUpsertSQL(7_001, 8_000, "bench.fleetshift.io"),
+		sql:  deltaHeartbeatUpsertSQL(7_001, 8_000, "bench.resource-manager.open-cluster-management.io"),
 	},
 	{
 		name: "delta_patch_existing_labels_conditions_observation",
-		sql:  deltaPatchExistingSQL(3_001, 4_000, "bench.fleetshift.io", 2),
+		sql:  deltaPatchExistingSQL(3_001, 4_000, "bench.resource-manager.open-cluster-management.io", 2),
 	},
 	{
 		name: "replace_latest_changed_no_aliases",
-		sql:  replaceLatestSQL(4_001, 5_000, "bench.fleetshift.io", 2),
+		sql:  replaceLatestSQL(4_001, 5_000, "bench.resource-manager.open-cluster-management.io", 2),
 	},
 	{
 		name: "replace_never_alias_empty_fingerprint_skip",
-		sql:  replaceLatestWithEmptyAliasFingerprintSkipSQL(6_001, 7_000, "bench.fleetshift.io", 1),
+		sql:  replaceLatestWithEmptyAliasFingerprintSkipSQL(6_001, 7_000, "bench.resource-manager.open-cluster-management.io", 1),
 	},
 	{
 		name: "replace_same_alias_fingerprint_skip",
-		sql:  replaceLatestWithAliasFingerprintSkipSQL(15_001, 16_000, "bench.fleetshift.io", 1),
+		sql:  replaceLatestWithAliasFingerprintSkipSQL(15_001, 16_000, "bench.resource-manager.open-cluster-management.io", 1),
 	},
 	{
 		name: "replace_same_alias_source_first_classification",
-		sql:  replaceLatestWithSameAliasClassificationSQL(16_001, 17_000, "bench.fleetshift.io", 1),
+		sql:  replaceLatestWithSameAliasClassificationSQL(16_001, 17_000, "bench.resource-manager.open-cluster-management.io", 1),
 	},
 	{
 		name: "replace_changed_state_and_new_alias_apply",
-		sql:  replaceLatestWithNewAliasApplySQL(45_001, 46_000, "bench.fleetshift.io", 2),
+		sql:  replaceLatestWithNewAliasApplySQL(45_001, 46_000, "bench.resource-manager.open-cluster-management.io", 2),
 	},
 	{
 		name: "replace_changed_state_and_alias_self_replace_in_place",
-		sql:  replaceLatestWithAliasSelfReplaceSQL(67_001, 68_000, "bench.fleetshift.io", 2),
+		sql:  replaceLatestWithAliasSelfReplaceSQL(67_001, 68_000, "bench.resource-manager.open-cluster-management.io", 2),
 	},
 	{
 		name: "alias_self_replace_sibling_conflict",
-		sql:  aliasSelfReplaceSiblingConflictSQL(82_001, 83_000, "bench.fleetshift.io", 2),
+		sql:  aliasSelfReplaceSiblingConflictSQL(82_001, 83_000, "bench.resource-manager.open-cluster-management.io", 2),
 	},
 	{
 		name: "full_replace_mixed_success",
@@ -1516,7 +1516,7 @@ var scenarios = []scenario{
 	},
 	{
 		name: "replace_changed_state_and_retract_alias_direct_cleanup",
-		sql:  replaceLatestWithAliasRetractSQL(59_001, 60_000, "bench.fleetshift.io", 2),
+		sql:  replaceLatestWithAliasRetractSQL(59_001, 60_000, "bench.resource-manager.open-cluster-management.io", 2),
 	},
 }
 
@@ -2060,7 +2060,7 @@ func fullReplaceMixedSuccessSQL() string {
 		clock_timestamp() AS received_at
 	FROM generate_series(84001, 84600) AS g
 	JOIN extension_resources er
-	  ON er.service_name = 'bench.fleetshift.io'
+	  ON er.service_name = 'bench.resource-manager.open-cluster-management.io'
 	 AND er.collection_name = 'widgets'
 	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
 ),
@@ -2133,7 +2133,7 @@ func fullReplacePartialConflictSQL() string {
 		clock_timestamp() AS received_at
 	FROM generate_series(83001, 83200) AS g
 	JOIN extension_resources er
-	  ON er.service_name = 'bench.fleetshift.io'
+	  ON er.service_name = 'bench.resource-manager.open-cluster-management.io'
 	 AND er.collection_name = 'widgets'
 	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
 ),
@@ -2727,7 +2727,7 @@ INSERT INTO extension_resources (
 )
 SELECT
 	gen_random_uuid(),
-	'bench.fleetshift.io',
+	'bench.resource-manager.open-cluster-management.io',
 	'Widget',
 	'widgets',
 	'r-' || lpad(g::text, 8, '0'),
@@ -2753,7 +2753,7 @@ INSERT INTO extension_resources (
 )
 SELECT
 	gen_random_uuid(),
-	'bench-b.fleetshift.io',
+	'bench-b.resource-manager.open-cluster-management.io',
 	'Widget',
 	'widgets',
 	'r-' || lpad(g::text, 8, '0'),
@@ -2805,7 +2805,7 @@ SELECT
 	'2026-01-01T00:00:00Z'::timestamptz
 FROM generate_series(1, 100000) AS g
 JOIN extension_resources er
-  ON er.service_name = 'bench.fleetshift.io'
+  ON er.service_name = 'bench.resource-manager.open-cluster-management.io'
  AND er.collection_name = 'widgets'
  AND er.resource_id = 'r-' || lpad(g::text, 8, '0');
 
@@ -2817,7 +2817,7 @@ INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespa
 SELECT er.uid, cl.namespace, cl.key, cl.id
 FROM resource_alias_claims cl
 JOIN extension_resources er
-  ON er.service_name = 'bench.fleetshift.io'
+  ON er.service_name = 'bench.resource-manager.open-cluster-management.io'
  AND er.collection_name = cl.platform_collection_name
  AND er.resource_id = cl.platform_resource_id
 WHERE cl.key = 'source-id';
@@ -2831,7 +2831,7 @@ JOIN resource_alias_claims cl
  AND cl.platform_collection_name = 'widgets'
  AND cl.platform_resource_id = 'r-' || lpad(g::text, 8, '0')
 JOIN extension_resources er
-  ON er.service_name = 'bench-b.fleetshift.io'
+  ON er.service_name = 'bench-b.resource-manager.open-cluster-management.io'
  AND er.collection_name = cl.platform_collection_name
  AND er.resource_id = cl.platform_resource_id;
 
@@ -2844,7 +2844,7 @@ JOIN resource_alias_claims cl
  AND cl.platform_collection_name = 'widgets'
  AND cl.platform_resource_id = 'r-' || lpad(g::text, 8, '0')
 JOIN extension_resources er
-  ON er.service_name = 'bench-b.fleetshift.io'
+  ON er.service_name = 'bench-b.resource-manager.open-cluster-management.io'
  AND er.collection_name = cl.platform_collection_name
  AND er.resource_id = cl.platform_resource_id;
 
@@ -2861,7 +2861,7 @@ JOIN resource_alias_claims cl
  AND cl.platform_collection_name = 'widgets'
  AND cl.platform_resource_id = 'r-' || lpad(g::text, 8, '0')
 JOIN extension_resources er
-  ON er.service_name = 'bench-b.fleetshift.io'
+  ON er.service_name = 'bench-b.resource-manager.open-cluster-management.io'
  AND er.collection_name = cl.platform_collection_name
  AND er.resource_id = cl.platform_resource_id;
 

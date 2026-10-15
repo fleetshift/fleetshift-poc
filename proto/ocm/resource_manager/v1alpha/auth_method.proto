@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package ocm.resource_manager.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha;rmv1alpha";
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "ocm/resource_manager/v1alpha/oidc_config.proto";
+
+// AuthMethod is a configured authentication method.
+message AuthMethod {
+  option (google.api.resource) = {
+    type: "resource-manager.open-cluster-management.io/AuthMethod"
+    pattern: "authMethods/{auth_method}"
+  };
+
+  // Resource name. Format: authMethods/{auth_method}
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+
+  // The type of authentication method.
+  Type type = 2;
+
+  // OIDC-specific configuration. Set when type is TYPE_OIDC.
+  OIDCConfig oidc_config = 3;
+
+  // The type of authentication method.
+  enum Type {
+    // Default value. Not used.
+    TYPE_UNSPECIFIED = 0;
+
+    // OpenID Connect token-based authentication.
+    TYPE_OIDC = 1;
+  }
+}

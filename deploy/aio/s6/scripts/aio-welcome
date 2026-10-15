@@ -3,7 +3,7 @@
 set -eu
 
 # shellcheck disable=SC1091
-. /run/fleetshift/public.env
+. /run/ocm-resource-manager/public.env
 
 url="${PUBLIC_ORIGIN}/readyz"
 i=0
@@ -23,31 +23,22 @@ if [ "$i" -ge 30 ]; then
 	exit 1
 fi
 
-if [ -f /run/fleetshift/dex.enabled ]; then
+echo "Resource manager is ready."
+
+if [ -f /run/ocm-resource-manager/dex.enabled ]; then
 	cat <<EOF
-
-
-Welcome to FleetShift
-╔══════════════════════════════════════════════════════════════════════╗
-║               ░█▀▀░█░░░█▀▀░█▀▀░▀█▀░█▀▀░█░█░▀█▀░█▀▀░▀█▀               ║
-║               ░█▀▀░█░░░█▀▀░█▀▀░░█░░▀▀█░█▀█░░█░░█▀▀░░█░               ║
-║               ░▀░░░▀▀▀░▀▀▀░▀▀▀░░▀░░▀▀▀░▀░▀░▀▀▀░▀░░░░▀░               ║
-╠══════════════════════════════════════════════════════════════════════╣
-║ [CONTAINER INITIALIZED]                                       v0.0.0 ║
-╚══════════════════════════════════════════════════════════════════════╝
-
 Open ${PUBLIC_ORIGIN}
 
 Demo login:
-  Email:    ops@fleetshift.local
-  Password: fleetshift-ops
+  Email:    ops@ocm-resource-manager.local
+  Password: ocm-resource-manager-ops
 
 Alternate developer login:
-  Email:    dev@fleetshift.local
-  Password: fleetshift-dev
+  Email:    dev@ocm-resource-manager.local
+  Password: ocm-resource-manager-dev
 
 The sandbox uses a local certificate. Your browser may ask you to accept it.
-Press Ctrl+C to stop FleetShift.
+Press Ctrl+C to stop.
 EOF
 else
 	cat <<EOF
@@ -55,6 +46,6 @@ Open ${PUBLIC_ORIGIN}
 
 Login uses the configured external identity provider.
 The sandbox uses a local certificate. Your browser may ask you to accept it.
-Press Ctrl+C to stop FleetShift.
+Press Ctrl+C to stop.
 EOF
 fi

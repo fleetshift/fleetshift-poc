@@ -1,12 +1,12 @@
 {
-  "name": "@fleetshift/kind-plugin",
-  "description": "A fleetshift UI plugin for Kind local clusters",
+  "name": "@ocm-resource-manager/kind-plugin",
+  "description": "Resource manager console plugin for Kind local clusters",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {},
   "dependencies": {
-    "@fleetshift/common": "*",
+    "@ocm-resource-manager/common": "^0.0.0",
     "@patternfly/react-core": "^6.5.1",
     "@patternfly/react-icons": "^6.5.1",
     "@scalprum/core": "^0.10.0",
@@ -16,8 +16,8 @@
     "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
-    "@fleetshift/build-utils": "*",
     "@module-federation/enhanced": "^2.9.0",
+    "@ocm-resource-manager/build-utils": "^0.0.0",
     "@openshift/dynamic-plugin-sdk": "^9.1.0",
     "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",
     "@rspack/cli": "^2.0.8",

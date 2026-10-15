@@ -33,13 +33,13 @@ describe("uniqueKindClusterIdFromEnv", () => {
     vi.unstubAllEnvs();
   });
 
-  it("reads FLEETSHIFT_KIND_PREFIX from the environment", () => {
-    vi.stubEnv("FLEETSHIFT_KIND_PREFIX", "kind-e2e-env-");
+  it("reads OCM_RM_KIND_PREFIX from the environment", () => {
+    vi.stubEnv("OCM_RM_KIND_PREFIX", "kind-e2e-env-");
     expect(uniqueKindClusterIdFromEnv()).toMatch(/^kind-e2e-env-[a-f0-9]{8}$/);
   });
 
-  it("fails when FLEETSHIFT_KIND_PREFIX is unset", () => {
-    vi.stubEnv("FLEETSHIFT_KIND_PREFIX", undefined);
+  it("fails when OCM_RM_KIND_PREFIX is unset", () => {
+    vi.stubEnv("OCM_RM_KIND_PREFIX", undefined);
     expect(() => uniqueKindClusterIdFromEnv()).toThrow(/unset/);
   });
 });

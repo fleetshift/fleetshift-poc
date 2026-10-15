@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // runPresenceFilterTests locks projection-faithful has() / container

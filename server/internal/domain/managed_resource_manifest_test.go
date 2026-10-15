@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
 func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	store, _ := setupStore(t)
 	spec := json.RawMessage(`{"provider":"kind","version":"4.16.2"}`)
-	erUID := seedIntent(t, store, "test.fleetshift.io/Cluster", "resources/prod-us-east-1", spec)
+	erUID := seedIntent(t, store, "test.resource-manager.open-cluster-management.io/Cluster", "resources/prod-us-east-1", spec)
 
 	s := &domain.ManagedResourceManifestStrategy{
 		Ref:   domain.IntentRef{ExtensionResourceUID: erUID, Version: 1, ManifestType: "clusters"},

@@ -2,7 +2,7 @@
 // independent of any real field mapping (see the package doc's
 // "Package split" section). They exercise it through a trivial stub
 // [querysql.FieldResolver] rather than a real one; the actual
-// FleetShift/Postgres field shape (resource.labels[...], JSONB
+// Resource Manager/Postgres field shape (resource.labels[...], JSONB
 // extraction, schema-backed path validation, safe numeric/boolean
 // casts, and the injection-safety of label/condition keys) is tested
 // against the real resolver in
@@ -17,8 +17,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
 )
 
 // stubResolver resolves every field path to its dotted string form as
@@ -62,10 +62,10 @@ func compileErr(t *testing.T, filter string) error {
 func TestCompileFilter_ConcurrentSharedCompiler(t *testing.T) {
 	c := querysql.Compiler{Fields: stubResolver{}, Params: dollarTestParams{}}
 	filters := []string{
-		`resourceType == "kind.fleetshift.io/Cluster"`,
-		`name == "alpha" && resourceType == "kind.fleetshift.io/Cluster"`,
+		`resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`,
+		`name == "alpha" && resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`,
 		`!(name == "beta")`,
-		`resourceType in ["kind.fleetshift.io/Cluster", "kind.fleetshift.io/Node"]`,
+		`resourceType in ["kind.resource-manager.open-cluster-management.io/Cluster", "kind.resource-manager.open-cluster-management.io/Node"]`,
 	}
 
 	const goroutines = 32
@@ -101,38 +101,38 @@ func TestCompileFilter_LogicalAndComparisonMechanics(t *testing.T) {
 	}{
 		{
 			name:     "equals",
-			filter:   `resourceType == "kind.fleetshift.io/Cluster"`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster"},
+			filter:   `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`,
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster"},
 		},
 		{
 			name:     "not equals",
-			filter:   `resourceType != "kind.fleetshift.io/Cluster"`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster"},
+			filter:   `resourceType != "kind.resource-manager.open-cluster-management.io/Cluster"`,
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster"},
 		},
 		{
 			name:     "and",
-			filter:   `resourceType == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster", "//kind.fleetshift.io/clusters/managed"},
+			filter:   `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" && name == "//kind.resource-manager.open-cluster-management.io/clusters/managed"`,
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster", "//kind.resource-manager.open-cluster-management.io/clusters/managed"},
 		},
 		{
 			name:     "or",
-			filter:   `resourceType == "kind.fleetshift.io/Cluster" || resourceType == "kubernetes.fleetshift.io/Node"`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"},
+			filter:   `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" || resourceType == "kubernetes.resource-manager.open-cluster-management.io/Node"`,
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster", "kubernetes.resource-manager.open-cluster-management.io/Node"},
 		},
 		{
 			name:     "not",
-			filter:   `!(resourceType == "kind.fleetshift.io/Cluster")`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster"},
+			filter:   `!(resourceType == "kind.resource-manager.open-cluster-management.io/Cluster")`,
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster"},
 		},
 		{
 			name:     "literal on left flips operator",
-			filter:   `"//kind.fleetshift.io/clusters/managed" == name`,
-			wantArgs: []any{"//kind.fleetshift.io/clusters/managed"},
+			filter:   `"//kind.resource-manager.open-cluster-management.io/clusters/managed" == name`,
+			wantArgs: []any{"//kind.resource-manager.open-cluster-management.io/clusters/managed"},
 		},
 		{
 			name:     "in list",
-			filter:   `resourceType in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"},
+			filter:   `resourceType in ["kind.resource-manager.open-cluster-management.io/Cluster", "kubernetes.resource-manager.open-cluster-management.io/Node"]`,
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster", "kubernetes.resource-manager.open-cluster-management.io/Node"},
 		},
 		{
 			name:     "in list is empty",
@@ -185,7 +185,7 @@ func TestCompileFilter_TypeHintDerivedFromLiteral(t *testing.T) {
 		filter   string
 		wantHint querysql.TypeHint
 	}{
-		{"string literal", `resourceType == "kind.fleetshift.io/Cluster"`, querysql.TypeHintString},
+		{"string literal", `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`, querysql.TypeHintString},
 		{"int literal", `resource.generation == 3`, querysql.TypeHintNumber},
 		{"bool literal", `resource.healthy == true`, querysql.TypeHintBool},
 		{"literal on left", `3 < resource.generation`, querysql.TypeHintNumber},
@@ -266,7 +266,7 @@ func TestCompileFilter_InListRequiresHomogeneousLiterals(t *testing.T) {
 // as soon as a filter actually references a field.
 func TestCompileFilter_NoResolverConfigured(t *testing.T) {
 	c := querysql.Compiler{Params: dollarTestParams{}}
-	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resourceType == "kind.fleetshift.io/Cluster"`})
+	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("err = %v, want ErrInvalidArgument", err)
 	}
@@ -401,9 +401,9 @@ func TestCompileFilter_StartsWith(t *testing.T) {
 	}{
 		{
 			name:     "simple prefix",
-			filter:   `name.startsWith("//kind.fleetshift.io/")`,
+			filter:   `name.startsWith("//kind.resource-manager.open-cluster-management.io/")`,
 			wantSQL:  `name LIKE $1 ESCAPE '\'`,
-			wantArgs: []any{`//kind.fleetshift.io/%`},
+			wantArgs: []any{`//kind.resource-manager.open-cluster-management.io/%`},
 		},
 		{
 			name:     "escapes LIKE metacharacters",
@@ -425,9 +425,9 @@ func TestCompileFilter_StartsWith(t *testing.T) {
 		},
 		{
 			name:     "and with startsWith",
-			filter:   `resourceType == "kind.fleetshift.io/Cluster" && name.startsWith("//kind")`,
+			filter:   `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" && name.startsWith("//kind")`,
 			wantSQL:  `(resourceType = $1) AND (name LIKE $2 ESCAPE '\')`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster", `//kind%`},
+			wantArgs: []any{"kind.resource-manager.open-cluster-management.io/Cluster", `//kind%`},
 		},
 	}
 	for _, tt := range tests {
@@ -506,7 +506,7 @@ func TestCompileFilter_ResourceTypeSnakeCaseRejected(t *testing.T) {
 		return querysql.SQLExpr{SQL: "col"}, nil
 	}), Params: dollarTestParams{}}
 	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `resource_type == "kind.fleetshift.io/Cluster"`,
+		Filter: `resource_type == "kind.resource-manager.open-cluster-management.io/Cluster"`,
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("err = %v, want ErrInvalidArgument for undeclared resource_type", err)
@@ -520,7 +520,7 @@ func TestCompileFilter_ResolverErrorPropagates(t *testing.T) {
 	c := querysql.Compiler{Fields: recordingResolver(func(querysql.FieldPath, querysql.TypeHint, querysql.ResolveContext) (querysql.SQLExpr, error) {
 		return querysql.SQLExpr{}, sentinel
 	}), Params: dollarTestParams{}}
-	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resourceType == "kind.fleetshift.io/Cluster"`})
+	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`})
 	if !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want it to wrap the resolver's error", err)
 	}
@@ -558,17 +558,17 @@ func TestCompileFilter_GuardInsideOrDoesNotCount(t *testing.T) {
 	}), Params: dollarTestParams{}}
 
 	if _, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `resourceType == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
+		Filter: `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" && name == "//kind.resource-manager.open-cluster-management.io/clusters/managed"`,
 	}); err != nil {
 		t.Fatalf("CompileFilter: unexpected error: %v", err)
 	}
-	if gotGuard == nil || *gotGuard != domain.ResourceType("kind.fleetshift.io/Cluster") {
-		t.Errorf("GuardedResourceType = %v, want kind.fleetshift.io/Cluster", gotGuard)
+	if gotGuard == nil || *gotGuard != domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster") {
+		t.Errorf("GuardedResourceType = %v, want kind.resource-manager.open-cluster-management.io/Cluster", gotGuard)
 	}
 
 	gotGuard = nil
 	if _, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `(resourceType == "kind.fleetshift.io/Cluster") || name == "//kind.fleetshift.io/clusters/managed"`,
+		Filter: `(resourceType == "kind.resource-manager.open-cluster-management.io/Cluster") || name == "//kind.resource-manager.open-cluster-management.io/clusters/managed"`,
 	}); err != nil {
 		t.Fatalf("CompileFilter: unexpected error: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestCompileFilter_CompareHookOverridesGenericComparison(t *testing.T) {
 	}), Params: dollarTestParams{}}
 
 	pred, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `resourceType == "kind.fleetshift.io/Cluster"`,
+		Filter: `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`,
 	})
 	if err != nil {
 		t.Fatalf("CompileFilter: %v", err)
@@ -605,7 +605,7 @@ func TestCompileFilter_CompareHookOverridesGenericComparison(t *testing.T) {
 	}
 
 	pred, err = c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `resourceType != "kind.fleetshift.io/Cluster"`,
+		Filter: `resourceType != "kind.resource-manager.open-cluster-management.io/Cluster"`,
 	})
 	if err != nil {
 		t.Fatalf("CompileFilter (!=): %v", err)
@@ -677,7 +677,7 @@ func TestCompileFilter_InHookOverridesGenericIn(t *testing.T) {
 	}), Params: dollarTestParams{}}
 
 	pred, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `resourceType in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
+		Filter: `resourceType in ["kind.resource-manager.open-cluster-management.io/Cluster", "kubernetes.resource-manager.open-cluster-management.io/Node"]`,
 	})
 	if err != nil {
 		t.Fatalf("CompileFilter: %v", err)

@@ -1,9 +1,9 @@
 import "./IconGalleryModal.scss";
 
-import { getCachedPfIcon, loadPfIcon } from "@fleetshift/common";
+import { getCachedPfIcon, loadPfIcon } from "@ocm-resource-manager/common";
 // The manifest is a flat string[] of PascalCase icon names, generated at
 // build time by scripts/generate-icons.mjs.
-import pfIcons from "@fleetshift/common/generated/pf-icons.json";
+import pfIcons from "@ocm-resource-manager/common/generated/pf-icons.json";
 import { create, insertMultiple, search } from "@orama/orama";
 import {
   Button,
@@ -111,7 +111,7 @@ function IconCell({ name, isSelected, onClick }: IconCellProps) {
     <button
       ref={ref}
       type="button"
-      className={`ome-settings-icon-cell${isSelected ? " ome-settings-icon-cell--selected" : ""}`}
+      className={`ocm-rm-settings-icon-cell${isSelected ? " ocm-rm-settings-icon-cell--selected" : ""}`}
       onClick={onClick}
       title={name}
       aria-label={name}
@@ -240,8 +240,8 @@ function IconGalleryModal({
       <ModalBody>
         {/* Preview row */}
         {highlighted && (
-          <div className="ome-settings-icon-preview">
-            <span className="ome-settings-icon-preview__icon">
+          <div className="ocm-rm-settings-icon-preview">
+            <span className="ocm-rm-settings-icon-preview__icon">
               {PreviewIcon ? (
                 <Icon isInline size="lg">
                   <PreviewIcon />
@@ -250,7 +250,7 @@ function IconGalleryModal({
                 <Skeleton width="32px" height="32px" />
               )}
             </span>
-            <span className="ome-settings-icon-preview__name">
+            <span className="ocm-rm-settings-icon-preview__name">
               {highlighted}
             </span>
           </div>
@@ -275,7 +275,7 @@ function IconGalleryModal({
           </EmptyState>
         ) : (
           <div
-            className="ome-settings-icon-grid"
+            className="ocm-rm-settings-icon-grid"
             role="grid"
             aria-label="Icon gallery"
           >

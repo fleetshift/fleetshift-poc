@@ -24,11 +24,11 @@ import (
 )
 
 const (
-	AnnotationAttestationRef = "fleetshift.io/attestation-ref"
-	labelDeliveryID          = "fleetshift.io/delivery-id"
-	labelTargetID            = "fleetshift.io/target-id"
-	defaultHubHash           = "fleetshift-demo-hub"
-	defaultAgentID           = "fleetshift-demo-agent"
+	AnnotationAttestationRef = "resource-manager.open-cluster-management.io/attestation-ref"
+	labelDeliveryID          = "resource-manager.open-cluster-management.io/delivery-id"
+	labelTargetID            = "resource-manager.open-cluster-management.io/target-id"
+	defaultHubHash           = "ocm-resource-manager-demo-hub"
+	defaultAgentID           = "ocm-resource-manager-demo-agent"
 )
 
 type DeliveryID string
@@ -42,17 +42,17 @@ const (
 	UpdateModeReadOnly        UpdateMode = "ReadOnly"
 )
 
-// Manifest is the tiny FleetShift-shaped input the POC translates into
+// Manifest is the tiny Resource Manager-shaped input the POC translates into
 // OCM ManifestWork payloads. It is intentionally smaller than the real
 // server-side domain types so the POC can live under the top-level poc/
-// tree without importing FleetShift internal packages.
+// tree without importing Resource Manager internal packages.
 type Manifest struct {
 	Raw   json.RawMessage
 	Watch bool
 }
 
 // DeliveryEnvelope is a small stand-in for the orchestration output that
-// would normally be passed to a FleetShift delivery agent.
+// would normally be passed to a Resource Manager delivery agent.
 type DeliveryEnvelope struct {
 	DeliveryID     DeliveryID
 	TargetID       TargetID
@@ -71,7 +71,7 @@ type manifestWorkClient interface {
 	UpdateStatus(ctx context.Context, work *workapiv1.ManifestWork, opts metav1.UpdateOptions) (*workapiv1.ManifestWork, error)
 }
 
-// Hub materializes FleetShift-style deliveries into an in-memory desired
+// Hub materializes Resource Manager-style deliveries into an in-memory desired
 // work source. Each target sees that source through a target-scoped
 // informer/lister view, mirroring the spoke-side contract OCM expects
 // without persisting ManifestWork to any API server.
@@ -512,7 +512,7 @@ type SpokeOptions struct {
 	Journal *AppliedManifestJournal
 }
 
-// DeliveryFeedback is a FleetShift-shaped status projection built from
+// DeliveryFeedback is a Resource Manager-shaped status projection built from
 // ManifestWork and AppliedManifestWork state.
 type DeliveryFeedback struct {
 	DeliveryID       DeliveryID

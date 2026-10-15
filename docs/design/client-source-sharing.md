@@ -1,6 +1,6 @@
 # Client Source Sharing
 
-Status: Proposed for OME-310
+Status: Proposed shared client configuration model
 
 This document defines source sharing and runtime boundaries between CLI and Web clients. See [Client Asset Separation](client-asset-separation.md) for browser asset delivery, ownership, and trust boundaries.
 
@@ -29,12 +29,12 @@ client/
 
 This separates two different decisions:
 
-- Code is shared by FleetShift clients.
+- Code is shared by Resource Manager clients.
 - Code is stable and intentionally exposed to community plugin or SDK users.
 
 The first does not require the second.
 
-Each Rspack configuration resolves `@fleetshift/client-shared/*` to `client/shared/src/*`. Rspack transpiles and bundles imported code into each consuming artifact. It watches imported shared files in watch mode.
+Each Rspack configuration resolves `@ocm-resource-manager/client-shared/*` to `client/shared/src/*`. Rspack transpiles and bundles imported code into each consuming artifact. It watches imported shared files in watch mode.
 
 TypeScript mirrors this alias with `paths`. Since shared files sit outside an application's `src` directory, each client `rootDir` must include the `client` directory. TypeScript 6 does not require `baseUrl` for `paths`; do not use it.
 
@@ -44,7 +44,7 @@ The approach was validated by importing a shared helper into Web UI code. Rspack
 
 ## Shared Configuration
 
-OME-310 defines a shared configuration model, not one configuration loader. Web and CLI fill the model differently:
+The proposal defines a shared configuration model with separate configuration loaders. Web and CLI fill the model differently:
 
 ```text
 Web API/bootstrap -> Web composition -> resolved Web context

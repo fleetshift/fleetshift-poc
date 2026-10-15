@@ -2,6 +2,8 @@
 
 This document is the entry point for the architecture. It is intentionally short: it gives the system's core mental model, names the major subsystems, and points to the deeper design documents that describe each area in detail.
 
+This experiment explores a resource manager-based management plane within the Open Cluster Management (OCM) ecosystem. The resource manager owns domain APIs and database persistence directly. References to OCM controllers, ManifestWork, and klusterlets describe existing OCM components and their Kubernetes API-based architecture.
+
 ## What this doc covers
 
 - What the management plane is and is not
@@ -63,7 +65,7 @@ A target is any endpoint that can:
 Target types can be things like:
 
 - `kubernetes`: manifests are applied against a Kubernetes API server
-- `platform`: manifests are FleetShift API objects delivered to a child platform
+- `platform`: manifests are Resource Manager API objects delivered to a child platform
 - `local`: the platform itself, addressed in-process
 
 Addons can register their own target types and delivery agents while still participating in the same orchestration pipeline.

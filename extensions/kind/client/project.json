@@ -1,10 +1,10 @@
 {
-  "name": "@fleetshift/kind-plugin",
+  "name": "@ocm-resource-manager/kind-plugin",
   "root": "extensions/kind/client",
   "sourceRoot": "extensions/kind/client/src",
   "projectType": "library",
   "tags": ["scope:ui", "type:lib", "federation:remote"],
-  "implicitDependencies": ["@fleetshift/kind-server"],
+  "implicitDependencies": ["@ocm-resource-manager/kind-server"],
   "targets": {
     "build": {
       "executor": "nx:run-commands",

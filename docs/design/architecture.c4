@@ -1,4 +1,4 @@
-// FleetShift Architecture — LikeC4 Model
+// Resource Manager Architecture — LikeC4 Model
 // Source of truth: docs/design/architecture.md and sub-documents.
 //
 // This diagram captures the key abstraction contours, not every internal detail.
@@ -91,9 +91,9 @@ model {
     '''
   }
 
-  // ── FleetShift Management Plane ─────────────
+  // ── Resource Manager Management Plane ─────────────
 
-  fleetshift = system 'FleetShift' {
+  resourceManager = system 'Resource Manager' {
     description '''
       A URL-addressable management plane providing the orchestration pipeline,
       the fleetlet transport layer, and platform APIs. Zero infrastructure coupling:
@@ -269,7 +269,7 @@ model {
       2. Apply it
       3. Continuously report health
 
-      Target types include Kubernetes (Server-Side Apply), other FleetShift instances,
+      Target types include Kubernetes (Server-Side Apply), other Resource Manager instances,
       and addon-registered types. Addons can register their own target types while
       participating in the same deployment pipeline.
     '''
@@ -299,28 +299,28 @@ model {
   // ─────────────────────────────────────────────
 
   // Actor → Platform
-  provider -> fleetshift.platformApi 'manages platform, addons, trust, tenants'
-  tenant -> fleetshift.platformApi 'deployments, targets, workspaces, managed resources'
+  provider -> resourceManager.platformApi 'manages platform, addons, trust, tenants'
+  tenant -> resourceManager.platformApi 'deployments, targets, workspaces, managed resources'
 
   // External Trust
-  fleetshift.deliveryAuth -> tenantIdp 'verifies identity (JWKS)'
+  resourceManager.deliveryAuth -> tenantIdp 'verifies identity (JWKS)'
   target.deliveryAgent -> tenantIdp 'verifies user signatures independently'
 
   // Platform internals
-  fleetshift.platformApi -> fleetshift.orchestration 'triggers fulfillments'
-  fleetshift.platformApi -> fleetshift.deliveryAuth 'sign, verify, PausedAuth'
-  fleetshift.platformApi -> fleetshift.accessControl 'authN/authZ on every request'
-  fleetshift.orchestration -> fleetshift.resourceStore 'durable execution state'
-  fleetshift.orchestration -> fleetshift.deliveryAuth 'attaches attestation to deliveries'
-  fleetshift.orchestration -> fleetshift.extensionPoints 'invokes addon strategy callbacks'
-  fleetshift.extensionPoints -> fleetshift.orchestration 'InvalidateManifests'
+  resourceManager.platformApi -> resourceManager.orchestration 'triggers fulfillments'
+  resourceManager.platformApi -> resourceManager.deliveryAuth 'sign, verify, PausedAuth'
+  resourceManager.platformApi -> resourceManager.accessControl 'authN/authZ on every request'
+  resourceManager.orchestration -> resourceManager.resourceStore 'durable execution state'
+  resourceManager.orchestration -> resourceManager.deliveryAuth 'attaches attestation to deliveries'
+  resourceManager.orchestration -> resourceManager.extensionPoints 'invokes addon strategy callbacks'
+  resourceManager.extensionPoints -> resourceManager.orchestration 'InvalidateManifests'
 
   // Platform → Fleetlet
-  fleetshift.orchestration -> fleetlet.deliveryChannel 'manifests + attestation envelope'
-  fleetlet.statusChannel -[async]-> fleetshift.orchestration 'health and delivery status'
-  fleetlet.indexChannel -[async]-> fleetshift.inventory 'observed-state deltas for inventory'
-  fleetlet.controlChannel -> fleetshift.platformApi 'registration, heartbeat'
-  fleetlet.accessChannel -> fleetshift.accessControl 'identity and permission lookups'
+  resourceManager.orchestration -> fleetlet.deliveryChannel 'manifests + attestation envelope'
+  fleetlet.statusChannel -[async]-> resourceManager.orchestration 'health and delivery status'
+  fleetlet.indexChannel -[async]-> resourceManager.inventory 'observed-state deltas for inventory'
+  fleetlet.controlChannel -> resourceManager.platformApi 'registration, heartbeat'
+  fleetlet.accessChannel -> resourceManager.accessControl 'identity and permission lookups'
 
   // Fleetlet → Target
   fleetlet.deliveryChannel -> target.deliveryAgent 'manifests + attestation'
@@ -328,9 +328,9 @@ model {
   target.indexerAgent -[async]-> fleetlet.indexChannel 'resource state deltas'
 
   // Addon ↔ Platform
-  addon.strategies -> fleetshift.extensionPoints 'Generate, Resolve, Plan, InvalidateManifests'
-  addon.managedResources -> fleetshift.extensionPoints 'registers resource types and schemas'
-  addon.addonUi -> fleetshift.extensionPoints 'UI plugins, API extensions, permission translation'
+  addon.strategies -> resourceManager.extensionPoints 'Generate, Resolve, Plan, InvalidateManifests'
+  addon.managedResources -> resourceManager.extensionPoints 'registers resource types and schemas'
+  addon.addonUi -> resourceManager.extensionPoints 'UI plugins, API extensions, permission translation'
 }
 
 // ─────────────────────────────────────────────
@@ -342,7 +342,7 @@ views {
   // ── Capability Layers ───────────────────────
 
   view index {
-    title '[DRAFT] FleetShift — Capability Layers'
+    title '[DRAFT] Resource Manager — Capability Layers'
     description '''
       The system in layers of responsibility. Domain addons capture
       fit-for-purpose knowledge and expose it through the platform.
@@ -356,15 +356,15 @@ views {
         addon.*
     }
 
-    group 'FleetShift — Core Fleet Management Engine' {
+    group 'Resource Manager — Core Fleet Management Engine' {
       include
-        fleetshift.orchestration,
-        fleetshift.extensionPoints,
-        fleetshift.deliveryAuth,
-        fleetshift.inventory,
-        fleetshift.accessControl,
-        fleetshift.tenancy,
-        fleetshift.resourceStore
+        resourceManager.orchestration,
+        resourceManager.extensionPoints,
+        resourceManager.deliveryAuth,
+        resourceManager.inventory,
+        resourceManager.accessControl,
+        resourceManager.tenancy,
+        resourceManager.resourceStore
     }
 
     group 'Fleetlet — Channel-Based Transport' {
@@ -380,22 +380,22 @@ views {
     style addon {
       color green
     }
-    style fleetshift.orchestration {
+    style resourceManager.orchestration {
       color primary
     }
-    style fleetshift.extensionPoints {
+    style resourceManager.extensionPoints {
       color secondary
     }
-    style fleetshift.deliveryAuth {
+    style resourceManager.deliveryAuth {
       color red
     }
-    style fleetshift.inventory {
+    style resourceManager.inventory {
       color indigo
     }
-    style fleetshift.accessControl {
+    style resourceManager.accessControl {
       color amber
     }
-    style fleetshift.tenancy {
+    style resourceManager.tenancy {
       color amber
     }
   }
@@ -403,7 +403,7 @@ views {
   // ── Landscape ───────────────────────────────
 
   view landscape {
-    title '[DRAFT] FleetShift — Landscape'
+    title '[DRAFT] Resource Manager — Landscape'
     description '''
       The major abstraction boundaries: users interact with the platform,
       the platform orchestrates deployments through the fleetlet to targets,
@@ -414,13 +414,13 @@ views {
     include
       provider,
       tenant,
-      fleetshift,
+      resourceManager,
       fleetlet,
       addon,
       target,
       tenantIdp
 
-    style fleetshift {
+    style resourceManager {
       color primary
     }
     style fleetlet {
@@ -436,7 +436,7 @@ views {
 
   // ── Platform & Addon Model ──────────────────
 
-  view platformView of fleetshift {
+  view platformView of resourceManager {
     title '[DRAFT] Platform & Addon Model'
     description '''
       The platform provides the orchestration shell and platform APIs.
@@ -489,8 +489,8 @@ views {
 
     include
       *,
-      fleetshift.orchestration,
-      fleetshift.platformApi,
+      resourceManager.orchestration,
+      resourceManager.platformApi,
       target.deliveryAgent,
       target.indexerAgent,
       addon
@@ -511,7 +511,7 @@ views {
 
   // ── Delivery Authorization ──────────────────
 
-  view authView of fleetshift.deliveryAuth {
+  view authView of resourceManager.deliveryAuth {
     title '[DRAFT] Delivery Authorization'
     description '''
       CredentialPresentation × Provenance. The platform is never a trust root.
@@ -524,8 +524,8 @@ views {
     include
       *,
       tenant,
-      fleetshift.platformApi,
-      fleetshift.orchestration,
+      resourceManager.platformApi,
+      resourceManager.orchestration,
       tenantIdp,
       target.deliveryAgent,
       fleetlet.deliveryChannel,
@@ -550,7 +550,7 @@ views {
       fleetlet.statusChannel,
       fleetlet.indexChannel,
       fleetlet.addonChannels,
-      fleetshift.orchestration,
+      resourceManager.orchestration,
       tenantIdp
 
     style deliveryAgent {
@@ -574,8 +574,8 @@ views {
 
     include
       *,
-      fleetshift.orchestration,
-      fleetshift.platformApi,
+      resourceManager.orchestration,
+      resourceManager.platformApi,
       fleetlet
 
     style strategies {

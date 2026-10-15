@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package ocm.resource_manager.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha;rmv1alpha";
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+
+// Request message for
+// [DeploymentService.DeleteDeployment][ocm.resource_manager.v1alpha.DeploymentService.DeleteDeployment].
+message DeleteDeploymentRequest {
+  // The resource name of the deployment to delete.
+  // Format: deployments/{deployment}
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "resource-manager.open-cluster-management.io/Deployment"
+    }
+  ];
+}

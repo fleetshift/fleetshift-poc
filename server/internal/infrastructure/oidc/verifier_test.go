@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
 )
 
 func TestVerifier_ValidToken(t *testing.T) {

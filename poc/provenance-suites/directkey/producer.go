@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
 )
 
 var _ protocol.ProducerAPI = (*Producer)(nil)

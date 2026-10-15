@@ -13,9 +13,9 @@ import (
 	// Blank import ensures attestation.proto is registered in
 	// protoregistry.GlobalFiles so the dynamic descriptor builder
 	// can resolve the Provenance message type.
-	_ "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	_ "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
 // ExtensionServiceDescriptors holds the compiled descriptors for a dynamically-built
@@ -121,8 +121,8 @@ func BuildExtensionServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoref
 		if err := dynamicapi.RegisterFileAndDeps(files, specFile); err != nil {
 			return nil, fmt.Errorf("register spec file deps: %w", err)
 		}
-		deps = append(deps, "fleetshift/v1/attestation.proto")
-		attestFile, err := protoregistry.GlobalFiles.FindFileByPath("fleetshift/v1/attestation.proto")
+		deps = append(deps, "ocm/resource_manager/v1alpha/attestation.proto")
+		attestFile, err := protoregistry.GlobalFiles.FindFileByPath("ocm/resource_manager/v1alpha/attestation.proto")
 		if err != nil {
 			return nil, fmt.Errorf("find attestation.proto: %w", err)
 		}
@@ -230,7 +230,7 @@ func buildResourceMessage(cfg *ResourceTypeConfig, singular, pkg, resourceFQN, s
 			dynamicapi.BoolField("reconciling", 23),
 			dynamicapi.StringField("pause_reason", 24),
 			dynamicapi.Int64Field("generation", 25),
-			dynamicapi.MessageField("provenance", 26, "fleetshift.v1.Provenance"),
+			dynamicapi.MessageField("provenance", 26, "ocm.resource_manager.v1alpha.Provenance"),
 			dynamicapi.MessageField("delete_time", 27, "google.protobuf.Timestamp"),
 		)
 	}
@@ -238,7 +238,7 @@ func buildResourceMessage(cfg *ResourceTypeConfig, singular, pkg, resourceFQN, s
 	if cfg.Capabilities.Inventory != nil {
 		// Nest Condition under the resource message so multiple inventory
 		// schemas sharing a ProtoPackage (e.g. kind Cluster + Node) do not
-		// collide on a file-level kind.fleetshift.v1.Condition symbol.
+		// collide on a file-level ocm.resource_manager.kind.v1alpha.Condition symbol.
 		msg.NestedType = append(msg.NestedType, buildConditionMessage())
 		dynamicapi.AppendMapField(msg, dynamicapi.MapField(
 			resourceFQN, "local_labels", 40,

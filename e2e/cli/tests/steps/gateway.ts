@@ -47,7 +47,7 @@ export class GatewaySteps {
 
   async rejectsDeploymentList(token?: string): Promise<void> {
     const response = await requestWithCAFile(
-      `${this.#sandbox.uiOrigin}/v1/deployments`,
+      `${this.#sandbox.uiOrigin}/v1alpha/deployments`,
       this.#sandbox.caFile,
       {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -59,7 +59,7 @@ export class GatewaySteps {
   async listsDeployment(id: string): Promise<void> {
     const token = await this.#client.accessToken();
     const response = await requestWithCAFile(
-      `${this.#sandbox.uiOrigin}/v1/deployments`,
+      `${this.#sandbox.uiOrigin}/v1alpha/deployments`,
       this.#sandbox.caFile,
       { headers: { Authorization: `Bearer ${token}` } },
     );

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/exec"
@@ -26,7 +26,7 @@ func TestNewLoopbackForward(t *testing.T) {
 		wantErr     bool
 	}{
 		{name: "valid", destination: "10.89.0.2:5556"},
-		{name: "dns name", destination: "fleetshift:5556"},
+		{name: "dns name", destination: "ocm-resource-manager:5556"},
 		{name: "invalid hostport", destination: "not-a-hostport", wantErr: true},
 		{name: "empty host", destination: ":5556", wantErr: true},
 		{name: "invalid port", destination: "10.89.0.2:0", wantErr: true},
@@ -87,8 +87,8 @@ func TestAgent_EnsureCluster_CallsLoopbackForward(t *testing.T) {
 	if first.State != domain.DeliveryStateDelivered {
 		t.Fatalf("first State = %q (%s)", first.State, first.Message)
 	}
-	if len(fwd.ensured) != 1 || fwd.ensured[0] != "fs--forward-me" {
-		t.Fatalf("after create ensured = %v, want [fs--forward-me]", fwd.ensured)
+	if len(fwd.ensured) != 1 || fwd.ensured[0] != "rm--forward-me" {
+		t.Fatalf("after create ensured = %v, want [rm--forward-me]", fwd.ensured)
 	}
 
 	fwd.ensured = nil
@@ -99,8 +99,8 @@ func TestAgent_EnsureCluster_CallsLoopbackForward(t *testing.T) {
 	if second.State != domain.DeliveryStateDelivered {
 		t.Fatalf("second State = %q (%s)", second.State, second.Message)
 	}
-	if len(fwd.ensured) != 1 || fwd.ensured[0] != "fs--forward-me" {
-		t.Fatalf("after ensure ensured = %v, want [fs--forward-me]", fwd.ensured)
+	if len(fwd.ensured) != 1 || fwd.ensured[0] != "rm--forward-me" {
+		t.Fatalf("after ensure ensured = %v, want [rm--forward-me]", fwd.ensured)
 	}
 }
 
@@ -151,8 +151,8 @@ func TestAgent_Remove_CallsLoopbackForward(t *testing.T) {
 	if res := awaitDone(t, reporter.done); res.State != domain.DeliveryStateDelivered {
 		t.Fatalf("remove State = %q (%s)", res.State, res.Message)
 	}
-	if len(fwd.removed) != 1 || fwd.removed[0] != "fs--gone" {
-		t.Fatalf("removed = %v, want [fs--gone]", fwd.removed)
+	if len(fwd.removed) != 1 || fwd.removed[0] != "rm--gone" {
+		t.Fatalf("removed = %v, want [rm--gone]", fwd.removed)
 	}
 }
 
@@ -165,11 +165,11 @@ func TestLoopbackForward_Ensure_InstallsSystemdProxy(t *testing.T) {
 	t.Cleanup(kind.OverrideLoopbackForwardBin(bin))
 
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x"); err != nil {
+	if err := fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(node.cmds) != 1 {
@@ -199,7 +199,7 @@ func TestLoopbackForward_Ensure_InstallsSystemdProxy(t *testing.T) {
 	if !bytes.Equal(cmd.stdin, payload) {
 		t.Fatalf("stdin = %q, want helper binary", cmd.stdin)
 	}
-	if !envHas(cmd.env, "DESTINATION=fleetshift:5556") || !envHas(cmd.env, "LISTEN_PORT=5556") || !envHas(cmd.env, "MODE=ensure") {
+	if !envHas(cmd.env, "DESTINATION=ocm-resource-manager:5556") || !envHas(cmd.env, "LISTEN_PORT=5556") || !envHas(cmd.env, "MODE=ensure") {
 		t.Fatalf("env = %v", cmd.env)
 	}
 }
@@ -207,11 +207,11 @@ func TestLoopbackForward_Ensure_InstallsSystemdProxy(t *testing.T) {
 func TestLoopbackForward_Ensure_MissingBinary(t *testing.T) {
 	t.Cleanup(kind.OverrideLoopbackForwardBin(filepath.Join(t.TempDir(), "missing")))
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -222,11 +222,11 @@ func TestLoopbackForward_Ensure_MissingBinary(t *testing.T) {
 
 func TestLoopbackForward_Remove_StopsUnit(t *testing.T) {
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fwd.Remove(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x"); err != nil {
+	if err := fwd.Remove(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(node.cmds) != 1 {
@@ -245,12 +245,12 @@ func TestLoopbackForward_Remove_StopsUnit(t *testing.T) {
 }
 
 func TestLoopbackForward_Ensure_NoControlPlane(t *testing.T) {
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
 	worker := &recordingKindNode{name: "w-1", role: "worker"}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{worker}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{worker}}, "rm--x")
 	if err == nil || !strings.Contains(err.Error(), "no control-plane nodes") {
 		t.Fatalf("error = %v, want no control-plane nodes", err)
 	}
@@ -263,11 +263,11 @@ func TestLoopbackForward_Ensure_EmptyBinary(t *testing.T) {
 	}
 	t.Cleanup(kind.OverrideLoopbackForwardBin(bin))
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
 	if err == nil || !strings.Contains(err.Error(), "is empty") {
 		t.Fatalf("error = %v, want empty helper", err)
 	}
@@ -280,11 +280,11 @@ func TestLoopbackForward_Ensure_CommandError(t *testing.T) {
 	}
 	t.Cleanup(kind.OverrideLoopbackForwardBin(bin))
 	node := &recordingKindNode{name: "cp-1", role: "control-plane", cmdErr: errors.New("systemctl failed")}
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
 	if err == nil || !strings.Contains(err.Error(), "ensure loopback forward on cp-1") || !strings.Contains(err.Error(), "systemctl failed") {
 		t.Fatalf("error = %v", err)
 	}
@@ -292,11 +292,11 @@ func TestLoopbackForward_Ensure_CommandError(t *testing.T) {
 
 func TestLoopbackForward_Ensure_DefaultBinaryPath(t *testing.T) {
 	node := &recordingKindNode{name: "cp-1", role: "control-plane"}
-	fwd, err := kind.NewLoopbackForward("fleetshift:5556")
+	fwd, err := kind.NewLoopbackForward("ocm-resource-manager:5556")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "fs--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
 	if err != nil {
 		if !strings.Contains(err.Error(), "/usr/local/bin/kind-loopback-forward") {
 			t.Fatalf("error = %v, want default helper path", err)

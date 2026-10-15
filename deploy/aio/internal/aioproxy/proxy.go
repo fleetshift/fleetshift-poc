@@ -1,5 +1,5 @@
 // Package aioproxy terminates the AIO gateway certificate and reverse-proxies
-// peer Dex and FleetShift on one public origin.
+// peer Dex and Resource Manager on one public origin.
 package aioproxy
 
 import (
@@ -30,7 +30,7 @@ const (
 // ForwardingHeaders are extra hop and identity headers a client can spoof
 // (address, proto, or authenticated user). ReverseProxy.Rewrite already
 // drops Forwarded and X-Forwarded-For/Host/Proto; these names are not in
-// that set and must not reach Dex or FleetShift.
+// that set and must not reach Dex or Resource Manager.
 var ForwardingHeaders = []string{
 	"X-Forwarded-Port",
 	"X-Forwarded-Ssl",
@@ -45,31 +45,31 @@ var ForwardingHeaders = []string{
 	"X-Forwarded-Client-Cert",
 }
 
-// Config is the AIO TLS-edge configuration. DexURL and FleetShiftURL are the
-// Dex and FleetShift loopback upstreams. The accepted Host header is derived
+// Config is the AIO TLS-edge configuration. DexURL and ResourceManagerURL are the
+// Dex and Resource Manager loopback upstreams. The accepted Host header is derived
 // from PublicOrigin.
 type Config struct {
-	ListenAddr    string
-	CertFile      string
-	KeyFile       string
-	PublicOrigin  string
-	DexURL        *url.URL
-	FleetShiftURL *url.URL
+	ListenAddr         string
+	CertFile           string
+	KeyFile            string
+	PublicOrigin       string
+	DexURL             *url.URL
+	ResourceManagerURL *url.URL
 }
 
 // Proxy terminates the AIO gateway certificate and multiplexes /idp to Dex
-// and every other path to FleetShift.
+// and every other path to Resource Manager.
 type Proxy struct {
-	certFile      string
-	keyFile       string
-	publicOrigin  string
-	canonicalHost string
-	dex           *httputil.ReverseProxy
-	fleetshift    *httputil.ReverseProxy
-	server        *http.Server
+	certFile        string
+	keyFile         string
+	publicOrigin    string
+	canonicalHost   string
+	dex             *httputil.ReverseProxy
+	resourceManager *httputil.ReverseProxy
+	server          *http.Server
 }
 
-// New constructs a Proxy for cfg. DexURL and FleetShiftURL must be non-nil
+// New constructs a Proxy for cfg. DexURL and ResourceManagerURL must be non-nil
 // absolute http or https URLs without userinfo. PublicOrigin must be an
 // absolute http or https origin; its host is the only accepted Host header.
 func New(cfg Config) (*Proxy, error) {
@@ -80,18 +80,18 @@ func New(cfg Config) (*Proxy, error) {
 	if err := checkUpstream("dex", cfg.DexURL); err != nil {
 		return nil, err
 	}
-	if err := checkUpstream("fleetshift", cfg.FleetShiftURL); err != nil {
+	if err := checkUpstream("ocm-resource-manager", cfg.ResourceManagerURL); err != nil {
 		return nil, err
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	p := &Proxy{
-		certFile:      cfg.CertFile,
-		keyFile:       cfg.KeyFile,
-		publicOrigin:  origin,
-		canonicalHost: host,
-		dex:           newUpstream(cfg.DexURL, transport),
-		fleetshift:    newUpstream(cfg.FleetShiftURL, transport),
+		certFile:        cfg.CertFile,
+		keyFile:         cfg.KeyFile,
+		publicOrigin:    origin,
+		canonicalHost:   host,
+		dex:             newUpstream(cfg.DexURL, transport),
+		resourceManager: newUpstream(cfg.ResourceManagerURL, transport),
 	}
 	p.server = &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -104,7 +104,7 @@ func New(cfg Config) (*Proxy, error) {
 	return p, nil
 }
 
-// ServeHTTP routes a request to Dex or FleetShift after Host and WebSocket
+// ServeHTTP routes a request to Dex or Resource Manager after Host and WebSocket
 // Origin checks. Encoded paths are classified with EscapedPath so a cleaned
 // path cannot cross the /idp routing boundary.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +126,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.dex.ServeHTTP(w, r)
 		return
 	}
-	p.fleetshift.ServeHTTP(w, r)
+	p.resourceManager.ServeHTTP(w, r)
 }
 
 // ListenAndServe serves HTTPS on the configured address until ctx is cancelled.
@@ -226,7 +226,7 @@ func newUpstream(target *url.URL, transport http.RoundTripper) *httputil.Reverse
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			// Readiness probes hit the edge before Dex and FleetShift bind. Skipping
+			// Readiness probes hit the edge before Dex and Resource Manager bind. Skipping
 			// ECONNREFUSED logs to reduce log noise.
 			if !errors.Is(err, syscall.ECONNREFUSED) {
 				log.Printf("aio-proxy: upstream error method=%s path=%s: %v", r.Method, r.URL.Path, err)

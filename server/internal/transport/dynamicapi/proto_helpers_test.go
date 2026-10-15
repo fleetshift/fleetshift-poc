@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
 func TestInt64Field(t *testing.T) {

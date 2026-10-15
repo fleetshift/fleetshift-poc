@@ -45,7 +45,7 @@ const InstallProgress = ({ onComplete }: InstallProgressProps) => {
   }, [activeStep]);
 
   return (
-    <div className="ome-install-progress">
+    <div className="ocm-rm-install-progress">
       <ProgressStepper isVertical aria-label="Extension install progress">
         {STEPS.map((step, idx) => (
           <ProgressStep

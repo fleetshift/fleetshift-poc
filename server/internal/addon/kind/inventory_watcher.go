@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 const defaultInventoryDebounce = 50 * time.Millisecond
@@ -162,8 +162,8 @@ func (w *InventoryWatcher) Watch(clusterName domain.ResourceName, kubeconfig []b
 			if node == nil {
 				return
 			}
-			// Stop reporting this node; resource delete is out of scope
-			// (OME-189). Drop any pending delta for the name.
+			// Stop reporting this node; deleting its inventory resource remains
+			// separate work. Drop any pending delta for the name.
 			w.dropPending(nodeResourceName(node.Name))
 		},
 	})

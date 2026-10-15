@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
 )
 
 func TestClassifyResourceContainer_Envelope(t *testing.T) {

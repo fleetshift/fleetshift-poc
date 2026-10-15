@@ -12,10 +12,10 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
 )
 
 // benchEnv holds pre-built descriptors for benchmarking the dynamic handler

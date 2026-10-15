@@ -140,8 +140,8 @@ for (const [rt, group] of byType) {
 function inferNamePattern(rt, names) {
   if (names.length === 0) return "";
   const sample = names[0];
-  if (rt === "kubernetes.fleetshift.io/Object") {
-    return "//kubernetes.fleetshift.io/clusters/{cluster}/apiResources/{group~version~resource}/objects/{uuid}";
+  if (rt === "kubernetes.resource-manager.open-cluster-management.io/Object") {
+    return "//kubernetes.resource-manager.open-cluster-management.io/clusters/{cluster}/apiResources/{group~version~resource}/objects/{uuid}";
   }
   if (rt.endsWith("/Cluster")) {
     const domain = rt.split("/")[0];
@@ -154,9 +154,9 @@ function inferNamePattern(rt, names) {
   return sample.replace(/[^/]+$/, "{id}");
 }
 
-// ── kubernetes.fleetshift.io/Object deep analysis ────────────────────
+// ── kubernetes.resource-manager.open-cluster-management.io/Object deep analysis ────────────────────
 
-const k8sObjects = byType.get("kubernetes.fleetshift.io/Object") ?? [];
+const k8sObjects = byType.get("kubernetes.resource-manager.open-cluster-management.io/Object") ?? [];
 
 // kind distribution
 const kindCounts = {};
@@ -230,7 +230,7 @@ const sortedApiGroups = Object.entries(apiGroupCounts).sort((a, b) => b[1] - a[1
 const crossTypePatterns = {
   commonFields: ["name", "resourceType", "resource.name", "resource.uid", "resource.etag", "resource.createTime", "resource.updateTime"],
   topLevelNameFormat: "//{domain}/{resourcePath}",
-  nameSegmentConventions: "K8s objects use GVR format: {group}~{version}~{resource} with ~ separator. Names are URIs: //kubernetes.fleetshift.io/clusters/{cluster}/apiResources/{gvr}/objects/{uuid}",
+  nameSegmentConventions: "K8s objects use GVR format: {group}~{version}~{resource} with ~ separator. Names are URIs: //kubernetes.resource-manager.open-cluster-management.io/clusters/{cluster}/apiResources/{gvr}/objects/{uuid}",
 
   observationKindDistribution: Object.fromEntries(sortedKinds),
   namespaceDistribution: Object.fromEntries(sortedNamespaces),
@@ -298,8 +298,8 @@ const crossTypePatterns = {
     { expression: 'resource.observation.extracted.status == "Running"', description: "Find running Pods" },
     { expression: 'resource.observation.extracted.phase == "Active"', description: "Find active Namespaces" },
     { expression: 'resource.observation.kind == "CustomResourceDefinition"', description: "Find all CRDs" },
-    { expression: 'resourceType == "kind.fleetshift.io/Cluster"', description: "Find Kind clusters" },
-    { expression: 'name.startsWith("//kubernetes.fleetshift.io/clusters/")', description: "Find all K8s objects" },
+    { expression: 'resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"', description: "Find Kind clusters" },
+    { expression: 'name.startsWith("//kubernetes.resource-manager.open-cluster-management.io/clusters/")', description: "Find all K8s objects" },
   ],
 
   searchAutocompleteHints: {

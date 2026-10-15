@@ -26,7 +26,7 @@ func setupTestWebDir(t *testing.T) string {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"label":     "Clusters",
 								"component": map[string]interface{}{"$codeRef": "ClustersModule.default"},

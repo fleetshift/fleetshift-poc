@@ -6,8 +6,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
 func stubSpecDescriptor() protoreflect.MessageDescriptor {
@@ -22,8 +22,8 @@ func managedOnlyConfig() *ResourceTypeConfig {
 			CollectionID: "clusters",
 			Version:      "v1",
 		},
-		ResourceType: "test.fleetshift.io/Cluster",
-		ProtoPackage: "test.fleetshift.v1",
+		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
+		ProtoPackage: "ocm.resource_manager.test.v1alpha",
 		Capabilities: ResourceCapabilities{
 			Management: &ManagementCapabilityConfig{
 				SpecMessage:    "google.protobuf.Timestamp",
@@ -41,8 +41,8 @@ func inventoryOnlyConfig() *ResourceTypeConfig {
 			CollectionID: "clusters",
 			Version:      "v1",
 		},
-		ResourceType: "test.fleetshift.io/Cluster",
-		ProtoPackage: "test.fleetshift.v1",
+		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
+		ProtoPackage: "ocm.resource_manager.test.v1alpha",
 		Capabilities: ResourceCapabilities{
 			Inventory: &InventoryCapabilityConfig{},
 		},
@@ -182,10 +182,10 @@ func TestBuildExtensionServiceDescriptors_CommonLabelsOnAllShapes(t *testing.T) 
 
 func TestSchemaContentHash_InventoryPresence(t *testing.T) {
 	base := domain.ExtensionResourceSchema{
-		ResourceType: "test.fleetshift.io/Cluster",
+		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
 		Singular:     "Cluster",
 		Plural:       "Clusters",
-		ProtoPackage: "test.fleetshift.v1",
+		ProtoPackage: "ocm.resource_manager.test.v1alpha",
 		Version:      "v1",
 		CollectionID: "clusters",
 		Management:   &domain.ManagementSchema{SpecMessage: "ClusterSpec"},

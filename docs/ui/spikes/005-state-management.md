@@ -6,7 +6,7 @@
 
 ## Problem
 
-FleetShift is composed of independently built plugins. Each plugin manages its own domain — one handles pods, another handles nodes, another handles deployments, and so on. These plugins need to maintain state (the list of pods, their statuses, metrics, etc.) and some plugins need access to data that belongs to another plugin.
+Resource Manager is composed of independently built plugins. Each plugin manages its own domain — one handles pods, another handles nodes, another handles deployments, and so on. These plugins need to maintain state (the list of pods, their statuses, metrics, etc.) and some plugins need access to data that belongs to another plugin.
 
 The traditional approach would be to introduce a global state management layer like Redux or Zustand where all plugins read from and write to a single shared store. This creates tight coupling — every plugin depends on the shape of the global state, changes to one plugin's data model can break others, and the global store becomes a bottleneck that every team has to coordinate around. It also means the shell application has to know about the data structures of every plugin upfront, which defeats the purpose of having independently deployable modules.
 

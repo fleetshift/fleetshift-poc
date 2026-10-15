@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ocm.resource_manager.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha;rmv1alpha";
+
+import "ocm/resource_manager/v1alpha/deployment.proto";
+
+// Response message for
+// [DeploymentService.ListDeployments][ocm.resource_manager.v1alpha.DeploymentService.ListDeployments].
+message ListDeploymentsResponse {
+  // The deployments.
+  repeated Deployment deployments = 1;
+
+  // A token for the next page. If empty, there are no more results.
+  string next_page_token = 2;
+}

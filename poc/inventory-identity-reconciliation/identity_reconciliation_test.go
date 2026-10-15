@@ -67,7 +67,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 
 	t.Run("pending_then_accepted", func(t *testing.T) {
 		report := buildBatch(0, rangeSpec{
-			start: 1, count: 1, serviceName: "kubernetes.fleetshift.io", collectionName: "clusters", generation: 1,
+			start: 1, count: 1, serviceName: "kubernetes.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 			aliasesFor: func(_ int, g int) []alias {
 				return []alias{{namespace: "cloud", key: "provider-id", value: "cluster-provider-001"}}
 			},
@@ -80,7 +80,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 			queuedSources:       1,
 			markedPending:       1,
 		})
-		assertStatus(ctx, t, db, "kubernetes.fleetshift.io", "clusters", "r-00000001", "pending")
+		assertStatus(ctx, t, db, "kubernetes.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "pending")
 		assertAcceptedRepresentations(ctx, t, db, "clusters", "r-00000001", 0)
 
 		reconciled := execReconcile(ctx, t, db)
@@ -92,14 +92,14 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 			acceptedAliases:       1,
 			acceptedRepresentions: 1,
 		})
-		assertStatus(ctx, t, db, "kubernetes.fleetshift.io", "clusters", "r-00000001", "accepted")
+		assertStatus(ctx, t, db, "kubernetes.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "accepted")
 		assertAcceptedRepresentations(ctx, t, db, "clusters", "r-00000001", 1)
 		assertResolvedAlias(ctx, t, db, "cloud", "provider-id", "cluster-provider-001", "clusters", "r-00000001")
 	})
 
 	t.Run("corroborating_inventory_source_is_accepted", func(t *testing.T) {
 		report := buildBatch(0, rangeSpec{
-			start: 1, count: 1, serviceName: "observer.fleetshift.io", collectionName: "clusters", generation: 1,
+			start: 1, count: 1, serviceName: "observer.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 			aliasesFor: func(_ int, g int) []alias {
 				return []alias{{namespace: "cloud", key: "provider-id", value: "cluster-provider-001"}}
 			},
@@ -119,7 +119,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 
 	t.Run("conflicting_report_succeeds_but_is_not_accepted", func(t *testing.T) {
 		report := buildBatch(0, rangeSpec{
-			start: 1, count: 1, serviceName: "miswired.fleetshift.io", collectionName: "clusters", generation: 1,
+			start: 1, count: 1, serviceName: "miswired.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 			aliasesFor: func(_ int, g int) []alias {
 				return []alias{{namespace: "cloud", key: "provider-id", value: "cluster-provider-999"}}
 			},
@@ -129,7 +129,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 		if got.queuedSources != 1 || got.updatedInventory != 1 {
 			t.Fatalf("hot path result = %s, want report accepted and source queued", got)
 		}
-		assertStatus(ctx, t, db, "miswired.fleetshift.io", "clusters", "r-00000001", "pending")
+		assertStatus(ctx, t, db, "miswired.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "pending")
 
 		reconciled := execReconcile(ctx, t, db)
 		assertReconcileResult(t, reconciled, reconcileResult{
@@ -140,7 +140,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 			acceptedAliases:       0,
 			acceptedRepresentions: 0,
 		})
-		assertStatus(ctx, t, db, "miswired.fleetshift.io", "clusters", "r-00000001", "conflict")
+		assertStatus(ctx, t, db, "miswired.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "conflict")
 		assertAcceptedRepresentations(ctx, t, db, "clusters", "r-00000001", 2)
 		assertConflictCount(ctx, t, db, "clusters", "r-00000001", 1)
 		assertResolvedAliasMissing(ctx, t, db, "cloud", "provider-id", "cluster-provider-999")
@@ -148,7 +148,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 
 	t.Run("accepted_source_becomes_pending_then_conflict_on_alias_change", func(t *testing.T) {
 		report := buildBatch(0, rangeSpec{
-			start: 1, count: 1, serviceName: "observer.fleetshift.io", collectionName: "clusters", generation: 2,
+			start: 1, count: 1, serviceName: "observer.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2,
 			aliasesFor: func(_ int, g int) []alias {
 				return []alias{{namespace: "cloud", key: "provider-id", value: "cluster-provider-002"}}
 			},
@@ -158,21 +158,21 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 		if got.storedAliasPayloads != 1 || got.markedPending != 1 {
 			t.Fatalf("hot path result = %s, want alias payload stored and source marked pending", got)
 		}
-		assertStatus(ctx, t, db, "observer.fleetshift.io", "clusters", "r-00000001", "pending")
+		assertStatus(ctx, t, db, "observer.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "pending")
 		assertAcceptedRepresentations(ctx, t, db, "clusters", "r-00000001", 1)
 
 		reconciled := execReconcile(ctx, t, db)
 		if reconciled.conflictedSources != 1 {
 			t.Fatalf("reconcile result = %s, want conflict", reconciled)
 		}
-		assertStatus(ctx, t, db, "observer.fleetshift.io", "clusters", "r-00000001", "conflict")
+		assertStatus(ctx, t, db, "observer.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "conflict")
 		assertConflictCount(ctx, t, db, "clusters", "r-00000001", 2)
 		assertResolvedAliasMissing(ctx, t, db, "cloud", "provider-id", "cluster-provider-002")
 	})
 
 	t.Run("conflict_resolves_after_corrected_report", func(t *testing.T) {
 		report := buildBatch(0, rangeSpec{
-			start: 1, count: 1, serviceName: "observer.fleetshift.io", collectionName: "clusters", generation: 3,
+			start: 1, count: 1, serviceName: "observer.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 3,
 			aliasesFor: func(_ int, g int) []alias {
 				return []alias{{namespace: "cloud", key: "provider-id", value: "cluster-provider-001"}}
 			},
@@ -186,14 +186,14 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 		if reconciled.acceptedSources != 1 || reconciled.conflictedSources != 0 {
 			t.Fatalf("reconcile result = %s, want accepted corrected source", reconciled)
 		}
-		assertStatus(ctx, t, db, "observer.fleetshift.io", "clusters", "r-00000001", "accepted")
+		assertStatus(ctx, t, db, "observer.resource-manager.open-cluster-management.io", "clusters", "r-00000001", "accepted")
 		assertAcceptedRepresentations(ctx, t, db, "clusters", "r-00000001", 2)
 		assertConflictCount(ctx, t, db, "clusters", "r-00000001", 1)
 	})
 
 	t.Run("accepted_source_can_remove_alias", func(t *testing.T) {
 		initial := buildBatch(0, rangeSpec{
-			start: 2, count: 1, serviceName: "alias-removal.fleetshift.io", collectionName: "clusters", generation: 1,
+			start: 2, count: 1, serviceName: "alias-removal.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 			aliasesFor: func(_ int, g int) []alias {
 				return []alias{{namespace: "cloud", key: "provider-id", value: "removable-provider-002"}}
 			},
@@ -210,7 +210,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 		assertResolvedAlias(ctx, t, db, "cloud", "provider-id", "removable-provider-002", "clusters", "r-00000002")
 
 		removed := buildBatch(0, rangeSpec{
-			start: 2, count: 1, serviceName: "alias-removal.fleetshift.io", collectionName: "clusters", generation: 2,
+			start: 2, count: 1, serviceName: "alias-removal.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2,
 			aliasesFor: func(int, int) []alias { return nil },
 		})
 
@@ -224,7 +224,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 		if reconciled.acceptedSources != 1 || reconciled.acceptedAliases != 0 {
 			t.Fatalf("removal reconcile result = %s, want accepted source with no aliases", reconciled)
 		}
-		assertStatus(ctx, t, db, "alias-removal.fleetshift.io", "clusters", "r-00000002", "accepted")
+		assertStatus(ctx, t, db, "alias-removal.resource-manager.open-cluster-management.io", "clusters", "r-00000002", "accepted")
 		assertAcceptedRepresentations(ctx, t, db, "clusters", "r-00000002", 1)
 		assertResolvedAliasMissing(ctx, t, db, "cloud", "provider-id", "removable-provider-002")
 	})
@@ -233,7 +233,7 @@ func TestInventoryIdentityReconciliation(t *testing.T) {
 		runBatchTimings(ctx, t, db)
 	})
 
-	if os.Getenv("FLEETSHIFT_LONG_INVENTORY_IDENTITY_BENCH") == "1" {
+	if os.Getenv("OCM_RM_LONG_INVENTORY_IDENTITY_BENCH") == "1" {
 		t.Run("long_benchmark", func(t *testing.T) {
 			runLongBenchmark(ctx, t, db)
 		})
@@ -600,7 +600,7 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			name: "new_no_aliases",
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 10_001 + iteration*1_000, count: 1_000, serviceName: "noalias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 10_001 + iteration*1_000, count: 1_000, serviceName: "noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(int, int) []alias { return nil },
 				})
 			},
@@ -615,13 +615,13 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			name: "steady_no_aliases",
 			setup: func() {
 				preseedAccepted("steady_no_aliases", buildBatch(0, rangeSpec{
-					start: 15_001, count: 1_000, serviceName: "steady-noalias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 15_001, count: 1_000, serviceName: "steady-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(int, int) []alias { return nil },
 				}))
 			},
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 15_001, count: 1_000, serviceName: "steady-noalias.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+					start: 15_001, count: 1_000, serviceName: "steady-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 					aliasesFor: func(int, int) []alias { return nil },
 				})
 			},
@@ -636,7 +636,7 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			name: "new_aliases",
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 20_001 + iteration*1_000, count: 1_000, serviceName: "newalias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 20_001 + iteration*1_000, count: 1_000, serviceName: "newalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("new-provider-%08d", g)}}
 					},
@@ -653,7 +653,7 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			name: "steady_same_aliases",
 			setup: func() {
 				preseedAccepted("steady_same_aliases", buildBatch(0, rangeSpec{
-					start: 30_001, count: 1_000, serviceName: "steady-alias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 30_001, count: 1_000, serviceName: "steady-alias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("steady-provider-%08d", g)}}
 					},
@@ -661,7 +661,7 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			},
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 30_001, count: 1_000, serviceName: "steady-alias.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+					start: 30_001, count: 1_000, serviceName: "steady-alias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("steady-provider-%08d", g)}}
 					},
@@ -678,7 +678,7 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			name: "conflicting_aliases",
 			setup: func() {
 				preseedAccepted("conflicting_aliases", buildBatch(0, rangeSpec{
-					start: 50_001, count: 1_000, serviceName: "identity-owner.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 50_001, count: 1_000, serviceName: "identity-owner.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("owner-provider-%08d", g)}}
 					},
@@ -686,7 +686,7 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 			},
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 50_001, count: 1_000, serviceName: fmt.Sprintf("conflict-%02d.fleetshift.io", iteration), collectionName: "clusters", generation: 1,
+					start: 50_001, count: 1_000, serviceName: fmt.Sprintf("conflict-%02d.resource-manager.open-cluster-management.io", iteration), collectionName: "clusters", generation: 1,
 					aliasesFor: func(iteration, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("conflicting-provider-%02d-%08d", iteration, g)}}
 					},
@@ -794,13 +794,13 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			itemsPerBatch: batchSize,
 			setup: func() {
 				preseedAccepted("long steady_no_aliases", buildBatch(0, rangeSpec{
-					start: 100_001, count: batchSize, serviceName: "long-steady-noalias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 100_001, count: batchSize, serviceName: "long-steady-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(int, int) []alias { return nil },
 				}))
 			},
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 100_001, count: batchSize, serviceName: "long-steady-noalias.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+					start: 100_001, count: batchSize, serviceName: "long-steady-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 					aliasesFor: func(int, int) []alias { return nil },
 				})
 			},
@@ -818,7 +818,7 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			itemsPerBatch: batchSize,
 			setup: func() {
 				preseedAccepted("long steady_same_aliases", buildBatch(0, rangeSpec{
-					start: 110_001, count: batchSize, serviceName: "long-steady-alias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 110_001, count: batchSize, serviceName: "long-steady-alias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-steady-provider-%08d", g)}}
 					},
@@ -826,7 +826,7 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			},
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 110_001, count: batchSize, serviceName: "long-steady-alias.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+					start: 110_001, count: batchSize, serviceName: "long-steady-alias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-steady-provider-%08d", g)}}
 					},
@@ -847,17 +847,17 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			setup: func() {
 				preseedAccepted("long mixed_realistic", buildBatch(0,
 					rangeSpec{
-						start: 120_001, count: mixedNoAliasCount, serviceName: "long-mixed-noalias.fleetshift.io", collectionName: "clusters", generation: 1,
+						start: 120_001, count: mixedNoAliasCount, serviceName: "long-mixed-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 						aliasesFor: func(int, int) []alias { return nil },
 					},
 					rangeSpec{
-						start: 130_001, count: mixedAliasCount, serviceName: "long-mixed-samealias.fleetshift.io", collectionName: "clusters", generation: 1,
+						start: 130_001, count: mixedAliasCount, serviceName: "long-mixed-samealias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 						aliasesFor: func(_ int, g int) []alias {
 							return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-mixed-provider-%08d", g)}}
 						},
 					},
 					rangeSpec{
-						start: 140_001, count: mixedChangingCount, serviceName: "long-mixed-changing.fleetshift.io", collectionName: "clusters", generation: 1,
+						start: 140_001, count: mixedChangingCount, serviceName: "long-mixed-changing.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 						aliasesFor: func(_ int, g int) []alias {
 							return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-changing-provider-%08d-v000", g)}}
 						},
@@ -867,17 +867,17 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			build: func(iteration int) batch {
 				return buildBatch(iteration,
 					rangeSpec{
-						start: 120_001, count: mixedNoAliasCount, serviceName: "long-mixed-noalias.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+						start: 120_001, count: mixedNoAliasCount, serviceName: "long-mixed-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 						aliasesFor: func(int, int) []alias { return nil },
 					},
 					rangeSpec{
-						start: 130_001, count: mixedAliasCount, serviceName: "long-mixed-samealias.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+						start: 130_001, count: mixedAliasCount, serviceName: "long-mixed-samealias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 						aliasesFor: func(_ int, g int) []alias {
 							return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-mixed-provider-%08d", g)}}
 						},
 					},
 					rangeSpec{
-						start: 140_001, count: mixedChangingCount, serviceName: "long-mixed-changing.fleetshift.io", collectionName: "clusters", generation: 2 + iteration,
+						start: 140_001, count: mixedChangingCount, serviceName: "long-mixed-changing.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 2 + iteration,
 						aliasesFor: func(iteration, g int) []alias {
 							return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-changing-provider-%08d-v%03d", g, iteration+1)}}
 						},
@@ -898,7 +898,7 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			itemsPerBatch: batchSize,
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 200_001 + iteration*batchSize, count: batchSize, serviceName: "long-new-noalias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 200_001 + iteration*batchSize, count: batchSize, serviceName: "long-new-noalias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(int, int) []alias { return nil },
 				})
 			},
@@ -916,7 +916,7 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			itemsPerBatch: aliasCount,
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 300_001 + iteration*aliasCount, count: aliasCount, serviceName: "long-new-alias.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 300_001 + iteration*aliasCount, count: aliasCount, serviceName: "long-new-alias.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-new-provider-%08d", g)}}
 					},
@@ -936,7 +936,7 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			itemsPerBatch: aliasCount,
 			setup: func() {
 				preseedAccepted("long conflicting_aliases", buildBatch(0, rangeSpec{
-					start: 400_001, count: aliasCount, serviceName: "long-conflict-owner.fleetshift.io", collectionName: "clusters", generation: 1,
+					start: 400_001, count: aliasCount, serviceName: "long-conflict-owner.resource-manager.open-cluster-management.io", collectionName: "clusters", generation: 1,
 					aliasesFor: func(_ int, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-owner-provider-%08d", g)}}
 					},
@@ -944,7 +944,7 @@ func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
 			},
 			build: func(iteration int) batch {
 				return buildBatch(iteration, rangeSpec{
-					start: 400_001, count: aliasCount, serviceName: fmt.Sprintf("long-conflict-%03d.fleetshift.io", iteration), collectionName: "clusters", generation: 1,
+					start: 400_001, count: aliasCount, serviceName: fmt.Sprintf("long-conflict-%03d.resource-manager.open-cluster-management.io", iteration), collectionName: "clusters", generation: 1,
 					aliasesFor: func(iteration, g int) []alias {
 						return []alias{{namespace: "cloud", key: "provider-id", value: fmt.Sprintf("long-conflicting-provider-%03d-%08d", iteration, g)}}
 					},

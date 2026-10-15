@@ -46,7 +46,7 @@ export default function NodesStep({ formData, onChange }: NodesStepProps) {
       {formData.nodes.map((node, i) => (
         <div
           key={i}
-          className="pf-v6-u-display-flex pf-v6-u-align-items-flex-end ome-kind-node-row"
+          className="pf-v6-u-display-flex pf-v6-u-align-items-flex-end ocm-rm-kind-node-row"
         >
           <FormGroup
             label={i === 0 ? "Role" : undefined}
@@ -70,7 +70,7 @@ export default function NodesStep({ formData, onChange }: NodesStepProps) {
           <FormGroup
             label={i === 0 ? "Image (optional)" : undefined}
             fieldId={`node-image-${i}`}
-            className="ome-kind-node-image"
+            className="ocm-rm-kind-node-image"
           >
             <TextInput
               id={`node-image-${i}`}

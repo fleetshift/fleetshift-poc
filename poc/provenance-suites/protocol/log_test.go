@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/internal/merklelog"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/internal/merklelog"
 	"github.com/transparency-dev/merkle/rfc6962"
 )
 

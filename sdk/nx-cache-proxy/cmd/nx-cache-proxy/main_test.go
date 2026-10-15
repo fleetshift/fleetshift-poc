@@ -75,7 +75,7 @@ func TestAuthorize(t *testing.T) {
 
 func TestHandleGetNoAuth(t *testing.T) {
 	p := &cacheProxy{readToken: "tok", writeToken: "wtok"}
-	r := httptest.NewRequest("GET", "/v1/cache/abc123", nil)
+	r := httptest.NewRequest("GET", "/v1alpha/cache/abc123", nil)
 	r.SetPathValue("hash", "abc123")
 	w := httptest.NewRecorder()
 
@@ -88,7 +88,7 @@ func TestHandleGetNoAuth(t *testing.T) {
 
 func TestHandlePutReadOnlyToken(t *testing.T) {
 	p := &cacheProxy{readToken: "read-tok", writeToken: "write-tok"}
-	r := httptest.NewRequest("PUT", "/v1/cache/abc123", strings.NewReader("data"))
+	r := httptest.NewRequest("PUT", "/v1alpha/cache/abc123", strings.NewReader("data"))
 	r.SetPathValue("hash", "abc123")
 	r.Header.Set("Authorization", "Bearer read-tok")
 	r.Header.Set("Content-Length", "4")
@@ -103,7 +103,7 @@ func TestHandlePutReadOnlyToken(t *testing.T) {
 
 func TestHandleGetMissingHash(t *testing.T) {
 	p := &cacheProxy{readToken: "tok", writeToken: "wtok"}
-	r := httptest.NewRequest("GET", "/v1/cache/", nil)
+	r := httptest.NewRequest("GET", "/v1alpha/cache/", nil)
 	r.SetPathValue("hash", "")
 	r.Header.Set("Authorization", "Bearer tok")
 	w := httptest.NewRecorder()

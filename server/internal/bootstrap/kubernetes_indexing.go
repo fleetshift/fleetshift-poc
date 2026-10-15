@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	kubernetesaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // kubernetesInProcessIndexing holds the indexing runtime for server composition.
@@ -78,7 +78,7 @@ func (b *directInventoryReportBackend) ReplaceBatch(ctx context.Context, resourc
 	return nil
 }
 
-// storeTargetLister adapts FleetShift's target store onto the Kubernetes
+// storeTargetLister adapts Resource Manager's target store onto the Kubernetes
 // startup replayer's TargetLister port at the server composition boundary.
 type storeTargetLister struct {
 	store domain.Store

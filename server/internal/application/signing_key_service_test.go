@@ -4,14 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
-const enrollmentAudience = "fleetshift-key-enrollment"
+const enrollmentAudience = "ocm-resource-manager-key-enrollment"
 
 func setupSignerEnrollmentService(t *testing.T) (*application.SignerEnrollmentService, *oidctest.Provider) {
 	t.Helper()

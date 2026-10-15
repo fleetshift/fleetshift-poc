@@ -30,7 +30,7 @@ ResourceManagerAPI
 
 TargetAPI
   ParseHints(TypedEvidence) -> TentativeHints (identity fields + unverified TypedAssertion)
-  RequiresEvidenceLog() -> whether this suite needs FleetShift log positions
+  RequiresEvidenceLog() -> whether this suite needs Resource Manager log positions
   BeginVerification(SignedStatement, authenticated profile and authority config)
       -> single-use session: Prepare identifies timestamp bindings;
          Finish authenticates and returns constraints
@@ -158,7 +158,7 @@ with a deployment does not change apply.
 ## Fulfillment-relation lookup
 
 Managed-resource and relation `ResourceType` values use the full versionless
-`{service}/{type}` identity, for example `kind.fleetshift.io/Cluster`.
+`{service}/{type}` identity, for example `kind.resource-manager.open-cluster-management.io/Cluster`.
 `protocol.ParseResourceType` constructs an immutable, comparable value with
 two nonempty components separated by one slash, without whitespace or extra
 path components. Comparison is exact; there is no service normalization, DNS
@@ -344,7 +344,7 @@ authenticated with the authority/profile configuration, use an explicit set
 of approved authorities, and reject unconfigured sources. The helper tests
 demonstrate coordinate semantics; they do not implement TSA trust policy.
 
-## The three FleetShift roles
+## The three Resource Manager roles
 
 ```text
 controlled producer

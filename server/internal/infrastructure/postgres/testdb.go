@@ -59,7 +59,7 @@ func detectProvider() testcontainers.ContainerCustomizer {
 func startContainer(extraOpts ...testcontainers.ContainerCustomizer) (*tcpostgres.PostgresContainer, string, error) {
 	ctx := context.Background()
 	opts := append([]testcontainers.ContainerCustomizer{
-		tcpostgres.WithDatabase("fleetshift_test"),
+		tcpostgres.WithDatabase("ocm-resource-manager_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
 		// Wait for the ready log twice (Postgres restarts once after

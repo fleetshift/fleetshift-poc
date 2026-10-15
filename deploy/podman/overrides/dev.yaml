@@ -2,4 +2,4 @@
 # exists so COMPOSE_FILES layering stays valid.
 
 services:
-  fleetshift-server: {}
+  ocm-resource-manager-server: {}

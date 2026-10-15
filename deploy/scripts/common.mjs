@@ -79,7 +79,7 @@ export async function waitFor(predicate, timeout, interval = 1) {
 
 export function importKeyValueArgs(args) {
   const keys = new Set([
-    "OME_CLUSTER_API",
+    "OCM_RM_CLUSTER_API",
     "KC_CLUSTER_API",
     "CLUSTER_NAME",
     "ACME_EMAIL",
@@ -96,7 +96,7 @@ export function importKeyValueArgs(args) {
     "PUBLIC_KEY_CLAIM_EXPR",
     "KEY_REGISTRY_ID",
     "KEY_REGISTRY_SUBJECT_EXPR",
-    "FLEETSHIFT_LOG_LEVEL",
+    "OCM_RM_LOG_LEVEL",
     "NAMESPACE",
     "TAG",
     "USER",

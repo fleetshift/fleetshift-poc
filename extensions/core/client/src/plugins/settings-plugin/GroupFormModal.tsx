@@ -1,5 +1,5 @@
-import type { NavLayoutGroup } from "@fleetshift/common";
-import { CUSTOM_GROUP_PREFIX, slugify } from "@fleetshift/common";
+import type { NavLayoutGroup } from "@ocm-resource-manager/common";
+import { CUSTOM_GROUP_PREFIX, slugify } from "@ocm-resource-manager/common";
 import {
   Button,
   Form,

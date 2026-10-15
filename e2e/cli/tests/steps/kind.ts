@@ -27,7 +27,7 @@ import {
 import { type Sandbox } from "../support/sandbox";
 import { CONFIG_MAP_DATA, CONFIG_MAP_NAME } from "./deployments";
 
-export const KIND_CLUSTER_TYPE = "kind.fleetshift.v1/clusters";
+export const KIND_CLUSTER_TYPE = "ocm.resource_manager.kind.v1alpha/clusters";
 const CLUSTER_WAIT_TIMEOUT_MS = 5 * 60_000;
 const OBJECT_WAIT_TIMEOUT_MS = 2 * 60_000;
 const KIND_API_WAIT_TIMEOUT_MS = 2 * 60_000;

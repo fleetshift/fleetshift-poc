@@ -20,17 +20,17 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	kindlog "sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	kubeaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
-const clusterName = "fleetshift-k8s-e2e"
+const clusterName = "ocm-resource-manager-k8s-e2e"
 
-// kindName is the ownership-encoded kind/docker cluster name (fs--{id}).
-const kindName = "fs--" + clusterName
+// kindName is the ownership-encoded kind/docker cluster name (rm--{id}).
+const kindName = "rm--" + clusterName
 
 var fixture *clusterFixture
 
@@ -333,9 +333,9 @@ func Test_CRDLifecycle(t *testing.T) {
 	crd := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "apiextensions.k8s.io/v1",
 		"kind":       "CustomResourceDefinition",
-		"metadata":   map[string]any{"name": "widgets.test.fleetshift.io"},
+		"metadata":   map[string]any{"name": "widgets.test.resource-manager.open-cluster-management.io"},
 		"spec": map[string]any{
-			"group": "test.fleetshift.io",
+			"group": "test.resource-manager.open-cluster-management.io",
 			"names": map[string]any{
 				"kind": "Widget", "plural": "widgets", "singular": "widget",
 			},
@@ -364,16 +364,16 @@ func Test_CRDLifecycle(t *testing.T) {
 		t.Fatalf("create CRD: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = f.dynClient.Resource(crdGVR).Delete(context.Background(), "widgets.test.fleetshift.io", metav1.DeleteOptions{})
+		_ = f.dynClient.Resource(crdGVR).Delete(context.Background(), "widgets.test.resource-manager.open-cluster-management.io", metav1.DeleteOptions{})
 	})
 
 	time.Sleep(5 * time.Second)
 
 	widgetGVR := schema.GroupVersionResource{
-		Group: "test.fleetshift.io", Version: "v1", Resource: "widgets",
+		Group: "test.resource-manager.open-cluster-management.io", Version: "v1", Resource: "widgets",
 	}
 	widget := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "test.fleetshift.io/v1",
+		"apiVersion": "test.resource-manager.open-cluster-management.io/v1",
 		"kind":       "Widget",
 		"metadata":   map[string]any{"name": "test-widget", "namespace": f.namespace},
 		"spec":       map[string]any{"color": "blue"},
@@ -473,9 +473,9 @@ func Test_CRDDeletion(t *testing.T) {
 	crd := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "apiextensions.k8s.io/v1",
 		"kind":       "CustomResourceDefinition",
-		"metadata":   map[string]any{"name": "gadgets.test.fleetshift.io"},
+		"metadata":   map[string]any{"name": "gadgets.test.resource-manager.open-cluster-management.io"},
 		"spec": map[string]any{
-			"group": "test.fleetshift.io",
+			"group": "test.resource-manager.open-cluster-management.io",
 			"names": map[string]any{
 				"kind": "Gadget", "plural": "gadgets", "singular": "gadget",
 			},
@@ -507,10 +507,10 @@ func Test_CRDDeletion(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	gadgetGVR := schema.GroupVersionResource{
-		Group: "test.fleetshift.io", Version: "v1", Resource: "gadgets",
+		Group: "test.resource-manager.open-cluster-management.io", Version: "v1", Resource: "gadgets",
 	}
 	gadget := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "test.fleetshift.io/v1",
+		"apiVersion": "test.resource-manager.open-cluster-management.io/v1",
 		"kind":       "Gadget",
 		"metadata":   map[string]any{"name": "test-gadget", "namespace": f.namespace},
 		"spec":       map[string]any{"size": "large"},
@@ -531,7 +531,7 @@ func Test_CRDDeletion(t *testing.T) {
 
 	// GVR disappearance is non-destructive: stop the informer, leave
 	// other collections alone (no DeleteCollection / collection wipe).
-	err = f.dynClient.Resource(crdGVR).Delete(ctx, "gadgets.test.fleetshift.io", metav1.DeleteOptions{})
+	err = f.dynClient.Resource(crdGVR).Delete(ctx, "gadgets.test.resource-manager.open-cluster-management.io", metav1.DeleteOptions{})
 	if err != nil {
 		t.Fatalf("delete CRD: %v", err)
 	}

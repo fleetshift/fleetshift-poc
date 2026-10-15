@@ -1,4 +1,4 @@
-// FleetShift UI — Module Groups Architecture
+// Resource Manager UI — Module Groups Architecture
 // Source of truth: docs/module-groups.md, build-utils/src/extensions/
 //
 // How plugins declare module groups for nested navigation,
@@ -105,7 +105,7 @@ model {
 
     moduleGroups = component 'Module Groups' {
       description '''
-        New extension type: fleetshift.module-group.
+        New extension type: ocm-resource-manager.module-group.
         Declares a navigational container for related modules.
         Properties: id, label, description, keywords.
         No component — groups are not routable. If a group needs
@@ -122,7 +122,7 @@ model {
 
     modules = component 'Modules' {
       description '''
-        fleetshift.module — gains optional group field.
+        ocm-resource-manager.module — gains optional group field.
         When group is set, the module nests under that group:
         route becomes /{groupId}/{moduleId}, nav renders as
         a child item under the group's NavExpandable.
@@ -131,7 +131,7 @@ model {
         top-level nav item at /{pluginKey}/{moduleId}.
 
         Module ids must be unique within their group.
-        The group field references a fleetshift.module-group id
+        The group field references a ocm-resource-manager.module-group id
         in the same plugin — cross-plugin references are rejected.
       '''
     }
@@ -153,7 +153,7 @@ model {
 
   buildTime = system 'Build-Time Validation' {
     description '''
-      Extended validation for module groups. FleetshiftPlugin
+      Extended validation for module groups. ResourceManagerPlugin
       validates group references at build time — the group must
       exist in the same plugin's extensions array.
     '''
@@ -161,25 +161,25 @@ model {
     builders = component 'Extension Builders' {
       description '''
         New builder: createModuleGroup() returns
-        FleetshiftExtension<"fleetshift.module-group", ModuleGroupExtras>.
+        ResourceManagerExtension<"ocm-resource-manager.module-group", ModuleGroupExtras>.
 
         Existing createModule() accepts optional group?: string.
         ModuleGroupExtras: Record<string, never> (no extra properties).
-        All builders produce FleetshiftExtension with type tags.
+        All builders produce ResourceManagerExtension with type tags.
       '''
       technology 'TypeScript'
     }
 
-    fleetshiftPlugin = component 'FleetshiftPlugin' {
+    resourceManagerPlugin = component 'ResourceManagerPlugin' {
       description '''
         Extended validation in validateExtensionSet():
 
         1. Group ID format: /^[a-z][a-z0-9-]*$/ (URL-safe).
         2. Group reference exists: if a module declares group: "foo",
-           a fleetshift.module-group with id "foo" must exist in the
+           a ocm-resource-manager.module-group with id "foo" must exist in the
            same extensions array. Build fails otherwise.
         3. No cross-plugin groups: enforced structurally — the group
-           and its modules are in the same FleetshiftPlugin instance.
+           and its modules are in the same ResourceManagerPlugin instance.
         4. Unique module ids within group: two modules in the same
            group cannot share an id.
         5. Group id uniqueness: no two groups in one plugin share an id.
@@ -191,8 +191,8 @@ model {
 
     manifest = store 'Plugin Manifest' {
       description '''
-        plugin-manifest.json — now includes fleetshift.module-group
-        entries alongside fleetshift.module entries. Module entries
+        plugin-manifest.json — now includes ocm-resource-manager.module-group
+        entries alongside ocm-resource-manager.module entries. Module entries
         may include a group property referencing a group id.
         Manifest format is additive — ungrouped plugins produce
         identical manifests to before.
@@ -212,8 +212,8 @@ model {
 
     manifestReader = component 'Manifest Reader' {
       description '''
-        Parses plugin-manifest.json. Extracts fleetshift.module-group
-        and fleetshift.module extensions. Builds a group-to-modules
+        Parses plugin-manifest.json. Extracts ocm-resource-manager.module-group
+        and ocm-resource-manager.module extensions. Builds a group-to-modules
         map from module group properties.
       '''
     }
@@ -291,7 +291,7 @@ model {
         Extended index building:
 
         Phase 0 (new) — Group scan:
-        Iterates fleetshift.module-group extensions. Inserts each
+        Iterates ocm-resource-manager.module-group extensions. Inserts each
         as category "nav-group" with route to first child.
         Stores group metadata for breadcrumb composition.
 
@@ -360,9 +360,9 @@ model {
   pluginModel.extensions -> buildTime.builders 'createClusterProvider(), etc.'
 
   // Build-time flow
-  buildTime.builders -[produces]-> buildTime.fleetshiftPlugin 'FleetshiftExtension[]'
-  buildTime.fleetshiftPlugin -[validates]-> buildTime.builders 'validates group references, unique ids'
-  buildTime.fleetshiftPlugin -[produces]-> buildTime.manifest 'plugin-manifest.json with groups'
+  buildTime.builders -[produces]-> buildTime.resourceManagerPlugin 'ResourceManagerExtension[]'
+  buildTime.resourceManagerPlugin -[validates]-> buildTime.builders 'validates group references, unique ids'
+  buildTime.resourceManagerPlugin -[produces]-> buildTime.manifest 'plugin-manifest.json with groups'
 
   // Manifest → Backend
   goBackend.manifestReader -[consumes]-> buildTime.manifest 'reads at startup'
@@ -454,7 +454,7 @@ views {
 
     include
       *,
-      buildTime.fleetshiftPlugin,
+      buildTime.resourceManagerPlugin,
       buildTime.builders
 
     style moduleGroups {
@@ -473,11 +473,11 @@ views {
   view buildView of buildTime {
     title 'Module Groups — Build-Time Validation'
     description '''
-      FleetshiftPlugin validates group references at build time:
+      ResourceManagerPlugin validates group references at build time:
       group must exist in the same extensions array, ids are URL-safe,
       module ids are unique within their group. Structurally enforces
       same-plugin scoping — the group and its modules are in one
-      FleetshiftPlugin instance. After validation, delegates to
+      ResourceManagerPlugin instance. After validation, delegates to
       DynamicRemotePlugin unchanged.
     '''
 
@@ -491,7 +491,7 @@ views {
     style builders {
       color green
     }
-    style fleetshiftPlugin {
+    style resourceManagerPlugin {
       color red
     }
   }
@@ -533,7 +533,7 @@ views {
     title 'Module Groups — Hierarchical Search'
     description '''
       Search index extends with a group scan phase:
-      fleetshift.module-group entries become "nav-group" category.
+      ocm-resource-manager.module-group entries become "nav-group" category.
       Grouped modules carry a group field linking to their parent group.
       Extensions inherit the group from their parent module.
 

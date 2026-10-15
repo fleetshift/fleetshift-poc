@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/slogutil"
 )
 
 func TestLevelOverrideHandler_BaseLevel(t *testing.T) {

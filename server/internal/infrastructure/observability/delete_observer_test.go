@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/observability"
 )
 
 func TestDeleteObserver_DeleteDeploymentStarted_LogsAndReturnsProbe(t *testing.T) {
@@ -138,7 +138,7 @@ func TestDeleteObserver_ManagedResourceCleanupStarted_FullLifecycle(t *testing.T
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
 	ctx, probe := obs.ManagedResourceCleanupStarted(context.Background(), domain.DeleteManagedResourceCleanupInput{
-		ResourceType:  "test.fleetshift.io/Cluster",
+		ResourceType:  "test.resource-manager.open-cluster-management.io/Cluster",
 		Name:          "my-cluster",
 		FulfillmentID: "ful-2",
 	})

@@ -11,12 +11,12 @@ import (
 	"github.com/cschleiden/go-workflows/worker"
 	"github.com/cschleiden/go-workflows/workflow"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/workflowenginetest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/workflowenginetest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/goworkflows"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
 func startWorker(t *testing.T, b backend.Backend) *worker.Worker {

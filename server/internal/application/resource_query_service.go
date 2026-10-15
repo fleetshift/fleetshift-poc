@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // WholePlatformScope is the only QueryResources scope accepted in v0.

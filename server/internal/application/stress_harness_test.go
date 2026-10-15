@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/goworkflows"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/keyregistry"
 )
 
 // ---------------------------------------------------------------------------
@@ -763,7 +763,7 @@ func stressManifest(deploymentName string, version int) domain.Manifest {
 			"namespace": "default",
 			"labels": map[string]any{
 				"app":        "stress-test",
-				"managed-by": "fleetshift",
+				"managed-by": "ocm-resource-manager",
 			},
 		},
 		"data": map[string]any{

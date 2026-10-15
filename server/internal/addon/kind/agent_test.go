@@ -15,10 +15,10 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/log"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/testutil"
 )
 
 // awaitDone drains one result from ch with a safety-net timeout so
@@ -224,8 +224,8 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	}
 
 	<-provider.created
-	if !provider.hasCluster("fs--dev-cluster") {
-		t.Error("expected cluster 'fs--dev-cluster' to exist")
+	if !provider.hasCluster("rm--dev-cluster") {
+		t.Error("expected cluster 'rm--dev-cluster' to exist")
 	}
 }
 
@@ -282,7 +282,7 @@ func TestAgent_Deliver_SameGenerationRetrySkipsCreate(t *testing.T) {
 	if got := provider.createCount(); got != 1 {
 		t.Fatalf("Create called %d times after first deliver, want 1", got)
 	}
-	if g, found, _ := store.Get(context.Background(), "fs--dev-cluster", nil); !found || g != 1 {
+	if g, found, _ := store.Get(context.Background(), "rm--dev-cluster", nil); !found || g != 1 {
 		t.Fatalf("store gen=%d found=%v, want 1 true", g, found)
 	}
 
@@ -422,10 +422,10 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 
 func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--my-cluster"] = nil
+	provider.clusters["rm--my-cluster"] = nil
 	reporter := newChannelReporter()
 	agent, store := newTestAgent(reporter, provider)
-	store.SetForTest("fs--my-cluster", 1)
+	store.SetForTest("rm--my-cluster", 1)
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -442,8 +442,8 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
 	}
 
-	if len(provider.deleted) != 1 || provider.deleted[0] != "fs--my-cluster" {
-		t.Errorf("deleted = %v, want [fs--my-cluster]", provider.deleted)
+	if len(provider.deleted) != 1 || provider.deleted[0] != "rm--my-cluster" {
+		t.Errorf("deleted = %v, want [rm--my-cluster]", provider.deleted)
 	}
 }
 
@@ -521,10 +521,10 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 
 func TestAgent_Remove_WiresObserverLogger(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--my-cluster"] = nil
+	provider.clusters["rm--my-cluster"] = nil
 	reporter := newChannelReporter()
 	agent, store := newTestAgent(reporter, provider)
-	store.SetForTest("fs--my-cluster", 1)
+	store.SetForTest("rm--my-cluster", 1)
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -772,7 +772,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 	verifier := &fakeTokenVerifier{}
 	cfg := domain.OIDCConfig{
 		IssuerURL: "https://issuer.example.com",
-		Audience:  "fleetshift",
+		Audience:  "ocm-resource-manager",
 	}
 
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
@@ -804,7 +804,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 	verifier := &fakeTokenVerifier{err: errors.New("token expired")}
 	cfg := domain.OIDCConfig{
 		IssuerURL: "https://issuer.example.com",
-		Audience:  "fleetshift",
+		Audience:  "ocm-resource-manager",
 	}
 
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
@@ -817,7 +817,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 				Issuer:  "https://issuer.example.com",
 			},
 		},
-		Audience: []domain.Audience{"fleetshift"},
+		Audience: []domain.Audience{"ocm-resource-manager"},
 	}
 
 	manifests := []domain.Manifest{{
@@ -849,7 +849,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 	verifier := &fakeTokenVerifier{err: errors.New("should not be called")}
 	cfg := domain.OIDCConfig{
 		IssuerURL: "https://issuer.example.com",
-		Audience:  "fleetshift",
+		Audience:  "ocm-resource-manager",
 	}
 
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
@@ -910,7 +910,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
 		JWKSURI:            "https://issuer.example.com/jwks",
-		EnrollmentAudience: "fleetshift-enroll",
+		EnrollmentAudience: "ocm-resource-manager-enroll",
 		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 			RegistryID: "github.com",
 			Expression: "claims.preferred_username",
@@ -1075,10 +1075,10 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 
 func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
 	fp := newFakeProvider()
-	fp.clusters["fs--rm-cluster"] = nil
+	fp.clusters["rm--rm-cluster"] = nil
 	reporter := newChannelReporter()
 	store := kind.NewMemoryGenerationStore()
-	store.SetForTest("fs--rm-cluster", 1)
+	store.SetForTest("rm--rm-cluster", 1)
 
 	bdp := &blockingDeleteProvider{
 		fakeProvider: fp,
@@ -1129,7 +1129,7 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
 		JWKSURI:            "https://issuer.example.com/jwks",
-		EnrollmentAudience: "fleetshift-enroll",
+		EnrollmentAudience: "ocm-resource-manager-enroll",
 	}
 	trustRaw, _ := json.Marshal(trustEntry)
 

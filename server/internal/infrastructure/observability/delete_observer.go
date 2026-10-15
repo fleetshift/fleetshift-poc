@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // DeleteObserver is a [domain.DeleteObserver] that logs delete and

@@ -6,7 +6,7 @@
 
 ## Problem
 
-FleetShift needs a CLI tool alongside the web UI. Some users prefer working in the terminal — scripting, automation, SSH sessions where there is no browser, or simply personal preference. The CLI needs to cover the same core operations as the GUI: listing resources, managing clusters, installing and enabling plugins.
+Resource Manager needs a CLI tool alongside the web UI. Some users prefer working in the terminal — scripting, automation, SSH sessions where there is no browser, or simply personal preference. The CLI needs to cover the same core operations as the GUI: listing resources, managing clusters, installing and enabling plugins.
 
 Building a CLI from scratch with raw stdout writes and manual input handling is tedious and error-prone. Layout, colors, spinners, tables — all of this has to be reinvented. And since the team already knows React from building the GUI, it would be ideal to use the same mental model for the terminal.
 
@@ -24,7 +24,7 @@ Ink provides layout primitives (`Box` for flexbox containers, `Text` for styled 
 
 The CLI supports three modes of operation, each suited to a different use case:
 
-**Single command mode.** The user runs a command like `fleetshift pods prod-cluster`, gets the output, and the process exits. This is classic CLI behavior — good for scripting, piping to other tools, and automation. The tool renders the result once and terminates.
+**Single command mode.** The user runs a command like `ocm-resource-manager pods prod-cluster`, gets the output, and the process exits. This is classic CLI behavior — good for scripting, piping to other tools, and automation. The tool renders the result once and terminates.
 
 **Interactive scrolling mode (default).** A REPL-like experience where the user types commands and sees results. Past output scrolls up naturally with the terminal's own scrollback. An input prompt sits at the bottom with tab completion. This mode behaves like a normal terminal session — output flows naturally and can be scrolled through.
 

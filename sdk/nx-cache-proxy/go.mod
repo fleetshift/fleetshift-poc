@@ -1,4 +1,4 @@
-module github.com/stolostron/fleetshift/sdk/nx-cache-proxy
+module github.com/stolostron/ocm-resource-manager/sdk/nx-cache-proxy
 
 go 1.26.0
 toolchain go1.26.6

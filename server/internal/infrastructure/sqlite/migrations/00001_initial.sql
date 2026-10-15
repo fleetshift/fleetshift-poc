@@ -214,7 +214,7 @@ CREATE INDEX idx_extension_resources_type_query_order
 
 -- Aliases split into two tables -- mirrors the Postgres migration's
 -- resource_alias_claims/resource_alias_contributions doc comment
--- (fleetshift-server/internal/infrastructure/postgres/migrations/00001_initial.sql)
+-- (server/internal/infrastructure/postgres/migrations/00001_initial.sql)
 -- exactly, including that inventory reporting no longer writes to
 -- either table (see that file's doc comment for why); that reasoning
 -- applies here unchanged. The two invariants

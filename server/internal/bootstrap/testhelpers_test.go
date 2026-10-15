@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 type testVerifier struct{}
@@ -41,9 +41,9 @@ func startTestServer(t *testing.T, opts ...Option) *Server {
 	return startTestServerWithConfig(t, ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
-		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		DBPath:               filepath.Join(t.TempDir(), "ocm-resource-manager.db"),
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "ocm-resource-manager",
 	}, opts...)
 }
 
@@ -56,7 +56,7 @@ func startTestServerWithConfig(t *testing.T, in ConfigInput, opts ...Option) *Se
 		in.HTTPAddr = "127.0.0.1:0"
 	}
 	if in.DBPath == "" {
-		in.DBPath = filepath.Join(t.TempDir(), "fleetshift.db")
+		in.DBPath = filepath.Join(t.TempDir(), "ocm-resource-manager.db")
 	}
 	// Fail-closed Start requires complete OIDC initial-AuthMethod config when the
 	// AuthMethod store is empty. Tests that intentionally omit it must call
@@ -65,7 +65,7 @@ func startTestServerWithConfig(t *testing.T, in ConfigInput, opts ...Option) *Se
 		in.OIDCIssuer = "https://test-issuer.example"
 	}
 	if in.OIDCResourceAudience == "" {
-		in.OIDCResourceAudience = "fleetshift"
+		in.OIDCResourceAudience = "ocm-resource-manager"
 	}
 	cfg, err := NewConfig(in)
 	if err != nil {

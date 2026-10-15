@@ -51,7 +51,7 @@ func DefaultSandboxPKIPaths() SandboxPKIPaths {
 }
 
 // EnsureSandboxPKI generates or reuses the AIO gateway CA and leaf.
-// The leaf DNS SAN is exactly fleetshift-sandbox.localhost. leafUID/leafGID
+// The leaf DNS SAN is exactly ocm-resource-manager.localhost. leafUID/leafGID
 // own the leaf private key (0400) so the unprivileged aio-proxy can read it;
 // the CA cert is world-readable and the CA private key stays root-only.
 func EnsureSandboxPKI(paths SandboxPKIPaths, leafUID, leafGID int) error {
@@ -107,7 +107,7 @@ func createCA(paths SandboxPKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, erro
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "FleetShift Sandbox CA"},
+		Subject:               pkix.Name{CommonName: "Resource Manager Sandbox CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(caValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
@@ -147,7 +147,7 @@ func ensureLeaf(paths SandboxPKIPaths, caCert *x509.Certificate, caKey *ecdsa.Pr
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "FleetShift AIO Gateway"},
+		Subject:      pkix.Name{CommonName: "Resource Manager AIO Gateway"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(leafValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

@@ -98,7 +98,7 @@ MCOA combines these choices in its enablement flow: when MCOA is enabled through
 
 **Question:** Should rollback use the fulfillment's rollout strategy or bypass it with immediate rollback to all targets?
 
-**Context:** KubeFleet has no built-in rollback; operators manually stop the update run and fix the CRP. FleetShift's `Rollback` endpoint is an explicit addition. The trade-off is safety versus speed: staged rollback is safer if the rollback itself is risky, but rollback also exists to recover quickly. The current leaning is immediate rollback by default with an optional `"paced": true` flag that reuses the fulfillment's rollout strategy.
+**Context:** KubeFleet has no built-in rollback; operators manually stop the update run and fix the CRP. Resource Manager's `Rollback` endpoint is an explicit addition. The trade-off is safety versus speed: staged rollback is safer if the rollback itself is risky, but rollback also exists to recover quickly. The current leaning is immediate rollback by default with an optional `"paced": true` flag that reuses the fulfillment's rollout strategy.
 
 ### Delivery-agent rollback mechanics
 

@@ -51,7 +51,7 @@ describe("GUI fetchInterceptor", () => {
     const { installFetchInterceptor } = await loadModule();
     installFetchInterceptor(fakeAuthRef("web-token-abc"));
 
-    await window.fetch("/v1/clusters");
+    await window.fetch("/v1alpha/clusters");
 
     expect(mockOriginalFetch).toHaveBeenCalled();
     const [, init] = mockOriginalFetch.mock.calls[0];
@@ -88,7 +88,7 @@ describe("GUI fetchInterceptor", () => {
     const ref = fakeAuthRef(undefined);
     installFetchInterceptor(ref);
 
-    await window.fetch("/v1/clusters");
+    await window.fetch("/v1alpha/clusters");
     const [, init1] = mockOriginalFetch.mock.calls[0];
     expect(new Headers(init1?.headers).get("Authorization")).toBeNull();
 
@@ -96,7 +96,7 @@ describe("GUI fetchInterceptor", () => {
       access_token: "fresh-token",
     } as AuthContextProps["user"];
 
-    await window.fetch("/v1/clusters");
+    await window.fetch("/v1alpha/clusters");
     const [, init2] = mockOriginalFetch.mock.calls[1];
     expect(new Headers(init2?.headers).get("Authorization")).toBe(
       "Bearer fresh-token",

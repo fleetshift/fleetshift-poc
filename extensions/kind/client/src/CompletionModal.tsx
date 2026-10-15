@@ -45,7 +45,7 @@ export default function CompletionModal({
             <img
               src={successImage}
               alt="Success illustration"
-              className="ome-kind-completion-image"
+              className="ocm-rm-kind-completion-image"
             />
           </SplitItem>
           <SplitItem isFilled>

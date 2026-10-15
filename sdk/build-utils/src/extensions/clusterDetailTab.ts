@@ -1,11 +1,12 @@
 import type {
   BaseExtensionProperties,
   EncodedCodeRef,
-  FleetshiftExtension,
+  ResourceManagerExtension,
 } from "./types";
 import { validateCodeRef } from "./validate";
 
-export const CLUSTER_DETAIL_TAB_TYPE = "fleetshift.cluster-detail-tab" as const;
+export const CLUSTER_DETAIL_TAB_TYPE =
+  "ocm-resource-manager.cluster-detail-tab" as const;
 
 export type ClusterDetailTabExtras = {
   component: EncodedCodeRef;
@@ -70,7 +71,10 @@ function throwOnErrors(errors: string[], type: string): void {
 
 export function createClusterDetailTab(
   properties: ClusterDetailTabProperties,
-): FleetshiftExtension<typeof CLUSTER_DETAIL_TAB_TYPE, ClusterDetailTabExtras> {
+): ResourceManagerExtension<
+  typeof CLUSTER_DETAIL_TAB_TYPE,
+  ClusterDetailTabExtras
+> {
   const ctx = `${CLUSTER_DETAIL_TAB_TYPE} "${properties.id || "(no id)"}"`;
   throwOnErrors(
     validateClusterDetailTabProperties(properties, ctx),

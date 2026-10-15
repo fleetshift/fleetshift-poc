@@ -22,7 +22,7 @@ const axisStyle = {
 
 export default function MttrTrend(_props: { widgetId: string }) {
   return (
-    <div className="ome-overview-mttr">
+    <div className="ocm-rm-overview-mttr">
       <Chart
         height={250}
         padding={{ top: 20, bottom: 50, left: 60, right: 30 }}

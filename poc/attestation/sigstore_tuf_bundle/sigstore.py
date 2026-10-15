@@ -45,12 +45,12 @@ from .tuf import TrustedMaterial
 BUNDLE_MEDIA_TYPE = "application/vnd.dev.sigstore.bundle.v0.3+json"
 
 PREDICATE_DELIVERY_AUTHORIZATION = (
-    "https://fleetshift.io/attestation/delivery-authorization/v1"
+    "https://resource-manager.open-cluster-management.io/attestation/delivery-authorization/v1"
 )
-PREDICATE_MANIFEST_SET = "https://fleetshift.io/attestation/manifest-set/v1"
-PREDICATE_PLACEMENT = "https://fleetshift.io/attestation/placement/v1"
+PREDICATE_MANIFEST_SET = "https://resource-manager.open-cluster-management.io/attestation/manifest-set/v1"
+PREDICATE_PLACEMENT = "https://resource-manager.open-cluster-management.io/attestation/placement/v1"
 PREDICATE_FULFILLMENT_RELATION = (
-    "https://fleetshift.io/attestation/fulfillment-relation/v1"
+    "https://resource-manager.open-cluster-management.io/attestation/fulfillment-relation/v1"
 )
 
 
@@ -109,7 +109,7 @@ class Signer:
     fulcio: FulcioCA
     tsa: RFC3161TimestampAuthority
     identity: OIDCIdentity
-    # ``signer_id`` is FleetShift's stable logical workload/user identity.  It
+    # ``signer_id`` is Resource Manager's stable logical workload/user identity.  It
     # is policy data, not self-authenticating Sigstore material: verification
     # derives it from the TUF-authenticated mapping for the certificate
     # identity.  Keeping it distinct lets a platform IdP use SPIFFE subjects
@@ -121,7 +121,7 @@ class Signer:
         if self.fulcio.oidc_issuer is not self.oidc_issuer:
             raise ValueError("signer OIDC issuer is not configured for this Fulcio")
         if not self.signer_id:
-            raise ValueError("FleetShift signer ID must not be empty")
+            raise ValueError("Resource Manager signer ID must not be empty")
 
     def sign_predicate(
         self,
@@ -353,7 +353,7 @@ def verify_sigstore_bundle(
         raise ValueError("unsupported Sigstore bundle media type")
     content_field, content_value = betterproto.which_one_of(proto, "content")
     if content_field != "dsse_envelope":
-        raise ValueError("FleetShift attestations require DSSE bundle content")
+        raise ValueError("Resource Manager attestations require DSSE bundle content")
     envelope = content_value
     if envelope.payload_type != DSSE_PAYLOAD_TYPE:
         raise ValueError("unexpected DSSE payload type")
@@ -409,10 +409,10 @@ def verify_sigstore_bundle(
         raise ValueError("DSSE payload is not an in-toto Statement/v1")
     allowed_predicates = set(expected_predicate_types)
     if statement.get("predicateType") not in allowed_predicates:
-        raise ValueError("unexpected FleetShift in-toto predicate type")
+        raise ValueError("unexpected Resource Manager in-toto predicate type")
     subjects = statement.get("subject")
     if not isinstance(subjects, list) or len(subjects) != 1:
-        raise ValueError("FleetShift statement requires exactly one subject")
+        raise ValueError("Resource Manager statement requires exactly one subject")
     subject = subjects[0]
     digest = subject.get("digest")
     if not isinstance(digest, dict) or set(digest) != {"sha256"}:
@@ -422,7 +422,7 @@ def verify_sigstore_bundle(
     if expected_subject_name is not None and subject.get("name") != expected_subject_name:
         raise ValueError("in-toto subject name mismatch")
     if not isinstance(statement.get("predicate"), dict):
-        raise ValueError("FleetShift predicate must be an object")
+        raise ValueError("Resource Manager predicate must be an object")
     return VerifiedSigstore(
         statement=statement,
         identity=identity,

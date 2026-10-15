@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 
-// OME-257: basic accessibility checks on key screens. These are lightweight,
+// Basic accessibility checks on key screens. These are lightweight,
 // dependency-free structural assertions (landmarks, headings, labelled
 // controls) rather than a full axe audit. Cluster status and the delete
 // confirmation dialog are covered functionally by the lifecycle journey.

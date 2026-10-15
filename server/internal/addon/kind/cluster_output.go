@@ -6,8 +6,8 @@ import (
 
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // KubernetesTargetType is the [domain.TargetType] for Kubernetes

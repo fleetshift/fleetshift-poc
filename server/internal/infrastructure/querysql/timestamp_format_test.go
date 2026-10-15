@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
 )
 
 func TestParseCELTimestamp_AcceptsRFC3339(t *testing.T) {

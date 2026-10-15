@@ -1,6 +1,6 @@
 # CLI Feature Inventory
 
-**Related Jira:** OME-305
+**Design context:** shared CLI and Web UI client architecture
 **Status:** Historical Go CLI baseline; superseded by `client/cli/`
 **Scope:** Historical `cli/`
 
@@ -9,14 +9,14 @@ for the shared CLI/Web UI client architecture. It describes feature behavior,
 not terminal presentation. The same feature may later have a CLI and Web UI
 representation.
 
-Sections describing a target model are proposals for OME-305, not claims about
+Sections describing a target model are proposals for the shared client architecture, not claims about
 current implementation. Current behavior is identified explicitly and grounded
 in the source paths listed below.
 
 ## Important Baseline
 
 This document records the removed Go CLI implementation. The Go source under
-`cli/` was removed as part of OME-306. Current CLI implementation lives under
+`cli/` was removed during the TypeScript CLI rewrite. Current CLI implementation lives under
 `client/cli/`; see [client/cli/README.md](../../client/cli/README.md).
 
 The historical Go CLI was a Cobra application. It was not the older
@@ -32,7 +32,7 @@ are stale. Current source code is authoritative.
 
 The historical CLI had no JavaScript Module Federation plugin loader. Its
 dynamic behavior came from gRPC reflection and dynamically constructed
-protobuf messages for addon-provided resource services. OME-306 moved this
+protobuf messages for addon-provided resource services. The CLI rewrite moved this
 client to TypeScript so it can share client and plugin infrastructure with the
 Web UI.
 
@@ -80,7 +80,7 @@ Global flags:
 | `--server-tls` | disabled | Enable TLS for gRPC |
 | `--server-ca-file` | empty | Add PEM CA bundle for server certificate |
 | `--server-insecure` | disabled | Skip TLS certificate verification; debugging only |
-| `--config-dir` | `~/.config/fleetshift` | Directory containing `auth.json` |
+| `--config-dir` | `~/.config/ocm-resource-manager` | Directory containing `auth.json` |
 | `--insecure-storage` | disabled | Use plaintext files instead of OS keyring |
 
 `--server-ca-file` and `--server-insecure` require `--server-tls`.
@@ -172,7 +172,7 @@ The current default transport is plaintext gRPC unless `--server-tls` is set.
 ## Deployment Features
 
 Deployment commands use the static
-`fleetshift.v1.DeploymentService` protobuf service.
+`ocm.resource_manager.v1alpha.DeploymentService` protobuf service.
 
 ### Create deployment
 
@@ -256,14 +256,14 @@ Canonical qualified type form:
 Example:
 
 ```text
-kind.fleetshift.v1/clusters
+ocm.resource_manager.kind.v1alpha/clusters
 ```
 
 ### Resolve resource type
 
 Resource commands accept:
 
-- Qualified type: `kind.fleetshift.v1/clusters`
+- Qualified type: `ocm.resource_manager.kind.v1alpha/clusters`
 - Collection ID: `clusters`
 - Plural name: `Clusters`
 
@@ -305,7 +305,7 @@ supports `--page-size`.
 
 `fleetctl resource query`, also available as `resource search`, queries managed
 resources across the platform using the static
-`fleetshift.v1.ResourceQueryService`.
+`ocm.resource_manager.v1alpha.ResourceQueryService`.
 
 Flags:
 
@@ -425,7 +425,7 @@ through one unified model.
 
 Runtime differences should be hidden behind Scalprum/SDK adapters, while
 extension contracts, API clients, capabilities, context, and validation remain
-shared. If Scalprum lacks required Node features, FleetShift can extend or own
+shared. If Scalprum lacks required Node features, Resource Manager can extend or own
 those additions rather than replacing the shared runtime with a separate CLI
 implementation.
 
@@ -457,7 +457,7 @@ definition and produce two target-specific compilations or configurations: one
 for Web UI and one for Node-based CLI. This would avoid duplicated plugin build
 logic while preserving correct runtime bundles and manifests. Whether this is
 implemented as one wrapper with two entries, two configurations, or another
-Rspack abstraction remains an OME-305 design decision.
+Rspack abstraction remains a shared client architecture design decision.
 
 The extension `client/` area can contain shared contracts and API integration
 plus target-specific entrypoints and renderers. Separate compilation does not
@@ -644,7 +644,7 @@ OpenAPI output from `buf.gen.yaml`. It has no TypeScript generation target yet.
 The current Buf configuration also excludes `proto/addons` from generated Go
 output because addon schemas are compiled dynamically by the server at runtime.
 
-OME-305 should add a separate TypeScript SDK generation target for core APIs.
+The shared client architecture should add a separate TypeScript SDK generation target for core APIs.
 Addon and plugin builds should invoke the same TypeScript SDK generation and
 validation tooling for addon-owned protos. Excluding addon protos from the
 server's generated Go output should not prevent client-side TypeScript
@@ -654,9 +654,9 @@ Static services:
 
 | Feature | Service |
 | --- | --- |
-| Deployment lifecycle | `fleetshift.v1.DeploymentService` |
-| Cross-resource query | `fleetshift.v1.ResourceQueryService` |
-| Signing enrollment | `fleetshift.v1.SignerEnrollmentService` |
+| Deployment lifecycle | `ocm.resource_manager.v1alpha.DeploymentService` |
+| Cross-resource query | `ocm.resource_manager.v1alpha.ResourceQueryService` |
+| Signing enrollment | `ocm.resource_manager.v1alpha.SignerEnrollmentService` |
 | Resource discovery and descriptors | `grpc.reflection.v1.ServerReflection` |
 
 Addon-provided resources are currently invoked by the CLI through dynamically
@@ -694,30 +694,30 @@ state are Web UI representations.
 ## Current Gaps and Planned Coverage
 
 These gaps describe the current Go CLI surface. Some already have planned
-coverage in OME Jira; planned coverage does not mean implementation is done.
+coverage in the client architecture proposals; planned coverage does not mean implementation is done.
 
 ### Covered by planned architecture or existing tickets
 
 | Current gap | Planned coverage |
 | --- | --- |
-| JavaScript/TypeScript client runtime | `OME-306` Rewrite CLI client in TypeScript |
-| Shared Dynamic Plugin SDK with Web UI | `OME-305`, `OME-306`, and target SDK model in this document |
-| Module Federation loading for CLI | `OME-306`; Node loading prototype already exists |
-| Server-driven plugin metadata and client-specific enablement | `OME-309`, `OME-313`, `OME-316` |
-| Typed plugin-provided CLI commands | `OME-319` and `OME-320`; implementation follows spike outcome |
-| Named profiles and shared client configuration | `OME-310` defines the model; implementation not yet created |
-| Live updates and shared extension subscriptions | `OME-322` defines protocol; `OME-325` implements shared client subscription path |
-| Interactive command discovery and command palette | `OME-320` defines behavior; implementation follows spike outcome |
+| JavaScript/TypeScript client runtime | TypeScript CLI rewrite |
+| Shared Dynamic Plugin SDK with Web UI | Shared client architecture, TypeScript CLI rewrite, and target SDK model in this document |
+| Module Federation loading for CLI | TypeScript CLI rewrite; Node loading prototype already exists |
+| Server-driven plugin metadata and client-specific enablement | `Implement runtime extension discovery and enablement`, `Design separation of client assets from Resource Manager`, `Implement independently served Web UI assets` |
+| Typed plugin-provided CLI commands | `Define and enforce client context and action contracts` and `Spike: Define context-aware navigation and command palette behavior`; implementation follows spike outcome |
+| Named profiles and shared client configuration | `Define shared client configuration model` defines the model; implementation not yet created |
+| Live updates and shared extension subscriptions | `Define WebSocket live-update protocol and lifecycle` defines protocol; `Implement shared WebSocket client and extension subscription API` implements shared client subscription path |
+| Interactive command discovery and command palette | `Spike: Define context-aware navigation and command palette behavior` defines behavior; implementation follows spike outcome |
 
 ### Partially addressed
 
 - **Resource watch/live updates:** protocol and shared client architecture are
-  planned in `OME-322` and `OME-325`, but server implementation and CLI-specific
+  planned in `Define WebSocket live-update protocol and lifecycle` and `Implement shared WebSocket client and extension subscription API`, but server implementation and CLI-specific
   rendering behavior remain open.
 - **Dynamic resource HTTP parity:** backend has dynamic HTTP routes, but the
   current CLI still uses gRPC reflection and dynamic gRPC invocation.
 - **Schema metadata:** CLI can inspect recursive protobuf `spec` fields, while
-  richer resource metadata and server-backed hints are covered by `OME-321`.
+  richer resource metadata and server-backed hints are covered by `Implement server-backed dynamic search hints`.
 - **TypeScript plugin loading:** Node Module Federation is proven by prototype,
   but shared SDK/Scalprum integration and production builds remain open.
 
@@ -728,11 +728,11 @@ coverage in OME Jira; planned coverage does not mean implementation is done.
 - Deployment watch or wait command and its CLI representation.
 - Full pagination controls for deployment and dynamic resource list commands.
 - Managed-resource create signing. This is distinct from deployment signing and
-  client artifact verification in `OME-317`.
+  client artifact verification in `Implement client artifact trust and verification`.
 - Full resource metadata output beyond the protobuf `spec` tree.
 - Persistent interactive CLI session and its target behavior. The old Ink POC
   explored this, but current Go CLI is command-per-process.
-- Server-side WebSocket implementation tickets, pending `OME-322` outcome.
+- Server-side WebSocket implementation tickets, pending `Define WebSocket live-update protocol and lifecycle` outcome.
 
 ### Intentional non-goal
 

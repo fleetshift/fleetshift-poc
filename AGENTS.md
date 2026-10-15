@@ -1,6 +1,6 @@
 # Rules for Agents
 
-This is the monorepo for FleetShift, a fleet management platform. It contains the management-plane server, CLI, proto definitions, React web UI, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
+This is the monorepo for Resource Manager, a fleet management platform. It contains the management-plane server, CLI, proto definitions, React web UI, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->
@@ -60,7 +60,7 @@ The architecture documentation lives in docs/design/ and is the primary source o
 - Prefer running tasks through Nx (`npx nx run <project>:<target>`, `npx nx run-many`, `npx nx affected`) for caching and dependency-aware execution. Build, test, proto, image, and infrastructure targets run through Nx; deployment scripts provide platform-specific checks.
 - Please always run go fmt ./... after you're done with any Go code changes
 
-## fleetshift-server
+## Resource manager server
 
 Read the relevant docs below **before** writing or modifying code in this module. They contain design rules that are easy to violate without context.
 
@@ -76,6 +76,6 @@ For how to...
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.
 
-## FleetShift UI
+## Resource Manager UI
 
-This is the complete frontend web app for fleetshift. See docs/ui/AGENTS.md for agent instructions.
+This is the complete frontend web app for ocm-resource-manager. See docs/ui/AGENTS.md for agent instructions.

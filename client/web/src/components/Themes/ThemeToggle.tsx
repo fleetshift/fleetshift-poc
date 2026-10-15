@@ -11,7 +11,7 @@ function getThemeClass(theme: ThemeToggleType): string {
 }
 
 function getThemeKey(theme: ThemeToggleType): string {
-  return `fleetshift_${theme}_mode`;
+  return `ocm-resource-manager_${theme}_mode`;
 }
 
 export function initThemeMode(theme: ThemeToggleType): boolean {

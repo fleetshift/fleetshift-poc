@@ -24,7 +24,7 @@ func TestFulfillmentSnapshot_RoundTrip(t *testing.T) {
 		StatusReason:             "all good",
 		Auth:                     DeliveryAuth{Token: "tok"},
 		Provenance:               &Provenance{Sig: Signature{Signer: FederatedIdentity{Subject: "u1", Issuer: "iss"}}},
-		AttestationRef:           &AttestationRef{RelationRef: ptrTo(ResourceType("test.fleetshift.io/K8s"))},
+		AttestationRef:           &AttestationRef{RelationRef: ptrTo(ResourceType("test.resource-manager.open-cluster-management.io/K8s"))},
 		Generation:               gen,
 		ObservedGeneration:       5,
 		ActiveWorkflowGen:        &gen,
@@ -202,7 +202,7 @@ func TestAuthMethodSnapshot_RoundTrip(t *testing.T) {
 		Type: AuthMethodTypeOIDC,
 		OIDC: &OIDCConfig{
 			IssuerURL: "https://accounts.example.com",
-			Audience:  "fleetshift",
+			Audience:  "ocm-resource-manager",
 		},
 	}
 
@@ -316,7 +316,7 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 		UpdatedAt: refTime.Add(time.Hour),
 		Representations: []ResourceRepresentationSnapshot{
 			{
-				ServiceName:          "kind.fleetshift.io",
+				ServiceName:          "kind.resource-manager.open-cluster-management.io",
 				Version:              "v1",
 				Name:                 "clusters/prod",
 				ExtensionResourceUID: NewExtensionResourceUID(),
@@ -324,7 +324,7 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 				UpdatedAt:            refTime,
 			},
 			{
-				ServiceName:          "gcp.fleetshift.io",
+				ServiceName:          "gcp.resource-manager.open-cluster-management.io",
 				Version:              "v1",
 				Name:                 "clusters/prod",
 				ExtensionResourceUID: NewExtensionResourceUID(),
@@ -336,7 +336,7 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 			{Namespace: "gcp", Key: "project_id", Value: "my-proj"},
 		},
 		Relationships: []ResourceRelationshipSnapshot{
-			{SourceName: "clusters/prod", Type: "runs-on", TargetName: "clusters/host", SourceService: "kind.fleetshift.io", CreatedAt: refTime},
+			{SourceName: "clusters/prod", Type: "runs-on", TargetName: "clusters/host", SourceService: "kind.resource-manager.open-cluster-management.io", CreatedAt: refTime},
 		},
 	}
 
@@ -351,8 +351,8 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 	if len(got.Representations) != 2 {
 		t.Fatalf("Representations len = %d, want 2", len(got.Representations))
 	}
-	assertEq(t, "Rep[0].ServiceName", got.Representations[0].ServiceName, ServiceName("kind.fleetshift.io"))
-	assertEq(t, "Rep[1].ServiceName", got.Representations[1].ServiceName, ServiceName("gcp.fleetshift.io"))
+	assertEq(t, "Rep[0].ServiceName", got.Representations[0].ServiceName, ServiceName("kind.resource-manager.open-cluster-management.io"))
+	assertEq(t, "Rep[1].ServiceName", got.Representations[1].ServiceName, ServiceName("gcp.resource-manager.open-cluster-management.io"))
 
 	// Representations() returns every entry populated at hydration
 	// time as-is: there's no "deleted" bookkeeping to filter, since a
@@ -383,7 +383,7 @@ func TestExtensionResourceTypeSnapshot_RoundTrip(t *testing.T) {
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "iss"}}
 
 	snap := ExtensionResourceTypeSnapshot{
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		Management: &ManagementTypeSnapshot{
@@ -415,7 +415,7 @@ func TestExtensionResourceTypeSnapshot_RoundTrip(t *testing.T) {
 
 func TestExtensionResourceTypeSnapshot_RoundTrip_NoManagement(t *testing.T) {
 	snap := ExtensionResourceTypeSnapshot{
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		CreatedAt:    refTime,
@@ -439,7 +439,7 @@ func TestExtensionResourceSnapshot_RoundTrip(t *testing.T) {
 	uid := NewExtensionResourceUID()
 	snap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		Name:         "clusters/dev",
 		Labels:       map[string]string{"env": "dev"},
 		CreatedAt:    refTime,
@@ -472,7 +472,7 @@ func TestExtensionResourceSnapshot_ManagedState_RoundTrip(t *testing.T) {
 	uid := NewExtensionResourceUID()
 	snap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		Name:         "clusters/prod",
 		Labels:       map[string]string{},
 		Managed: &ManagedStateSnapshot{
@@ -496,7 +496,7 @@ func TestExtensionResourceSnapshot_ManagedState_RoundTrip(t *testing.T) {
 func TestExtensionResourceFromSnapshot_PreservesVersionBaseline(t *testing.T) {
 	r := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
 		UID:          NewExtensionResourceUID(),
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		Name:         "clusters/prod",
 		Managed: &ManagedStateSnapshot{
 			CurrentVersion: 7,
@@ -515,7 +515,7 @@ func TestExtensionResourceFromSnapshot_PreservesVersionBaseline(t *testing.T) {
 func TestExtensionResourceSnapshot_CapturesPendingIntents(t *testing.T) {
 	r := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
 		UID:          NewExtensionResourceUID(),
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		Name:         "clusters/prod",
 		Managed: &ManagedStateSnapshot{
 			CurrentVersion: 0,
@@ -538,7 +538,7 @@ func TestExtensionResourceSnapshot_CapturesPendingIntents(t *testing.T) {
 
 func TestExtensionResourceTypeSnapshot_RoundTrip_WithInventory(t *testing.T) {
 	snap := ExtensionResourceTypeSnapshot{
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		Inventory:    &InventoryTypeSnapshot{},
@@ -567,7 +567,7 @@ func TestExtensionResourceTypeSnapshot_RoundTrip_ManagedPlusInventory(t *testing
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "iss"}}
 
 	snap := ExtensionResourceTypeSnapshot{
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		Management: &ManagementTypeSnapshot{
@@ -599,7 +599,7 @@ func TestExtensionResourceSnapshot_RoundTrip_WithInventory(t *testing.T) {
 	uid := NewExtensionResourceUID()
 	snap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		Name:         "clusters/dev",
 		Labels:       map[string]string{"env": "dev"},
 		Managed: &ManagedStateSnapshot{
@@ -647,7 +647,7 @@ func TestExtensionResourceSnapshot_RoundTrip_InventoryOnly(t *testing.T) {
 	uid := NewExtensionResourceUID()
 	snap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.fleetshift.io/Cluster",
+		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
 		Name:         "clusters/dev",
 		Labels:       map[string]string{},
 		Inventory: &InventoryResourceSnapshot{

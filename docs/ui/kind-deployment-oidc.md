@@ -9,14 +9,14 @@ Kind cluster provisioning from the UI works end-to-end. Clusters are created via
 ### 1. Start the Go backend
 
 ```bash
-cd ../fleetshift-poc
+cd ../ocm-resource-manager
 make build
-CONTAINER_HOST=host.docker.internal ./bin/fleetshift serve --http-addr :8085 --log-level debug
+CONTAINER_HOST=host.docker.internal ./bin/resource-manager serve --http-addr :8085 --log-level debug
 ```
 
 `CONTAINER_HOST` rewrites `localhost` in OIDC issuer URLs to `host.docker.internal` so kind containers can reach host services. Without this, OIDC-authenticated deployments fail because `localhost` inside a Docker container doesn't reach the host.
 
-Day One server AuthMethod install is performed by `fleetshift serve` bootstrap (empty store + OIDC bootstrap config).
+Day One server AuthMethod install is performed by `resource-manager serve` bootstrap (empty store + OIDC bootstrap config).
 
 ### 2. Create a deployment from the UI
 
@@ -68,12 +68,12 @@ kind get kubeconfig --name <cluster-name> | kubectl --kubeconfig /dev/stdin get 
 
 **Symptom:** After fixing the manifest format, reusing the same deployment ID still fails. The Go backend logs show `workflows.is_replaying=true` and the old broken payload is replayed.
 
-**Root cause:** FleetShift uses a durable workflow engine (`go-workflows`). Failed workflow activities persist in SQLite and are replayed with the original payload when the server restarts or the workflow is re-triggered.
+**Root cause:** Resource Manager uses a durable workflow engine (`go-workflows`). Failed workflow activities persist in SQLite and are replayed with the original payload when the server restarts or the workflow is re-triggered.
 
 **Workaround:** Use a different deployment ID, or delete the database and restart:
 
 ```bash
-rm ../fleetshift-poc/fleetshift.db
+rm ../ocm-resource-manager/ocm-resource-manager.db
 # Restart the server, then re-register auth method
 ```
 
@@ -221,7 +221,7 @@ The gRPC-gateway supports server-side streaming via newline-delimited JSON (`app
 |---------|-------|
 | Deployment stuck in "Creating" | Go backend logs — look for `delivery event` lines |
 | `kubeadm init` fails | `docker exec <name>-control-plane cat /kind/kubeadm.conf` — check for bad OIDC URLs |
-| Same deployment ID keeps failing | Delete `fleetshift.db` and restart — workflow replay issue |
+| Same deployment ID keeps failing | Delete `ocm-resource-manager.db` and restart — workflow replay issue |
 | No OIDC on created cluster | Check `subject_id` in auth logs — if empty, `auth.Caller` is nil |
 | Container missing after failure | Kind cleans up on failure — need to inspect during "Starting control-plane" window |
 | OIDC issuer unreachable from container | Set `CONTAINER_HOST=host.docker.internal` when starting the Go backend |

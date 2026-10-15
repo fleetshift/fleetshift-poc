@@ -66,7 +66,7 @@ func clearEnv(t *testing.T, key string) {
 // is often too long and listen fails with "bind: invalid argument".
 func listenUnixSocket(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "fs-")
+	dir, err := os.MkdirTemp("/tmp", "rm-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("dex-on adds fleetshift alias loopback forward", func(t *testing.T) {
+	t.Run("dex-on adds ocm-resource-manager alias loopback forward", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
@@ -165,7 +165,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		want := loopbackForwardToEnvKey + "=fleetshift:8085\n"
+		want := loopbackForwardToEnvKey + "=ocm-resource-manager:8085\n"
 		if !strings.Contains(body, want) {
 			t.Fatalf("kind.env missing %q, got %q", want, body)
 		}

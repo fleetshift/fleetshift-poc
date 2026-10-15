@@ -10,10 +10,10 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/platformresource"
 )
 
 // DynamicSchemaActivator implements [application.SchemaActivator] by

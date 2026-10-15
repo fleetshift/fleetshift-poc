@@ -1,5 +1,5 @@
-import type { FlatNode } from "@fleetshift/common";
-import { NodeKind } from "@fleetshift/common";
+import type { FlatNode } from "@ocm-resource-manager/common";
+import { NodeKind } from "@ocm-resource-manager/common";
 
 export interface DragState {
   dragId: string;

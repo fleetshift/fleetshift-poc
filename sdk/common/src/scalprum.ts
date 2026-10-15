@@ -7,8 +7,8 @@ export interface NavPage {
   title: string;
 }
 
-export interface FleetShiftApi {
-  fleetshift: {
+export interface ResourceManagerApi {
+  resourceManager: {
     getPluginPagePath: (scope: string, module: string) => string | undefined;
     getNavPages: () => NavPage[];
     /** Backend-defined navigation layout (before user overrides). */

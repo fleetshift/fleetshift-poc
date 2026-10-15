@@ -14,19 +14,19 @@ export type BaseExtensionProperties = {
   searchIcon?: EncodedCodeRef;
 };
 
-export const FLEETSHIFT_EXTENSION_TYPES = [
-  "fleetshift.module-group",
-  "fleetshift.module",
-  "fleetshift.setup",
-  "fleetshift.cluster-provider",
-  "fleetshift.onboarding-action",
-  "fleetshift.cluster-detail-tab",
+export const OCM_RM_EXTENSION_TYPES = [
+  "ocm-resource-manager.module-group",
+  "ocm-resource-manager.module",
+  "ocm-resource-manager.setup",
+  "ocm-resource-manager.cluster-provider",
+  "ocm-resource-manager.onboarding-action",
+  "ocm-resource-manager.cluster-detail-tab",
 ] as const;
 
-export type FleetshiftExtensionType =
-  (typeof FLEETSHIFT_EXTENSION_TYPES)[number];
+export type ResourceManagerExtensionType =
+  (typeof OCM_RM_EXTENSION_TYPES)[number];
 
-export type FleetshiftExtension<
+export type ResourceManagerExtension<
   TType extends string = string,
   TExtra extends Record<string, unknown> = Record<string, unknown>,
 > = {
@@ -64,7 +64,7 @@ export type OnboardingActionExtras = {
   card: EncodedCodeRef;
   form: EncodedCodeRef;
   overviewCta?: string;
-  category?: FleetshiftExtensionType;
+  category?: ResourceManagerExtensionType;
 };
 
 export type ModuleGroupProperties = BaseExtensionProperties & ModuleGroupExtras;

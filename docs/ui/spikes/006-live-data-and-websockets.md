@@ -6,7 +6,7 @@
 
 ## Problem
 
-FleetShift connects to clusters it does not own and needs to show their current state — what pods are running, what nodes are available, what is healthy, what is not. This data changes constantly. Showing stale data is not useful for operations — if a pod crashed 30 seconds ago, the user needs to know now, not after they manually refresh.
+Resource Manager connects to clusters it does not own and needs to show their current state — what pods are running, what nodes are available, what is healthy, what is not. This data changes constantly. Showing stale data is not useful for operations — if a pod crashed 30 seconds ago, the user needs to know now, not after they manually refresh.
 
 The question is how to pull live data from real Kubernetes clusters and deliver it to the browser in real time, across multiple clusters simultaneously.
 

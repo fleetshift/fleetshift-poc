@@ -10,7 +10,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // OIDCSpec configures the K8s API server's OIDC authentication on a
@@ -62,7 +62,7 @@ func ensureCallerAdminBinding(ctx context.Context, client kubernetes.Interface, 
 
 	desired := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "fleetshift-admin-" + string(caller.Subject),
+			Name: "ocm-resource-manager-admin-" + string(caller.Subject),
 		},
 		Subjects: []rbacv1.Subject{{
 			Kind:     "User",

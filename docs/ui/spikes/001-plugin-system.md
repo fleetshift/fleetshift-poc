@@ -6,7 +6,7 @@
 
 ## Problem
 
-FleetShift needs a frontend that can change what it shows based on the environment it runs in and who is using it. Different clusters have different capabilities installed. Different users care about different things. The UI cannot be a single hardcoded application — it has to figure out at runtime what pieces to load and how to put them together.
+Resource Manager needs a frontend that can change what it shows based on the environment it runs in and who is using it. Different clusters have different capabilities installed. Different users care about different things. The UI cannot be a single hardcoded application — it has to figure out at runtime what pieces to load and how to put them together.
 
 Specifically:
 

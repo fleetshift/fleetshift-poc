@@ -33,7 +33,7 @@ from tuf.ngclient import Updater
 from tuf.ngclient.fetcher import FetcherInterface
 
 SIGSTORE_TRUSTED_ROOT_TARGET = "sigstore-trusted-root.json"
-FLEETSHIFT_POLICY_TARGET = "fleetshift-trust-policy.json"
+OCM_RM_POLICY_TARGET = "ocm-resource-manager-trust-policy.json"
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class TrustUpdate:
 
 @dataclass(frozen=True)
 class TrustedMaterial:
-    """TUF-authenticated Sigstore roots and FleetShift identity policies."""
+    """TUF-authenticated Sigstore roots and Resource Manager identity policies."""
 
     sigstore_root: TrustedRoot
     anchors: dict[str, Any]
@@ -176,7 +176,7 @@ class TUFClient:
             raise ValueError("provisioned TUF bootstrap is not root metadata")
         self._trusted_root = trusted_root
         self._owned_state = (
-            tempfile.TemporaryDirectory(prefix="fleetshift-tuf-client-")
+            tempfile.TemporaryDirectory(prefix="ocm-resource-manager-tuf-client-")
             if state_directory is None
             else None
         )
@@ -204,7 +204,7 @@ class TUFClient:
         updater.refresh()
 
         resolved: dict[str, bytes] = {}
-        for target_path in (SIGSTORE_TRUSTED_ROOT_TARGET, FLEETSHIFT_POLICY_TARGET):
+        for target_path in (SIGSTORE_TRUSTED_ROOT_TARGET, OCM_RM_POLICY_TARGET):
             target_info = updater.get_targetinfo(target_path)
             if target_info is None:
                 raise ValueError(f"required TUF target is missing: {target_path}")
@@ -231,12 +231,12 @@ class TUFClient:
             raise ValueError("Sigstore trusted root contains no Fulcio authorities")
         if not sigstore_root.timestamp_authorities:
             raise ValueError("Sigstore trusted root contains no timestamp authorities")
-        anchors = json.loads(resolved[FLEETSHIFT_POLICY_TARGET])
+        anchors = json.loads(resolved[OCM_RM_POLICY_TARGET])
         if not isinstance(anchors, dict):
-            raise ValueError("FleetShift trust policy must be an anchor map")
+            raise ValueError("Resource Manager trust policy must be an anchor map")
         for anchor_id, anchor in anchors.items():
             if not isinstance(anchor_id, str) or not anchor_id:
-                raise ValueError("FleetShift trust policy has an empty anchor ID")
+                raise ValueError("Resource Manager trust policy has an empty anchor ID")
             if not isinstance(anchor, dict):
                 raise ValueError(f"trust anchor {anchor_id!r} must be an object")
             for field in ("kinds", "certificate_authority_uris", "allowed_identities"):

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/producer"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/producer"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
 )
 
 func TestConflictingEnrollmentPrepareAndCommitShareTheAcceptLock(t *testing.T) {
@@ -73,7 +73,7 @@ func TestIdentityCollisionInRepositoryIsFatal(t *testing.T) {
 		DeliveryScope: protocol.DeliveryScope{
 			Tenant:           managerTestTenant(),
 			TargetID:         "target-east",
-			FullResourceName: "//fleetshift.io/deployments/collision",
+			FullResourceName: "//resource-manager.open-cluster-management.io/deployments/collision",
 			Generation:       1,
 			Action:           protocol.ActionPut,
 		},
@@ -165,7 +165,7 @@ func TestCallerBindingIncludesExternalTenantPartition(t *testing.T) {
 					t.Fatal(err)
 				}
 				evidence, err := user.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
-					DeliveryScope: protocol.DeliveryScope{TargetID: "target-east", FullResourceName: "//fleetshift.io/deployments/partition", Generation: 1, Action: protocol.ActionPut},
+					DeliveryScope: protocol.DeliveryScope{TargetID: "target-east", FullResourceName: "//resource-manager.open-cluster-management.io/deployments/partition", Generation: 1, Action: protocol.ActionPut},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -237,7 +237,7 @@ func TestRoutingTenantIDStaysInsideManager(t *testing.T) {
 		// Sign directly through the profile to exercise the manager's own scope
 		// guard, independent of the producer's ordinary scope binding.
 		assertion, err := (protocol.DeploymentAuthorization{DeliveryScope: protocol.DeliveryScope{
-			Tenant: tenant, TargetID: "target-east", FullResourceName: "//fleetshift.io/deployments/external", Generation: 1, Action: protocol.ActionPut,
+			Tenant: tenant, TargetID: "target-east", FullResourceName: "//resource-manager.open-cluster-management.io/deployments/external", Generation: 1, Action: protocol.ActionPut,
 		}}).Assertion()
 		if err != nil {
 			t.Fatal(err)

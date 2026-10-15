@@ -1,7 +1,10 @@
-import type { InventoryResource, SearchResultRender } from "@fleetshift/common";
+import type {
+  InventoryResource,
+  SearchResultRender,
+} from "@ocm-resource-manager/common";
 
 const CANONICAL_RE =
-  /\/\/kubernetes\.fleetshift\.io\/clusters\/([^/]+)\/apiResources\/([^/]+)\/objects\/([^/]+)/;
+  /\/\/kubernetes\.ocm-resource-manager\.io\/clusters\/([^/]+)\/apiResources\/([^/]+)\/objects\/([^/]+)/;
 
 const KIND_TO_TAB: Record<string, string> = {
   DaemonSet: "pods",

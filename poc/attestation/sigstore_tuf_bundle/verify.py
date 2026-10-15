@@ -1,4 +1,4 @@
-"""Stateful, offline verification of couriered FleetShift delivery packages."""
+"""Stateful, offline verification of couriered Resource Manager delivery packages."""
 
 from __future__ import annotations
 

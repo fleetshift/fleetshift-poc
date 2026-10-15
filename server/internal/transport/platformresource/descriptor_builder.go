@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
 // ServiceDescriptors holds the compiled descriptors for a
@@ -82,7 +82,7 @@ func BuildServiceDescriptors(cfg *Config) (*ServiceDescriptors, error) {
 	resourceMsg := buildResourceMessage(resourceName, pkg, repMsg, aliasMsg, relMsg)
 
 	fdp := &descriptorpb.FileDescriptorProto{
-		Name:       proto.String(fmt.Sprintf("dynamic/fleetshift/v1/platform_%s_service.proto", lower)),
+		Name:       proto.String(fmt.Sprintf("dynamic/ocm/resource_manager/v1alpha/platform_%s_service.proto", lower)),
 		Package:    proto.String(pkg),
 		Syntax:     proto.String("proto3"),
 		Dependency: []string{"google/protobuf/timestamp.proto"},

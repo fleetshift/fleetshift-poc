@@ -13,14 +13,14 @@ package scripted
 import (
 	_ "embed"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // Fixed D31 identifiers. These are locked by the design decision and
 // must not change without a reviewed schema version bump.
 const (
 	// AddonID is the add-on identifier registered with the platform.
-	AddonID domain.AddonID = "scripted.fleetshift.io"
+	AddonID domain.AddonID = "scripted.resource-manager.open-cluster-management.io"
 
 	// TargetType is the delivery target type for scripted delivery.
 	TargetType domain.TargetType = "scripted"
@@ -29,7 +29,7 @@ const (
 	TargetID domain.TargetID = "scripted-local"
 
 	// ResourceType is the managed resource type for scripted resources.
-	ResourceType domain.ResourceType = "scripted.fleetshift.io/ScriptedResource"
+	ResourceType domain.ResourceType = "scripted.resource-manager.open-cluster-management.io/ScriptedResource"
 
 	// CollectionID is the REST collection name for scripted resources.
 	CollectionID = "scriptedResources"
@@ -43,14 +43,14 @@ const (
 	CapabilityLabel = "scripted-delivery"
 
 	// ProtoPackage is the protobuf package name for the spec schema.
-	ProtoPackage = "addons.scripted.v1"
+	ProtoPackage = "ocm.resource_manager.scripted.v1alpha"
 
 	// SpecMessage is the fully qualified protobuf message name for the
 	// resource spec.
-	SpecMessage = "addons.scripted.v1.ScriptedResourceSpec"
+	SpecMessage = "ocm.resource_manager.scripted.v1alpha.ScriptedResourceSpec"
 )
 
-const specProtoPath = "addons/scripted/v1/scripted_resource_spec.proto"
+const specProtoPath = "ocm/resource_manager/scripted/v1alpha/scripted_resource_spec.proto"
 
 //go:embed scripted_resource_spec.proto
 var scriptedResourceSpecProto string
@@ -79,7 +79,7 @@ func Schema() domain.ExtensionResourceSchema {
 	return domain.ExtensionResourceSchema{
 		ResourceType: ResourceType,
 		ProtoPackage: ProtoPackage,
-		Version:      "v1",
+		Version:      "v1alpha",
 		CollectionID: CollectionID,
 		Singular:     "ScriptedResource",
 		Plural:       "ScriptedResources",

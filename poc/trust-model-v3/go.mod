@@ -1,4 +1,4 @@
-module github.com/fleetshift/fleetshift-poc/poc/trust-model-v3
+module github.com/stolostron/ocm-resource-manager/poc/trust-model-v3
 
 go 1.25.0
 

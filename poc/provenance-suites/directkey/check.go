@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
 )
 
 // CheckDelivery is the resource manager's own provenance check. It uses the

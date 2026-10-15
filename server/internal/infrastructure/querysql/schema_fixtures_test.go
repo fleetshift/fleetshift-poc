@@ -6,12 +6,12 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
-const testRT = domain.ResourceType("kind.fleetshift.io/Cluster")
+const testRT = domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
 
 type staticQuerySchemas map[domain.ResourceType]domain.ResourceQuerySchema
 
@@ -94,7 +94,7 @@ func TestCompiler_SchemaLookupReusedAcrossFieldResolutions(t *testing.T) {
 			return querysql.SQLExpr{SQL: "col"}, nil
 		}),
 	}
-	filter := `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "a" && resource.spec.tags == "b"`
+	filter := `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" && resource.spec.nested.value == "a" && resource.spec.tags == "b"`
 	if _, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter}); err != nil {
 		t.Fatalf("CompileFilter: %v", err)
 	}

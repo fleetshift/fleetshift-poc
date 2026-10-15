@@ -6,8 +6,9 @@ describe("retained cluster dashboard", () => {
   it("identifies Kind and leaves unreported versions unknown", () => {
     const cluster = toDashboardCluster(
       {
-        name: "//kind.fleetshift.io/clusters/local",
-        resourceType: "kind.fleetshift.io/Cluster",
+        name: "//kind.resource-manager.open-cluster-management.io/clusters/local",
+        resourceType:
+          "kind.resource-manager.open-cluster-management.io/Cluster",
         resource: {
           name: "clusters/local",
           uid: "cluster-1",

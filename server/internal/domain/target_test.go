@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestToPlacementTarget_OmitsProperties(t *testing.T) {
@@ -124,7 +124,7 @@ func TestResolvedTargetInfos_OmitsMissingFromPool(t *testing.T) {
 	}
 }
 
-// --- VerifyTargetMatch tests (OME-291) ---
+// --- VerifyTargetMatch tests (Fix connectTargets blind ErrAlreadyExists skip with create-or-verify) ---
 
 func TestVerifyTargetMatch_ExactMatch(t *testing.T) {
 	a := domain.NewTargetInfo("t1", "kind", "Cluster A", domain.TargetStateReady,

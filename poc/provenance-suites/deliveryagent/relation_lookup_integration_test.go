@@ -8,10 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/temporal"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/resourcemanager"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/temporal"
 )
 
 func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
@@ -100,7 +100,7 @@ func TestRequestedRelationVerificationHasNoAlternativeFallback(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				view, ok := agent.Applied("//fleetshift.io/clusters/test")
+				view, ok := agent.Applied("//resource-manager.open-cluster-management.io/clusters/test")
 				if !ok || len(view.Manifests) != 1 || view.Manifests[0].MediaType != "application/good" || string(view.Manifests[0].Bytes) != `{"region":"east"}` {
 					t.Fatalf("applied view=%+v", view)
 				}
@@ -177,7 +177,7 @@ func TestRequestedRelationUsesAuthenticatedContentAfterTentativeLookup(t *testin
 func lookupManagedRoot(t *testing.T, signer *directkey.Producer, kind string) protocol.TypedEvidence {
 	t.Helper()
 	assertion, err := (protocol.ManagedResourceAuthorization{
-		DeliveryScope: protocol.DeliveryScope{Tenant: signer.Principal().Tenant(), TargetID: "target-test", FullResourceName: "//fleetshift.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
+		DeliveryScope: protocol.DeliveryScope{Tenant: signer.Principal().Tenant(), TargetID: "target-test", FullResourceName: "//resource-manager.open-cluster-management.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
 		ResourceType:  resourceTypeForTest(t, kind), Spec: []byte(`{"region":"east"}`),
 	}).Assertion()
 	if err != nil {
@@ -195,7 +195,7 @@ func rawManagedRoot(t *testing.T, signer *directkey.Producer, kind string) proto
 		ResourceType string          `json:"resource_type"`
 		Spec         json.RawMessage `json:"spec"`
 	}{
-		DeliveryScope: protocol.DeliveryScope{Tenant: signer.Principal().Tenant(), TargetID: "target-test", FullResourceName: "//fleetshift.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
+		DeliveryScope: protocol.DeliveryScope{Tenant: signer.Principal().Tenant(), TargetID: "target-test", FullResourceName: "//resource-manager.open-cluster-management.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
 		ResourceType:  kind, Spec: []byte(`{"region":"east"}`),
 	})
 	if err != nil {
@@ -253,7 +253,7 @@ func TestManagedResourceIgnoresUnusableAndUnrelatedSupport(t *testing.T) {
 				if err := session.withNode(context.Background(), session.catalog.rootID, func(root verifiedNode) error { return agent.dispatchForTest(session, root) }); err != nil {
 					t.Fatal(err)
 				}
-				if _, ok := agent.Applied("//fleetshift.io/clusters/test"); !ok {
+				if _, ok := agent.Applied("//resource-manager.open-cluster-management.io/clusters/test"); !ok {
 					t.Fatal("valid requested relation did not reach apply")
 				}
 				wantParse := 3

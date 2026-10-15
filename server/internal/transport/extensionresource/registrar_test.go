@@ -17,15 +17,15 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/testutil"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
 )
 
 const clusterTargetType domain.TargetType = "cluster-addon"
@@ -306,7 +306,7 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 
 	// Invoke the dynamic service via gRPC.
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp)
+	err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp)
 	if err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 	getReq.Set(getNameField, protoreflect.ValueOfString("clusters/dev-cluster"))
 
 	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	err = env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp)
+	err = env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/GetCluster", getReq, getResp)
 	if err != nil {
 		t.Fatalf("GetCluster: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestDynamic_CreateWithLabels(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 	got := createResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
@@ -386,7 +386,7 @@ func TestDynamic_CreateWithLabels(t *testing.T) {
 	getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
 	getReq.Set(env.svc.Descriptors.GetRequest.Fields().ByName("name"), protoreflect.ValueOfString("clusters/labeled"))
 	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/GetCluster", getReq, getResp); err != nil {
 		t.Fatalf("GetCluster: %v", err)
 	}
 	got = getResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
@@ -403,7 +403,7 @@ func TestDynamic_CreateWithLabels(t *testing.T) {
 	resource2.Set(env.svc.Descriptors.Resource.Fields().ByName("spec"), protoreflect.ValueOfMessage(spec2))
 	createReq2.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource2))
 	createResp2 := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq2, createResp2); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq2, createResp2); err != nil {
 		t.Fatalf("CreateCluster unlabeled: %v", err)
 	}
 	if createResp2.Has(labelsField) {
@@ -431,7 +431,7 @@ func TestDynamic_ValidationRejectsInvalidSpec(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	resp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, resp)
+	err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, resp)
 	if err == nil {
 		t.Fatal("expected error for invalid spec, got nil")
 	}
@@ -462,14 +462,14 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 
 	// List
 	listReq := dynamicpb.NewMessage(env.svc.Descriptors.ListRequest)
 	listResp := dynamicpb.NewMessage(env.svc.Descriptors.ListResponse)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/ListClusters", listReq, listResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/ListClusters", listReq, listResp); err != nil {
 		t.Fatalf("ListClusters: %v", err)
 	}
 
@@ -485,7 +485,7 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 	deleteReq.Set(deleteNameField, protoreflect.ValueOfString("clusters/cluster-a"))
 
 	deleteResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/DeleteCluster", deleteReq, deleteResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/DeleteCluster", deleteReq, deleteResp); err != nil {
 		t.Fatalf("DeleteCluster: %v", err)
 	}
 
@@ -518,7 +518,7 @@ func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 
@@ -529,7 +529,7 @@ func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
 	deleteReq.Set(deleteNameField, protoreflect.ValueOfString("clusters/cluster-a"))
 
 	deleteResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/DeleteCluster", deleteReq, deleteResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/DeleteCluster", deleteReq, deleteResp); err != nil {
 		t.Fatalf("DeleteCluster: %v", err)
 	}
 
@@ -549,7 +549,7 @@ func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
 	getReq.Set(getNameField, protoreflect.ValueOfString("clusters/cluster-a"))
 
 	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/GetCluster", getReq, getResp); err != nil {
 		t.Fatalf("GetCluster during delete: %v", err)
 	}
 	if int32(getResp.Get(stateField).Enum()) != 3 { // DELETING
@@ -558,7 +558,7 @@ func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
 
 	listReq := dynamicpb.NewMessage(env.svc.Descriptors.ListRequest)
 	listResp := dynamicpb.NewMessage(env.svc.Descriptors.ListResponse)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/ListClusters", listReq, listResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/ListClusters", listReq, listResp); err != nil {
 		t.Fatalf("ListClusters during delete: %v", err)
 	}
 
@@ -584,7 +584,7 @@ func awaitDynamicState(t *testing.T, ctx context.Context, env *testEnv, id strin
 		getReq.Set(getNameField, protoreflect.ValueOfString("clusters/"+id))
 
 		getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-		if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp); err == nil {
+		if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/GetCluster", getReq, getResp); err == nil {
 			if getResp.Get(stateField).Enum() == want {
 				return
 			}
@@ -607,7 +607,7 @@ func TestDynamic_GetNotFound(t *testing.T) {
 	getReq.Set(nameField, protoreflect.ValueOfString("clusters/nonexistent"))
 
 	resp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, resp)
+	err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/GetCluster", getReq, resp)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -633,8 +633,8 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	}
 
 	// Verify service name
-	if svc.Desc.ServiceName != "kind.fleetshift.v1.ClusterService" {
-		t.Errorf("service name = %q, want %q", svc.Desc.ServiceName, "kind.fleetshift.v1.ClusterService")
+	if svc.Desc.ServiceName != "ocm.resource_manager.kind.v1alpha.ClusterService" {
+		t.Errorf("service name = %q, want %q", svc.Desc.ServiceName, "ocm.resource_manager.kind.v1alpha.ClusterService")
 	}
 
 	// Verify method count
@@ -658,8 +658,8 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	if specField == nil {
 		t.Fatal("resource message missing spec field")
 	}
-	if specField.Message().FullName() != "addons.kind.v1.KindClusterSpec" {
-		t.Errorf("spec message = %q, want addons.kind.v1.KindClusterSpec", specField.Message().FullName())
+	if specField.Message().FullName() != "ocm.resource_manager.kind.v1alpha.KindClusterSpec" {
+		t.Errorf("spec message = %q, want ocm.resource_manager.kind.v1alpha.KindClusterSpec", specField.Message().FullName())
 	}
 
 	// Verify we can create a dynamic message from the resource descriptor
@@ -781,7 +781,7 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 
@@ -822,7 +822,7 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 		protoreflect.ValueOfString("clusters/prov-cluster"))
 
 	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/GetCluster", getReq, getResp); err != nil {
 		t.Fatalf("GetCluster: %v", err)
 	}
 
@@ -872,7 +872,7 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 
@@ -911,7 +911,7 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	resumeReq.Set(nameField, protoreflect.ValueOfString("clusters/resume-cluster"))
 
 	resumeResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	err = env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/ResumeCluster", resumeReq, resumeResp)
+	err = env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/ResumeCluster", resumeReq, resumeResp)
 	if err != nil {
 		t.Fatalf("ResumeCluster: %v", err)
 	}
@@ -946,7 +946,7 @@ func TestDynamic_ResumeRPC_NotPaused(t *testing.T) {
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
 	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+	if err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/CreateCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 
@@ -957,7 +957,7 @@ func TestDynamic_ResumeRPC_NotPaused(t *testing.T) {
 	resumeReq.Set(nameField, protoreflect.ValueOfString("clusters/not-paused-cluster"))
 
 	resumeResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/ResumeCluster", resumeReq, resumeResp)
+	err := env.conn.Invoke(ctx, "/ocm.resource_manager.kind.v1alpha.ClusterService/ResumeCluster", resumeReq, resumeResp)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

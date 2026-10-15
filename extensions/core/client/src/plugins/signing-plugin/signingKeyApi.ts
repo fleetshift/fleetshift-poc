@@ -9,12 +9,12 @@
  * SignASN1 approach.
  */
 
-import { createIDBStore } from "@fleetshift/common";
+import { createIDBStore } from "@ocm-resource-manager/common";
 
 const KEY_ID = "signing-key";
 
 const signingStore = createIDBStore<CryptoKeyPair>({
-  db: "fleetshift-signing",
+  db: "ocm-resource-manager-signing",
   version: 1,
   store: "keys",
   upgrade(db) {

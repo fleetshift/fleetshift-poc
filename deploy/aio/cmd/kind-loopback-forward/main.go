@@ -8,12 +8,12 @@ import (
 	"log"
 	"os"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/loopbackforward"
+	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/loopbackforward"
 )
 
 func main() {
 	listen := flag.String("listen", "", "local host:port to accept (127.0.0.1:8085)")
-	to := flag.String("to", "", "backend host:port (fleetshift:8085)")
+	to := flag.String("to", "", "backend host:port (ocm-resource-manager:8085)")
 	flag.Parse()
 	if *listen == "" || *to == "" {
 		log.Fatal("-listen and -to are required")

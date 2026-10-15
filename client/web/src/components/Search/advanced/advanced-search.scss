@@ -1,21 +1,21 @@
-.ome-search__advanced-bar {
+.ocm-rm-search__advanced-bar {
   width: 100%;
   position: relative;
 }
 
 // Color-coded input: mirror overlay with colored tokens on top of transparent input text
-.ome-search__input-wrapper {
+.ocm-rm-search__input-wrapper {
   position: relative;
 }
 
-.ome-search__input--colored {
+.ocm-rm-search__input--colored {
   input {
     color: transparent !important;
     caret-color: var(--pf-t--global--text--color--regular);
   }
 }
 
-.ome-search__input-mirror {
+.ocm-rm-search__input-mirror {
   position: absolute;
   inset: 0;
   display: flex;
@@ -27,11 +27,11 @@
   border: var(--pf-v6-c-form-control--BorderWidth, 1px) solid transparent;
 }
 
-.ome-search__input-mirror-scroll {
+.ocm-rm-search__input-mirror-scroll {
   white-space: pre;
 }
 
-.ome-search__autocomplete {
+.ocm-rm-search__autocomplete {
   position: absolute;
   top: 100%;
   left: 0;
@@ -62,14 +62,14 @@
 }
 
 // Operator chips — compact inline layout
-.ome-search__operator-chips {
+.ocm-rm-search__operator-chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--pf-t--global--spacer--xs);
   padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
 }
 
-.ome-search__operator-chip {
+.ocm-rm-search__operator-chip {
   display: inline-flex;
   align-items: center;
   padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm);
@@ -94,35 +94,35 @@
 }
 
 // CEL preview pinned at top of menu
-.ome-search__cel-preview-header {
+.ocm-rm-search__cel-preview-header {
   padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
   border-bottom: var(--pf-t--global--border--width--regular) solid
     var(--pf-t--global--border--color--default);
   flex-shrink: 0;
 }
 
-.ome-search__cel-preview {
+.ocm-rm-search__cel-preview {
   display: flex;
   align-items: center;
   gap: var(--pf-t--global--spacer--sm);
   font-size: var(--pf-t--global--font--size--sm);
 }
 
-.ome-search__cel-preview-status {
+.ocm-rm-search__cel-preview-status {
   flex-shrink: 0;
   display: flex;
   align-items: center;
 }
 
-.ome-search__cel-preview-icon--valid {
+.ocm-rm-search__cel-preview-icon--valid {
   color: var(--pf-t--global--color--status--success--default);
 }
 
-.ome-search__cel-preview-icon--invalid {
+.ocm-rm-search__cel-preview-icon--invalid {
   color: var(--pf-t--global--color--status--danger--default);
 }
 
-.ome-search__cel-preview-expression {
+.ocm-rm-search__cel-preview-expression {
   font-family: var(--pf-t--global--font--family--mono);
   font-size: var(--pf-t--global--font--size--sm);
   white-space: pre-wrap;
@@ -130,40 +130,40 @@
   flex: 1;
 }
 
-.ome-search__cel-preview-error {
+.ocm-rm-search__cel-preview-error {
   color: var(--pf-t--global--color--status--danger--default);
   font-size: var(--pf-t--global--font--size--xs);
   font-style: italic;
 }
 
 // Syntax coloring tokens
-.ome-search__cel-token--field {
+.ocm-rm-search__cel-token--field {
   color: var(--pf-t--global--color--brand--default);
 }
 
-.ome-search__cel-token--operator {
+.ocm-rm-search__cel-token--operator {
   color: var(--pf-t--global--color--status--danger--default);
 }
 
-.ome-search__cel-token--value {
+.ocm-rm-search__cel-token--value {
   color: var(--pf-t--global--color--status--success--default);
 }
 
-.ome-search__cel-token--combinator {
+.ocm-rm-search__cel-token--combinator {
   color: var(--pf-t--global--color--nonstatus--gray--default);
   font-weight: var(--pf-t--global--font--weight--body--bold);
 }
 
-.ome-search__cel-token--paren {
+.ocm-rm-search__cel-token--paren {
   color: var(--pf-t--global--color--nonstatus--gray--default);
 }
 
-.ome-search__cel-token--macro {
+.ocm-rm-search__cel-token--macro {
   color: var(--pf-t--global--color--nonstatus--purple--default);
 }
 
 // Keyboard shortcuts hint bar pinned at bottom of autocomplete menu
-.ome-search__keyboard-hints {
+.ocm-rm-search__keyboard-hints {
   display: flex;
   flex-wrap: wrap;
   gap: var(--pf-t--global--spacer--md);

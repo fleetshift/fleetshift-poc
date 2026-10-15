@@ -11,8 +11,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestAgent_Deliver_RestartRecoversOwnership(t *testing.T) {
@@ -81,7 +81,7 @@ func TestAgent_Deliver_HigherGenerationRecreates(t *testing.T) {
 	if provider.createCount() != 2 {
 		t.Fatalf("Create count = %d, want 2", provider.createCount())
 	}
-	if g, found, _ := store.Get(context.Background(), "fs--demo", nil); !found || g != 2 {
+	if g, found, _ := store.Get(context.Background(), "rm--demo", nil); !found || g != 2 {
 		t.Fatalf("replacement generation = %d found=%v, want 2", g, found)
 	}
 }
@@ -109,7 +109,7 @@ func TestAgent_Deliver_HigherGenerationDeleteFailsThenRetryRecreates(t *testing.
 	if r := awaitDone(t, reporter.done); r.State != domain.DeliveryStateFailed {
 		t.Fatalf("expected failed delete, got %q", r.State)
 	}
-	if g, found, _ := store.Get(context.Background(), "fs--demo", nil); !found || g != 1 {
+	if g, found, _ := store.Get(context.Background(), "rm--demo", nil); !found || g != 1 {
 		t.Fatalf("after failed delete gen=%d found=%v, want still 1", g, found)
 	}
 
@@ -124,7 +124,7 @@ func TestAgent_Deliver_HigherGenerationDeleteFailsThenRetryRecreates(t *testing.
 	if provider.createCount() <= createsBefore {
 		t.Fatal("retry must recreate (Create again)")
 	}
-	if g, found, _ := store.Get(context.Background(), "fs--demo", nil); !found || g != 2 {
+	if g, found, _ := store.Get(context.Background(), "rm--demo", nil); !found || g != 2 {
 		t.Fatalf("after retry gen=%d found=%v, want 2", g, found)
 	}
 }
@@ -167,17 +167,17 @@ func TestAgent_Remove_LowerGenerationRejected(t *testing.T) {
 	if r.State != domain.DeliveryStateFailed || !strings.Contains(r.Message, "stale") {
 		t.Fatalf("want stale remove fail, got %q %q", r.State, r.Message)
 	}
-	if !provider.hasCluster("fs--demo") {
+	if !provider.hasCluster("rm--demo") {
 		t.Fatal("cluster should remain after stale remove")
 	}
-	if g, _, _ := store.Get(context.Background(), "fs--demo", nil); g != 2 {
+	if g, _, _ := store.Get(context.Background(), "rm--demo", nil); g != 2 {
 		t.Fatalf("gen = %d, want 2", g)
 	}
 }
 
 func TestAgent_Deliver_OwnedWithoutCMRecreates(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--demo"] = nil
+	provider.clusters["rm--demo"] = nil
 	reporter := newChannelReporter()
 	agent, store := newTestAgent(reporter, provider)
 
@@ -194,7 +194,7 @@ func TestAgent_Deliver_OwnedWithoutCMRecreates(t *testing.T) {
 	if provider.createCount() != 1 {
 		t.Fatalf("Create count = %d, want 1", provider.createCount())
 	}
-	if g, found, _ := store.Get(context.Background(), "fs--demo", nil); !found || g != 1 {
+	if g, found, _ := store.Get(context.Background(), "rm--demo", nil); !found || g != 1 {
 		t.Fatalf("replacement generation = %d found=%v, want 1", g, found)
 	}
 }
@@ -220,7 +220,7 @@ func (s *failAdvanceOnceStore) Forget(name string) { s.inner.Forget(name) }
 
 func TestAgent_Deliver_MissingCMPersistFailThenRetryRecreates(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--demo"] = nil
+	provider.clusters["rm--demo"] = nil
 	reporter := newChannelReporter()
 	inner := kind.NewMemoryGenerationStore()
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&failAdvanceOnceStore{inner: inner}), stubPlatformSA())
@@ -234,10 +234,10 @@ func TestAgent_Deliver_MissingCMPersistFailThenRetryRecreates(t *testing.T) {
 	if provider.deleteCount() != 1 || provider.createCount() != 1 {
 		t.Fatalf("after persist fail: deletes=%d creates=%d, want 1 each", provider.deleteCount(), provider.createCount())
 	}
-	if _, found, _ := inner.Get(context.Background(), "fs--demo", nil); found {
+	if _, found, _ := inner.Get(context.Background(), "rm--demo", nil); found {
 		t.Fatal("generation must not be recorded after persist failure")
 	}
-	if !provider.hasCluster("fs--demo") {
+	if !provider.hasCluster("rm--demo") {
 		t.Fatal("replacement cluster should exist after create-then-persist-fail")
 	}
 
@@ -253,7 +253,7 @@ func TestAgent_Deliver_MissingCMPersistFailThenRetryRecreates(t *testing.T) {
 		t.Fatalf("retry must recreate again; deletes=%d→%d creates=%d→%d",
 			deletesBefore, provider.deleteCount(), createsBefore, provider.createCount())
 	}
-	if g, found, _ := inner.Get(context.Background(), "fs--demo", nil); !found || g != 1 {
+	if g, found, _ := inner.Get(context.Background(), "rm--demo", nil); !found || g != 1 {
 		t.Fatalf("after retry gen=%d found=%v, want 1", g, found)
 	}
 }
@@ -279,14 +279,14 @@ func TestAgent_Deliver_MissingCMDeleteFailsRetainsClusterAndWatch(t *testing.T) 
 	}
 
 	// Simulate missing ownership ConfigMap while the cluster and watch remain.
-	store.Forget("fs--demo")
+	store.Forget("rm--demo")
 	provider.deleteErr = errors.New("delete failed")
 
 	_ = agent.Deliver(context.Background(), target, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if r := awaitDone(t, reporter.done); r.State != domain.DeliveryStateFailed {
 		t.Fatalf("want failed delete, got %q %s", r.State, r.Message)
 	}
-	if !provider.hasCluster("fs--demo") {
+	if !provider.hasCluster("rm--demo") {
 		t.Fatal("failed deletion must leave the existing cluster intact")
 	}
 	if !inv.IsWatchingForTest(rn) {
@@ -316,12 +316,12 @@ func TestAgent_Deliver_MissingCMReplacementRecordsGenAndWatch(t *testing.T) {
 		t.Fatalf("watch starts after first deliver = %d, want 1", got)
 	}
 
-	store.Forget("fs--demo")
+	store.Forget("rm--demo")
 	_ = agent.Deliver(context.Background(), target, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 3)
 	if r := awaitDone(t, reporter.done); r.State != domain.DeliveryStateDelivered {
 		t.Fatalf("recreate: %q %s", r.State, r.Message)
 	}
-	if g, found, _ := store.Get(context.Background(), "fs--demo", nil); !found || g != 3 {
+	if g, found, _ := store.Get(context.Background(), "rm--demo", nil); !found || g != 3 {
 		t.Fatalf("replacement generation = %d found=%v, want 3", g, found)
 	}
 	if got := watchStarts.Load(); got != 2 {
@@ -334,7 +334,7 @@ func TestAgent_Deliver_MissingCMReplacementRecordsGenAndWatch(t *testing.T) {
 
 func TestAgent_Deliver_GetGenerationErrorFailsWithoutDelete(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--demo"] = nil
+	provider.clusters["rm--demo"] = nil
 	reporter := newChannelReporter()
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&errGetStore{err: errors.New("api unavailable")}), stubPlatformSA())
 
@@ -348,7 +348,7 @@ func TestAgent_Deliver_GetGenerationErrorFailsWithoutDelete(t *testing.T) {
 	if provider.deleteCount() != 0 || provider.createCount() != 0 {
 		t.Fatalf("Get error must not delete/recreate; deletes=%d creates=%d", provider.deleteCount(), provider.createCount())
 	}
-	if !provider.hasCluster("fs--demo") {
+	if !provider.hasCluster("rm--demo") {
 		t.Fatal("cluster must remain")
 	}
 }
@@ -432,7 +432,7 @@ func (s *staleOnAdvanceStore) Forget(name string) { s.inner.Forget(name) }
 
 func TestAgent_Deliver_CheckAndAdvanceStaleOnReplacementAfterMissingCM(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--demo"] = nil
+	provider.clusters["rm--demo"] = nil
 	reporter := newChannelReporter()
 	inner := kind.NewMemoryGenerationStore()
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&staleOnAdvanceStore{inner: inner, plant: 2}), stubPlatformSA())
@@ -496,7 +496,7 @@ func TestAgent_Remove_StaleKeepsInventoryWatch(t *testing.T) {
 	if !inv.IsWatchingForTest(rn) {
 		t.Fatal("stale remove must not Unwatch; cluster still running")
 	}
-	if !provider.hasCluster("fs--demo") {
+	if !provider.hasCluster("rm--demo") {
 		t.Fatal("cluster should remain")
 	}
 }

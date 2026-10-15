@@ -1,4 +1,4 @@
-import type { OnboardingActionFormProps } from "@fleetshift/common";
+import type { OnboardingActionFormProps } from "@ocm-resource-manager/common";
 import {
   Button,
   EmptyState,
@@ -17,8 +17,8 @@ export function createConnectionForm(config: ConnectionFormConfig) {
     onCancel,
   }: OnboardingActionFormProps) {
     return (
-      <div className="ome-setup-whats-next__body">
-        <div className="ome-setup-whats-next__inner">
+      <div className="ocm-rm-setup-whats-next__body">
+        <div className="ocm-rm-setup-whats-next__inner">
           <EmptyState
             headingLevel="h1"
             titleText={`Connect to ${config.providerLabel}`}

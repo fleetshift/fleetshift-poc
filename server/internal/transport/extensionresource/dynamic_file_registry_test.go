@@ -5,10 +5,10 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
 )
 
 func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
@@ -104,7 +104,7 @@ func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
 	}
 
 	// FindDescriptorByName should find the service.
-	svcName := protoreflect.FullName("kind.fleetshift.v1.ClusterService")
+	svcName := protoreflect.FullName("ocm.resource_manager.kind.v1alpha.ClusterService")
 	desc, err := reg.FindDescriptorByName(svcName)
 	if err != nil {
 		t.Fatalf("FindDescriptorByName(%s): %v", svcName, err)
@@ -127,8 +127,8 @@ func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.
 	}
 
 	for _, svcName := range []protoreflect.FullName{
-		"kind.fleetshift.v1.ClusterService",
-		"addons.scripted.v1.ScriptedResourceService",
+		"ocm.resource_manager.kind.v1alpha.ClusterService",
+		"ocm.resource_manager.scripted.v1alpha.ScriptedResourceService",
 	} {
 		desc, err := reg.FindDescriptorByName(svcName)
 		if err != nil {
@@ -187,7 +187,7 @@ func TestDynamicFileRegistry_DeregisterRemovesDescriptor(t *testing.T) {
 		t.Fatal("expected error after Deregister, got nil")
 	}
 
-	svcName := protoreflect.FullName("kind.fleetshift.v1.ClusterService")
+	svcName := protoreflect.FullName("ocm.resource_manager.kind.v1alpha.ClusterService")
 	_, err = reg.FindDescriptorByName(svcName)
 	if err == nil {
 		t.Fatal("expected error for FindDescriptorByName after Deregister, got nil")

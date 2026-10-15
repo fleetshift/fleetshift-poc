@@ -189,7 +189,7 @@ type MapFieldParts struct {
 //
 // parentFQN is the fully-qualified name of the parent message (without a
 // leading dot), used to form the entry type_name
-// (e.g. "kind.fleetshift.v1.Cluster" → ".kind.fleetshift.v1.Cluster.LabelsEntry").
+// (e.g. "ocm.resource_manager.kind.v1alpha.Cluster" → ".kind.ocm.resource_manager.v1alpha.Cluster.LabelsEntry").
 //
 // valueTypeName is empty for scalar values; for message or enum values it is
 // the fully-qualified type name (with or without a leading dot),

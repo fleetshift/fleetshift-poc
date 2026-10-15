@@ -14,11 +14,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/ptr"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 const (
-	platformSAName      = "fleetshift-platform"
+	platformSAName      = "ocm-resource-manager-platform"
 	platformSANamespace = "kube-system"
 	// TokenRequest lifetime (30 days). Credentials are not rotated automatically.
 	platformTokenExpirySeconds = 30 * 24 * 3600

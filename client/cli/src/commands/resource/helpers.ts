@@ -17,13 +17,16 @@ export function resourceRoute(type: string): ResourceRoute {
   }
   const protoPackage = type.slice(0, separator);
   const collection = type.slice(separator + 1);
-  const service = protoPackage.replace(/\.fleetshift\.v1$/, ".fleetshift.io");
-  if (service === protoPackage) {
+  const match = /^ocm\.resource_manager\.([a-z][a-z0-9]*)\.v1alpha$/.exec(
+    protoPackage,
+  );
+  if (!match) {
     throw new Error(`unsupported resource package ${protoPackage}`);
   }
+  const service = `${match[1]}.resource-manager.open-cluster-management.io`;
   return {
     collection,
-    path: `/apis/${service}/v1/${collection}`,
+    path: `/apis/${service}/v1alpha/${collection}`,
     singular: collection.endsWith("s") ? collection.slice(0, -1) : collection,
   };
 }

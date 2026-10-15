@@ -2,7 +2,7 @@
 
 **Status:** Draft
 
-**Related issue:** [OME-313](https://redhat.atlassian.net/browse/OME-313)
+**Related issue:** Design separation of client assets from Resource Manager
 
 This document defines browser asset delivery, ownership, and trust boundaries. See [Client Source Sharing](client-source-sharing.md) for source sharing and runtime boundaries between CLI and Web clients.
 
@@ -34,7 +34,7 @@ This design moves browser asset delivery out of Resource Manager while keeping o
 ```mermaid
 flowchart LR
     Build[Plugin builds] --> Merge[Merged web directory]
-    Merge --> Image["/srv/web in FleetShift image"]
+    Merge --> Image["/srv/web in Resource Manager image"]
     Image --> RM["Resource Manager serves /app"]
     RM --> Registry["plugin-registry.json"]
     Registry --> Config["/api/ui/config"]
@@ -53,7 +53,7 @@ flowchart TB
     Policy[PluginClientPolicy<br/>deployment authority] --> Operator[Client Asset Operator<br/>discovery + integrity]
     Operator -->|policy + integrity| Gateway[Console Gateway<br/>dynamic plugin assets]
     Operator -->|sanitized catalog| RM[Resource Manager<br/>RBAC + user settings]
-    Browser[Browser] --> Edge[OpenShift Route / AIO edge]
+    Browser[Browser] --> Edge[Public edge]
     Edge -->|/client/web/ + /client/shell/*| Shell[Immutable shell origin]
     Edge -->|/client/web/plugins/*| Gateway
     Edge -->|authenticated /api/*| RM
@@ -90,7 +90,7 @@ The browser uses one public origin and never accesses plugin origins directly. E
 Deployment defines one `PluginClientPolicy` per plugin identity. YAML is suitable for AIO. A namespace-scoped CRD is preferred for cluster deployment. The resource shares plugin identity across clients while each client declares its own artifact details.
 
 ```yaml
-apiVersion: ui.fleetshift.io/v1alpha1
+apiVersion: ui.resource-manager.open-cluster-management.io/v1alpha1
 kind: PluginClientPolicy
 metadata:
   name: kind
@@ -240,7 +240,7 @@ flowchart LR
 
 AIO retains public TLS, host validation, WebSocket handling, and supervision. Operator watches configured YAML. Gateway is separate from Resource Manager and accepts only operator-owned policy.
 
-### Cluster
+### OpenShift deployment example
 
 ```mermaid
 flowchart LR
@@ -268,7 +268,7 @@ An independently provisioned asset distribution component could replace Gateway 
 
 ## Open Questions
 
-1. Are deployment allowlists sufficient for OME-313, or are signed route/catalog updates required?
+1. Are deployment allowlists sufficient for separating client assets from Resource Manager, or are signed route/catalog updates required?
 2. Is `PluginClientPolicy` correct resource name and scope?
 3. Which operator policy source is preferred: mounted file, CRD, or administrator service?
 4. Which artifact provenance or manifest-signature format is required?

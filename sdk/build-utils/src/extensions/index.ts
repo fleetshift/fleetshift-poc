@@ -14,8 +14,8 @@ export {
   createClusterDetailTab,
   validateClusterDetailTabProperties,
 } from "./clusterDetailTab";
-export type { FleetshiftPluginOptions } from "./FleetshiftPlugin";
-export { FleetshiftPlugin } from "./FleetshiftPlugin";
+export type { ResourceManagerPluginOptions } from "./ResourceManagerPlugin";
+export { ResourceManagerPlugin } from "./ResourceManagerPlugin";
 export type {
   SearchResultRendererExtras,
   SearchResultRendererInput,
@@ -32,18 +32,18 @@ export type {
   ClusterProviderProperties,
   EncodedCodeRef,
   ExtensionPointDeclaration,
-  FleetshiftExtension,
-  FleetshiftExtensionType,
   ModuleExtras,
   ModuleGroupExtras,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
+  ResourceManagerExtension,
+  ResourceManagerExtensionType,
   SetupExtras,
   SetupProperties,
 } from "./types";
-export { FLEETSHIFT_EXTENSION_TYPES } from "./types";
+export { OCM_RM_EXTENSION_TYPES } from "./types";
 export {
   validateClusterProviderProperties,
   validateCodeRef,

@@ -22,7 +22,7 @@ func MustCAPEM(t *testing.T) []byte {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "fleetshift-test-ca"},
+		Subject:      pkix.Name{CommonName: "ocm-resource-manager-test-ca"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		IsCA:         true,

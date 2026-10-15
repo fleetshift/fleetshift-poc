@@ -1,12 +1,12 @@
 # Advanced Search with CEL Expressions
 
-**Jira:** [OME-210](https://redhat.atlassian.net/browse/OME-210)
+**Design context:** advanced search with CEL expressions
 **Status:** Draft
 **Authors:** Martin Marosi
 
 ## Problem
 
-The current search is client-side full-text (Orama) over plugin-contributed `fleetshift.search-index` extensions. It handles keyword lookups well but cannot express structured queries like field comparisons, label selectors, or date ranges. Users managing fleets need to filter by status, provider, node count, labels, and other resource attributes — things that require a query language, not a text box.
+The current search is client-side full-text (Orama) over plugin-contributed `ocm-resource-manager.search-index` extensions. It handles keyword lookups well but cannot express structured queries like field comparisons, label selectors, or date ranges. Users managing fleets need to filter by status, provider, node count, labels, and other resource attributes — things that require a query language, not a text box.
 
 ## Proposal
 
@@ -18,7 +18,7 @@ Add CEL (Common Expression Language) as the query language for advanced search. 
 
 Use `@react-querybuilder/core` (Option A — logic only, no vendor UI) as the query manipulation and CEL formatting engine. Build a fully custom PatternFly interface on top.
 
-**Why headless:** The UI must feel native to our PF design system with `ome-` scoped styles. Wrapping a third-party widget with `controlElements` overrides (Option B) still couples us to their component tree and context. The core package gives us everything we need without the UI baggage.
+**Why headless:** The UI must feel native to our PF design system with `ocm-rm-` scoped styles. Wrapping a third-party widget with `controlElements` overrides (Option B) still couples us to their component tree and context. The core package gives us everything we need without the UI baggage.
 
 #### `@react-querybuilder/core` provides
 
@@ -48,8 +48,8 @@ The Go backend already has a `QueryResources` gRPC/REST endpoint that accepts a 
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `name` | `string` | Full resource name, e.g. `//fleetshift/clusters/my-cluster` |
-| `resourceType` | `string` | Resource type, e.g. `fleetshift/Cluster` |
+| `name` | `string` | Full resource name, e.g. `//resource-manager.open-cluster-management.io/clusters/my-cluster` |
+| `resourceType` | `string` | Resource type, e.g. `resource-manager.open-cluster-management.io/Cluster` |
 | `resource` | `dyn` | Dynamic — access `.labels`, `.state`, `.spec.*`, `.conditions`, etc. |
 
 **Supported CEL operators** (built-in only, no custom functions):
@@ -100,14 +100,14 @@ New endpoints needed:
 ```
 GET /v1/resourceTypes
 → [
-    { "type": "fleetshift/Cluster", "apiVersion": "v1" },
-    { "type": "fleetshift/Target",  "apiVersion": "v1" },
+    { "type": "resource-manager.open-cluster-management.io/Cluster", "apiVersion": "v1" },
+    { "type": "ocm-resource-manager/Target",  "apiVersion": "v1" },
     ...
   ]
 
 GET /v1/resourceTypes/{type}/schema
 → {
-    "type": "fleetshift/Cluster",
+    "type": "resource-manager.open-cluster-management.io/Cluster",
     "fields": [
       { "path": "spec.name",                "type": "string" },
       { "path": "spec.nodes",               "type": "repeated", "itemType": "message" },
@@ -133,12 +133,12 @@ This is a **type-level** event, not per-instance. It fires on structural changes
 WS /api/ui/events/ws
 
 ← { "eventKind": "schema.registry.changed",
-    "resourceType": "fleetshift/Cluster",
+    "resourceType": "resource-manager.open-cluster-management.io/Cluster",
     "action": "activated",
     "timestamp": 1721474400 }
 ```
 
-The UI receives this event and re-fetches `/v1/resourceTypes` and any cached per-type schemas. This keeps the field registry in sync without polling — the schema only changes on addon lifecycle events, not on every resource instance write.
+The UI receives this event and re-fetches `/v1alpha/resourceTypes` and any cached per-type schemas. This keeps the field registry in sync without polling — the schema only changes on addon lifecycle events, not on every resource instance write.
 
 ## UI Design
 
@@ -378,7 +378,7 @@ Execution limits (expression complexity, AST depth) should be enforced server-si
 No backend changes. Uses existing `QueryResources` endpoint with `?filter=`.
 
 1. Add `@react-querybuilder/core` dependency — CEL formatting (`formatQuery`) and parsing (`parseCEL`)
-2. Define static base field registry in `@fleetshift/common` — fields, types, operators, enum values, descriptions, aliases
+2. Define static base field registry in `@ocm-resource-manager/common` — fields, types, operators, enum values, descriptions, aliases
 3. Build Orama autocomplete index from the field registry — fuzzy field name matching for suggestions
 4. Build advanced search components (shell — `web`):
    - **Search bar expansion** — full-width animation on activation (`/` shortcut or icon button)

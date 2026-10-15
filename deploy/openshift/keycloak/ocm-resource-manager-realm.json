@@ -1,0 +1,284 @@
+{
+  "realm": "ocm-resource-manager",
+  "displayName": "ACME Corp",
+  "enabled": true,
+  "sslRequired": "external",
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "defaultRole": {
+    "name": "default-roles-ocm-resource-manager",
+    "description": "${role_default-roles}",
+    "composite": true
+  },
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}}},{\"name\":\"email\",\"displayName\":\"${email}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"email\":{},\"length\":{\"max\":255}}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}}},{\"name\":\"signing_public_key\",\"displayName\":\"Signing Public Key\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"github_username\",\"displayName\":\"GitHub Username\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}}],\"unmanagedAttributePolicy\":\"ENABLED\"}"
+          ]
+        }
+      }
+    ]
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "ops",
+        "description": "Operations persona — manages clusters and infrastructure"
+      },
+      {
+        "name": "dev",
+        "description": "Developer persona — manages applications"
+      },
+      {
+        "name": "default-roles-ocm-resource-manager",
+        "composite": true,
+        "composites": {
+          "client": {
+            "ocm-resource-manager": ["ocm-resource-manager-user"],
+            "account": ["manage-account", "view-profile"]
+          }
+        }
+      }
+    ],
+    "client": {
+      "ocm-resource-manager": [
+        {
+          "name": "ocm-resource-manager-user",
+          "description": "Baseline role for all Resource Manager users"
+        }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "ocm-resource-manager",
+      "name": "Resource Manager Platform",
+      "standardFlowEnabled": false,
+      "fullScopeAllowed": false
+    },
+    {
+      "clientId": "ocm-resource-manager-ui",
+      "name": "Resource Manager UI",
+      "publicClient": true,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://localhost:8085/*",
+        "http://localhost:8888/*",
+        "http://127.0.0.1:8085/*",
+        "https://ocm-resource-manager.localhost:8085/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8085",
+        "http://127.0.0.1:8085",
+        "https://ocm-resource-manager.localhost:8085"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "github-username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "github_username",
+            "claim.name": "github_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "signing-public-key",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "signing_public_key",
+            "claim.name": "signing_public_key",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ocm-resource-manager-cli",
+      "name": "Resource Manager CLI",
+      "publicClient": true,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://127.0.0.1/callback",
+        "http://localhost:8080/*",
+        "http://localhost:8888/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8888",
+        "http://127.0.0.1",
+        "http://localhost:8080"
+      ],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true",
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "github-username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "github_username",
+            "claim.name": "github_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "signing-public-key",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "signing_public_key",
+            "claim.name": "signing_public_key",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ocm-resource-manager-signing",
+      "name": "Resource Manager Signing (Key Enrollment)",
+      "publicClient": true,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://127.0.0.1/callback"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "ocm-resource-manager-signing-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "ocm-resource-manager-signing",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "github-username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "github_username",
+            "claim.name": "github_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "signing-public-key",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "signing_public_key",
+            "claim.name": "signing_public_key",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ocp-console",
+      "name": "OCP Web Console",
+      "fullScopeAllowed": false,
+      "secret": "GENERATED_AT_DEPLOY_TIME",
+      "redirectUris": [],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "ocp-console-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "ocp-console",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clientScopeMappings": {
+    "ocm-resource-manager": [
+      { "client": "ocm-resource-manager-ui", "roles": ["ocm-resource-manager-user"] },
+      { "client": "ocm-resource-manager-cli", "roles": ["ocm-resource-manager-user"] },
+      { "client": "ocm-resource-manager-signing", "roles": ["ocm-resource-manager-user"] }
+    ],
+    "account": [
+      { "client": "ocm-resource-manager-ui", "roles": ["manage-account", "view-profile"] }
+    ]
+  },
+  "users": [
+    {
+      "username": "ops-user",
+      "email": "ops@ocm-resource-manager.local",
+      "firstName": "Ops",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "GENERATED_AT_DEPLOY_TIME"
+        }
+      ],
+      "realmRoles": ["ops", "default-roles-ocm-resource-manager"],
+      "clientRoles": {
+        "account": ["manage-account", "view-profile"]
+      },
+      "attributes": {
+        "github_username": ["ops-github"]
+      }
+    },
+    {
+      "username": "dev-user",
+      "email": "dev@ocm-resource-manager.local",
+      "firstName": "Dev",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "GENERATED_AT_DEPLOY_TIME"
+        }
+      ],
+      "realmRoles": ["dev", "default-roles-ocm-resource-manager"],
+      "clientRoles": {
+        "account": ["manage-account", "view-profile"]
+      },
+      "attributes": {
+        "github_username": ["dev-github"]
+      }
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 /**
- * Re-export tree utilities from @fleetshift/common.
+ * Re-export tree utilities from @ocm-resource-manager/common.
  * Canonical source: common/src/navLayout.ts
  */
-export type { FlatNode } from "@fleetshift/common";
+export type { FlatNode } from "@ocm-resource-manager/common";
 export {
   arrayMove,
   buildLayout,
@@ -11,4 +11,4 @@ export {
   getProjection,
   INDENTATION,
   normalizeOrder,
-} from "@fleetshift/common";
+} from "@ocm-resource-manager/common";

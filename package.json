@@ -1,5 +1,5 @@
 {
-  "name": "fleetshift-poc",
+  "name": "ocm-resource-manager",
   "private": true,
   "workspaces": [
     "client/cli",

@@ -15,31 +15,31 @@ func TestNewResourceType(t *testing.T) {
 	}{
 		{
 			name:     "valid",
-			service:  "kind.fleetshift.io",
+			service:  "kind.resource-manager.open-cluster-management.io",
 			typeName: "Cluster",
-			want:     "kind.fleetshift.io/Cluster",
+			want:     "kind.resource-manager.open-cluster-management.io/Cluster",
 		},
 		{
 			name:     "multi-segment service name",
-			service:  "kind.fleetshift.io",
+			service:  "kind.resource-manager.open-cluster-management.io",
 			typeName: "Cluster",
-			want:     "kind.fleetshift.io/Cluster",
+			want:     "kind.resource-manager.open-cluster-management.io/Cluster",
 		},
 		{
 			name:     "empty type name rejected",
-			service:  "kind.fleetshift.io",
+			service:  "kind.resource-manager.open-cluster-management.io",
 			typeName: "",
 			wantErr:  true,
 		},
 		{
 			name:     "lowercase type name rejected",
-			service:  "kind.fleetshift.io",
+			service:  "kind.resource-manager.open-cluster-management.io",
 			typeName: "cluster",
 			wantErr:  true,
 		},
 		{
 			name:     "type name with slash rejected",
-			service:  "kind.fleetshift.io",
+			service:  "kind.resource-manager.open-cluster-management.io",
 			typeName: "Cluster/Sub",
 			wantErr:  true,
 		},
@@ -72,13 +72,13 @@ func TestParseResourceType(t *testing.T) {
 	}{
 		{
 			name:  "valid kind cluster",
-			input: "kind.fleetshift.io/Cluster",
-			want:  "kind.fleetshift.io/Cluster",
+			input: "kind.resource-manager.open-cluster-management.io/Cluster",
+			want:  "kind.resource-manager.open-cluster-management.io/Cluster",
 		},
 		{
 			name:  "valid kind cluster",
-			input: "kind.fleetshift.io/Cluster",
-			want:  "kind.fleetshift.io/Cluster",
+			input: "kind.resource-manager.open-cluster-management.io/Cluster",
+			want:  "kind.resource-manager.open-cluster-management.io/Cluster",
 		},
 		{
 			name:    "empty rejected",
@@ -92,7 +92,7 @@ func TestParseResourceType(t *testing.T) {
 		},
 		{
 			name:    "too many slashes rejected",
-			input:   "kind.fleetshift.io/Cluster/Sub",
+			input:   "kind.resource-manager.open-cluster-management.io/Cluster/Sub",
 			wantErr: true,
 		},
 		{
@@ -102,12 +102,12 @@ func TestParseResourceType(t *testing.T) {
 		},
 		{
 			name:    "empty type segment rejected",
-			input:   "kind.fleetshift.io/",
+			input:   "kind.resource-manager.open-cluster-management.io/",
 			wantErr: true,
 		},
 		{
 			name:    "lowercase type segment rejected",
-			input:   "kind.fleetshift.io/cluster",
+			input:   "kind.resource-manager.open-cluster-management.io/cluster",
 			wantErr: true,
 		},
 	}
@@ -131,10 +131,10 @@ func TestParseResourceType(t *testing.T) {
 }
 
 func TestResourceType_Accessors(t *testing.T) {
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
 
-	if got := rt.ServiceName(); got != "kind.fleetshift.io" {
-		t.Errorf("ServiceName() = %q, want %q", got, "kind.fleetshift.io")
+	if got := rt.ServiceName(); got != "kind.resource-manager.open-cluster-management.io" {
+		t.Errorf("ServiceName() = %q, want %q", got, "kind.resource-manager.open-cluster-management.io")
 	}
 	if got := rt.TypeName(); got != "Cluster" {
 		t.Errorf("TypeName() = %q, want %q", got, "Cluster")
@@ -153,9 +153,9 @@ func TestResourceType_Accessors_Malformed(t *testing.T) {
 }
 
 func TestResourceType_FullName(t *testing.T) {
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
 	got := rt.FullName("clusters/prod")
-	want := FullResourceName("//kind.fleetshift.io/clusters/prod")
+	want := FullResourceName("//kind.resource-manager.open-cluster-management.io/clusters/prod")
 
 	if got != want {
 		t.Errorf("ResourceType.FullName() = %q, want %q", got, want)

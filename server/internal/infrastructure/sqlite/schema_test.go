@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
 func TestExtensionResourcesQueryOrderIndexes(t *testing.T) {
@@ -80,7 +80,7 @@ func TestExtensionResourcesReportedAliases_StoredAsObjectPayload(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	repo := sqlite.ExtensionResourceRepo{DB: db}
 
-	rt := domain.ResourceType("shape.fleetshift.io/Node")
+	rt := domain.ResourceType("shape.resource-manager.open-cluster-management.io/Node")
 	if err := repo.CreateType(ctx, domain.NewExtensionResourceType(
 		rt, "v1", "nodes", time.Unix(0, 0).UTC(), domain.WithInventory(),
 	)); err != nil {

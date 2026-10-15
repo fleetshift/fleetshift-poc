@@ -7,11 +7,11 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
-	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
+	transportgrpc "github.com/stolostron/ocm-resource-manager/server/internal/transport/grpc"
 )
 
 // registerGatewayHandlers registers the static gRPC-gateway handlers on mux
@@ -33,7 +33,7 @@ func registerGatewayHandlers(ctx context.Context, gwMux *runtime.ServeMux, conn 
 	return nil
 }
 
-// registerStaticGRPCServices registers the core FleetShift gRPC services and
+// registerStaticGRPCServices registers the core Resource Manager gRPC services and
 // composite reflection.
 func registerStaticGRPCServices(
 	grpcServer *grpc.Server,

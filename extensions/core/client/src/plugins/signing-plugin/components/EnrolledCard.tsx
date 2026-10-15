@@ -24,11 +24,11 @@ const EnrolledCard = ({
   handleReenroll,
 }: EnrolledCardProps) => {
   return (
-    <div className="ome-signing-setup">
-      <Title headingLevel="h1" className="ome-signing-setup__title">
+    <div className="ocm-rm-signing-setup">
+      <Title headingLevel="h1" className="ocm-rm-signing-setup__title">
         Signing Key Enrollment
       </Title>
-      <Card isCompact className="ome-signing-setup__configured-card">
+      <Card isCompact className="ocm-rm-signing-setup__configured-card">
         <CardHeader>
           <CardTitle>
             <Icon status="success">

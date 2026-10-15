@@ -111,7 +111,7 @@ catalog adds versioning and asset location:
 | `capabilities` | Declared capability types (maps to `AddonDescriptor.Capabilities`) |
 | `install_spec` | OCI artifact reference for the backend workload (e.g. `registry.example.com/org/addon-monitoring:v1.2.0`), if backend capabilities present |
 | `manifest_url` | URL to the `plugin-manifest.json` on the external asset host, if UI plugin capability present |
-| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/addons/monitoring/v1.2.0`), if UI plugin capability present |
+| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0`), if UI plugin capability present |
 | `extends_core` | Which core plugin surface this addon extends (if any) |
 | `dependencies` | Other addons or core APIs this addon requires |
 
@@ -125,8 +125,8 @@ for the packaging and deployment model.
 
 ### Per-instance catalogs
 
-Each OME deployment has its own addon catalog. A self-hosted OME might have
-a private catalog populated with internal addons. A hosted/SaaS OME could
+Each resource manager deployment has its own addon catalog. A self-hosted resource manager might have
+a private catalog populated with internal addons. A hosted/SaaS resource manager could
 optionally point to a public catalog as well. This is analogous to Helm's
 configurable chart repositories or VS Code's extension marketplace — the
 catalog source is a deployment decision, not a build decision.
@@ -192,7 +192,7 @@ graph TD
     subgraph Engine["Management Engine"]
         CAT["Addon Catalog<br/>(metadata + URLs)"]
         STATE["Cluster State<br/>(which addons enabled where)"]
-        API["Plugin Registry API<br/>GET /v1/addon-plugins"]
+        API["Plugin Registry API<br/>GET /v1alpha/addon-plugins"]
 
         CAT --> STATE
         CAT --> API
@@ -249,7 +249,7 @@ sequenceDiagram
     Engine->>Engine: Compile schemas, register delivery agents
 
     Note over Admin,Shell: UI Discovery (automatic, independent of Connect)
-    Shell->>Engine: GET /v1/addon-plugins
+    Shell->>Engine: GET /v1alpha/addon-plugins
     Engine-->>Shell: Plugin registry (manifest URLs + assets_base_url per addon)
     Shell->>AssetHost: GET plugin-manifest.json
     AssetHost-->>Shell: Manifest (relative loadScripts)
@@ -317,7 +317,7 @@ shell does not know or care.
 
 ```mermaid
 graph LR
-    SHELL["Shell App"] -->|"GET /v1/addon-plugins"| ENGINE["Engine API"]
+    SHELL["Shell App"] -->|"GET /v1alpha/addon-plugins"| ENGINE["Engine API"]
     ENGINE -->|"JSON: name, manifest URL,<br/>resolved loadScripts"| SHELL
     SHELL -->|"Merge into Scalprum config"| SCALPRUM["Scalprum Runtime"]
     SCALPRUM -->|"GET manifest + JS"| CDN["External Asset Host"]
@@ -331,8 +331,8 @@ not the engine:
 {
   "addon-monitoring-plugin": {
     "name": "addon-monitoring-plugin",
-    "manifestLocation": "https://cdn.example.com/addons/monitoring/v1.2.0/plugin-manifest.json",
-    "assetsHost": "https://cdn.example.com/addons/monitoring/v1.2.0"
+    "manifestLocation": "https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0/plugin-manifest.json",
+    "assetsHost": "https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0"
   }
 }
 ```
@@ -400,7 +400,7 @@ sequenceDiagram
     participant CI as CI/CD Pipeline
     participant Registry as OCI Registry
     participant Host as Asset Host
-    participant Engine as OME Engine
+    participant Engine as Resource Manager
 
     Dev->>CI: Push code
     CI->>CI: Build (webpack + SDK)
@@ -444,7 +444,7 @@ runtime:
 ```
 manifest.loadScripts = ["plugin-entry.js"]
               ↓  transformManifest(manifest, assetsHost)
-manifest.loadScripts = ["https://cdn.example.com/addons/monitoring/v1.2.0/plugin-entry.js"]
+manifest.loadScripts = ["https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0/plugin-entry.js"]
 ```
 
 The engine only stores the base URL. The shell does the resolution. The
@@ -468,9 +468,9 @@ The same OCI artifact works across all environments:
 
 | Environment | Asset Host | `assets_base_url` |
 |-------------|-----------|-------------------|
-| Dev (local) | `localhost:8001` | `http://localhost:8001/addons/monitoring/v1.2.0` |
-| Staging | Internal nginx | `https://assets.staging.internal/addons/monitoring/v1.2.0` |
-| Production | CDN | `https://cdn.example.com/addons/monitoring/v1.2.0` |
+| Dev (local) | `localhost:8001` | `http://localhost:8001/ocm/resource_manager/monitoring/v1alpha.2.0` |
+| Staging | Internal nginx | `https://assets.staging.internal/ocm/resource_manager/monitoring/v1alpha.2.0` |
+| Production | CDN | `https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0` |
 
 The artifact is built once. Where it is hosted and how it is registered
 are deployment decisions, not build decisions.
@@ -529,8 +529,8 @@ graph TD
 
 Extension types:
 
-- **`fleetshift.module`** -- standalone page with its own nav item
-- **`fleetshift.dashboard-widget`** -- widget rendered on the dashboard
+- **`ocm-resource-manager.module`** -- standalone page with its own nav item
+- **`ocm-resource-manager.dashboard-widget`** -- widget rendered on the dashboard
 - **Core extension points** -- tabs, panels, or other slots defined by core
   plugins (e.g. a tab on the cluster detail page)
 
@@ -565,7 +565,7 @@ means the backend can provide the page registry that the shell uses for
 resolution, keeping routing knowledge centralized rather than scattered across
 plugins.
 
-See [007-cross-plugin-navigation](https://github.com/fleetshift/fleetshift-user-interface/blob/main/spikes/007-cross-plugin-navigation.md)
+See [007-cross-plugin-navigation](../ui/spikes/007-cross-plugin-navigation.md)
 for the implementation spike.
 
 ## Explored Alternative: Allowing Core Plugin Overrides
@@ -673,7 +673,7 @@ These **pre-installed plugins** sit between core plugins and full addons:
 |------|-------------------|-----------|---------|
 | **Core plugin** | None (core K8s APIs) | fleetlet → K8s API | Pods, Namespaces, Nodes |
 | **Pre-installed plugin** | None (pre-existing CRDs) | fleetlet → K8s API (custom resources) | Security, service mesh, serverless |
-| **Addon plugin** | Addon backend (deployed by OME) | fleetlet → addon sidecar → OME | Custom monitoring, custom dashboards |
+| **Addon plugin** | Addon backend (deployed by resource manager) | fleetlet → addon sidecar → resource manager | Custom monitoring, custom dashboards |
 
 ### From the UI, all plugins are the same
 
@@ -690,7 +690,7 @@ The federated module itself knows how to obtain its data. It makes HTTP
 calls to whatever API it needs — core K8s, custom resources, or an addon
 aggregation endpoint. The shell does not know or care where the data comes
 from. This means there is no separate "install" vs "import" flow for the UI
-layer. Whether the backend was deployed by OME, pre-installed by an
+layer. Whether the backend was deployed by resource manager, pre-installed by an
 operator, or is a built-in K8s API, the UI plugin activation is the same
 operation: register metadata, enable the module.
 
@@ -721,9 +721,9 @@ shell's API object — not a difference in the plugin loading mechanism.
 
 A core plugin is always available (every cluster has pods and namespaces).
 A pre-installed plugin only makes sense when the relevant CRDs are present
-on the cluster. Unlike addon plugins — where OME deploys the backend and
+on the cluster. Unlike addon plugins — where resource manager deploys the backend and
 knows exactly what exists — pre-installed plugins are set up by operators
-or product installers. OME needs to **discover** them.
+or product installers. Resource Manager needs to **discover** them.
 
 The catalog drives this. Each pre-installed plugin entry declares what to
 look for. For example, a StackRox operator plugin could discover its
@@ -740,22 +740,22 @@ discovery:
 
 The `type: pre-installed` flag tells the system this is not an addon to deploy
 but a pre-existing capability to discover. The fleetlet checks whether
-the declared CRDs exist on each managed cluster and reports back to OME:
+the declared CRDs exist on each managed cluster and reports back to resource manager:
 
 ```mermaid
 sequenceDiagram
     participant Catalog as Addon Catalog
-    participant OME as OME Engine
+    participant RM as Resource Manager
     participant Fleetlet as Fleetlet (Cluster A)
 
-    OME->>Fleetlet: "Check for these CRDs"
+    RM->>Fleetlet: "Check for these CRDs"
     Fleetlet->>Fleetlet: kubectl get crd centrals.platform.stackrox.io securedclusters.platform.stackrox.io
-    Fleetlet-->>OME: "CRDs present: [Central, SecuredCluster]"
-    OME->>OME: Mark "Cluster A has security-plugin"
-    OME-->>Catalog: Plugin visible for Cluster A
+    Fleetlet-->>RM: "CRDs present: [Central, SecuredCluster]"
+    RM->>RM: Mark "Cluster A has security-plugin"
+    RM-->>Catalog: Plugin visible for Cluster A
 ```
 
-This is the same end state as addon installation — OME knows which
+This is the same end state as addon installation — resource manager knows which
 clusters have which plugins — but the path is discovery rather than
 deployment. The UI plugin activates when at least one cluster reports the
 relevant CRDs, and is hidden when none do.
@@ -766,7 +766,7 @@ The single-cluster view works without any addon backend — the UI can query
 one cluster's K8s API for its security operator configuration, service mesh
 configs, etc., just like the classic OCP console does.
 
-However, once OME manages multiple clusters with the same pre-installed plugin,
+However, once resource manager manages multiple clusters with the same pre-installed plugin,
 a new need emerges: **fleet-wide aggregation**. Viewing security violations
 across 50 clusters, comparing service mesh configurations across
 environments, or rolling out a policy change fleet-wide — these operations
@@ -802,7 +802,7 @@ graph LR
 
 The transition is incremental: the per-cluster UI remains useful on its own,
 and the addon backend adds the fleet-wide layer on top. This means security
-tooling can integrate with OME in two phases:
+tooling can integrate with resource manager in two phases:
 
 1. **Day 1**: Register as a pre-installed plugin — per-cluster views work
    immediately for any cluster that has the operator installed, no addon
@@ -819,9 +819,9 @@ aggregation when the use case demands it.
 The long-term vision is an addon SDK that bundles backend + frontend + cli:
 
 ```
-fleetshift addon create monitoring
-fleetshift addon build          # produces backend binary + UI OCI artifact
-fleetshift addon publish        # pushes OCI artifact to registry + registers with engine
+fleetctl addon create monitoring
+fleetctl addon build          # produces backend binary + UI OCI artifact
+fleetctl addon publish        # pushes OCI artifact to registry + registers with Resource Manager
 ```
 
 The `publish` step pushes the UI artifact to an OCI registry, deploys the
@@ -869,9 +869,9 @@ rather than Connect. See
 [addon_integration.md](architecture/addon_integration.md#addon-lifecycle)
 for the unified addon lifecycle.
 
-### Addon discovery flows from the platform (OME-12)
+### Addon discovery flows from the platform (Addon registration and discovery)
 
-The foundational addon story (OME-12: Addon registration and discovery)
+The foundational addon story (Addon registration and discovery: Addon registration and discovery)
 specifies:
 
 > Addons can be registered with the platform and declare their capabilities.
@@ -880,9 +880,9 @@ specifies:
 Registration is with the platform. Discovery flows from the platform. This
 applies equally to backend capabilities and frontend plugins.
 
-### UI plugin discovery is based on backend registration (OME-13)
+### UI plugin discovery is based on backend registration (Web UI addon integration)
 
-OME-13 (Web UI addon integration) specifies:
+Web UI addon integration (Web UI addon integration) specifies:
 
 > UI plugins are discoverable based on backend addon registration. The addon
 > model provides the metadata the frontend needs to load the correct plugin.
@@ -890,14 +890,14 @@ OME-13 (Web UI addon integration) specifies:
 The frontend asks the platform what plugins exist. The platform answers based
 on what addons have registered, providing the URLs where assets are hosted.
 
-### The kernel owns the UI shell (OME-30 layered model)
+### The kernel owns the UI shell
 
-The cluster provisioning design (OME-30) defines a four-layer architecture.
+The cluster provisioning design defines a four-layer architecture.
 The UI shell and plugin system sit at Layer 1 (kernel) -- platform
 infrastructure that addons at higher layers contribute to. The kernel
 manages the plugin catalog; addons populate it.
 
-### All addon stories follow the same pattern (OME-18 through OME-21)
+### All addon stories follow the same pattern
 
 Observability and security addons, manifest strategies, and API extensions
 all register with the management plane. The management plane stores their
@@ -924,7 +924,7 @@ is designed to support it — it would be another capability variant in the
 descriptor, activated at Enable time (no Connect needed). The current
 codebase has proto definitions (`UIPluginSpec`, `RegisterPlugin`) that will
 evolve to store metadata and URLs rather than asset blobs. The plugin
-registry API (`/v1/addon-plugins`) and the Scalprum config merge logic in
+registry API (`/v1alpha/addon-plugins`) and the Scalprum config merge logic in
 the shell remain the correct integration points — the change is in what
 the engine stores (metadata + URLs) and where assets are served from
 (external host, not engine).

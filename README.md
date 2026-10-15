@@ -1,21 +1,25 @@
-# fleetshift-poc
+# ocm-resource-manager
 
-This repository represents both a **prototype** for a next generation Kubernetes cluster management vision, alongside **individual POCs** for exploration of isolated concepts.
+This repository explores an experimental variant of Open Cluster Management (OCM) using a resource manager-based architecture. A standalone resource manager and database provide the foundation for consolidated management and inventory, with native multitenancy and role-based access control as architectural goals. Kubernetes is the primary built-in target; addons support additional target types. Standalone proofs of concept explore individual parts of the design.
+
+The resource manager owns domain APIs and persistence directly in SQLite or PostgreSQL. This differs from OCM's Kubernetes API-based management plane; standalone operation itself is already supported by OCM. This experiment is preparation for OCM upstream discussions, without a claim of formal acceptance or complete component compatibility.
+
+See the [architecture](docs/design/architecture.md) and [contributor acknowledgment](docs/contributors.md).
 
 ## Start here
 
 ### Podman
 
-One way to try FleetShift is the all-in-one image (API, UI, and peer
+One way to try Resource Manager is the all-in-one image (API, UI, and peer
 Dex in one container). Needs **podman**. Sandbox only — not a production
 deployment.
 
-Open https://fleetshift-sandbox.localhost:8085 (redirects to `/app`) and accept
+Open https://ocm-resource-manager.localhost:8085 (redirects to `/app`) and accept
 the browser certificate warning (unknown sandbox CA — Advanced/Proceed or
 Accept Risk). Publish ports on `127.0.0.1` only.
 
-Demo users (login is the email): `ops@fleetshift.local` / `fleetshift-ops` and
-`dev@fleetshift.local` / `fleetshift-dev`.
+Demo users (login is the email): `ops@ocm-resource-manager.local` / `ocm-resource-manager-ops` and
+`dev@ocm-resource-manager.local` / `ocm-resource-manager-dev`.
 
 #### Bare run (peer Dex)
 
@@ -25,13 +29,13 @@ No OIDC flags. Packaging starts Dex and fills AuthMethod/UI defaults.
 podman run \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  quay.io/stolostron/fleetshift:latest
+  quay.io/stolostron/ocm-resource-manager:latest
 ```
 
 #### With kind
 
 Privileged + host engine socket (local/dev only). Create the network once:
-`podman network create kind`. The `fleetshift` network alias is required.
+`podman network create kind`. The `ocm-resource-manager` network alias is required.
 Linux rootless: `systemctl --user enable --now podman.socket` and
 `export PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock` (not
 `/var/run/docker.sock`).
@@ -43,8 +47,8 @@ podman run \
   -p 127.0.0.1:50051:50051 \
   -v /tmp:/tmp \
   -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
-  --network kind:alias=fleetshift \
-  quay.io/stolostron/fleetshift:latest
+  --network kind:alias=ocm-resource-manager \
+  quay.io/stolostron/ocm-resource-manager:latest
 ```
 
 Build the image from this repo with `npx nx run image:aio`. Env defaults, Dex-off,
@@ -129,7 +133,7 @@ npx nx run web:dev                 # terminal 2: full build, then watch-rebuild
 npx nx run web:dev:watch           # terminal 2 alt: watch only (skip initial build)
 ```
 
-Then open **https://fleetshift-sandbox.localhost:8085** (redirects to `/app`)
+Then open **https://ocm-resource-manager.localhost:8085** (redirects to `/app`)
 and accept the browser certificate warning. Dex is same-origin under `/idp`.
 
 #### Component tests
@@ -156,7 +160,7 @@ npx nx test:e2e e2e-cli      # Playwright CLI journeys (fleetctl, Kind, delivery
 ```
 
 Frontend e2e expects the sandbox origin
-(`https://fleetshift-sandbox.localhost:8085`). Playwright flags after `--`,
+(`https://ocm-resource-manager.localhost:8085`). Playwright flags after `--`,
 for example `npx nx test:e2e e2e-web -- --ui` — see
 [e2e/web/README.md](e2e/web/README.md). CLI e2e builds fleetctl and starts
 the same shared sandbox runner. How to add tests, Kind pool usage, and CI:
@@ -178,7 +182,7 @@ compose and is documented in [deploy/podman/README.md](deploy/podman/README.md).
 Copy `.env.template` to `.env` first. Commands are also available through Nx;
 env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to deployment scripts.
 
-Open https://fleetshift-sandbox.localhost:8085 after `deploy:podman:up` / `deploy:podman:dev`. If a
+Open https://ocm-resource-manager.localhost:8085 after `deploy:podman:up` / `deploy:podman:dev`. If a
 persisted volume still has the old `https://127.0.0.1:5556/dex` issuer, run
 `npx nx run deploy:podman:clean` once.
 

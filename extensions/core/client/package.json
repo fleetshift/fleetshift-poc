@@ -1,5 +1,5 @@
 {
-  "name": "@fleetshift/mock-ui-plugins",
+  "name": "@ocm-resource-manager/mock-ui-plugins",
   "description": "Rspack Module Federation remote plugins — built and served by the Go backend.",
   "version": "0.0.0",
   "private": true,
@@ -8,7 +8,7 @@
   "dependencies": {
     "@data-driven-forms/pf4-component-mapper": "^4.2.0",
     "@data-driven-forms/react-form-renderer": "^4.2.0",
-    "@fleetshift/common": "*",
+    "@ocm-resource-manager/common": "^0.0.0",
     "@orama/orama": "^3.1.18",
     "@patternfly/react-charts": "^8.5.1",
     "@patternfly/react-code-editor": "^6.6.1",
@@ -34,8 +34,8 @@
     "victory": "^37.3.6"
   },
   "devDependencies": {
-    "@fleetshift/build-utils": "*",
     "@module-federation/enhanced": "^2.9.0",
+    "@ocm-resource-manager/build-utils": "^0.0.0",
     "@openshift/dynamic-plugin-sdk": "^9.1.0",
     "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",
     "@rspack/cli": "^2.0.8",

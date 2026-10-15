@@ -14,7 +14,7 @@ package sqlite
 //
 // Run with:
 //
-//	FLEETSHIFT_QUERY_BENCH=1 go test ./internal/infrastructure/sqlite/ -run 'TestQueryResources(ExplainPlan|Benchmark)$' -v -timeout 10m
+//	OCM_RM_QUERY_BENCH=1 go test ./internal/infrastructure/sqlite/ -run 'TestQueryResources(ExplainPlan|Benchmark)$' -v -timeout 10m
 
 import (
 	"context"
@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
 )
 
 // ---------------------------------------------------------------------------
@@ -36,11 +36,11 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	qrbClusterService    = "kind.fleetshift.io"
+	qrbClusterService    = "kind.resource-manager.open-cluster-management.io"
 	qrbClusterType       = "Cluster"
 	qrbClusterCollection = "clusters"
 
-	qrbNodeService    = "kubernetes.fleetshift.io"
+	qrbNodeService    = "kubernetes.resource-manager.open-cluster-management.io"
 	qrbNodeType       = "Node"
 	qrbNodeCollection = "nodes"
 
@@ -335,7 +335,7 @@ func seedQRBAliasesAndRelationships(t *testing.T, db *sql.DB) {
 			args := make([]any, 0, n*4)
 			for i := 0; i < n; i++ {
 				idx := start + i
-				placeholders[i] = "(?, ?, 'depends-on', ?, ?, 'bench.fleetshift.io', ?)"
+				placeholders[i] = "(?, ?, 'depends-on', ?, ?, 'bench.resource-manager.open-cluster-management.io', ?)"
 				args = append(args, qrbPlatformOnlyCollection, fmt.Sprintf("asset-%08d", idx),
 					qrbPlatformOnlyCollection, fmt.Sprintf("asset-%08d", (idx+1)%qrbPlatformOnlyCount), createdAt)
 			}
@@ -428,8 +428,8 @@ func explainQueryResources(t *testing.T, db *sql.DB, label, filter, orderBy stri
 }
 
 func TestQueryResourcesExplainPlan(t *testing.T) {
-	if os.Getenv("FLEETSHIFT_QUERY_BENCH") == "" {
-		t.Skip("set FLEETSHIFT_QUERY_BENCH=1 to run (seeds a realistic-scale corpus on a temp SQLite file)")
+	if os.Getenv("OCM_RM_QUERY_BENCH") == "" {
+		t.Skip("set OCM_RM_QUERY_BENCH=1 to run (seeds a realistic-scale corpus on a temp SQLite file)")
 	}
 
 	db := openQRBBenchDB(t)
@@ -601,8 +601,8 @@ func timeQueryResources(t *testing.T, db *sql.DB, scenario string, req domain.Qu
 }
 
 func TestQueryResourcesBenchmark(t *testing.T) {
-	if os.Getenv("FLEETSHIFT_QUERY_BENCH") == "" {
-		t.Skip("set FLEETSHIFT_QUERY_BENCH=1 to run (seeds a realistic-scale corpus on a temp SQLite file)")
+	if os.Getenv("OCM_RM_QUERY_BENCH") == "" {
+		t.Skip("set OCM_RM_QUERY_BENCH=1 to run (seeds a realistic-scale corpus on a temp SQLite file)")
 	}
 
 	db := openQRBBenchDB(t)

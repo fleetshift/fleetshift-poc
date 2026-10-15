@@ -1,13 +1,13 @@
 import type {
   ClusterProviderExtras,
   ClusterProviderProperties,
-  FleetshiftExtension,
   ModuleExtras,
   ModuleGroupExtras,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
+  ResourceManagerExtension,
   SetupExtras,
   SetupProperties,
 } from "./types";
@@ -29,44 +29,59 @@ function throwOnErrors(errors: string[], type: string): void {
 
 export function createModuleGroup(
   properties: ModuleGroupProperties,
-): FleetshiftExtension<"fleetshift.module-group", ModuleGroupExtras> {
+): ResourceManagerExtension<
+  "ocm-resource-manager.module-group",
+  ModuleGroupExtras
+> {
   throwOnErrors(
     validateModuleGroupProperties(properties),
-    "fleetshift.module-group",
+    "ocm-resource-manager.module-group",
   );
-  return { type: "fleetshift.module-group", properties };
+  return { type: "ocm-resource-manager.module-group", properties };
 }
 
 export function createModule(
   properties: ModuleProperties,
-): FleetshiftExtension<"fleetshift.module", ModuleExtras> {
-  throwOnErrors(validateModuleProperties(properties), "fleetshift.module");
-  return { type: "fleetshift.module", properties };
+): ResourceManagerExtension<"ocm-resource-manager.module", ModuleExtras> {
+  throwOnErrors(
+    validateModuleProperties(properties),
+    "ocm-resource-manager.module",
+  );
+  return { type: "ocm-resource-manager.module", properties };
 }
 
 export function createSetup(
   properties: SetupProperties,
-): FleetshiftExtension<"fleetshift.setup", SetupExtras> {
-  throwOnErrors(validateSetupProperties(properties), "fleetshift.setup");
-  return { type: "fleetshift.setup", properties };
+): ResourceManagerExtension<"ocm-resource-manager.setup", SetupExtras> {
+  throwOnErrors(
+    validateSetupProperties(properties),
+    "ocm-resource-manager.setup",
+  );
+  return { type: "ocm-resource-manager.setup", properties };
 }
 
 export function createClusterProvider(
   properties: ClusterProviderProperties,
-): FleetshiftExtension<"fleetshift.cluster-provider", ClusterProviderExtras> {
+): ResourceManagerExtension<
+  "ocm-resource-manager.cluster-provider",
+  ClusterProviderExtras
+> {
   throwOnErrors(
     validateClusterProviderProperties(properties),
-    "fleetshift.cluster-provider",
+    "ocm-resource-manager.cluster-provider",
   );
-  return { type: "fleetshift.cluster-provider", properties };
+  return { type: "ocm-resource-manager.cluster-provider", properties };
 }
 
 export function createOnboardingAction(
   properties: OnboardingActionProperties,
-): FleetshiftExtension<"fleetshift.onboarding-action", OnboardingActionExtras> {
+): ResourceManagerExtension<
+  "ocm-resource-manager.onboarding-action",
+  OnboardingActionExtras
+> {
   throwOnErrors(
     validateOnboardingActionProperties(properties),
-    "fleetshift.onboarding-action",
+    "ocm-resource-manager.onboarding-action",
   );
-  return { type: "fleetshift.onboarding-action", properties };
+  return { type: "ocm-resource-manager.onboarding-action", properties };
 }

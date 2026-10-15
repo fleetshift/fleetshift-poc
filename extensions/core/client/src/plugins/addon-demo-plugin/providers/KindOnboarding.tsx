@@ -1,4 +1,4 @@
-import type { OnboardingActionFormProps } from "@fleetshift/common";
+import type { OnboardingActionFormProps } from "@ocm-resource-manager/common";
 import {
   Button,
   Form,
@@ -57,9 +57,9 @@ export function KindOnboardingForm({
 
   return (
     <>
-      <div className="ome-setup-whats-next__body">
-        <div className="ome-setup-whats-next__inner">
-          <Title headingLevel="h1" className="ome-setup-whats-next__title">
+      <div className="ocm-rm-setup-whats-next__body">
+        <div className="ocm-rm-setup-whats-next__inner">
+          <Title headingLevel="h1" className="ocm-rm-setup-whats-next__title">
             Kind Local Cluster
           </Title>
           <Form>
@@ -101,8 +101,8 @@ export function KindOnboardingForm({
           </Form>
         </div>
       </div>
-      <div className="ome-setup-whats-next__toolbar">
-        <div className="ome-setup-whats-next__toolbar-inner">
+      <div className="ocm-rm-setup-whats-next__toolbar">
+        <div className="ocm-rm-setup-whats-next__toolbar-inner">
           <Button
             variant="primary"
             isDisabled={!isValid}

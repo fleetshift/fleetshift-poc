@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
 )
 
 func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.T) {
@@ -56,7 +56,7 @@ func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.
 	if err := agent.Deliver(pkg); err != nil {
 		t.Fatal(err)
 	}
-	view, ok := agent.Applied("//fleetshift.io/clusters/test")
+	view, ok := agent.Applied("//resource-manager.open-cluster-management.io/clusters/test")
 	if !ok {
 		t.Fatal("mixed provenance delivery did not apply")
 	}
@@ -69,7 +69,7 @@ func TestRequestedRelationUsesItsOwnInstalledImplementationAndPolicy(t *testing.
 	rootID, relationID := evidenceIdentity(t, root), evidenceIdentity(t, support.Evidence)
 	want := AuthorizedAction{
 		RootEvidence: rootID, Principal: user.Principal(),
-		Scope:         protocol.DeliveryScope{Tenant: sessionTenant(), TargetID: "target-test", FullResourceName: "//fleetshift.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
+		Scope:         protocol.DeliveryScope{Tenant: sessionTenant(), TargetID: "target-test", FullResourceName: "//resource-manager.open-cluster-management.io/clusters/test", Generation: 1, Action: protocol.ActionPut},
 		PredicateType: protocol.PredicateTypeManagedResourceV1,
 		Manifests:     []protocol.TypedManifest{{MediaType: "application/json", Bytes: []byte(`{"region":"east"}`)}},
 		Basis:         []protocol.Digest{rootID, relationID},

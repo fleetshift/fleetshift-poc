@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
 const (
-	deletePreflightResourceType domain.ResourceType = "test.fleetshift.io/Widget"
+	deletePreflightResourceType domain.ResourceType = "test.resource-manager.open-cluster-management.io/Widget"
 	deletePreflightManifestType domain.ManifestType = "api.test.widget"
 	deletePreflightTargetType   domain.TargetType   = "test"
 	deletePreflightTargetID     domain.TargetID     = "addon-local"

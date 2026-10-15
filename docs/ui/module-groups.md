@@ -1,12 +1,12 @@
 # Module Groups — Nested Navigation and Hierarchical Search
 
-**Epic:** [OME-3 — Addon / Extension Model](https://redhat.atlassian.net/browse/OME-3)
+**Epic:** Addon / Extension Model
 **Depends on:** [Feature Contracts](./feature-contracts.md)
 **Status:** Implemented
 
 ## Context
 
-FleetShift navigation is flat — each `fleetshift.module` gets a top-level `NavItem` in the sidebar and a route at `/{pluginKey}/{moduleId}`. As the number of plugins grows, the nav becomes an undifferentiated list. Plugins like `settings-plugin` already declare multiple modules (Navigation, Authentication, Extensions) that logically belong together but render as three separate nav items.
+Resource Manager navigation is flat — each `ocm-resource-manager.module` gets a top-level `NavItem` in the sidebar and a route at `/{pluginKey}/{moduleId}`. As the number of plugins grows, the nav becomes an undifferentiated list. Plugins like `settings-plugin` already declare multiple modules (Navigation, Authentication, Extensions) that logically belong together but render as three separate nav items.
 
 We need **expandable nav groups** — a bucket of related modules that collapses and expands in the sidebar, with nested routes under a shared URL prefix. This also impacts search (hierarchical result grouping) and breadcrumbs.
 
@@ -17,7 +17,7 @@ We need **expandable nav groups** — a bucket of related modules that collapses
 3. **Backward-compatible.** Modules without a `group` stay top-level. Existing plugins work unchanged.
 4. **User reorder (existing).** Users can already reorder nav items via Settings. This must work with groups — reorder groups at the top level and modules within groups. Search and breadcrumbs follow the active (user-customized) layout. Creating custom groups or moving modules across plugin boundaries is a future extension.
 
-## New Extension Type: `fleetshift.module-group`
+## New Extension Type: `ocm-resource-manager.module-group`
 
 A module group declares a navigational container for related modules within the same plugin.
 
@@ -30,12 +30,12 @@ Module groups have no extra properties beyond `BaseExtensionProperties` (id, lab
 Added to the extension type registry:
 
 ```typescript
-const FLEETSHIFT_EXTENSION_TYPES = [
-  "fleetshift.module-group",   // new
-  "fleetshift.module",
-  "fleetshift.setup",
-  "fleetshift.cluster-provider",
-  "fleetshift.onboarding-action",
+const OCM_RM_EXTENSION_TYPES = [
+  "ocm-resource-manager.module-group",   // new
+  "ocm-resource-manager.module",
+  "ocm-resource-manager.setup",
+  "ocm-resource-manager.cluster-provider",
+  "ocm-resource-manager.onboarding-action",
 ] as const;
 ```
 
@@ -44,14 +44,14 @@ const FLEETSHIFT_EXTENSION_TYPES = [
 ```typescript
 function createModuleGroup(
   props: BaseExtensionProperties & ModuleGroupExtras
-): FleetshiftExtension<"fleetshift.module-group", ModuleGroupExtras>;
+): ResourceManagerExtension<"ocm-resource-manager.module-group", ModuleGroupExtras>;
 ```
 
 ### Manifest output
 
 ```json
 {
-  "type": "fleetshift.module-group",
+  "type": "ocm-resource-manager.module-group",
   "properties": {
     "id": "settings",
     "label": "Settings",
@@ -62,16 +62,16 @@ function createModuleGroup(
 }
 ```
 
-## Updated `fleetshift.module`
+## Updated `ocm-resource-manager.module`
 
-Modules gain an optional `group` field referencing a `fleetshift.module-group` id **within the same plugin**.
+Modules gain an optional `group` field referencing a `ocm-resource-manager.module-group` id **within the same plugin**.
 
 ```typescript
 type ModuleExtras = {
   component: EncodedCodeRef;
   icon: EncodedCodeRef;
   extensionPoints?: Record<string, ExtensionPointDeclaration>;
-  /** References a fleetshift.module-group id in the same plugin. */
+  /** References a ocm-resource-manager.module-group id in the same plugin. */
   group?: string;
 };
 ```
@@ -116,7 +116,7 @@ The `{groupId}` replaces `{pluginKey}` as the URL namespace for grouped modules.
 Before (current — `settings-plugin`):
 
 ```typescript
-const SettingsPlugin = new FleetshiftPlugin({
+const SettingsPlugin = new ResourceManagerPlugin({
   extensions: [
     createModule({
       id: "settings",
@@ -142,7 +142,7 @@ Routes: `/settings/settings`, `/settings/extensions`
 After:
 
 ```typescript
-const SettingsPlugin = new FleetshiftPlugin({
+const SettingsPlugin = new ResourceManagerPlugin({
   extensions: [
     createModuleGroup({
       id: "settings",
@@ -177,9 +177,9 @@ Routes: `/settings/navigation`, `/settings/extensions`
 
 ## Build-Time Validation
 
-`FleetshiftPlugin` validates at build time:
+`ResourceManagerPlugin` validates at build time:
 
-1. **Group exists.** If a module declares `group: "foo"`, a `fleetshift.module-group` with `id: "foo"` must exist in the same plugin's `extensions` array. Build fails otherwise.
+1. **Group exists.** If a module declares `group: "foo"`, a `ocm-resource-manager.module-group` with `id: "foo"` must exist in the same plugin's `extensions` array. Build fails otherwise.
 2. **No cross-plugin groups.** Groups are scoped to the plugin. There is no mechanism to reference a group from another plugin.
 3. **Unique ids within group.** Two modules in the same group cannot share an id.
 4. **Group id format.** Must match `/^[a-z][a-z0-9-]*$/` (same as module ids) since it becomes a URL segment.
@@ -222,7 +222,7 @@ Routes: `/settings/navigation`, `/settings/extensions`
 }
 ```
 
-The backend's `generateNavLayout()` function scans manifests for `fleetshift.module-group` extensions, collects modules with matching `group` fields, and nests them under the group entry. Ungrouped modules remain as top-level `"type": "page"` entries.
+The backend's `generateNavLayout()` function scans manifests for `ocm-resource-manager.module-group` extensions, collects modules with matching `group` fields, and nests them under the group entry. Ungrouped modules remain as top-level `"type": "page"` entries.
 
 `pluginPages` is unchanged — it still lists every module as a flat page entry (id, title, path, scope, module, pluginKey). The grouping is a nav concern, not a routing concern. The shell's router registers all pages flat; the nav component renders the hierarchy from `navLayout`.
 
@@ -290,9 +290,9 @@ interface SearchEntry {
 
 | Extension type | `category` | `group` | `feature` | `route` |
 |----------------|-----------|---------|-----------|---------|
-| `fleetshift.module-group` | `nav-group` | — | — | `/{groupId}` (or first child) |
-| `fleetshift.module` (grouped) | `nav` | group id | `{pluginKey}.{moduleId}` | `/{groupId}/{moduleId}` |
-| `fleetshift.module` (ungrouped) | `nav` | — | `{pluginKey}.{moduleId}` | `/{pluginKey}/{moduleId}` |
+| `ocm-resource-manager.module-group` | `nav-group` | — | — | `/{groupId}` (or first child) |
+| `ocm-resource-manager.module` (grouped) | `nav` | group id | `{pluginKey}.{moduleId}` | `/{groupId}/{moduleId}` |
+| `ocm-resource-manager.module` (ungrouped) | `nav` | — | `{pluginKey}.{moduleId}` | `/{pluginKey}/{moduleId}` |
 | Other extensions | `extension` | inherited from parent module | parent feature id | composed from parent |
 
 ### Search result rendering
@@ -327,7 +327,7 @@ With hierarchical routes, breadcrumbs follow the group → module → extension 
 | `/core/clusters` | Clusters (ungrouped, no parent) |
 | `/core/clusters?create=example` | Clusters > Example provider |
 
-The shell derives breadcrumbs from `navLayout` + current route. Group label comes from the `fleetshift.module-group` metadata. Module label comes from the `fleetshift.module` metadata.
+The shell derives breadcrumbs from `navLayout` + current route. Group label comes from the `ocm-resource-manager.module-group` metadata. Module label comes from the `ocm-resource-manager.module` metadata.
 
 ## `CORE_EXTENSION_META` and `navSection`
 
@@ -366,14 +366,14 @@ The flat `string[]` storage works for groups. Groups are treated as atomic dragg
 
 ### Phase 1: Contract (build-utils)
 
-1. Add `ModuleGroupExtras` type and `"fleetshift.module-group"` to `FLEETSHIFT_EXTENSION_TYPES`.
+1. Add `ModuleGroupExtras` type and `"ocm-resource-manager.module-group"` to `OCM_RM_EXTENSION_TYPES`.
 2. Add optional `group?: string` to `ModuleExtras`.
 3. Add `createModuleGroup()` builder function.
-4. Add build-time validation in `FleetshiftPlugin`.
+4. Add build-time validation in `ResourceManagerPlugin`.
 
-### Phase 2: Backend (fleetshift-poc)
+### Phase 2: Backend (ocm-resource-manager)
 
-1. Update `generatePluginPages()` to handle `fleetshift.module-group` extensions and `group` properties.
+1. Update `generatePluginPages()` to handle `ocm-resource-manager.module-group` extensions and `group` properties.
 2. Update `generateNavLayout()` to emit nested `{ type: "group", children: [...] }` entries.
 3. Route generation: grouped modules get `/{groupId}/{moduleId}` paths.
 
@@ -407,8 +407,8 @@ The flat `string[]` storage works for groups. Groups are treated as atomic dragg
 
 ## Related Issues
 
-- [OME-145](https://redhat.atlassian.net/browse/OME-145) — Extract search system into a plugin loaded via MF
-- [OME-146](https://redhat.atlassian.net/browse/OME-146) — User-created custom nav groups with PF icon gallery
+- Extract search system into a plugin loaded via Module Federation — Extract search system into a plugin loaded via MF
+- Spike: Navigation customization design — custom groups, icon overrides, hidden items — User-created custom nav groups with PF icon gallery
 
 ## Open Questions
 

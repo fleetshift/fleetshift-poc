@@ -8,7 +8,7 @@
  * currently resolve to the same role and identical navigation. The only
  * user-visible persona signal today is the masthead user-menu label, which is
  * the capitalized `preferred_username` (see AuthContext.display_name). Proper
- * group-to-role mapping is tracked separately (OME-206).
+ * group-to-role mapping is separate from the sandbox identity-provider setup.
  */
 export type PersonaId = "ops" | "dev";
 
@@ -23,15 +23,15 @@ export interface Persona {
 
 export const OPERATOR: Persona = {
   id: "ops",
-  email: "ops@fleetshift.local",
-  password: "fleetshift-ops",
+  email: "ops@ocm-resource-manager.local",
+  password: "ocm-resource-manager-ops",
   usernameLabel: "Ops-user",
 };
 
 export const DEVELOPER: Persona = {
   id: "dev",
-  email: "dev@fleetshift.local",
-  password: "fleetshift-dev",
+  email: "dev@ocm-resource-manager.local",
+  password: "ocm-resource-manager-dev",
   usernameLabel: "Dev-user",
 };
 

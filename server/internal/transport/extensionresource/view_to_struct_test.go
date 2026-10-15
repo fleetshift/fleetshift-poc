@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestViewToStruct_MatchesViewToResourceProtoJSON(t *testing.T) {
@@ -75,7 +75,7 @@ func TestViewToStruct_RequiresDescriptorsAndConfig(t *testing.T) {
 	view := domain.ExtensionResourceView{
 		Resource: *domain.NewExtensionResource(
 			domain.NewExtensionResourceUID(),
-			"kind.fleetshift.io/Cluster",
+			"kind.resource-manager.open-cluster-management.io/Cluster",
 			"clusters/x",
 			time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
 		),

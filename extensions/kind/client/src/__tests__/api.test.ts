@@ -46,7 +46,9 @@ describe("createKindCluster", () => {
     expect(spy).toHaveBeenCalledOnce();
     const [url, init] = spy.mock.calls[0];
     const { path, params } = parseRelativeUrl(url as string);
-    expect(path).toBe("/apis/kind.fleetshift.io/v1/clusters");
+    expect(path).toBe(
+      "/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters",
+    );
     expect(params.get("cluster_id")).toBe("my-cluster");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ spec });

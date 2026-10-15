@@ -2,7 +2,7 @@ import { useScalprum } from "@scalprum/react-core";
 import { forwardRef, type ReactNode } from "react";
 import { Link, type LinkProps, type To } from "react-router-dom";
 
-import type { FleetShiftApi } from "./scalprum.js";
+import type { ResourceManagerApi } from "./scalprum.js";
 
 export interface PluginLinkProps extends Omit<LinkProps, "to"> {
   scope: string;
@@ -14,8 +14,8 @@ export interface PluginLinkProps extends Omit<LinkProps, "to"> {
 
 const PluginLink = forwardRef<HTMLAnchorElement, PluginLinkProps>(
   ({ scope, module, to, fallback = null, children, ...rest }, ref) => {
-    const { api } = useScalprum<{ api: FleetShiftApi }>();
-    const basePath = api.fleetshift.getPluginPagePath(scope, module);
+    const { api } = useScalprum<{ api: ResourceManagerApi }>();
+    const basePath = api.resourceManager.getPluginPagePath(scope, module);
 
     if (!basePath) {
       return <>{fallback}</>;

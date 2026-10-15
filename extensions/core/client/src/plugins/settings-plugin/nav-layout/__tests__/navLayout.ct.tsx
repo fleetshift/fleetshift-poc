@@ -1,5 +1,5 @@
-import type { FlatNode } from "@fleetshift/common";
-import { MORE_ENTRY_ID, NodeKind } from "@fleetshift/common";
+import type { FlatNode } from "@ocm-resource-manager/common";
+import { MORE_ENTRY_ID, NodeKind } from "@ocm-resource-manager/common";
 import { expect, test } from "@playwright/experimental-ct-react";
 
 import type { DragState } from "../../useDragTree";
@@ -108,10 +108,10 @@ test.describe("TreeItem", () => {
       />,
     );
     await expect(
-      component.locator(".ome-settings-tree-item__row--section"),
+      component.locator(".ocm-rm-settings-tree-item__row--section"),
     ).toBeVisible();
     await expect(
-      component.locator(".ome-settings-tree-item__label--section"),
+      component.locator(".ocm-rm-settings-tree-item__label--section"),
     ).toBeVisible();
   });
 
@@ -131,7 +131,7 @@ test.describe("TreeItem", () => {
       />,
     );
     await expect(
-      component.locator(".ome-settings-nav-editor__hidden-divider"),
+      component.locator(".ocm-rm-settings-nav-editor__hidden-divider"),
     ).toContainText("Hidden");
     await expect(component.locator("[data-drag-handle]")).toHaveCount(0);
   });
@@ -218,7 +218,7 @@ test.describe("TreeItem", () => {
         displacementY={0}
       />,
     );
-    await expect(p.locator(".ome-settings-tree-item--hidden")).toBeVisible();
+    await expect(p.locator(".ocm-rm-settings-tree-item--hidden")).toBeVisible();
   });
 
   test("isDropTarget adds drop-target class", async ({ mount, page: p }) => {
@@ -237,7 +237,7 @@ test.describe("TreeItem", () => {
       />,
     );
     await expect(
-      p.locator(".ome-settings-tree-item--drop-target"),
+      p.locator(".ocm-rm-settings-tree-item--drop-target"),
     ).toBeVisible();
   });
 
@@ -256,7 +256,9 @@ test.describe("TreeItem", () => {
         displacementY={0}
       />,
     );
-    await expect(p.locator(".ome-settings-tree-item--elevated")).toBeVisible();
+    await expect(
+      p.locator(".ocm-rm-settings-tree-item--elevated"),
+    ).toBeVisible();
   });
 });
 
@@ -311,7 +313,7 @@ test.describe("SortableSection", () => {
       />,
     );
     await expect(
-      p.locator(".ome-settings-tree-item__empty-group"),
+      p.locator(".ocm-rm-settings-tree-item__empty-group"),
     ).toContainText("Drop items here to add to this group");
   });
 
@@ -340,9 +342,9 @@ test.describe("SortableSection", () => {
         onBlur={noop}
       />,
     );
-    await expect(p.locator(".ome-settings-tree-item__empty-group")).toHaveCount(
-      0,
-    );
+    await expect(
+      p.locator(".ocm-rm-settings-tree-item__empty-group"),
+    ).toHaveCount(0);
   });
 
   test("items after hidden divider get hidden styling", async ({
@@ -370,7 +372,7 @@ test.describe("SortableSection", () => {
         onBlur={noop}
       />,
     );
-    const hiddenItem = p.locator(".ome-settings-tree-item--hidden");
+    const hiddenItem = p.locator(".ocm-rm-settings-tree-item--hidden");
     await expect(hiddenItem).toHaveCount(1);
     await expect(hiddenItem).toContainText("Hidden");
   });
@@ -394,7 +396,7 @@ test.describe("SortableSection", () => {
       />,
     );
     await expect(
-      p.locator(".ome-settings-nav-editor__section-label"),
+      p.locator(".ocm-rm-settings-nav-editor__section-label"),
     ).toContainText("Navigation");
   });
 
@@ -433,7 +435,7 @@ test.describe("SortableSection", () => {
       />,
     );
     const emptyPlaceholder = p.locator(
-      ".ome-settings-tree-item--drop-target .ome-settings-tree-item__empty-group",
+      ".ocm-rm-settings-tree-item--drop-target .ocm-rm-settings-tree-item__empty-group",
     );
     await expect(emptyPlaceholder).toBeVisible();
     await expect(emptyPlaceholder).toContainText(
@@ -478,7 +480,7 @@ test.describe("SortableSection", () => {
         onBlur={noop}
       />,
     );
-    const dropTarget = p.locator(".ome-settings-tree-item--drop-target");
+    const dropTarget = p.locator(".ocm-rm-settings-tree-item--drop-target");
     await expect(dropTarget).toHaveCount(1);
     await expect(dropTarget).toContainText("target");
   });

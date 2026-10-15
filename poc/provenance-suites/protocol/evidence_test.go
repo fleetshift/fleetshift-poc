@@ -183,7 +183,7 @@ func TestDeliveryScopeSignsResourceNameAndStaticPlacement(t *testing.T) {
 	scope := DeliveryScope{
 		Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 		TargetID:         "target-east",
-		FullResourceName: "//fleetshift.io/deployments/web",
+		FullResourceName: "//resource-manager.open-cluster-management.io/deployments/web",
 		Generation:       1,
 		Action:           ActionPut,
 	}
@@ -191,7 +191,7 @@ func TestDeliveryScopeSignsResourceNameAndStaticPlacement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !bytes.Contains(raw, []byte(`"name":"//fleetshift.io/deployments/web"`)) {
+	if !bytes.Contains(raw, []byte(`"name":"//resource-manager.open-cluster-management.io/deployments/web"`)) {
 		t.Fatalf("canonical JSON missing AIP-122 name: %s", raw)
 	}
 	if !bytes.Contains(raw, []byte(`"target_id":"target-east"`)) {
@@ -215,7 +215,7 @@ func TestCanonicalJSONIsDeterministicForFixedStructs(t *testing.T) {
 		DeliveryScope: DeliveryScope{
 			Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 			TargetID:         "target-east",
-			FullResourceName: "//fleetshift.io/deployments/web",
+			FullResourceName: "//resource-manager.open-cluster-management.io/deployments/web",
 			Generation:       1,
 			Action:           ActionPut,
 		},
@@ -242,7 +242,7 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 		DeliveryScope: DeliveryScope{
 			Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 			TargetID:         "target-east",
-			FullResourceName: "//fleetshift.io/deployments/web",
+			FullResourceName: "//resource-manager.open-cluster-management.io/deployments/web",
 			Generation:       1,
 			Action:           ActionPut,
 		},
@@ -262,11 +262,11 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 		DeliveryScope: DeliveryScope{
 			Tenant:           Tenant{PrincipalAuthority: PrincipalAuthority{Scheme: IdentitySchemeOIDCSubV1, Authority: "https://issuer.example.test"}},
 			TargetID:         "target-east",
-			FullResourceName: "//kind.fleetshift.io/clusters/prod",
+			FullResourceName: "//kind.resource-manager.open-cluster-management.io/clusters/prod",
 			Generation:       1,
 			Action:           ActionPut,
 		},
-		ResourceType: resourceTypeForTest(t, "kind.fleetshift.io/Cluster"),
+		ResourceType: resourceTypeForTest(t, "kind.resource-manager.open-cluster-management.io/Cluster"),
 		Spec:         []byte(`{"region":"us-east-1"}`),
 	}.Assertion()
 	if err != nil {
@@ -277,7 +277,7 @@ func TestAuthorizationAssertionSetsOwnPredicateType(t *testing.T) {
 	}
 
 	relation, err := FulfillmentRelation{
-		ResourceType: resourceTypeForTest(t, "kind.fleetshift.io/Cluster"),
+		ResourceType: resourceTypeForTest(t, "kind.resource-manager.open-cluster-management.io/Cluster"),
 		MediaType:    "application/vnd.example.cluster-spec+json",
 	}.Assertion()
 	if err != nil {

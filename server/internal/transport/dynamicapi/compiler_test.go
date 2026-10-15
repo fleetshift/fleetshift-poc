@@ -9,11 +9,11 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
-const specMessageName = "addons.kind.v1.KindClusterSpec"
+const specMessageName = "ocm.resource_manager.kind.v1alpha.KindClusterSpec"
 
 func TestCompileInline(t *testing.T) {
 	schema := kindaddon.Schema()

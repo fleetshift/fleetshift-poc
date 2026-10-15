@@ -1,7 +1,7 @@
 import { DEVELOPER, OPERATOR } from "../../shared/personas";
 import { expect, test } from "./fixtures";
 
-// OME-257: prove the packaged image reaches a working, logged-in console for
+// Prove the packaged image reaches a working, logged-in console for
 // both sandbox personas. The real authorization-code + PKCE login through the
 // rendered Dex screen is exercised once per persona in auth-setup; each test
 // here reuses that persona's saved session (Playwright's multi-role pattern)

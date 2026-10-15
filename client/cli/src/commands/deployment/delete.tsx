@@ -11,7 +11,7 @@ export const deleteCommand: CommandSpec = {
     if (!name) throw new Error("deployment name is required");
     await (
       await deploymentClient(args)
-    ).request(`/v1/${deploymentName(name)}`, { method: "DELETE" });
+    ).request(`/v1alpha/${deploymentName(name)}`, { method: "DELETE" });
     return <Output value="Deleted." />;
   },
 };

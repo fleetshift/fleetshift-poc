@@ -8,21 +8,21 @@ import (
 )
 
 const (
-	// KindEnvPath is sourced by the fleetshift s6 run script for kind networking.
-	KindEnvPath = "/run/fleetshift/kind.env"
+	// KindEnvPath is sourced by the ocm-resource-manager s6 run script for kind networking.
+	KindEnvPath = "/run/ocm-resource-manager/kind.env"
 
 	loopbackForwardToEnvKey    = "KIND_LOOPBACK_FORWARD_TO"
 	kindExperimentalNetKey     = "KIND_EXPERIMENTAL_DOCKER_NETWORK"
 	kindExperimentalNetDefault = "kind"
 	// loopbackForwardHost is the default KIND_LOOPBACK_FORWARD_TO host. AIO
 	// kind runs should publish this as a network alias.
-	loopbackForwardHost = "fleetshift"
+	loopbackForwardHost = "ocm-resource-manager"
 )
 
 // ConfigureKindEnv writes path when a container engine socket is mounted.
 // Always defaults KIND_EXPERIMENTAL_DOCKER_NETWORK=kind unless that variable
 // is already present in the environment (including empty). On Dex-on, also
-// writes KIND_LOOPBACK_FORWARD_TO=fleetshift:<gateway-port> unless that
+// writes KIND_LOOPBACK_FORWARD_TO=ocm-resource-manager:<gateway-port> unless that
 // variable is already set (operator pin, including empty to disable). The
 // kind addon reads that env to install a loopback TCP proxy on control-plane
 // nodes and, when forwarding, kube-apiserver hostAliases for the issuer host.
