@@ -9,7 +9,7 @@
 //     registered at Connect; the indexer runtime is composed separately
 //     in server wiring ([IndexingRuntime] plus a one-shot startup replay
 //     of persisted targets) and is not part of ConnectInput. When an
-//     IndexingRuntime is injected, Kind call EnsureIndexer
+//     IndexingRuntime is injected, Kind calls EnsureIndexer
 //     before reporting Delivered and StopIndexer at cluster teardown.
 //
 // Delivery and inventory share [TargetType] and the target property

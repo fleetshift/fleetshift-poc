@@ -20,8 +20,29 @@ export default defineConfig({
       resolve: {
         alias: {
           "@fleetshift/common": path.resolve(root, "sdk/common/src"),
+          "@data-driven-forms/pf4-component-mapper/form-template": path.resolve(
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/form-template/index.js",
+          ),
+          "@data-driven-forms/pf4-component-mapper/text-field": path.resolve(
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/text-field/index.js",
+          ),
+          "@data-driven-forms/pf4-component-mapper/wizard": path.resolve(
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/wizard/index.js",
+          ),
+          "@data-driven-forms/pf4-component-mapper/select": path.resolve(
+            root,
+            "node_modules/@data-driven-forms/pf4-component-mapper/esm/select/index.js",
+          ),
         },
-        dedupe: ["react", "react-dom"],
+        dedupe: [
+          "@data-driven-forms/react-form-renderer",
+          "react",
+          "react-dom",
+          "react-final-form",
+        ],
       },
     },
   },
