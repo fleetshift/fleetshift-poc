@@ -45,7 +45,7 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 ## Data Driven Forms (DDF)
 
-For plugins using DDF, schema-driven forms use `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`.
+The core plugin package retains `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper` as placeholders for future schema-driven forms; neither is currently used.
 
 - **Custom components**: DDF's pf4-component-mapper components are PF4-era. For PF6 controls (FormSelect, etc.), create custom DDF components using `useFieldApi` from `react-form-renderer`. Register in `componentMapper` with a custom string key.
 - **Wizard steps**: Use `nextStep: "step-name"` to chain steps (without it, DDF shows "Submit" instead of "Next"). The DDF wizard step template uses PF4 class `pf-c-form`. Override with `StepTemplate` using `<div className="pf-v6-c-form">` — not `<Form>` to avoid form-in-form since `FormTemplate` already wraps in `<form>`.

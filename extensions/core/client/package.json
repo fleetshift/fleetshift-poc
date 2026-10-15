@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {},
   "dependencies": {
+    "@data-driven-forms/pf4-component-mapper": "^4.2.0",
+    "@data-driven-forms/react-form-renderer": "^4.2.0",
     "@fleetshift/common": "*",
     "@orama/orama": "^3.1.18",
     "@patternfly/react-charts": "^8.5.1",
