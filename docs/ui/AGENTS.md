@@ -34,13 +34,24 @@ FleetShift UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Mod
 
 - Unit tests for edge cases and bug candidates, not happy-path snapshots.
 - Tests next to code (`__tests__/` or `.test.ts`). Vitest + `@testing-library/react`.
-- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (routers). See `client/web/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` for patterns.
+- **Component tests**: Playwright CT (`@playwright/experimental-ct-react`). Config per package (`playwright.config.ts`). Test files: `*.ct.tsx` in `__tests__/`. Mount components directly or via harness wrappers for components needing context providers (DDF, routers). See `client/web/src/components/Search/advanced/__tests__/advancedSearch.ct.tsx` for patterns.
 - E2E in `e2e`, Playwright.
 
 ### Playwright CT notes
 
-- Components mounted via `mount()` must be **imported**, not defined in the test file. For components requiring wrappers (providers), create harness components in a separate `harnesses.tsx` file.
+- Components mounted via `mount()` must be **imported**, not defined in the test file. For components requiring wrappers (FormRenderer, providers), create harness components in a separate `harnesses.tsx` file.
 - Bootstrap files: `playwright/index.html` + `playwright/index.tsx` (imports PF CSS).
+- For plugins using DDF, if CJS/ESM dual imports cause `FormRenderer` duplicate declaration errors, alias deep imports (e.g. `@data-driven-forms/pf4-component-mapper/form-template`) to ESM paths in `ctViteConfig.resolve.alias` and dedupe `@data-driven-forms/react-form-renderer` + `react-final-form`.
+
+## Data Driven Forms (DDF)
+
+For plugins using DDF, schema-driven forms use `@data-driven-forms/react-form-renderer` + `@data-driven-forms/pf4-component-mapper`.
+
+- **Custom components**: DDF's pf4-component-mapper components are PF4-era. For PF6 controls (FormSelect, etc.), create custom DDF components using `useFieldApi` from `react-form-renderer`. Register in `componentMapper` with a custom string key.
+- **Wizard steps**: Use `nextStep: "step-name"` to chain steps (without it, DDF shows "Submit" instead of "Next"). The DDF wizard step template uses PF4 class `pf-c-form`. Override with `StepTemplate` using `<div className="pf-v6-c-form">` — not `<Form>` to avoid form-in-form since `FormTemplate` already wraps in `<form>`.
+- **Async validators**: Must **throw** error strings. `composeValidators` catches via `.catch(error => error)`. Sync validators return error strings.
+- **Reactive updates in custom components**: Each field component must register via `useFieldApi(props)`. `useFormApi().getState().values` is a snapshot that won't re-render. For read-only access to all values, use `FormSpy` with `subscription={{ values: true }}`.
+- **Wrapping existing components**: To progressively migrate, wrap existing step components as DDF fields. Use `useFieldApi` to bridge DDF form state to component props.
 
 ## Style
 
