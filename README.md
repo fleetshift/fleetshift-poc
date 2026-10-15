@@ -4,7 +4,9 @@ This repository represents both a **prototype** for a next generation Kubernetes
 
 ## Start here
 
-The fastest way to try FleetShift is the all-in-one image (API, UI, and peer
+### Podman
+
+One way to try FleetShift is the all-in-one image (API, UI, and peer
 Dex in one container). Needs **podman**. Sandbox only — not a production
 deployment.
 
@@ -15,7 +17,7 @@ Accept Risk). Publish ports on `127.0.0.1` only.
 Demo users (login is the email): `ops@fleetshift.local` / `fleetshift-ops` and
 `dev@fleetshift.local` / `fleetshift-dev`.
 
-### Bare run (peer Dex)
+#### Bare run (peer Dex)
 
 No OIDC flags. Packaging starts Dex and fills AuthMethod/UI defaults.
 
@@ -26,7 +28,7 @@ podman run \
   quay.io/stolostron/fleetshift:latest
 ```
 
-### With kind
+#### With kind
 
 Privileged + host engine socket (local/dev only). Create the network once:
 `podman network create kind`. The `fleetshift` network alias is required.
@@ -53,9 +55,9 @@ fleetctl, and packaging internals:
 
 | Path | What you launch | Guide |
 |------|-----------------|-------|
-| Local compose stack | All-in-one image via compose/Nx (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
-| OpenShift example | Cluster deployment using Routes and ImageStreams | [deploy/kubernetes/](deploy/kubernetes/README.md) |
-| Keycloak (OpenShift) | External OIDC for cluster deploy or AIO compose (`OIDC_ISSUER_URL` in `.env`) | [deploy/keycloak/](deploy/keycloak/README.md) |
+| Podman compose stack | All-in-one image via compose/Nx (HTTPS origin, source builds, local-web watch) | [deploy/podman/](deploy/podman/README.md) |
+| OpenShift example | Cluster deployment using Routes and ImageStreams | [deploy/openshift/](deploy/openshift/README.md) |
+| Keycloak (OpenShift) | External OIDC for cluster deploy or AIO compose (`OIDC_ISSUER_URL` in `.env`) | [deploy/openshift/keycloak/](deploy/openshift/keycloak/README.md) |
 | Nx remote cache | Shared build cache backed by MinIO | [docs/nx-remote-cache.md](docs/nx-remote-cache.md) |
 
 ## Develop in this repo
@@ -65,7 +67,7 @@ fleetctl, and packaging internals:
 - **Go 1.22+**
 - **Node.js 20+** — for Nx and UI packages
 - **buf** — for protobuf generation (`brew install bufbuild/buf/buf`)
-- `.env` file — copy from `.env.template` (compose stack and Kubernetes only)
+- `.env` file — copy from `.env.template` for the Podman and OpenShift examples
 
 Deployment-specific tools (podman, oc, kind, etc.) are listed in each
 deployment guide.
@@ -115,17 +117,22 @@ CLI guide: [client/cli/README.md](client/cli/README.md).
 ### UI development
 
 `web:dev` is **not** a standalone TLS origin — it rebuilds the SPA shell and
-MF plugins on change into the repo-root `web/` dir, which the running AIO
-stack serves. Run it in a second terminal alongside the stack:
+MF plugins on change into the repo-root `web/` dir.
+
+#### Podman
+
+With the Podman AIO stack, run it in a second terminal alongside the stack:
 
 ```bash
-npx nx run pd:dev LOCAL_WEB=true   # terminal 1: stack serves UI from host web/
+npx nx run deploy:podman:dev LOCAL_WEB=true   # terminal 1: stack serves UI from host web/
 npx nx run web:dev                 # terminal 2: full build, then watch-rebuild
 npx nx run web:dev:watch           # terminal 2 alt: watch only (skip initial build)
 ```
 
 Then open **https://fleetshift-sandbox.localhost:8085** (redirects to `/app`)
 and accept the browser certificate warning. Dex is same-origin under `/idp`.
+
+#### Component tests
 
 ```bash
 npx nx run web:test:ct      # component tests (playwright)
@@ -162,32 +169,37 @@ npx nx run proto:generate   # regenerate protobuf and gRPC stubs
 
 ```
 
-## Local compose stack
+## Deployment stacks
 
-The local harness (`pd:*` Nx targets) runs the all-in-one image via
+### Podman
+
+The Podman harness (`deploy:podman:*` Nx targets) runs the all-in-one image via
 compose and is documented in [deploy/podman/README.md](deploy/podman/README.md).
 Copy `.env.template` to `.env` first. Commands are also available through Nx;
 env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to deployment scripts.
 
-Open https://fleetshift-sandbox.localhost:8085 after `pd:up` / `pd:dev`. If a
+Open https://fleetshift-sandbox.localhost:8085 after `deploy:podman:up` / `deploy:podman:dev`. If a
 persisted volume still has the old `https://127.0.0.1:5556/dex` issuer, run
-`npx nx run pd:clean` once.
+`npx nx run deploy:podman:clean` once.
 
 ```bash
-npx nx run pd:dev                                    # build AIO from source, start stack
-npx nx run pd:dev LOCAL_WEB=true                     # + serve UI from host web/ (watch mode)
-npx nx run pd:up                                     # start stack (prebuilt image)
-npx nx run pd:down                                   # stop stack
-npx nx run pd:clean                                  # stop + remove volumes
-npx nx run pd:status                                 # show container status
-npx nx run pd:logs                                   # tail all logs
-npx nx run pd:rebuild                                # rebuild and restart
-npx nx run pd:clock-drift                            # fix podman clock drift
+npx nx run deploy:podman:dev                                    # build AIO from source, start stack
+npx nx run deploy:podman:dev LOCAL_WEB=true                     # + serve UI from host web/ (watch mode)
+npx nx run deploy:podman:up                                     # start stack (prebuilt image)
+npx nx run deploy:podman:down                                   # stop stack
+npx nx run deploy:podman:clean                                  # stop + remove volumes
+npx nx run deploy:podman:status                                 # show container status
+npx nx run deploy:podman:logs                                   # tail all logs
+npx nx run deploy:podman:rebuild                                # rebuild and restart
+npx nx run deploy:podman:clock-drift                            # check podman clock drift
 
 ```
 
 Point at an external issuer by setting `OIDC_ISSUER_URL` in `.env` (peer Dex
 then parks) — see the OIDC scope caveat in `.env.template`.
 
-Keycloak OCP (`kc:*`), Kubernetes OCP (`k8s:*`), and MinIO (`minio:*`) targets
-use Nx and target remote clusters, not local compose.
+### OpenShift
+
+The `deploy:openshift:*` targets use Nx and target remote clusters,
+including the Keycloak and MinIO deployment workflows.
+See [deploy/openshift/](deploy/openshift/README.md).

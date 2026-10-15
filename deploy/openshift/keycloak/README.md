@@ -1,6 +1,6 @@
 # OpenShift Keycloak
 
-Production-like Keycloak on OpenShift for OIDC integration testing and demos. Deploys RHBK (operator-managed), PostgreSQL, TLS via cert-manager, and the FleetShift realm.
+This OpenShift example provides production-like Keycloak for OIDC integration testing and demos. It deploys RHBK (operator-managed), PostgreSQL, TLS via cert-manager, and the FleetShift realm.
 
 Everything runs in the `keycloak-prod` namespace.
 
@@ -13,19 +13,19 @@ Everything runs in the `keycloak-prod` namespace.
 ## Deploy
 
 ```bash
-npx nx run kc:deploy -- ACME_EMAIL=you@example.com
-npx nx run kc:deploy -- ACME_EMAIL=you@example.com BASE_DOMAIN=example.com
-npx nx run kc:deploy -- ACME_EMAIL=you@example.com FRESH_CERT=true
+npx nx run deploy:openshift:keycloak:deploy -- ACME_EMAIL=you@example.com
+npx nx run deploy:openshift:keycloak:deploy -- ACME_EMAIL=you@example.com BASE_DOMAIN=example.com
+npx nx run deploy:openshift:keycloak:deploy -- ACME_EMAIL=you@example.com FRESH_CERT=true
 ```
 
 The deploy is idempotent — safe to re-run. On completion, it prints the Keycloak URL, admin credentials, and test user passwords.
 
 ## Add Cluster Console Redirect URIs
 
-Before provisioning AWS clusters with OIDC console access, register each cluster's redirect URI. Keycloak does not support wildcard subdomain patterns, so each cluster needs an explicit entry:
+For OpenShift clusters using this Keycloak realm for console OIDC, register each cluster's redirect URI. Keycloak does not support wildcard subdomain patterns, so each cluster needs an explicit entry:
 
 ```bash
-npx nx run kc:add-base-domain -- BASE_DOMAIN=example.com CLUSTER_NAME=my-cluster
+npx nx run deploy:openshift:keycloak:add-base-domain -- BASE_DOMAIN=example.com CLUSTER_NAME=my-cluster
 ```
 
 ## Retrieve Console Client Secret
@@ -40,13 +40,13 @@ This is the `ocp-console` client secret (cluster console OIDC), not the FleetShi
 ## Add Users
 
 ```bash
-npx nx run kc:add-user -- USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev
+npx nx run deploy:openshift:keycloak:add-user -- USERNAME=you@example.com PASSWORD=mypass GITHUB=ghuser ROLES=ops,dev
 ```
 
 ## Teardown
 
 ```bash
-npx nx run kc:teardown
+npx nx run deploy:openshift:keycloak:teardown
 ```
 
 Prompts for confirmation. Optionally uninstalls cert-manager and RHBK operators.

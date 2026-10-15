@@ -41,7 +41,7 @@ if (adminPassword && !url)
 if (url && !adminPassword)
   error("--keycloak-url requires --admin-password (or KC_ADMIN_PASSWORD).");
 if (!url) {
-  await (await import("../../scripts/common.mjs")).requireOcLogin();
+  await (await import("../../../scripts/common.mjs")).requireOcLogin();
   const ns = process.env.OC_NAMESPACE || "keycloak-prod";
   const cr = process.env.OC_CR_NAME || "keycloak";
   const domain = (

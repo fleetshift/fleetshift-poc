@@ -31,8 +31,8 @@ e2e/.env
 # Taskfile checksum cache and deployment state
 .task/
 deploy/podman/.active-deploy
-deploy/kubernetes/config.env
-deploy/kubernetes/secrets.env
+deploy/openshift/config.env
+deploy/openshift/secrets.env
 
 # Editor/IDE
 # .idea/

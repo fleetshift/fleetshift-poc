@@ -1,8 +1,8 @@
 # FleetShift all-in-one image
 
 Single container (`quay.io/stolostron/fleetshift`) with API, baked-in UI, and
-peer Dex under s6-overlay. Documented and tested with **podman**. This is
-**not** the multi-service compose harness in
+peer Dex under s6-overlay. Documented and tested with **podman**. To launch
+this image through the Podman compose stack, see
 [deploy/podman/](../podman/README.md).
 
 Sandbox for demos, bootstrapping, and testing — not a production deployment.
@@ -10,6 +10,8 @@ Packaging owns PID 1, peer Dex (default), sandbox PKI, and the ordinary
 `fleetshift serve` argv. The server stays IdP-agnostic.
 
 ## Build
+
+### Podman
 
 ```bash
 npx nx run image:aio
@@ -27,6 +29,8 @@ podman build -f Dockerfile.fleetshift \
 ```
 
 ## Quick start (Dex-on)
+
+### Podman
 
 Bare run needs **no** OIDC flags. Packaging starts peer Dex behind the AIO TLS
 edge at `https://fleetshift-sandbox.localhost:8085/idp` and fills AuthMethod/UI
@@ -91,8 +95,8 @@ email:
 ## Packaging defaults
 
 AIO fills omitted AuthMethod/UI fields. These are **packaging** defaults, not
-`fleetshift serve` binary defaults. Compose/Kubernetes use a different config
-surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
+`fleetshift serve` binary defaults. The [OpenShift deployment example](../openshift/README.md)
+uses a different config surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 
 **Required from you** — everything else may be left unset.
 
@@ -152,6 +156,8 @@ and forwards the resolved serve argv. The welcome banner still waits for public
 `/readyz`, then shows the FleetShift URL and external-IdP text without demo
 Dex credentials.
 
+### Podman
+
 Minimal:
 
 ```bash
@@ -185,6 +191,8 @@ To use a public-key claim instead of registry mapping, omit
 `-e OIDC_PUBLIC_KEY_CLAIM_EXPRESSION=claims.spk`.
 
 ## With kind
+
+### Podman
 
 Privileged + host container socket (full control of the host engine —
 local/dev only). Create the `kind` network once if needed:
@@ -237,6 +245,8 @@ podman run -d \
 Host CLIs do not inherit the browser certificate exception. Copy the sandbox CA
 for a scoped `--oidc-ca-file` only — do not install it into the system trust
 store:
+
+### Podman
 
 ```bash
 podman cp <container>:/data/sandbox/pki/ca.crt .

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { $ } from "zx";
-import { importKeyValueArgs, requireOcCluster } from "../../scripts/common.mjs";
+import {
+  importKeyValueArgs,
+  requireOcCluster,
+} from "../../../scripts/common.mjs";
 const [command, ...args] = importKeyValueArgs(process.argv.slice(2));
 await requireOcCluster("KC_CLUSTER_API");
 

@@ -9,8 +9,8 @@ import {
 } from "../../scripts/common.mjs";
 
 importKeyValueArgs(process.argv.slice(2));
-const k8sDir = resolve(import.meta.dirname, "..");
-const rootDir = resolve(k8sDir, "../..");
+const openshiftDir = resolve(import.meta.dirname, "..");
+const rootDir = resolve(openshiftDir, "../..");
 if (!(await $`command -v oc`.nothrow()).ok)
   throw new Error("'oc' CLI not found.");
 if (!existsSync(resolve(rootDir, ".env")))
@@ -19,11 +19,11 @@ await loadDotenv(resolve(rootDir, ".env"));
 await requireOcCluster("OME_CLUSTER_API");
 
 // Generate deployment inputs before applying manifests; Kustomize consumes both files.
-await $`sh -c ${`printf '%s\n' 'OIDC_ISSUER_URL=${process.env.OIDC_ISSUER_URL}' 'OIDC_UI_CLIENT_ID=${process.env.OIDC_UI_CLIENT_ID || "fleetshift-ui"}' 'OIDC_UI_SCOPE=${process.env.OIDC_UI_SCOPE || "openid profile email"}' 'OIDC_CLI_CLIENT_ID=${process.env.OIDC_CLI_CLIENT_ID}' 'OIDC_RESOURCE_AUDIENCE=${process.env.OIDC_RESOURCE_AUDIENCE || process.env.OIDC_AUDIENCE || "fleetshift"}' 'OIDC_KEY_ENROLLMENT_AUDIENCE=${process.env.OIDC_KEY_ENROLLMENT_AUDIENCE || "fleetshift-signing"}' 'PUBLIC_KEY_CLAIM_EXPR=${process.env.PUBLIC_KEY_CLAIM_EXPR || ""}' 'KEY_REGISTRY_ID=${process.env.KEY_REGISTRY_ID}' 'KEY_REGISTRY_SUBJECT_EXPR=${process.env.KEY_REGISTRY_SUBJECT_EXPR}' 'FLEETSHIFT_LOG_LEVEL=${process.env.FLEETSHIFT_LOG_LEVEL || "info"}' 'FLEETSHIFT_SERVER_ADDONS=kubernetes' > ${resolve(k8sDir, "config.env")}`}`;
+await $`sh -c ${`printf '%s\n' 'OIDC_ISSUER_URL=${process.env.OIDC_ISSUER_URL}' 'OIDC_UI_CLIENT_ID=${process.env.OIDC_UI_CLIENT_ID || "fleetshift-ui"}' 'OIDC_UI_SCOPE=${process.env.OIDC_UI_SCOPE || "openid profile email"}' 'OIDC_CLI_CLIENT_ID=${process.env.OIDC_CLI_CLIENT_ID}' 'OIDC_RESOURCE_AUDIENCE=${process.env.OIDC_RESOURCE_AUDIENCE || process.env.OIDC_AUDIENCE || "fleetshift"}' 'OIDC_KEY_ENROLLMENT_AUDIENCE=${process.env.OIDC_KEY_ENROLLMENT_AUDIENCE || "fleetshift-signing"}' 'PUBLIC_KEY_CLAIM_EXPR=${process.env.PUBLIC_KEY_CLAIM_EXPR || ""}' 'KEY_REGISTRY_ID=${process.env.KEY_REGISTRY_ID}' 'KEY_REGISTRY_SUBJECT_EXPR=${process.env.KEY_REGISTRY_SUBJECT_EXPR}' 'FLEETSHIFT_LOG_LEVEL=${process.env.FLEETSHIFT_LOG_LEVEL || "info"}' 'FLEETSHIFT_SERVER_ADDONS=kubernetes' > ${resolve(openshiftDir, "config.env")}`}`;
 const password = encodeURIComponent(process.env.POSTGRES_PASSWORD);
-await $`sh -c ${`printf '%s\n' 'POSTGRES_USER=${process.env.POSTGRES_USER}' 'POSTGRES_PASSWORD=${process.env.POSTGRES_PASSWORD}' 'POSTGRES_DB=${process.env.POSTGRES_DB}' 'DATABASE_URL=postgres://${process.env.POSTGRES_USER}:${password}@postgres:5432/${process.env.POSTGRES_DB}?sslmode=disable' > ${resolve(k8sDir, "secrets.env")}`}`;
-await $`oc apply -f ${resolve(k8sDir, "namespace.yaml")}`;
-await $`oc apply -k ${k8sDir}`;
+await $`sh -c ${`printf '%s\n' 'POSTGRES_USER=${process.env.POSTGRES_USER}' 'POSTGRES_PASSWORD=${process.env.POSTGRES_PASSWORD}' 'POSTGRES_DB=${process.env.POSTGRES_DB}' 'DATABASE_URL=postgres://${process.env.POSTGRES_USER}:${password}@postgres:5432/${process.env.POSTGRES_DB}?sslmode=disable' > ${resolve(openshiftDir, "secrets.env")}`}`;
+await $`oc apply -f ${resolve(openshiftDir, "namespace.yaml")}`;
+await $`oc apply -k ${openshiftDir}`;
 await $`oc wait -n fleetshift statefulset/postgres --for=jsonpath={.status.readyReplicas}=1 --timeout=120s`;
 await $`oc import-image fleetshift-server:latest -n fleetshift --confirm`.nothrow();
 await $`oc import-image fleetshift-web:latest -n fleetshift --confirm`.nothrow();

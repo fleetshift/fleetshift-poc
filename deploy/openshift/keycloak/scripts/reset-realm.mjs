@@ -3,7 +3,7 @@ import { $, question } from "zx";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { requireOcLogin } from "../../scripts/common.mjs";
+import { requireOcLogin } from "../../../scripts/common.mjs";
 
 await requireOcLogin();
 for (const command of ["oc", "jq", "openssl", "curl"])

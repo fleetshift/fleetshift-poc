@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { $, question } from "zx";
-import { requireOcLogin } from "../../scripts/common.mjs";
+import { requireOcLogin } from "../../../scripts/common.mjs";
 await requireOcLogin();
 console.log(
   "This will remove MinIO Nx cache deployment from namespace 'minio-nx-cache'.",

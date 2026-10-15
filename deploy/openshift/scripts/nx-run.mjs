@@ -22,7 +22,7 @@ if (command === "logs") {
 if (command === "set-image") {
   if (!process.env.TAG)
     throw new Error(
-      "TAG is required. Usage: npx nx run k8s:set-image -- TAG=<image-tag>",
+      "TAG is required. Usage: npx nx run deploy:openshift:set-image -- TAG=<image-tag>",
     );
   await $`oc tag quay.io/stolostron/fleetshift:${process.env.TAG} fleetshift-server:latest -n ${process.env.NAMESPACE || "fleetshift"}`;
   process.exit(0);
@@ -50,4 +50,4 @@ if (command === "grpc-route-cert-teardown") {
   await $`node ${resolve(import.meta.dirname, "../grpc-route-cert/scripts/teardown.mjs")} ${rest}`;
   process.exit(0);
 }
-throw new Error(`Unknown Kubernetes command: ${command || ""}`);
+throw new Error(`Unknown OpenShift command: ${command || ""}`);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { $ } from "zx";
 import { resolve } from "node:path";
-import { requireOcLogin } from "../../scripts/common.mjs";
+import { requireOcLogin } from "../../../scripts/common.mjs";
 const dir = resolve(import.meta.dirname, "..");
 await $`command -v oc`;
 await $`command -v openssl`;
@@ -39,5 +39,5 @@ for (const file of [
   await $`oc apply -n minio-nx-cache -f ${resolve(dir, "manifests", file)}`;
 await $`oc patch route nx-cache-proxy -n minio-nx-cache --type=merge -p ${'{"spec":{"tls":{"certificate":null,"key":null,"caCertificate":null,"externalCertificate":{"name":"nx-cache-proxy-tls"}}}}'}`;
 console.log(
-  `\n==========================================\n  Nx Remote Cache Deployment Complete\n==========================================\n\n  Cache Proxy: https://${host}\n  Console:     https://${consoleHost}\n  Bucket:      nx-cache\n\n  Run 'npx nx run minio:credentials' to retrieve bearer tokens.\n\n==========================================`,
+  `\n==========================================\n  Nx Remote Cache Deployment Complete\n==========================================\n\n  Cache Proxy: https://${host}\n  Console:     https://${consoleHost}\n  Bucket:      nx-cache\n\n  Run 'npx nx run deploy:openshift:minio:credentials' to retrieve bearer tokens.\n\n==========================================`,
 );

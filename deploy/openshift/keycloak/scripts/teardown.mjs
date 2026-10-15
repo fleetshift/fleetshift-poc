@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { $, question } from "zx";
-import { requireOcLogin } from "../../scripts/common.mjs";
+import { requireOcLogin } from "../../../scripts/common.mjs";
 
 const namespace = "keycloak-prod";
 const backupNamespace = "cert-manager-operator";

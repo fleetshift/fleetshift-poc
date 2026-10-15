@@ -59,13 +59,13 @@ Why this matters:
 
 ## Important note about normal FleetShift deploys
 
-The base Kubernetes deploy still applies the plain `route-grpc.yaml` from `deploy/kubernetes/`.
+The base OpenShift deploy still applies the plain `route-grpc.yaml` from `deploy/openshift/`.
 
 That means this workflow should be treated as a repeatable **post-deploy** step:
 
 ```bash
-npx nx run k8s:deploy
-npx nx run k8s:grpc-cert:deploy -- ACME_EMAIL=you@example.com
+npx nx run deploy:openshift:deploy
+npx nx run deploy:openshift:grpc-cert:deploy -- ACME_EMAIL=you@example.com
 ```
 
 If a future base deploy overwrites the Route fields, just rerun the Route-cert deploy script.
@@ -112,7 +112,7 @@ grpc-fleetshift.apps.sno-1-6c5z7.aws-acm-cluster-virt.devcluster.openshift.com
 From the repo root:
 
 ```bash
-npx nx run k8s:grpc-cert:deploy -- ACME_EMAIL=you@example.com
+npx nx run deploy:openshift:grpc-cert:deploy -- ACME_EMAIL=you@example.com
 ```
 
 ## Expected success state
@@ -142,7 +142,7 @@ node ./scripts/teardown.mjs --namespace fleetshift --route-name grpc
 ### Task wrapper
 
 ```bash
-npx nx run k8s:grpc-cert:teardown
+npx nx run deploy:openshift:grpc-cert:teardown
 ```
 
 ## Safe cleanup defaults
