@@ -217,9 +217,9 @@ Aliases are namespaced key:value pairs for alternate identifiers. They enable cr
 
 Examples:
 
-- `cloud/project-id:my-project/cluster-id:abc123`
+- `acmecloud/project-id:my-project/cluster-id:abc123`
 - `sig-multicluster/cluster-id:550e8400-e29b-41d4-a716-446655440000`
-- `security/cluster-id:scanner-12345`
+- `acmesecurity/cluster-id:scanner-12345`
 
 See pocs/ for various alias approaches.
 
