@@ -10,7 +10,7 @@ The UI requires the following API capabilities to support its multi-cluster inte
 
 Aggregate pages (e.g. "All Pods across all clusters", "All Deployments", dashboard widgets) need a single API that returns data spanning multiple clusters. Querying each cluster individually from the browser does not scale — with tens or hundreds of clusters, the UI cannot fan out requests to every cluster on every page load.
 
-The platform must provide an aggregate data API: a service that indexes or proxies multi-cluster resource queries behind a single endpoint. ACM Search is one example of such a service when clusters are managed by Red Hat Advanced Cluster Management; the UI contract does not require that implementation.
+The platform must provide an aggregate data API: a service that indexes or proxies multi-cluster resource queries behind a single endpoint.
 
 #### Data Normalization
 

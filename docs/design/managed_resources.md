@@ -15,12 +15,12 @@ Example: imagine a full featured cluster management addon. It should handle many
 - Assist in knowable operational issues in the course of provisioning, upgrades, or other configuration changes
 - Manage cluster pooling strategies
 - View the state of clusters and their underlying nodes (inventory)
-- Integration with other cluster-related addons for security, observability, or storage (e.g., ACS, MCOA, ODF)
+- Integration with other cluster-related addons for security, observability, or storage
 
 You could imagine similar domain specific experiences for other managed resource types:
 
 - VMs
-- GitOps instances (e.g., Argo CD)
+- GitOps instances
 - Model serving
 - ...
 
@@ -50,7 +50,7 @@ POST /apis/kind.fleetshift.io/v1/clusters
     "compute_pools": [
       {
         "name": "workers",
-        "instance_type": "m5.2xlarge",
+        "instance_type": "large",
         "replicas": 3,
         "autoscaling": { "min_replicas": 3, "max_replicas": 12 }
       }
@@ -62,7 +62,7 @@ POST /apis/kind.fleetshift.io/v1/clusters
     },
     "encryption": {
       "etcd_encryption": true,
-      "kms_key_arn": "arn:aws:kms:us-east-1:123456789012:key/mrk-abc123"
+      "key_reference": "keys/etcd-key"
     }
   }
 }
@@ -347,11 +347,11 @@ TODO: Reconcile between delivery conditions and inventoried conditions? Both are
 
 ### Inventory
 
-Inventory is the system for all historical observations — a point-in-time report of what an observer saw about a resource. It covers both managed and inventory resources. Comparable to ACM Search (stolostron/search-v2-api) in scope, but optimized for observation history and health querying.
+Inventory is the system for all historical observations — a point-in-time report of what an observer saw about a resource. It covers both managed and inventory resources, with a focus on observation history and health querying.
 
 Inventory stores per-resource projections keyed by extension resource identity and linked to the platform resource via identity equivalence. Management and inventory are composable type capabilities: inventory-only types declare inventory without management; managed types may also declare inventory and carry observed state on the same extension resource. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the resource identity model and capability axes.
 
-Inventory is a projection of what the addon extracts from the source resource, not a literal copy of that source (comparable to ACM search collectors extracting a subset of K8s fields). Once reported, those fields are the platform-held resource data — available the same way on typed Get/List and on `queryResources`.
+Inventory is a projection of what the addon extracts from the source resource, not a literal copy of that source (e.g., collectors extracting a subset of K8s fields). Once reported, those fields are the platform-held resource data — available the same way on typed Get/List and on `queryResources`.
 
 Each inventory item has:
 
@@ -366,7 +366,7 @@ For managed resources, the managed thing itself may have an inventory projection
 
 **Condition types** are both platform-defined and addon-defined. The platform defines conventional types (`Lifecycle`, `Healthy`) for universal fleet dashboards. Addons define domain-specific types (`ReplicationHealthy`, `KeyValid`, `Progressing`) without platform coordination. The platform defines conventions, not constraints — ecosystem conventions emerge from usage.
 
-Validated against real cloud APIs: EKS (health issues list), GKE (gRPC-coded conditions), AKS (provisioningState/powerState only), RDS (health encoded in status enum). Each maps onto the inventory shape with addon-side translation. The inconsistency across cloud APIs is the reason conditions exist as a platform abstraction.
+Validated against cloud APIs with health issue lists, gRPC-coded conditions, provisioning/power state only, or health encoded in a status enum. Each maps onto the inventory shape with addon-side translation. The inconsistency across cloud APIs is the reason conditions exist as a platform abstraction.
 
 #### Managed resource API projection
 
@@ -390,7 +390,7 @@ GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
                   [composition of these sources: TBD]
 ```
 
-> OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (ACS in a relational db, MCOA in prometheus/thanos, ...).
+> OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (a vulnerability scanner in a relational db, an observability addon in a time-series database, ...).
 
 #### Managed resource HEAD table
 

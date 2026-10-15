@@ -109,7 +109,7 @@ catalog adds versioning and asset location:
 | `name` | Human-readable name (maps to `AddonDescriptor.Name`) |
 | `version` | Semver — used for upgrades and cache-busting |
 | `capabilities` | Declared capability types (maps to `AddonDescriptor.Capabilities`) |
-| `install_spec` | OCI artifact reference for the backend workload (e.g. `ghcr.io/org/addon-monitoring:v1.2.0`), if backend capabilities present |
+| `install_spec` | OCI artifact reference for the backend workload (e.g. `registry.example.com/org/addon-monitoring:v1.2.0`), if backend capabilities present |
 | `manifest_url` | URL to the `plugin-manifest.json` on the external asset host, if UI plugin capability present |
 | `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/addons/monitoring/v1.2.0`), if UI plugin capability present |
 | `extends_core` | Which core plugin surface this addon extends (if any) |
@@ -119,9 +119,9 @@ The engine does **not** store or serve addon UI assets. The catalog stores
 metadata and URLs — pointers to where the assets live. The `install_spec`
 tells the engine how to deploy the backend workload. The `manifest_url` and
 `assets_base_url` tell the shell where to fetch the UI plugin. Asset hosting
-is a deployment concern: a CDN, an nginx server, S3, or any static file
-host. See [OCI Artifact Distribution](#oci-artifact-distribution) for the
-packaging and deployment model.
+is a deployment concern: a CDN, an HTTP server, object storage, or any
+static file host. See [OCI Artifact Distribution](#oci-artifact-distribution)
+for the packaging and deployment model.
 
 ### Per-instance catalogs
 
@@ -199,7 +199,7 @@ graph TD
     end
 
     subgraph AssetHost["External Asset Host"]
-        CDN["Static File Server<br/>(CDN, nginx, S3)"]
+        CDN["Static File Server<br/>(CDN, HTTP server, object storage)"]
         MANIFEST["plugin-manifest.json"]
         JS["JS/CSS bundles"]
 
@@ -387,7 +387,7 @@ domain** without rebuilding. This requires two things working together:
    `"plugin-entry.js"`, not `"https://cdn.example.com/.../plugin-entry.js"`).
 
 This combination is what makes the same OCI artifact deployable to any
-host — a CDN, an internal nginx, S3, GitHub Pages — without rebuilding.
+host — a CDN, an internal HTTP server, or object storage — without rebuilding.
 The domain is never baked into the artifact at build time.
 
 ### Publishing and deployment
@@ -404,15 +404,14 @@ sequenceDiagram
 
     Dev->>CI: Push code
     CI->>CI: Build (webpack + SDK)
-    CI->>Registry: Push OCI artifact (ghcr.io/org/addon:v1.2.0)
+    CI->>Registry: Push OCI artifact (registry.example.com/org/addon:v1.2.0)
     CI->>Host: Pull artifact, extract /dist to host
     CI->>Engine: Register addon (manifest_url + assets_base_url)
 ```
 
 1. **Build**: CI runs webpack with the Dynamic Plugin SDK. Output goes into
    a `FROM scratch` image with `/dist`.
-2. **Publish**: Push to any OCI-compliant registry (ghcr.io, quay.io, ECR,
-   private registry).
+2. **Publish**: Push to any OCI-compliant registry.
 3. **Deploy**: Pull the artifact and extract `/dist` to a static file host.
    This is an ops pipeline step — `docker create` + `docker cp` or
    equivalent. The engine is not involved.
@@ -456,8 +455,8 @@ environments — only the registered `assets_base_url` changes.
 
 OCI tags provide immutable versioning for free:
 
-- `ghcr.io/org/addon-monitoring:v1.2.0` — specific release
-- `ghcr.io/org/addon-monitoring:v1.1.0` — previous version, still in registry
+- `registry.example.com/org/addon-monitoring:v1.2.0` — specific release
+- `registry.example.com/org/addon-monitoring:v1.1.0` — previous version, still in registry
 
 Old versions remain on the asset host (or can be re-extracted). Rolling
 back is updating the catalog entry's `assets_base_url` to point to the
@@ -727,11 +726,11 @@ knows exactly what exists — pre-installed plugins are set up by operators
 or product installers. OME needs to **discover** them.
 
 The catalog drives this. Each pre-installed plugin entry declares what to
-look for. For example, an ACS/StackRox operator plugin could discover its
+look for. For example, a StackRox operator plugin could discover its
 [configuration resources](https://github.com/stackrox/stackrox/blob/master/operator/install/README.md):
 
 ```yaml
-name: acs-plugin
+name: security-plugin
 type: pre-installed
 discovery:
   crds:
@@ -752,7 +751,7 @@ sequenceDiagram
     OME->>Fleetlet: "Check for these CRDs"
     Fleetlet->>Fleetlet: kubectl get crd centrals.platform.stackrox.io securedclusters.platform.stackrox.io
     Fleetlet-->>OME: "CRDs present: [Central, SecuredCluster]"
-    OME->>OME: Mark "Cluster A has acs-plugin"
+    OME->>OME: Mark "Cluster A has security-plugin"
     OME-->>Catalog: Plugin visible for Cluster A
 ```
 
@@ -764,11 +763,11 @@ relevant CRDs, and is hidden when none do.
 ### The fleet aggregation boundary
 
 The single-cluster view works without any addon backend — the UI can query
-one cluster's K8s API for its ACS operator configuration, service mesh
+one cluster's K8s API for its security operator configuration, service mesh
 configs, etc., just like the classic OCP console does.
 
 However, once OME manages multiple clusters with the same pre-installed plugin,
-a new need emerges: **fleet-wide aggregation**. Viewing ACS operator configuration
+a new need emerges: **fleet-wide aggregation**. Viewing security violations
 across 50 clusters, comparing service mesh configurations across
 environments, or rolling out a policy change fleet-wide — these operations
 cannot be served by querying one cluster at a time.
@@ -802,13 +801,13 @@ graph LR
 ```
 
 The transition is incremental: the per-cluster UI remains useful on its own,
-and the addon backend adds the fleet-wide layer on top. This means a product
-like ACS can integrate with OME in two phases:
+and the addon backend adds the fleet-wide layer on top. This means security
+tooling can integrate with OME in two phases:
 
 1. **Day 1**: Register as a pre-installed plugin — per-cluster views work
-   immediately for any cluster that has ACS installed, no addon deployment
-   required
-2. **Day 2**: Ship an addon backend that aggregates ACS data across the
+   immediately for any cluster that has the operator installed, no addon
+   deployment required
+2. **Day 2**: Ship an addon backend that aggregates security data across the
    fleet — fleet-wide dashboards, cross-cluster policy views, etc.
 
 This avoids an all-or-nothing integration model: products get useful
@@ -900,10 +899,10 @@ manages the plugin catalog; addons populate it.
 
 ### All addon stories follow the same pattern (OME-18 through OME-21)
 
-MCOA, ACS, manifest strategies, and API extensions all register with the
-management plane. The management plane stores their definitions and routes
-to them. No addon story has the cluster as the source of truth for addon
-capabilities or assets.
+Observability and security addons, manifest strategies, and API extensions
+all register with the management plane. The management plane stores their
+definitions and routes to them. No addon story has the cluster as the
+source of truth for addon capabilities or assets.
 
 ## Relationship to Existing Implementation
 

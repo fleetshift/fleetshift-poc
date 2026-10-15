@@ -48,7 +48,7 @@ Placement strategies that target a pool receive the pool's membership rather tha
 **Proposal**: the provider platform registers **managed resource types** that define the consumer-facing contract. A managed resource type is:
 
 - **Schema**: what the consumer can request (region, version, size, capabilities). Validated by the provider platform on receipt.
-- **Manifest generator (provider-side)**: takes a validated request and generates the low-level manifests for the factory (e.g., `HostedCluster` resources for a HyperShift-based service or `ArgoCD` resources for an operator-based Argo CD service). This is the provider's internal addon.
+- **Manifest generator (provider-side)**: takes a validated request and generates the low-level manifests for the factory (e.g., an `ArgoCD` custom resource for an operator-based GitOps service). This is the provider's internal addon.
 - **Placement strategy (provider-side)**: how the generated manifests are scheduled onto the factory pool. Bespoke per managed resource type (e.g., binpacking with different capacity constraints for hosted control plane and GitOps services).
 - **Health model (provider-side)**: what "healthy" means for this managed resource type. For example, a hosted control plane service might check that control plane pods are running and the API server is reachable; a GitOps service might check that its instance is reconciling. Each type defines its own health.
 - **Consumer-facing status**: the subset of health and lifecycle information surfaced back to the consumer. The consumer sees "my managed cluster is Provisioning / Ready / Degraded" without seeing which management cluster it's on or how many pods it has.
@@ -128,11 +128,11 @@ The vault can also rate-limit credential issuance and alert on anomalous pattern
 
 **Buffered transport (hardened mode)**:
 
-For the highest security requirements, the factory-side agent reads manifests from a buffer (S3, Kafka, NATS) rather than maintaining a persistent connection to the platform. The platform writes to the buffer; the factory-side agent reads from it. Status flows back through the same buffer (or a separate one). No persistent channel exists.
+For the highest security requirements, the factory-side agent reads manifests from a buffer (object storage or a message broker) rather than maintaining a persistent connection to the platform. The platform writes to the buffer; the factory-side agent reads from it. Status flows back through the same buffer (or a separate one). No persistent channel exists.
 
 The buffer is in a **separate security domain** (e.g., a different cloud account) accessible to both the platform and the factory via cross-account credentials, but neither side has network access to the other. If the platform is compromised, the attacker can write to the buffer but cannot reach the factory cluster directly. The factory-side agent validates signed intents before applying anything read from the buffer.
 
-This maps to the fleetlet's existing transport pluggability. The factory fleetlet uses a Kafka, NATS, or S3 transport instead of gRPC/TLS. Locally, the delivery agent sees the same interface. The delivery contract (Manifest x Placement x Rollout, signed intents, status reporting) is identical regardless of transport.
+This maps to the fleetlet's existing transport pluggability. The factory fleetlet uses a buffer transport instead of gRPC/TLS. Locally, the delivery agent sees the same interface. The delivery contract (Manifest x Placement x Rollout, signed intents, status reporting) is identical regardless of transport.
 
 **Trade-offs of buffer mode**: no real-time delivery (polling or message queue latency), no protocol channel (no K8s API access through the platform), delayed status. These may be acceptable for a factory pool -- for example, a hosted control plane service whose provisioning and status updates tolerate delays of seconds and whose provider doesn't need to proxy API requests to factory clusters.
 
@@ -206,7 +206,7 @@ What is the exact protocol for standing intent renewal? Does the consumer platfo
 
 ### Vault integration specifics
 
-Which vault systems should be supported for dual-credential factory credential retrieval? HashiCorp Vault, cloud-native KMS (AWS KMS, Azure Key Vault), or a platform-internal credential service? How are vault policies provisioned and managed -- are they part of the pool template (automatically configured when a new factory cluster joins a pool)?
+Which vault systems should be supported for dual-credential factory credential retrieval? An external vault, a cloud key management service, or a platform-internal credential service? How are vault policies provisioned and managed -- are they part of the pool template (automatically configured when a new factory cluster joins a pool)?
 
 ### Provider operational tooling
 

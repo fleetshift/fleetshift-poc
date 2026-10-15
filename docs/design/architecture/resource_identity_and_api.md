@@ -41,7 +41,7 @@ Read this when you need to understand how multiple extensions can model the same
 
 Today, a managed resource extends a common gRPC service under a single proto package (`fleetshift.v1`). There is no separation between a canonical resource identity and the extension that manages it. Once inventory reporting introduces multiple extensions that model some aspect of the same resource — read or write — this breaks down. Either resource paths collide, or the resource is named something else despite logically sharing a common identity.
 
-For example: a cluster may be provisioned by Kind, scanned by a security addon such as ACS, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
+For example: a cluster may be provisioned by Kind, scanned by a vulnerability scanner, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
 
 ### Solution: two layers
 
@@ -62,8 +62,8 @@ graph TB
     subgraph extLayer ["Extension Representations"]
         kind["//kind.fleetshift.io/clusters/foo"]
         k8s["//kubernetes.fleetshift.io/clusters/foo"]
-        acs["//acs.fleetshift.io/clusters/foo"]
-        hyperv["//hyperv.fleetshift.io/vms/bar"]
+        security["//security.fleetshift.io/clusters/foo"]
+        virtualization["//virtualization.fleetshift.io/vms/bar"]
     end
 
     subgraph rolesLegend ["Representation Roles"]
@@ -74,14 +74,14 @@ graph TB
 
     platformCluster -->|representation| kind
     platformCluster -->|representation| k8s
-    platformCluster -->|representation| acs
+    platformCluster -->|representation| security
     kind -.->|roles| managed
     kind -.->|roles| inventory
     k8s -.->|roles| target
     k8s -.->|roles| inventory
-    acs -.->|roles| inventory
-    platformVM -->|representation| hyperv
-    hyperv -.->|roles| managed
+    security -.->|roles| inventory
+    platformVM -->|representation| virtualization
+    virtualization -.->|roles| managed
 ```
 
 
@@ -217,9 +217,9 @@ Aliases are namespaced key:value pairs for alternate identifiers. They enable cr
 
 Examples:
 
-- `gcp/project-id:my-project/cluster-id:abc123`
+- `cloud/project-id:my-project/cluster-id:abc123`
 - `sig-multicluster/cluster-id:550e8400-e29b-41d4-a716-446655440000`
-- `acs/cluster-id:acs-12345`
+- `security/cluster-id:scanner-12345`
 
 See pocs/ for various alias approaches.
 
@@ -269,7 +269,7 @@ Example: platform resource `clusters/foo` has representations:
 
 - `//kind.fleetshift.io/clusters/foo` — roles: `managed`, `inventory`
 - `//kubernetes.fleetshift.io/clusters/foo` — roles: `target`, `inventory`
-- `//acs.fleetshift.io/clusters/foo` — roles: `inventory`
+- `//security.fleetshift.io/clusters/foo` — roles: `inventory`
 
 ### Semantic relationships
 

@@ -160,7 +160,7 @@ The platform uses the latest successful output. If addon state changed between c
 
 ## Managed resources as a structural bridge
 
-Managed resources are addon-driven, consumer-facing resource types such as clusters, VMs, or GitOps instances (e.g., Argo CD).
+Managed resources are addon-driven, consumer-facing resource types such as clusters, VMs, or GitOps instances.
 
 The important architectural relationship here is structural:
 
