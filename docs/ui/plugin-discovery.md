@@ -1,5 +1,7 @@
 # Plugin Discovery
 
+Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
+
 FleetShift dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
 
 ## Overview
@@ -127,7 +129,7 @@ The current graceful-degradation approach (silently falling back to always-on pl
 
 ### Re-use of existing OpenShift console plugins
 
-Re-using existing OpenShift console plugins (`ConsolePlugin` resources from `console.openshift.io/v1`) should be considered a requirement. These plugins are the authoritative source of UI extensions on OpenShift clusters.
+Re-using existing OpenShift console plugins (`ConsolePlugin` resources from `console.openshift.io/v1`) is an optional integration for connected OpenShift clusters. These plugins are the authoritative source of UI extensions on OpenShift clusters.
 
 This will require some updates on the existing OCP plugin side as well — details will be covered in a separate OCP plugin re-use document.
 

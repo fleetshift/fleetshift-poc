@@ -66,9 +66,9 @@ generation fencing / a small journal — not a full object database.
 | Layer | Role | Inspiration |
 |-------|------|-------------|
 | `fsruntime` | Drop-in `cluster.Cluster` / `manager.Manager` over an in-memory list/watch store | `pgruntime.NewManager` |
-| `provider` | Discovers targets, engages clusters, implements `DeliveryAgent`, mirrors status | multicluster-runtime providers + gcphcp agent |
+| `provider` | Discovers targets, engages clusters, implements `DeliveryAgent`, mirrors status | multicluster-runtime providers + delivery agent |
 | `contract` | FleetShift-shaped delivery types (no `internal/` imports) | `poc/ocm-work-agent-adapter` |
-| `controllers` | Ordinary reconciler; kube client only | greeting controller / gcphcp reconcile |
+| `controllers` | Ordinary reconciler; kube client only | greeting controller / addon reconcile |
 | `platform` | Fake control plane for tests | recording delivery + DeliveryReportService |
 
 ## Status write-back (kube-like guarantees)
@@ -133,7 +133,7 @@ store (projection + RV journal)
 - `mcbuilder.ControllerManagedBy(mgr).For(&Delivery{}).Complete(r)`
 - SharedInformer → workqueue → reconcile against the informer cache
 - `client.Get` / `Status().Update` / `apierrors.IsNotFound`
-- Generation fencing and async report-back (same contract as gcphcp)
+- Generation fencing and async report-back (the shared delivery contract)
 
 ## What changes
 
@@ -161,10 +161,10 @@ go run ./example
 | `platform.Fake` | orchestration + `DeliveryReportService` |
 | `provider.Provider` + `statusMirror` | in-process addon or fleetlet Delivery channel adapter |
 | `fsruntime` store | could be Postgres (pgruntime), SQLite, or a thin cache over fleetlet streams |
-| Example target type `gcphcp` | real `server/internal/addon/gcphcp` |
+| Example target type `example` | illustrative addon delivery target |
 
 The reconciler in this POC only simulates apply. A next step would replace
-the simulated work with the same phase machine gcphcp uses, while keeping
+the simulated work with a real addon implementation, while keeping
 the controller-runtime watch/reconcile loop and status-only write-back.
 
 ## Files

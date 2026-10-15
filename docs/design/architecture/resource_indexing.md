@@ -110,7 +110,7 @@ The inventory shape is designed to balance well-structured data the platform and
 This gives the platform a uniform query surface without requiring the platform to understand every domain-specific observation payload. The platform identity layer owns aliases and semantic relationships; the per-extension projection owns labels, properties, observations, and conditions. There are several different structured types here over the more basic Kubernetes shape, mainly for supporting secondary indexes (which etcd cannot support). Specifically we have:
 
 - Relationships: In kube these are up to spec/status fields. Here, they are well defined to support a graph traversal of relationships. This is likely to be used for access control, search, and navigation.
-- Aliases: These are well defined to support correlation across extensions. ACS may already scan a cluster. If that cluster is later imported into the management plane, ACS won't already know the resource's platform name. Aliases must be used to correlate (kube system namespace uid, cloud platform identifier, ACS's own ID, SIG multicluster ID, ...).
+- Aliases: These are well defined to support correlation across extensions. For example, a vulnerability scanner may already scan a cluster. If that cluster is later imported into the management plane, the addon won't already know the resource's platform name. Aliases must be used to correlate (kube system namespace uid, cloud platform identifier, the addon's own ID, SIG multicluster ID, ...).
 - Conditions: Conditions are elevated to first class, out of status. This is so they can be intentionally indexed, as well as used for condition aggregation (though condition aggregation may still want to be possibly based on other data, not just child conditions)
 - Properties: I am less sure about these. There are two intentions here, which possibly shouldn't be combined: possible alignment with multicluster SIG, and elevating certain status (or spec?) fields for reliable consumption. For example, a cluster control plane URL. It also gives operators a place to put fields where the cost of story history is not worth it.
 
@@ -122,7 +122,7 @@ Condition transitions are to be modeled as historical condition events, but that
 
 Resource identity for inventoried resources follows the two-layer API model defined in [resource_identity_and_api.md](resource_identity_and_api.md).
 
-Inventoried resources are extension resources in their addon's own package, with a corresponding platform resource for canonical identity. For example, when the ACS addon reports cluster status, it creates an extension resource at `//acs.fleetshift.io/clusters/foo` which links to the same platform identity as `//gcphcp.fleetshift.io/clusters/foo` or `//kubernetes.fleetshift.io/clusters/foo`.
+Inventoried resources are extension resources in their addon's own package, with a corresponding platform resource for canonical identity. For example, when a security addon reports cluster status, it creates an extension resource at `//security.fleetshift.io/clusters/foo` which links to the same platform identity as `//kind.fleetshift.io/clusters/foo` or `//kubernetes.fleetshift.io/clusters/foo`.
 
 Identity correlation across extensions works through:
 

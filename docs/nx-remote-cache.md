@@ -9,7 +9,7 @@ Remote cache for Nx task outputs backed by MinIO and a lightweight Go proxy (`nx
                        :8080                   :9000
 ```
 
-- **nx-cache-proxy** implements the [Nx custom remote cache OpenAPI spec](../deploy/minio-nx-cache/cache-openapi.json) — `GET /v1/cache/{hash}` and `PUT /v1/cache/{hash}` with bearer token auth.
+- **nx-cache-proxy** implements the [Nx custom remote cache OpenAPI spec](../sdk/nx-cache-proxy/cache-openapi.json) — `GET /v1/cache/{hash}` and `PUT /v1/cache/{hash}` with bearer token auth.
 - **MinIO** provides S3-compatible object storage for the cache entries.
 - Cache entries expire after a configurable TTL (default 24h). MinIO lifecycle rules garbage-collect expired objects at the storage layer (3 days).
 
@@ -21,7 +21,11 @@ Two bearer tokens control access:
 - **Read token** — can only `GET`. Intended for CI and container builds.
 - **Write token** — can `GET` and `PUT`. Intended for developers.
 
-## Quick start — local (podman)
+## Quick start
+
+### Podman
+
+To add the cache to the [Podman compose stack](../deploy/podman/README.md):
 
 1. **Add to `.env`:**
 
@@ -33,7 +37,7 @@ Two bearer tokens control access:
 2. **Start MinIO + proxy:**
 
    ```sh
-   NX_CACHE=true npx nx run pd:up
+   NX_CACHE=true npx nx run deploy:podman:up
    ```
 
    This starts MinIO on `:9000` (console `:9001`), creates the `nx-cache` bucket, and runs the proxy on `:8420`. The `NX_CACHE=true` flag adds the `nx-cache.yaml` compose override.
@@ -54,7 +58,11 @@ Two bearer tokens control access:
 
 ## Container image builds
 
-The `Dockerfile.web` accepts build args for remote cache. When building via the `dev.yaml` compose override, these are passed from `.env` automatically:
+The `Dockerfile.web` accepts build args for remote cache.
+
+### Podman
+
+When building via the Podman stack's `dev.yaml` compose override, these are passed from `.env` automatically:
 
 ```yaml
 # deploy/podman/overrides/dev.yaml
@@ -82,13 +90,17 @@ podman build \
   -f Dockerfile.web .
 ```
 
-## OpenShift deployment
+## Cluster deployment
 
-### Prerequisites (one-time, per cluster)
+### OpenShift
 
-- **cert-manager ClusterIssuer** — `deploy.sh` mints a publicly-trusted cert for
+These instructions use the [OpenShift cache example](../deploy/openshift/minio-nx-cache/).
+
+#### Prerequisites (one-time, per cluster)
+
+- **cert-manager ClusterIssuer** — `deploy.mjs` mints a publicly-trusted cert for
   the proxy Route (the Nx CLI rejects the cluster's self-signed ingress cert).
-  Defaults to `zerossl-prod`; override with `CERT_ISSUER=<name> npx nx run minio:deploy`.
+  Defaults to `zerossl-prod`; override with `CERT_ISSUER=<name> npx nx run deploy:openshift:minio:deploy`.
 - **Image pull secret** — the proxy image lives in a private quay.io repo, so the
   namespace needs a `quay-pull` secret linked to the `default` service account:
 
@@ -103,26 +115,26 @@ podman build \
   Desktop on macOS stores creds in the keychain, so its `config.json` won't work;
   the podman `auth.json` above does.)
 
-MinIO and the cache proxy run on the Keycloak OCP cluster. All `minio:*` Nx targets require an active `oc` session on that cluster:
+The `deploy:openshift:minio:*` targets use `KC_CLUSTER_API` to select their OpenShift cluster, the same variable used by the Keycloak example. They require an active `oc` session on that cluster:
 
 ```sh
 # 1. Log in to the Keycloak cluster and set KC_CLUSTER_API in .env
 oc login <keycloak-cluster-api-url>
 
 # 2. Deploy (generates random credentials + bearer tokens, stores in OCP secrets)
-npx nx run minio:deploy
+npx nx run deploy:openshift:minio:deploy
 
 # 3. Check status
-npx nx run minio:status
+npx nx run deploy:openshift:minio:status
 
 # 4. Get connection info — prints the NX_SELF_HOSTED_REMOTE_CACHE_* values to put in .env
-npx nx run minio:credentials
+npx nx run deploy:openshift:minio:credentials
 
 # 5. Tear down (interactive)
-npx nx run minio:teardown
+npx nx run deploy:openshift:minio:teardown
 ```
 
-To retrieve credentials later (e.g., on a new machine), log in to the cluster and run `npx nx run minio:credentials` — it reads from the existing OCP secrets.
+To retrieve credentials later (e.g., on a new machine), log in to the cluster and run `npx nx run deploy:openshift:minio:credentials` — it reads from the existing OCP secrets.
 
 ## Configuration reference
 
@@ -154,6 +166,6 @@ Nx loads these from `.env` automatically.
 
 - Proxy: [`sdk/nx-cache-proxy/`](../sdk/nx-cache-proxy/)
 - Dockerfile: [`Dockerfile.nx-cache`](../Dockerfile.nx-cache)
-- OCP manifests: [`deploy/minio-nx-cache/manifests/`](../deploy/minio-nx-cache/manifests/)
-- Compose override: [`deploy/podman/overrides/nx-cache.yaml`](../deploy/podman/overrides/nx-cache.yaml)
-- OpenAPI spec: [`deploy/minio-nx-cache/cache-openapi.json`](../deploy/minio-nx-cache/cache-openapi.json)
+- OCP manifests: [`deploy/openshift/minio-nx-cache/manifests/`](../deploy/openshift/minio-nx-cache/manifests/)
+- Podman compose override: [`deploy/podman/overrides/nx-cache.yaml`](../deploy/podman/overrides/nx-cache.yaml)
+- OpenAPI spec: [`sdk/nx-cache-proxy/cache-openapi.json`](../sdk/nx-cache-proxy/cache-openapi.json)

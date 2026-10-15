@@ -4,7 +4,7 @@ import { createProviderWizard } from "../shared/GenericProviderWizard";
 
 export const VsphereProviderCard = createProviderCard({
   label: "vSphere",
-  description: "Create an OpenShift cluster on VMware vSphere infrastructure.",
+  description: "Create a Kubernetes cluster on VMware vSphere infrastructure.",
   icon: VsphereIcon,
   ariaLabel: "Select vSphere provider",
 });

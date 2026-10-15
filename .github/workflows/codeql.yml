@@ -49,7 +49,6 @@ jobs:
               - sdk/common
               - sdk/build-utils
               - extensions/core/client
-              - extensions/gcphcp/client
               - extensions/kind/client
               - e2e
             paths-ignore:

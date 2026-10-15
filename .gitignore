@@ -31,12 +31,8 @@ e2e/.env
 # Taskfile checksum cache and deployment state
 .task/
 deploy/podman/.active-deploy
-deploy/podman/.gcphcp.yaml
-gcphcp.yaml
-deploy/podman/gcphcp.yaml
-deploy/kubernetes/config.env
-deploy/kubernetes/gcphcp.yaml
-deploy/kubernetes/secrets.env
+deploy/openshift/config.env
+deploy/openshift/secrets.env
 
 # Editor/IDE
 # .idea/

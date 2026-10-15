@@ -93,23 +93,23 @@ Deployment defines one `PluginClientPolicy` per plugin identity. YAML is suitabl
 apiVersion: ui.fleetshift.io/v1alpha1
 kind: PluginClientPolicy
 metadata:
-  name: gcphcp
+  name: kind
 spec:
   plugin:
-    name: gcphcp-plugin
-    key: gcphcp
+    name: kind-plugin
+    key: kind
     version: 1.2.0
   policyRevision: 1
   clients:
     web:
-      origin: https://assets.example.com/gcphcp/1.2.0/web
+      origin: https://assets.example.com/kind/1.2.0/web
       manifestPath: plugin-manifest.json
-      routePrefix: /client/web/plugins/gcphcp/1.2.0
+      routePrefix: /client/web/plugins/kind/1.2.0
       enabled: true
       required: true
       onFailure: block-client
     cli:
-      artifact: oci://registry.example.com/gcphcp-cli:1.2.0
+      artifact: oci://registry.example.com/kind-cli:1.2.0
       manifestPath: cli-manifest.json
       enabled: true
       required: false

@@ -304,12 +304,12 @@ Settings                          ← nav-group (clickable → /settings/navigat
   Navigation — Manage nav layout  ← nav
   Authentication — Configure OIDC ← nav
   Extensions — Discover addons    ← nav
-    ├── GCP HCP — Connect GCP...  ← extension (onboarding-action under grouped module)
+    ├── Example provider — Connect provider...  ← extension (onboarding-action under grouped module)
     └── Kind — Local cluster...   ← extension
 
 Pages
   Clusters — View and manage...   ← nav (ungrouped, no parent group)
-    ├── GCP HCP — Managed...      ← extension (cluster-provider)
+    ├── Example provider — Managed...      ← extension (cluster-provider)
     └── Kind — Local cluster...   ← extension
 ```
 
@@ -325,7 +325,7 @@ With hierarchical routes, breadcrumbs follow the group → module → extension 
 |-------|-------------|
 | `/settings/navigation` | Settings > Navigation |
 | `/core/clusters` | Clusters (ungrouped, no parent) |
-| `/core/clusters?create=gcphcp` | Clusters > GCP HCP |
+| `/core/clusters?create=example` | Clusters > Example provider |
 
 The shell derives breadcrumbs from `navLayout` + current route. Group label comes from the `fleetshift.module-group` metadata. Module label comes from the `fleetshift.module` metadata.
 

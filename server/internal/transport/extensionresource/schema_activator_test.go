@@ -20,7 +20,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -1095,15 +1094,17 @@ func TestPlatformRefCounting(t *testing.T) {
 		t.Fatal("Kind activation should create the platform service (refcount 0→1)")
 	}
 
-	// Step 2: activate GCP HCP (same collection: "clusters"), but with
+	// Step 2: activate a second Kind schema (same collection: "clusters"), but with
 	// a different extension API version. This should still share the same
 	// platform service.
-	gcphcpSchema := gcphcpaddon.Schema("gcphcp-test")
-	gcphcpSchema.Version = "v2"
+	secondarySchema := kindaddon.Schema()
+	secondarySchema.ResourceType = "secondary.kind.fleetshift.io/Cluster"
+	secondarySchema.ProtoPackage = "secondary.kind.fleetshift.v2"
+	secondarySchema.Version = "v2"
 
-	gcpID, err := activator.Activate(ctx, gcphcpSchema)
+	secondaryID, err := activator.Activate(ctx, secondarySchema)
 	if err != nil {
-		t.Fatalf("Activate GCPHCP: %v", err)
+		t.Fatalf("Activate secondary Kind: %v", err)
 	}
 
 	// Step 3: one platform service exists
@@ -1117,8 +1118,8 @@ func TestPlatformRefCounting(t *testing.T) {
 		t.Fatal("platform service should survive after deactivating one of two extensions")
 	}
 
-	// Step 5: deactivate GCP HCP → platform removed (refcount 1→0)
-	activator.Deactivate(gcpID)
+	// Step 5: deactivate secondary Kind → platform removed (refcount 1→0)
+	activator.Deactivate(secondaryID)
 
 	// Step 6: platform no longer routable
 	if _, ok := mux.ServiceInfo()[platformSvc]; ok {

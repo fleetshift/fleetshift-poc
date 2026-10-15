@@ -70,11 +70,10 @@ COPY --from=dex-bin /usr/local/bin/dex /usr/local/bin/dex
 COPY --from=aio-builder /bin/aio-init /usr/local/bin/aio-init
 COPY --from=aio-builder /bin/kind-loopback-forward /usr/local/bin/kind-loopback-forward
 COPY --from=aio-builder /bin/aio-proxy /usr/local/bin/aio-proxy
-COPY deploy/scripts/render-gcphcp-config.sh /usr/local/bin/render-gcphcp-config.sh
 COPY deploy/aio/s6/ /etc/s6-overlay/
 
 RUN set -eux; \
-	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy /usr/local/bin/render-gcphcp-config.sh; \
+	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends curl ca-certificates xz-utils; \
 	arch="$TARGETARCH"; \

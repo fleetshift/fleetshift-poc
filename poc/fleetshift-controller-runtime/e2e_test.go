@@ -27,7 +27,7 @@ func TestDeliveryReconcileViaMulticlusterProvider(t *testing.T) {
 	fake := platform.NewFake()
 	target := contract.TargetInfo{
 		ID:   "gcp-project-us-central1",
-		Type: "gcphcp",
+		Type: "example",
 		Name: "demo-target",
 		Properties: map[string]string{
 			"gcp_project": "demo",
@@ -80,7 +80,7 @@ func TestDeliveryReconcileViaMulticlusterProvider(t *testing.T) {
 
 	deliveryID := contract.DeliveryID("del-1")
 	if err := fake.Dispatch(ctx, prov, target, deliveryID, []contract.Manifest{{
-		ManifestType: "api.gcphcp.cluster",
+		ManifestType: "api.example.cluster",
 		Raw:          manifest,
 	}}, contract.DeliveryAuth{Token: "caller-jwt"}, 1, contract.DeliveryOperationDeliver); err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestAuthFailureReported(t *testing.T) {
 	log.SetLogger(zap.New(zap.UseDevMode(true)))
 	logger := logr.Discard()
 	fake := platform.NewFake()
-	target := contract.TargetInfo{ID: "t-auth", Type: "gcphcp", Name: "t-auth"}
+	target := contract.TargetInfo{ID: "t-auth", Type: "example", Name: "t-auth"}
 
 	prov, err := provider.New(provider.Options{
 		Scheme: deliveryv1.Scheme, Reporter: fake, Logger: logger, Targets: []contract.TargetInfo{target},
@@ -208,7 +208,7 @@ func TestAuthFailureReported(t *testing.T) {
 
 	deliveryID := contract.DeliveryID("del-auth")
 	if err := fake.Dispatch(ctx, prov, target, deliveryID, []contract.Manifest{{
-		ManifestType: "api.gcphcp.cluster", Raw: []byte(`{}`),
+		ManifestType: "api.example.cluster", Raw: []byte(`{}`),
 	}}, contract.DeliveryAuth{}, 1, contract.DeliveryOperationDeliver); err != nil {
 		t.Fatal(err)
 	}

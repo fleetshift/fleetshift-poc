@@ -60,7 +60,7 @@ func (r *DeliveryReconciler) Reconcile(ctx context.Context, req mcreconcile.Requ
 		return ctrl.Result{}, err
 	}
 
-	// Simulate target-side work. A real addon (e.g. gcphcp) would call
+	// Simulate target-side work. A real addon would call
 	// cloud APIs here. The POC "applies" by accepting the manifest.
 	phase := string(contract.DeliveryStateDelivered)
 	message := fmt.Sprintf("applied %s (%s)", delivery.Spec.ManifestType, delivery.Spec.Operation)

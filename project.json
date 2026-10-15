@@ -72,16 +72,11 @@
       "options": {
         "command": "node tools/generate-plugin-registry.mjs"
       },
-      "dependsOn": [
-        "plugins:build",
-        "@fleetshift/gcphcp-plugin:build",
-        "@fleetshift/kind-plugin:build"
-      ],
+      "dependsOn": ["plugins:build", "@fleetshift/kind-plugin:build"],
       "cache": true,
       "inputs": [
         "{workspaceRoot}/tools/generate-plugin-registry.mjs",
         "{workspaceRoot}/extensions/core/client/dist/**/*",
-        "{workspaceRoot}/extensions/gcphcp/client/dist/**/*",
         "{workspaceRoot}/extensions/kind/client/dist/**/*"
       ]
     },
@@ -103,224 +98,224 @@
         ]
       }
     },
-    "pd:up": {
+    "deploy:podman:up": {
       "executor": "nx:run-commands",
       "options": { "command": "./deploy/podman/scripts/start.mjs" },
       "cache": false
     },
-    "pd:dev": {
+    "deploy:podman:dev": {
       "executor": "nx:run-commands",
       "options": { "command": "DEV=true ./deploy/podman/scripts/start.mjs" },
       "cache": false
     },
-    "pd:down": {
+    "deploy:podman:down": {
       "executor": "nx:run-commands",
       "options": { "command": "./deploy/podman/scripts/stop.mjs" },
       "cache": false
     },
-    "pd:clean": {
+    "deploy:podman:clean": {
       "executor": "nx:run-commands",
       "options": { "command": "./deploy/podman/scripts/stop.mjs --clean" },
       "cache": false
     },
-    "pd:logs": {
+    "deploy:podman:logs": {
       "executor": "nx:run-commands",
       "options": {
         "command": "./deploy/podman/scripts/compose-command.mjs logs -f"
       },
       "cache": false
     },
-    "pd:status": {
+    "deploy:podman:status": {
       "executor": "nx:run-commands",
       "options": {
         "command": "./deploy/podman/scripts/compose-command.mjs ps"
       },
       "cache": false
     },
-    "pd:rebuild": {
+    "deploy:podman:rebuild": {
       "executor": "nx:run-commands",
       "options": { "command": "./deploy/podman/scripts/rebuild.mjs" },
       "cache": false
     },
-    "pd:pull": {
+    "deploy:podman:pull": {
       "executor": "nx:run-commands",
       "options": {
         "command": "./deploy/podman/scripts/compose-command.mjs pull --ignore-buildable"
       },
       "cache": false
     },
-    "pd:clock-drift": {
+    "deploy:podman:clock-drift": {
       "executor": "nx:run-commands",
       "options": { "command": "./deploy/podman/scripts/check-clock-drift.mjs" },
       "cache": false
     },
-    "kc:deploy": {
+    "deploy:openshift:keycloak:deploy": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs deploy",
-        "cwd": "deploy/keycloak",
+        "cwd": "deploy/openshift/keycloak",
         "envFile": ".env"
       },
       "cache": false
     },
-    "kc:teardown": {
+    "deploy:openshift:keycloak:teardown": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs teardown",
-        "cwd": "deploy/keycloak",
+        "cwd": "deploy/openshift/keycloak",
         "envFile": ".env"
       },
       "cache": false
     },
-    "kc:reset-realm": {
+    "deploy:openshift:keycloak:reset-realm": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs reset-realm",
-        "cwd": "deploy/keycloak",
+        "cwd": "deploy/openshift/keycloak",
         "envFile": ".env"
       },
       "cache": false
     },
-    "kc:add-user": {
+    "deploy:openshift:keycloak:add-user": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs add-user",
-        "cwd": "deploy/keycloak",
+        "cwd": "deploy/openshift/keycloak",
         "envFile": ".env"
       },
       "cache": false
     },
-    "kc:add-base-domain": {
+    "deploy:openshift:keycloak:add-base-domain": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs add-base-domain",
-        "cwd": "deploy/keycloak",
+        "cwd": "deploy/openshift/keycloak",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:deploy": {
+    "deploy:openshift:deploy": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs deploy",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:teardown": {
+    "deploy:openshift:teardown": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs teardown",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:status": {
+    "deploy:openshift:status": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs status",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:logs": {
+    "deploy:openshift:logs": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs logs",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:set-image": {
+    "deploy:openshift:set-image": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs set-image",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:reset-image": {
+    "deploy:openshift:reset-image": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs reset-image",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:import-images": {
+    "deploy:openshift:import-images": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs import-images",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:register-redirect": {
+    "deploy:openshift:register-redirect": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs register-redirect",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:grpc-cert:deploy": {
+    "deploy:openshift:grpc-cert:deploy": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs grpc-route-cert-deploy",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "k8s:grpc-cert:teardown": {
+    "deploy:openshift:grpc-cert:teardown": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs grpc-route-cert-teardown",
-        "cwd": "deploy/kubernetes",
+        "cwd": "deploy/openshift",
         "envFile": ".env"
       },
       "cache": false
     },
-    "minio:deploy": {
+    "deploy:openshift:minio:deploy": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs deploy",
-        "cwd": "deploy/minio-nx-cache",
+        "cwd": "deploy/openshift/minio-nx-cache",
         "envFile": ".env"
       },
       "cache": false
     },
-    "minio:teardown": {
+    "deploy:openshift:minio:teardown": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs teardown",
-        "cwd": "deploy/minio-nx-cache",
+        "cwd": "deploy/openshift/minio-nx-cache",
         "envFile": ".env"
       },
       "cache": false
     },
-    "minio:status": {
+    "deploy:openshift:minio:status": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs status",
-        "cwd": "deploy/minio-nx-cache",
+        "cwd": "deploy/openshift/minio-nx-cache",
         "envFile": ".env"
       },
       "cache": false
     },
-    "minio:credentials": {
+    "deploy:openshift:minio:credentials": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node ./scripts/nx-run.mjs credentials",
-        "cwd": "deploy/minio-nx-cache",
+        "cwd": "deploy/openshift/minio-nx-cache",
         "envFile": ".env"
       },
       "cache": false

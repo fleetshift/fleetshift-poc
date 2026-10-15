@@ -15,7 +15,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const webDir = resolve(root, "web");
 const pluginDistDirs = [
   resolve(root, "extensions/core/client/dist"),
-  resolve(root, "extensions/gcphcp/client/dist"),
   resolve(root, "extensions/kind/client/dist"),
 ];
 const guiDist = resolve(root, "client/web/dist");

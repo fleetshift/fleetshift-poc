@@ -2,14 +2,14 @@
 
 ## What is FleetShift
 
-FleetShift is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes and OpenShift clusters.
+FleetShift is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
 
 ## Goals
 
 - **Dynamic UI composition** — the UI discovers what each cluster supports and loads only the relevant plugin UIs. Adding a new cluster with new capabilities should automatically surface new UI sections without code changes to the shell.
 - **Graceful growth** — the system must work for 1 cluster and scale gracefully as the number of integrated clusters grows to tens or hundreds. The architecture (plugin loading, data fetching, navigation) should not degrade as clusters are added.
 - **Plugin-based extensibility** — all cluster-specific UI is delivered through plugins loaded at runtime via Module Federation. The shell is generic; plugins bring the domain knowledge.
-- **Multi-platform support** — must work with both vanilla Kubernetes and OpenShift clusters, detecting platform-specific capabilities (e.g. ConsolePlugins, Routes) where available.
+- **Multi-platform support** — supports Kubernetes distributions, detecting platform-specific capabilities (e.g. ConsolePlugins, Routes) where available.
 
 ## Design
 
@@ -25,7 +25,7 @@ FleetShift is a multi-cluster management UI that dynamically composes its interf
 ## Requirements
 
 - [Plugin Discovery](./plugin-discovery.md) — how FleetShift detects which UI plugins to enable for each cluster
-- [OCP Plugin Re-use](./ocp-plugin-reuse.md) — priority: re-using existing OpenShift console plugins in FleetShift
+- [OCP Plugin Re-use](./ocp-plugin-reuse.md) — optional integration for re-using existing OpenShift console plugins in FleetShift
 - [Plugin Versioning](./plugin-versioning.md) — loading multiple versions of the same plugin from different clusters
 - [API Requirements](./api-requirements.md) — aggregate data layer and per-cluster drill-down proxy
 

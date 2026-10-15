@@ -1,8 +1,8 @@
 # FleetShift logless Sigstore bundle POC
 
-This is an independent peer to `../sigstore_tuf`, informed by it and by
-`../hybrid`, but built around the standard Sigstore bundle and trust-root data
-models. It asks the same FleetShift question:
+This is informed by the historical `sigstore_tuf` experiment (absent from this
+checkout) and by `../hybrid`, and built around the standard Sigstore bundle and
+trust-root data models. It asks the same FleetShift question:
 
 > Can a delivery agent verify a complete authorization and fulfillment chain
 > locally, while the management plane only couriers the evidence?

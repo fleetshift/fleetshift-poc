@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
@@ -172,7 +172,7 @@ func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
 	}
 }
 
-func TestExpectedSurface_KindGCPTargetsAndSchemasLive(t *testing.T) {
+func TestExpectedSurface_KindScriptedTargetsAndSchemasLive(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
 	srv := startTestServerWithConfig(t, ConfigInput{DBPath: dbPath}, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
 		kindDesc := kindaddon.Descriptor()
@@ -199,16 +199,16 @@ func TestExpectedSurface_KindGCPTargetsAndSchemasLive(t *testing.T) {
 				},
 			},
 			{
-				Descriptor: gcphcpaddon.Descriptor(),
+				Descriptor: scripted.Descriptor(),
 				Connect: application.ConnectInput{
 					Agent: recording,
 					Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-						ID:                    "gcphcp-test",
-						Type:                  gcphcpaddon.TargetType,
-						Name:                  "Test GCP HCP Provider",
-						AcceptedManifestTypes: []domain.ManifestType{gcphcpaddon.ClusterManifestType},
+						ID:                    scripted.TargetID,
+						Type:                  scripted.TargetType,
+						Name:                  "Test Scripted Provider",
+						AcceptedManifestTypes: []domain.ManifestType{scripted.ManagedManifestType},
 					})},
-					Schemas: []domain.ExtensionResourceSchema{gcphcpaddon.Schema("gcphcp-test")},
+					Schemas: []domain.ExtensionResourceSchema{scripted.Schema()},
 				},
 			},
 		}, nil
@@ -233,7 +233,7 @@ func TestExpectedSurface_KindGCPTargetsAndSchemasLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list targets: %v", err)
 	}
-	wantTargets := map[domain.TargetID]bool{"kind-local": false, "gcphcp-test": false}
+	wantTargets := map[domain.TargetID]bool{"kind-local": false, scripted.TargetID: false}
 	for _, target := range targets {
 		if _, ok := wantTargets[target.ID()]; ok {
 			wantTargets[target.ID()] = true
@@ -250,9 +250,9 @@ func TestExpectedSurface_KindGCPTargetsAndSchemasLive(t *testing.T) {
 		t.Fatalf("list types: %v", err)
 	}
 	wantTypes := map[domain.ResourceType]bool{
-		kindaddon.ClusterResourceType:   false,
-		kindaddon.NodeResourceType:      false,
-		gcphcpaddon.ClusterResourceType: false,
+		kindaddon.ClusterResourceType: false,
+		kindaddon.NodeResourceType:    false,
+		scripted.ResourceType:         false,
 	}
 	for _, typ := range types {
 		if _, ok := wantTypes[typ.ResourceType()]; ok {

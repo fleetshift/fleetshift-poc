@@ -21,7 +21,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -228,23 +227,11 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 
 	keyResolver := newProductionKeyResolver()
 
-	// Parse GCP config once when enabled (trust placement + production assembly).
-	var gcphcpCfg *gcphcpaddon.Config
-	var gcphcpTargetID string
-	if enabledAddons[AddonGCPHCP] {
-		parsed, err := gcphcpaddon.ParseConfig(cfg.GCPHCPConfigPath)
-		if err != nil {
-			return fail(fmt.Errorf("parse gcphcp config: %w", err))
-		}
-		gcphcpCfg = &parsed
-		gcphcpTargetID = parsed.Targets[0].ID
-	}
-
 	// --- register all workflows before starting the worker ---
 	setupHub := transporthttp.NewSetupHub(logger)
 	wfs, err := registerWorkflows(
 		reg, p.store, p.vault, router, p.authMethodRepo, *oidcDeps, setupHub,
-		enabledAddons, gcphcpTargetID, keyResolver, logger,
+		enabledAddons, keyResolver, logger,
 	)
 	if err != nil {
 		return fail(err)
@@ -380,7 +367,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	if o.addonAssembly != nil {
 		specs, err = o.addonAssembly(ctx, addonDeps)
 	} else {
-		specs, err = assembleProductionAddons(addonDeps, keyResolver, oidcHTTPClient, gcphcpCfg)
+		specs, err = assembleProductionAddons(addonDeps, keyResolver, oidcHTTPClient)
 	}
 	if err != nil {
 		return fail(err)

@@ -13,7 +13,7 @@ const ConfigurationPage = () => {
     <PageSection>
       <Title headingLevel="h1">Configuration</Title>
       <Content component="p">
-        Deploy and manage applications across your OpenShift fleet using GitOps
+        Deploy and manage applications across your Kubernetes fleet using GitOps
         and Helm. Keep workloads consistent as you scale from a single cluster
         to many.
       </Content>

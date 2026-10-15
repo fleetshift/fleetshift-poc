@@ -1,7 +1,7 @@
-# Local compose stack
+# Local Podman compose stack
 
 Compose launcher for the all-in-one image (`quay.io/stolostron/fleetshift`)
-under `deploy/podman`: podman + docker-compose via Nx (`pd:*` targets). One container runs the TLS edge, API, baked-in
+under `deploy/podman`: podman + docker-compose via Nx (`deploy:podman:*` targets). One container runs the TLS edge, API, baked-in
 UI, and peer Dex.
 
 This is **not** a multi-service Keycloak/Postgres harness. Packaging internals
@@ -33,7 +33,7 @@ Create the kind network once: `podman network create kind`. Linux rootless:
 ```bash
 cp .env.template .env         # leave OIDC_ISSUER_URL unset for peer Dex
   npx nx run cli:build          # build TypeScript fleetctl
-  npx nx run pd:dev             # build AIO from source and start
+  npx nx run deploy:podman:dev             # build AIO from source and start
 ```
 
 Open https://fleetshift-sandbox.localhost:8085 and accept the certificate
@@ -44,8 +44,8 @@ If `/data` was persisted from a pre-HTTPS AIO run, the AuthMethod issuer is
 still `https://127.0.0.1:5556/dex`. Reset once:
 
 ```bash
- npx nx run pd:clean
- npx nx run pd:dev
+ npx nx run deploy:podman:clean
+ npx nx run deploy:podman:dev
 ```
 
 `start.mjs` copies the sandbox CA to `deploy/podman/.certs/ca.crt` for fleetctl.
@@ -65,33 +65,28 @@ Point at an external issuer by setting `OIDC_ISSUER_URL` in `.env` (peer Dex
 then parks). Register `https://fleetshift-sandbox.localhost:8085`,
 `/app/auth/callback`, and `/app/silent-renew.html` on that IdP.
 
-AIO enables `gcphcp` from `GCPHCP_GATEWAY_URL` alone. Set it in `.env` when
-needed. Do not commit a concrete CLS gateway URL.
-
 ## Tasks
 
-All local deployment commands use Nx `pd:*` targets.
+Commands for this Podman stack use Nx `deploy:podman:*` targets.
 
 | Task | Description |
 |------|-------------|
-| `podman:up` | Start the AIO stack (prebuilt image) |
-| `podman:dev` | Build the AIO image from source, then up |
-| `podman:down` | Stop containers, preserve data |
-| `podman:clean` | Stop + delete volumes and `.certs` |
-| `podman:rebuild` | Stop, rebuild the AIO image, restart |
-| `podman:build` | Build the AIO image without restarting |
-| `podman:pull` | Pull the latest all-in-one image |
-| `podman:logs` | Follow logs from all containers |
-| `podman:logs:<service>` | Tail specific service (e.g. `podman:logs:fleetshift-server`) |
-| `podman:status` | Show running containers |
-| `podman:restart:<service>` | Restart a specific container |
-| `podman:rebuild-web` | Rebuild the AIO image (baked UI) and restart |
+| `deploy:podman:up` | Start the AIO stack (prebuilt image) |
+| `deploy:podman:dev` | Build the AIO image from source, then up |
+| `deploy:podman:down` | Stop containers, preserve data |
+| `deploy:podman:clean` | Stop + delete volumes and `.certs` |
+| `deploy:podman:rebuild` | Stop, rebuild the AIO image, restart |
+| `image:aio` | Build the AIO image without restarting |
+| `deploy:podman:pull` | Pull the latest all-in-one image |
+| `deploy:podman:logs` | Follow logs from all containers |
+| `deploy:podman:status` | Show running containers |
+| `deploy:podman:clock-drift` | Check Podman machine clock drift |
 
 ## Full Stack Dev Mode
 
-`npx nx run pd:dev` builds the AIO image from this repo (`npx nx run image:aio`) and
+`npx nx run deploy:podman:dev` builds the AIO image from this repo (`npx nx run image:aio`) and
 starts it. After changing Go or UI sources that are baked into the image, run
-`npx nx run pd:rebuild`.
+`npx nx run deploy:podman:rebuild`.
 
 ### Local Web Watch Mode
 
@@ -99,7 +94,7 @@ For faster frontend iteration, bind-mount host `web/` over the baked UI:
 
 ```bash
 # Terminal 1 — start the stack with local web assets
-npx nx run pd:dev LOCAL_WEB=true
+npx nx run deploy:podman:dev LOCAL_WEB=true
 
 # Terminal 2 — watch & rebuild merged UI assets into monorepo-root web/
 npx nx run web:dev
@@ -110,9 +105,9 @@ Open https://fleetshift-sandbox.localhost:8085 and refresh after rebuilds.
 ## Configuration
 
 Copy `.env.template` to `.env` and edit. Command-line variables always override
-`.env`. This stack uses AIO `OIDC_*` names; Kubernetes uses different ones —
+`.env`. This stack uses AIO `OIDC_*` names; the OpenShift example uses different ones —
 see [deploy/aio/README.md](../aio/README.md) and
-[deploy/kubernetes/README.md](../kubernetes/README.md).
+[deploy/openshift/README.md](../openshift/README.md).
 
 Leave `OIDC_UI_SCOPE` unset. Packaging picks Dex-on vs Dex-off from whether
 `OIDC_ISSUER_URL` is set. Setting the portable scope on Dex-on drops

@@ -1,12 +1,11 @@
 # TypeScript Fleetctl CLI
 
-TypeScript `fleetctl` CLI for the FleetShift AIO runtime.
+TypeScript `fleetctl` CLI for FleetShift. The local setup examples below use
+the [Podman AIO stack](../../deploy/podman/README.md).
 
 ## Prerequisites
 
-- Podman with Docker Compose provider
 - Node.js and workspace dependencies installed
-- Kind network available for the AIO stack
 
 Install dependencies from repository root:
 
@@ -14,27 +13,34 @@ Install dependencies from repository root:
 npm install
 ```
 
+### Podman
+
+- Podman with Docker Compose provider
+- Kind network available for the AIO stack
+
 ## Start AIO
 
-Use Nx deployment targets. Do not invoke `docker compose` directly.
+### Podman
+
+To run the Podman AIO stack, use its Nx deployment targets:
 
 ```bash
 cp .env.template .env
-npx nx run pd:dev
+npx nx run deploy:podman:dev
 ```
 
 For built-in Dex, leave `OIDC_ISSUER_URL` unset in `.env`. If it is set, AIO runs Dex-off and `/idp` is unavailable. To reset a local stack that was previously started in Dex-off mode:
 
 ```bash
 # Remove OIDC_ISSUER_URL from .env first.
-npx nx run pd:clean
-npx nx run pd:dev
+npx nx run deploy:podman:clean
+npx nx run deploy:podman:dev
 ```
 
 Check runtime status:
 
 ```bash
-npx nx run pd:status
+npx nx run deploy:podman:status
 ```
 
 Expected endpoints:
@@ -92,7 +98,9 @@ Before publishing for real, remove package `private` flag and use release versio
 
 ## Recover AIO CA
 
-`pd:dev` normally copies sandbox CA to `deploy/podman/.certs/ca.crt`. If that file is missing, copy it manually. Direct Compose commands need `PODMAN_SOCKET` set because Compose interpolates it before executing `cp`:
+### Podman
+
+`deploy:podman:dev` normally copies sandbox CA to `deploy/podman/.certs/ca.crt`. If that file is missing, copy it manually. Direct Compose commands need `PODMAN_SOCKET` set because Compose interpolates it before executing `cp`:
 
 ```bash
 mkdir -p deploy/podman/.certs
@@ -111,11 +119,18 @@ curl --cacert deploy/podman/.certs/ca.crt \
   https://fleetshift-sandbox.localhost:8085/idp/.well-known/openid-configuration
 ```
 
-`502` from `/idp` means AIO is Dex-off or Dex is not ready. Check `npx nx run pd:logs` and verify `OIDC_ISSUER_URL` is unset for built-in Dex.
+`502` from `/idp` means AIO is Dex-off or Dex is not ready. Check `npx nx run deploy:podman:logs` and verify `OIDC_ISSUER_URL` is unset for built-in Dex.
 
 ## Configure And Login
 
-Use separate config directory while validating TS CLI:
+TS CLI writes Go-compatible files:
+
+- `$FLEETCTL_CONFIG_DIR/auth.json`
+- `$FLEETCTL_CONFIG_DIR/credentials.json`
+
+### Podman
+
+To connect to the Podman AIO stack, use a separate config directory while validating TS CLI:
 
 ```bash
 export FLEETCTL_CONFIG_DIR=/tmp/fleetshift-ts
@@ -132,19 +147,18 @@ fleetctl auth login
 
 The login flow opens a browser and starts a loopback callback listener. Use the demo operator credentials above.
 
-TS CLI writes Go-compatible files:
-
-- `$FLEETCTL_CONFIG_DIR/auth.json`
-- `$FLEETCTL_CONFIG_DIR/credentials.json`
-
 ## Run Live Commands
 
-Default values are designed for local AIO development:
+CLI defaults (the server URL matches the Podman AIO stack):
 
 - Server: `https://fleetshift-sandbox.localhost:8085`
 - Config directory: `FLEETCTL_CONFIG_DIR`, or `~/.config/fleetshift`
 
 Set `FLEETCTL_SERVER` only when targeting another runtime. Set `FLEETCTL_CONFIG_DIR` when isolating credentials. Both command flags are optional and override these defaults.
+
+Explicit `--server` and `--config-dir` values override environment defaults. Use `--output json` for machine-readable responses.
+
+### Podman
 
 ```bash
 export FLEETCTL_SERVER=https://fleetshift-sandbox.localhost:8085
@@ -160,7 +174,7 @@ fleetctl deployment list
 fleetctl resource query
 ```
 
-Explicit `--server` and `--config-dir` values override environment defaults. Use `--output json` for machine-readable responses.
+### Timing and debug output
 
 Measure total process time from CLI startup through command/render completion. Debug output goes to stderr so command stdout remains script-safe:
 
@@ -199,19 +213,23 @@ Implemented command handlers cover auth setup/login/logout/inspect/enroll, deplo
 
 ## Cleanup
 
-Stop AIO while preserving local data:
+### Podman
+
+Stop the Podman AIO stack while preserving local data:
 
 ```bash
-npx nx run pd:down
+npx nx run deploy:podman:down
 ```
 
-Remove AIO containers, volumes, and generated sandbox certificates:
+Remove the Podman stack's containers, volumes, and generated sandbox certificates:
 
 ```bash
-npx nx run pd:clean
+npx nx run deploy:podman:clean
 ```
 
-`pd:clean` is destructive for local AIO data. Use it when switching between Dex-on and Dex-off modes or when persisted auth configuration is stale.
+`deploy:podman:clean` is destructive for local AIO data. Use it when switching between Dex-on and Dex-off modes or when persisted auth configuration is stale.
+
+### CLI
 
 Remove TS CLI credentials and generated executable:
 

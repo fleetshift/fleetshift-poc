@@ -29,13 +29,6 @@ const ENTRIES: SemanticEntry[] = [
     category: "Resource Type",
   },
   {
-    term: "cluster gcp hcp",
-    label: "GCP HCP clusters",
-    expression: 'resourceType == "gcphcp.fleetshift.io/Cluster"',
-    valueOnly: '"gcphcp.fleetshift.io/Cluster"',
-    category: "Resource Type",
-  },
-  {
     term: "node",
     label: "Kind nodes",
     expression: 'resourceType == "kind.fleetshift.io/Node"',
@@ -174,9 +167,6 @@ const ENTRIES: SemanticEntry[] = [
   // Common namespaces
   ...nsEntry("kube-system"),
   ...nsEntry("default"),
-  ...nsEntry("openshift-monitoring"),
-  ...nsEntry("openshift"),
-  ...nsEntry("openshift-operators"),
 
   // API groups
   ...apiGroupEntry("apps", "Apps (Deployments, DaemonSets)"),

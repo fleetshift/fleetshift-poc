@@ -58,7 +58,7 @@ if (!process.env.OIDC_ISSUER_URL) {
   (unknown sandbox CA). Dex is same-origin under /idp; port 5556 is not published.
 
   If this volume previously ran the old :5556 Dex issuer, reset it first:
-    npx nx run pd:clean
+    npx nx run deploy:podman:clean
 
   Configure fleetctl:
     bin/fleetctl auth setup \\
@@ -76,5 +76,5 @@ if (!process.env.OIDC_ISSUER_URL) {
 }
 
 console.log(
-  "\n    Run 'npx nx run pd:logs' to tail container output.\n    Run 'npx nx run pd:status' to list containers.\n    Run 'npx nx --help' to see all available commands.",
+  "\n    Run 'npx nx run deploy:podman:logs' to tail container output.\n    Run 'npx nx run deploy:podman:status' to list containers.\n    Run 'npx nx --help' to see all available commands.",
 );

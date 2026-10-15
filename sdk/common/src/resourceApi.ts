@@ -30,9 +30,9 @@ export interface ResourceCommon {
  * defines.
  */
 export interface ResourceResult<Props = Record<string, unknown>> {
-  /** Canonical full resource name, e.g. `"//gcphcp.fleetshift.io/clusters/prod"`. */
+  /** Canonical full resource name, e.g. `"//kind.fleetshift.io/clusters/prod"`. */
   name: string;
-  /** Stable type identity, e.g. `"gcphcp.fleetshift.io/Cluster"`. */
+  /** Stable type identity, e.g. `"kind.fleetshift.io/Cluster"`. */
   resourceType: string;
   /** Dynamic resource body (protojson-encoded Struct). */
   resource: ResourceCommon & Props;
@@ -159,12 +159,12 @@ export interface ResourceApi<Props = Record<string, unknown>> {
  *
  * @example
  * ```ts
- * interface ClusterResource { spec: { releaseVersion: string } }
+ * interface ClusterResource { state: string }
  * const clusterApi = createResourceApi<ClusterResource>("-");
  *
  * // query with a CEL filter
  * const { resources } = await clusterApi.search({
- *   filter: 'resource_type == "gcphcp.fleetshift.io/Cluster"',
+ *   filter: 'resource_type == "kind.fleetshift.io/Cluster"',
  *   pageSize: 20,
  * });
  *
@@ -272,8 +272,8 @@ function jsonInit(method: string, body?: unknown): RequestInit {
  * const mgmt = createApiClient("/v1");
  * const deployments = await mgmt.get<ListDeploymentsResponse>("/deployments");
  *
- * const gcphcp = createApiClient("/apis/gcphcp.fleetshift.io/v1");
- * const cluster = await gcphcp.post<GcpHcpCluster>(
+ * const kind = createApiClient("/apis/kind.fleetshift.io/v1");
+ * const cluster = await kind.post<KindCluster>(
  *   "/clusters?cluster_id=my-cluster",
  *   { spec },
  * );

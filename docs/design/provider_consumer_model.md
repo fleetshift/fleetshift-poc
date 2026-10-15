@@ -1,6 +1,6 @@
 # Provider/consumer management model
 
-This document proposes extensions to the FleetShift architecture to support the provider/consumer/factory topology observed in every managed infrastructure service at scale. These proposals emerge from analysis of real systems (ROSA Cluster Service, IBM Cloud IKS/ROKS, ARO HCP, RAZEE, HyperShift, ACM) and from the observation that the provider/consumer split is not unique to cloud providers -- it is the natural structure of any organization managing infrastructure at scale, including enterprise IT teams and mid-market customers.
+This document proposes extensions to the FleetShift architecture to support the provider/consumer/factory topology observed in every managed infrastructure service at scale. These proposals emerge from analysis of managed Kubernetes services, hosted control plane implementations, and multicluster management systems, and from the observation that the provider/consumer split is not unique to cloud providers -- it is the natural structure of any organization managing infrastructure at scale, including enterprise IT teams and mid-market customers.
 
 The core argument: the provider/consumer/factory/neighborhood model should be first-class structure in FleetShift's kernel, not a pattern assembled from generic primitives. The generic Manifest x Placement x Rollout model remains the foundation, but provider-side concepts (managed resource types, factory pools, neighborhoods, signed intents) are built-in alongside it.
 
@@ -8,7 +8,7 @@ The core argument: the provider/consumer/factory/neighborhood model should be fi
 
 Every managed infrastructure service implements the same structural pattern:
 
-- A **consumer** requests managed resources (clusters, ArgoCD instances, VMs) through a front door.
+- A **consumer** requests managed resources (clusters, GitOps instances, VMs) through a front door.
 - A **provider** fulfills those requests by scheduling onto pools of infrastructure ("factory clusters") organized by workload type ("neighborhoods").
 - A **curtain** separates the consumer surface from the factory infrastructure, enforcing network separation, identity boundaries, and blast radius containment.
 
@@ -25,19 +25,19 @@ The progression is continuous. The product experience should guide users along t
 
 **Current state**: the "workspace target pool" is a passive set -- all targets in a workspace's subtree. Placement strategies receive this set and select from it. There is no capacity tracking, no expansion trigger, no pool-level lifecycle.
 
-**Problem**: the provider model requires active pools. An HCP management cluster pool must track how many hosted control planes each member is running (capacity), detect when all members are at their density limit (exhaustion), and trigger provisioning of new management clusters (expansion). Each neighborhood type (HCP, Argo, Virt, AI) has its own density constraints and provisioning template.
+**Problem**: the provider model requires active pools. For example, a pool of management clusters hosting control planes could track how many each member is running (capacity), detect when all members are at their configured density limit (exhaustion), and trigger provisioning of new management clusters (expansion). Each neighborhood type (hosted control planes, GitOps, virtualization, AI) has its own capacity constraints and provisioning template.
 
 **Proposal**: a **Pool** is a first-class platform resource, distinct from a workspace's implicit target set. A pool defines:
 
 - **Membership criteria**: which targets belong to this pool (label selector, explicit list, or provisioning-correlated).
-- **Target template**: a provisioning deployment spec that defines what a new pool member looks like. When the pool needs to expand, the platform creates a new provisioning deployment from this template. This ensures every member follows the same well-known configuration (e.g., an Argo pool's template includes best-practice ArgoCD operator installation, network policies, UDN configuration, etc.).
-- **Capacity model**: a pool-type-specific definition of capacity per target. For HCP management clusters: number of hosted control planes (DNS entries consumed, resource utilization). For Argo pools: number of ArgoCD instances. For Virt: VM count, storage utilization, GPU availability. The capacity model is an extension point -- each neighborhood type registers its own definition.
+- **Target template**: a provisioning deployment spec that defines what a new pool member looks like. When the pool needs to expand, the platform creates a new provisioning deployment from this template. This ensures every member follows the same well-known configuration (e.g., an operator-based GitOps pool's template includes the operator installation, network policies, and any service-specific network isolation).
+- **Capacity model**: a pool-type-specific definition of capacity per target. Examples include hosted control plane count, DNS entries consumed, or resource utilization for a management cluster pool; instance count for a GitOps pool; VM count, storage utilization, or GPU availability for a virtualization pool. The capacity model is an extension point -- each neighborhood type registers its own definition.
 - **Expansion policy**: conditions under which new targets should be provisioned (e.g., "when average pool utilization exceeds 80%" or "when no target has capacity for the next allocation"). Contraction policy (draining and deprovisioning underutilized targets) is the inverse.
 - **Health aggregates**: pool-level health derived from member health, capacity utilization, and provisioning status. Visible to the provider administrator.
 
 Placement strategies that target a pool receive the pool's membership rather than a raw workspace target set. The platform's placement view (ID, name, labels) is unchanged -- it remains minimal, governing only when the platform triggers re-evaluation. Capacity-aware placement is addon-driven: a binpacking scored strategy runs as an out-of-process addon, continuously monitoring target capacity through its own data sources (Prometheus, cloud APIs, management cluster metrics), maintaining a live scoring model, and signaling the platform to re-resolve when scores shift. When `Resolve` is called, the strategy returns results from its already-maintained state. The pool provides the membership set; the addon-driven strategy provides the scoring intelligence. This is the existing architecture's intended model for stateful placement, applied to the pool concept.
 
-**Relationship to existing concepts**: a pool is not a workspace. Workspaces define organizational scope and access boundaries. Pools define operational groupings of infrastructure with capacity semantics. A pool's targets may span multiple workspaces (e.g., a global HCP management pool with members in several regional workspaces), or a single workspace may contain targets in multiple pools (management pool + argo pool in the same region).
+**Relationship to existing concepts**: a pool is not a workspace. Workspaces define organizational scope and access boundaries. Pools define operational groupings of infrastructure with capacity semantics. A pool's targets may span multiple workspaces (e.g., a global hosted control plane management pool with members in several regional workspaces), or a single workspace may contain targets in multiple pools (management pool + GitOps pool in the same region).
 
 ## 2. Provider-surfaced managed resource types
 
@@ -48,9 +48,9 @@ Placement strategies that target a pool receive the pool's membership rather tha
 **Proposal**: the provider platform registers **managed resource types** that define the consumer-facing contract. A managed resource type is:
 
 - **Schema**: what the consumer can request (region, version, size, capabilities). Validated by the provider platform on receipt.
-- **Manifest generator (provider-side)**: takes a validated request and generates the low-level manifests for the factory (HostedCluster CRDs, ArgoCD instances, etc.). This is the provider's internal addon.
-- **Placement strategy (provider-side)**: how the generated manifests are scheduled onto the factory pool. Bespoke per managed resource type (binpacking for HCP, different binpacking for Argo, etc.).
-- **Health model (provider-side)**: what "healthy" means for this managed resource type. HCP healthy means the control plane pods are running and the API server is reachable. Argo healthy means the ArgoCD instance is reconciling. Each type defines its own health.
+- **Manifest generator (provider-side)**: takes a validated request and generates the low-level manifests for the factory (e.g., an `ArgoCD` custom resource for an operator-based GitOps service). This is the provider's internal addon.
+- **Placement strategy (provider-side)**: how the generated manifests are scheduled onto the factory pool. Bespoke per managed resource type (e.g., binpacking with different capacity constraints for hosted control plane and GitOps services).
+- **Health model (provider-side)**: what "healthy" means for this managed resource type. For example, a hosted control plane service might check that control plane pods are running and the API server is reachable; a GitOps service might check that its instance is reconciling. Each type defines its own health.
 - **Consumer-facing status**: the subset of health and lifecycle information surfaced back to the consumer. The consumer sees "my managed cluster is Provisioning / Ready / Degraded" without seeing which management cluster it's on or how many pods it has.
 
 ### Direct consumer integration (baseline)
@@ -76,7 +76,7 @@ motivates that mechanism for the provider/consumer/factory chain; the common
 provenance and attestation contracts, rather than the older concrete envelope
 sketched below, govern its representation.
 
-**Problem**: in the provider/consumer/factory chain, the provider platform holds credentials for factory clusters. If the provider platform is compromised, the attacker has those credentials and can create/modify/delete tenant resources on any factory cluster. Per-factory-cluster credential scoping limits blast radius between factories but not within a factory (a single HCP management cluster hosts ~80 tenants' control planes).
+**Problem**: in the provider/consumer/factory chain, the provider platform holds credentials for factory clusters. If the provider platform is compromised, the attacker has those credentials and can create/modify/delete tenant resources on any factory cluster. Per-factory-cluster credential scoping limits blast radius between factories but not within a factory (e.g., a management cluster configured to host control planes for 80 tenants exposes all 80).
 
 **Proposal**: delivery to factory targets requires a **signed operation intent** from the originating consumer platform. The signed intent is:
 
@@ -87,7 +87,7 @@ sketched below, govern its representation.
 
 Both the provider platform's credential AND a valid signed intent are required. Neither alone is sufficient.
 
-**Standing intents for background operations**: reconciliation, upgrades, and healing require the provider to act without the consumer being online. The consumer platform issues standing intents with bounded lifetime (e.g., 24 hours): "tenant Acme approves ongoing management of HCP X." These are automatically renewed by the consumer platform. If the consumer platform stops renewing (outage, compromise), standing intents expire and background operations on that tenant's resources pause until renewal. This is fail-safe: the system degrades toward less access.
+**Standing intents for background operations**: reconciliation, upgrades, and healing require the provider to act without the consumer being online. The consumer platform issues standing intents with bounded lifetime (e.g., 24 hours): "tenant Acme approves ongoing management of hosted control plane X." These are automatically renewed by the consumer platform. If the consumer platform stops renewing (outage, compromise), standing intents expire and background operations on that tenant's resources pause until renewal. This is fail-safe: the system degrades toward less access.
 
 **Delivery envelope extension**: the delivery channel's request message gains an `attestation` field carrying the signed intent. The fleetlet validates this field before invoking the local delivery agent. For non-factory targets (consumer workload clusters), the attestation field is optional -- the existing identity model (token passthrough, delegation SAs) applies.
 
@@ -128,19 +128,19 @@ The vault can also rate-limit credential issuance and alert on anomalous pattern
 
 **Buffered transport (hardened mode)**:
 
-For the highest security requirements, the factory-side agent reads manifests from a buffer (S3, Kafka, NATS) rather than maintaining a persistent connection to the platform. The platform writes to the buffer; the factory-side agent reads from it. Status flows back through the same buffer (or a separate one). No persistent channel exists.
+For the highest security requirements, the factory-side agent reads manifests from a buffer (object storage or a message broker) rather than maintaining a persistent connection to the platform. The platform writes to the buffer; the factory-side agent reads from it. Status flows back through the same buffer (or a separate one). No persistent channel exists.
 
 The buffer is in a **separate security domain** (e.g., a different cloud account) accessible to both the platform and the factory via cross-account credentials, but neither side has network access to the other. If the platform is compromised, the attacker can write to the buffer but cannot reach the factory cluster directly. The factory-side agent validates signed intents before applying anything read from the buffer.
 
-This maps to the fleetlet's existing transport pluggability. The factory fleetlet uses a Kafka, NATS, or S3 transport instead of gRPC/TLS. Locally, the delivery agent sees the same interface. The delivery contract (Manifest x Placement x Rollout, signed intents, status reporting) is identical regardless of transport.
+This maps to the fleetlet's existing transport pluggability. The factory fleetlet uses a buffer transport instead of gRPC/TLS. Locally, the delivery agent sees the same interface. The delivery contract (Manifest x Placement x Rollout, signed intents, status reporting) is identical regardless of transport.
 
-**Trade-offs of buffer mode**: no real-time delivery (polling or message queue latency), no protocol channel (no K8s API access through the platform), delayed status. For factory clusters, these are acceptable -- HCP provisioning is not latency-sensitive, the provider doesn't need to proxy API requests to factory clusters, and status can be delayed by seconds without operational impact.
+**Trade-offs of buffer mode**: no real-time delivery (polling or message queue latency), no protocol channel (no K8s API access through the platform), delayed status. These may be acceptable for a factory pool -- for example, a hosted control plane service whose provisioning and status updates tolerate delays of seconds and whose provider doesn't need to proxy API requests to factory clusters.
 
 ## 6. Break-glass access sessions
 
 **Current state**: if protocol channels are disabled on factory targets (proposal 5), there is no mechanism for a provider operator (SRE) to access a factory cluster through the platform when debugging is needed.
 
-**Problem**: SREs sometimes need direct access to factory clusters (investigating a stuck HCP, diagnosing management cluster issues). A separate, out-of-band break-glass system is the conventional approach, but it fragments audit trails and doesn't compose with the platform's identity model.
+**Problem**: SREs sometimes need direct access to factory clusters (investigating a stuck hosted control plane, diagnosing management cluster issues). A separate, out-of-band break-glass system is the conventional approach, but it fragments audit trails and doesn't compose with the platform's identity model.
 
 **Proposal**: the platform models break-glass access as a first-class resource -- an **access session** with a lifecycle (Requested -> Approved -> Active -> Expired/Revoked).
 
@@ -165,7 +165,7 @@ The flow:
 
 **Current state**: the index channel streams resource deltas from targets to the platform for fleet-wide search. This is designed for consumer-visible clusters.
 
-**Problem**: indexing factory clusters would expose provider-internal state (tenant namespace names, HCP resource configurations, scheduling decisions) through the platform's search API. But some indexing of consumer-visible managed resources is valuable -- the consumer wants to know "what pods are running in my managed cluster" without needing direct API access to the cluster.
+**Problem**: indexing factory clusters would expose provider-internal state (tenant namespace names, hosted control plane resource configurations, scheduling decisions) through the platform's search API. But some indexing of consumer-visible managed resources is valuable -- the consumer wants to know "what pods are running in my managed cluster" without needing direct API access to the cluster.
 
 **Proposal**: distinguish between **substrate indexing** (resources on the factory cluster itself -- management-internal) and **managed target indexing** (resources on clusters that were provisioned for consumers and are consumer-visible).
 
@@ -174,7 +174,7 @@ The flow:
 
 The boundary is clean: factory clusters connect to the provider platform with restricted channel profiles (no index channel). Consumer clusters connect to the consumer platform with full channel profiles (including index channel). The two never overlap -- a cluster is either infrastructure (provider-visible only) or a managed target (consumer-visible).
 
-If the provider needs operational visibility into what's running on factory clusters (e.g., "which management clusters are running HCPs for tenant Acme"), this is a provider-internal query answered by the provider platform's own deployment status and health reporting -- not by indexing the factory cluster's resources through the fleetlet.
+If the provider needs operational visibility into what's running on factory clusters (e.g., "which management clusters are hosting control planes for tenant Acme"), this is a provider-internal query answered by the provider platform's own deployment status and health reporting -- not by indexing the factory cluster's resources through the fleetlet.
 
 ## 8. Provider-adjacent domain-specific abstractions
 
@@ -186,7 +186,7 @@ If the provider needs operational visibility into what's running on factory clus
 
 **Managed resource type**: a registered type with a schema (consumer-facing request format), a manifest generator (provider-side rendering), a placement strategy (provider-side scheduling), and a health model (provider-side health definition with consumer-facing status projection). This replaces the pattern of manually wiring a consumer-side addon, a provider-side addon, and a cross-platform delivery path. The kernel handles the wiring; the extension point is "define what this managed resource looks like."
 
-**Neighborhood**: a named grouping of pools that share a workload type, lifecycle policy, and security profile. A neighborhood defines: which managed resource type it serves, which pools it uses, what the factory target profile is (restricted channels, buffer mode, etc.), and what the upgrade lifecycle looks like (management clusters upgrade more frequently than workload clusters). Neighborhoods are the structural equivalent of Derek Carr's "city planning" metaphor -- each neighborhood has a purpose, and the platform guides the user toward planning them.
+**Neighborhood**: a named grouping of pools that share a workload type, lifecycle policy, and security profile. A neighborhood defines: which managed resource type it serves, which pools it uses, what the factory target profile is (restricted channels, buffer mode, etc.), and what the upgrade lifecycle looks like (e.g., a service may upgrade management clusters more frequently than workload clusters). Neighborhoods are the structural equivalent of Derek Carr's "city planning" metaphor -- each neighborhood has a purpose, and the platform guides the user toward planning them.
 
 **Target profile**: a configuration that determines which fleetlet channels are available, which transport is used, and what validation happens at the fleetlet layer. Three built-in profiles: **consumer** (full channels, including protocol and index), **factory** (delivery + status only, signed intent validation, no protocol channel), and **hardened factory** (buffered transport, no persistent connection). Custom profiles are possible. The target profile is assigned per-pool or per-target and enforced by the fleetlet.
 
@@ -206,7 +206,7 @@ What is the exact protocol for standing intent renewal? Does the consumer platfo
 
 ### Vault integration specifics
 
-Which vault systems should be supported for dual-credential factory credential retrieval? HashiCorp Vault, cloud-native KMS (AWS KMS, Azure Key Vault), or a platform-internal credential service? How are vault policies provisioned and managed -- are they part of the pool template (automatically configured when a new factory cluster joins a pool)?
+Which vault systems should be supported for dual-credential factory credential retrieval? An external vault, a cloud key management service, or a platform-internal credential service? How are vault policies provisioned and managed -- are they part of the pool template (automatically configured when a new factory cluster joins a pool)?
 
 ### Provider operational tooling
 

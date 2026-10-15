@@ -14,7 +14,6 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	kindlog "sigs.k8s.io/kind/pkg/log"
 
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
@@ -24,14 +23,11 @@ import (
 )
 
 // buildTrustBundlePlacement returns a static placement strategy for trust-bundle
-// delivery when kind and/or gcphcp consumers are enabled.
-func buildTrustBundlePlacement(enabledAddons map[AddonName]bool, gcphcpTargetID string) domain.PlacementStrategySpec {
-	targets := make([]domain.TargetID, 0, 2)
+// delivery when the Kind consumer is enabled.
+func buildTrustBundlePlacement(enabledAddons map[AddonName]bool) domain.PlacementStrategySpec {
+	targets := make([]domain.TargetID, 0, 1)
 	if enabledAddons[AddonKind] {
 		targets = append(targets, "kind-local")
-	}
-	if enabledAddons[AddonGCPHCP] && gcphcpTargetID != "" {
-		targets = append(targets, domain.TargetID(gcphcpTargetID))
 	}
 	if len(targets) == 0 {
 		return domain.PlacementStrategySpec{}
@@ -42,17 +38,15 @@ func buildTrustBundlePlacement(enabledAddons map[AddonName]bool, gcphcpTargetID 
 	}
 }
 
-// assembleProductionAddons builds production kind/kubernetes/gcphcp specs.
+// assembleProductionAddons builds production Kind, Kubernetes, and scripted specs.
 // Agent construction stays at the composition edge because agents have
-// external dependencies (Docker, cloud creds, etc.) that AddonManager
+// external dependencies (container runtimes, credentials, etc.) that AddonManager
 // should not own; Enable/Connect only register capabilities and wire
 // schemas/targets/agents into the running graph.
-// gcphcpCfg is required when AddonGCPHCP is enabled (parsed once by Start).
 func assembleProductionAddons(
 	deps AddonDeps,
 	keyResolver *domain.KeyResolver,
 	oidcHTTPClient *http.Client,
-	gcphcpCfg *gcphcpaddon.Config,
 ) ([]AddonSpec, error) {
 	enabled := deps.Config.AddonSet()
 	var specs []AddonSpec
@@ -124,45 +118,6 @@ func assembleProductionAddons(
 			Connect: application.ConnectInput{
 				Agent:   kubeAgent,
 				Schemas: []domain.ExtensionResourceSchema{kubernetesaddon.InventorySchema()},
-			},
-		})
-	}
-
-	if enabled[AddonGCPHCP] {
-		if gcphcpCfg == nil {
-			return nil, fmt.Errorf("gcphcp addon is enabled but config was not provided to assembly")
-		}
-		agentDeps := gcphcpaddon.AgentDeps{
-			Gateway:  gcphcpCfg.Gateway,
-			Observer: gcphcpaddon.NewSlogAgentObserver(deps.Logger),
-			Reporter: deps.DeliveryReporter,
-		}
-		if deps.Indexing != nil {
-			agentDeps.IndexingRuntime = deps.Indexing.Runtime
-		}
-		gcphcpConcreteAgent := gcphcpaddon.NewAgent(agentDeps)
-		if gcphcpConcreteAgent == nil {
-			return nil, fmt.Errorf("gcphcp delivery agent is nil")
-		}
-		activeTarget := gcphcpCfg.Targets[0]
-		targetID := domain.TargetID(activeTarget.ID)
-		specs = append(specs, AddonSpec{
-			Descriptor: gcphcpaddon.Descriptor(),
-			Connect: application.ConnectInput{
-				Agent: gcphcpConcreteAgent,
-				Targets: []domain.TargetInfo{domain.NewTargetInfo(
-					targetID,
-					gcphcpaddon.TargetType,
-					fmt.Sprintf("GCP HCP %s/%s", activeTarget.GCPProject, activeTarget.Region),
-					domain.TargetStateReady,
-					nil,
-					activeTarget.TargetProperties(),
-					[]domain.ManifestType{gcphcpaddon.ClusterManifestType, domain.TrustBundleManifestType},
-				)},
-				Schemas: []domain.ExtensionResourceSchema{gcphcpaddon.Schema(targetID)},
-			},
-			AfterConnectBestEffort: func(ctx context.Context) error {
-				return gcphcpConcreteAgent.RecoverActiveDeliveries(ctx, []domain.TargetID{targetID})
 			},
 		})
 	}

@@ -45,7 +45,7 @@ func TestRegisteredSelfTarget_DeriveStrategies(t *testing.T) {
 	intent := domain.ResourceIntent{
 		ExtensionResourceUID: uid,
 		Version:              1,
-		Spec:                 json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+		Spec:                 json.RawMessage(`{"provider":"kind","version":"4.16.2"}`),
 		CreatedAt:            time.Now(),
 	}
 

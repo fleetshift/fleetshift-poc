@@ -61,7 +61,7 @@ Delivery capability means the addon can apply and remove manifests via server-si
 
 At Connect time, the addon provides its delivery agent and the inventory-only schema for `Object`. The platform validates delivery and registers the schema for reporting authorization. Indexing runtime lifecycle is **not** part of Connect: the addon manager does not start or stop indexers.
 
-In the current POC, the descriptor is compiled into the server binary. Enable and Connect happen at startup. The in-process indexing runtime is composed in server wiring and injected into producers (Kind, GCP HCP) that start and stop indexers. In a future external agent model, the same inventory report contract would be used over a transport, and an agent pod on the target cluster would own its own lifecycle rather than being hosted in-process.
+In the current POC, the descriptor is compiled into the server binary. Enable and Connect happen at startup. The in-process indexing runtime is composed in server wiring and injected into producers (Kind) that start and stop indexers. In a future external agent model, the same inventory report contract would be used over a transport, and an agent pod on the target cluster would own its own lifecycle rather than being hosted in-process.
 
 The addon does not declare a managed resource capability for watched cluster objects. Kubernetes delivery targets are registered through the platform's target management / delivery-output path. Watched objects are inventory-only extension resources under `kubernetes.fleetshift.io/Object`.
 
@@ -102,7 +102,7 @@ In the in-process model, the platform server hosts multiple per-target indexers 
 - **Client construction**: builds Kubernetes clients from API server, CA, and bearer credential
 - **Unexpected-exit restart**: when a vault-backed credential ref is present, a small number of local restarts with backoff; re-resolves the credential from vault (raw token bytes are not retained after start handoff)
 
-Producers own start/stop for provisioned clusters: Kind and GCP HCP ensure an indexer before reporting delivery success, and stop it at cluster teardown. After addon Connect, a one-shot startup replay lists persisted kubernetes targets with resolvable credentials and starts indexers so server restart recovers indexing. There is no store-driven reconcile loop and no orchestration hooks for indexing.
+Producers own start/stop for provisioned clusters: Kind ensures an indexer before reporting delivery success, and stops it at cluster teardown. After addon Connect, a one-shot startup replay lists persisted kubernetes targets with resolvable credentials and starts indexers so server restart recovers indexing. There is no store-driven reconcile loop and no orchestration hooks for indexing.
 
 The host does not manage inventory cleanup. Stopping an indexer only stops watching; target-scoped indexed inventory cleanup after target deletion is currently deferred (stale inventory can remain until a future cleanup path lands).
 
@@ -244,7 +244,7 @@ Recursive owner traversal is computed automatically for all resources via the co
 
 ### Edge type extensibility
 
-Edge types are strings, not a closed enum. Future addons or schema extensions can register custom edge types (e.g., a GCP addon could add `hostedIn`) without modifying the core model.
+Edge types are strings, not a closed enum. Future addons or schema extensions can register custom edge types (e.g., a cloud-provider addon could add `hostedIn`) without modifying the core model.
 
 ### NodeStore
 
@@ -452,7 +452,7 @@ All other resources discovered on the cluster receive base extraction only — i
 
 The two-tier model and allow/deny configuration address the core extensibility gap for controlling what is watched. However, enriched extraction rules (JSONPath fields, hooks) are compiled into the binary. Whether enriched schema entries should be configurable at runtime — via a configuration API, a custom resource, or similar — remains open. Allow/deny lists and namespace filters are modeled in index config, but producers currently start with the default schema only, so runtime allow/deny/namespace overrides are not yet wired.
 
-Where that config lives matters. Storing index filters or schema on target properties is a poor fit today: Kind and GCP HCP rebuild target properties on every delivery (full replace, not merge), so operator-set indexing config would be wiped on the next reconcile. An addon-level config (applied to every kubernetes target, similar to the GCP HCP addon config file pattern) avoids that clobber; per-target overrides likely need a different durable mechanism than the properties map. Also consider whether CEL should be used in addition to JSONPath (platform already utilizes CEL), or whether we should completely replace JSONPath with CEL.
+Where that config lives matters. Storing index filters or schema on target properties is a poor fit today: Kind rebuilds target properties on every delivery (full replace, not merge), so operator-set indexing config would be wiped on the next reconcile. An addon-level config (applied to every kubernetes target) avoids that clobber; per-target overrides likely need a different durable mechanism than the properties map. Also consider whether CEL should be used in addition to JSONPath (platform already utilizes CEL), or whether we should completely replace JSONPath with CEL.
 
 If enriched schema becomes runtime-configurable, the platform needs extraction guardrails for sensitive built-ins. ConfigMaps and Secrets have no default enriched schema entry today (base tier only). A configurable schema must not allow callers to pull `data` (or equivalent) into observation — for example by denying custom field extraction on those types, or by an explicit trust/authorization model that makes such extraction safe.
 
@@ -483,14 +483,14 @@ Producers call `EnsureIndexer` before reporting `Delivered`, and a one-shot star
 What remains open are crash and signal windows around that handshake:
 
 - **Startup-replay miss**: a kubernetes target committed after the replay's final list scan stays unindexed until a later `EnsureIndexer` or process restart + replay. Replay is one-shot; it does not poll.
-- **Crash after Ensure, before terminal `ReportResult`**: the in-process indexer dies with the server. The Kind cluster may already exist, but delivery is not terminal, outputs are not committed, and startup replay has nothing to list. The workflow is still waiting for completion. GCP HCP can resume via `RecoverActiveDeliveries`; Kind does not yet have that parity, so this window can stall until some other recovery path lands.
+- **Crash after Ensure, before terminal `ReportResult`**: the in-process indexer dies with the server. The Kind cluster may already exist, but delivery is not terminal, outputs are not committed, and startup replay has nothing to list. The workflow is still waiting for completion. Kind has no active-delivery recovery yet, so this window can stall until a recovery path lands.
 - **Non-atomic `ReportResult` commit vs workflow signal**: delivery state is persisted, then the fulfillment signal is sent in a separate step. If the process dies after committing `Delivered` but before the signal is observed, `ProcessDeliveryOutputs` (vault + target registration) may never run. Startup replay cannot start an indexer without those outputs. By contrast, once a completion signal is durably in workflow history, a failed or interrupted `ProcessDeliveryOutputs` activity is retried by the workflow — that case does not depend on startup replay.
 
 Deferred target-scoped cleanup amplifies the worst windows: inventory written by a briefly running indexer can remain if teardown or handshake recovery never cleans it up.
 
 ### Kind same-generation token remint restarts the indexer
 
-On a same-generation Kind Deliver (cluster already owned; no recreate), `ensureCluster` still mints a new platform ServiceAccount token via TokenRequest. Producer `EnsureIndexer` then sees a fingerprint change because the runtime fingerprint digests raw credential bytes, and stop-and-replaces a healthy indexer. Options include reusing a resolvable vault-backed token on same-generation ensure, fingerprinting by secret-ref identity (with a clear credential-rotation story), or skipping `EnsureIndexer` when fingerprint-relevant inputs are unchanged. Any fix should stay consistent with GCP HCP's Ensure path and vault-backed unexpected-exit restart.
+On a same-generation Kind Deliver (cluster already owned; no recreate), `ensureCluster` still mints a new platform ServiceAccount token via TokenRequest. Producer `EnsureIndexer` then sees a fingerprint change because the runtime fingerprint digests raw credential bytes, and stop-and-replaces a healthy indexer. Options include reusing a resolvable vault-backed token on same-generation ensure, fingerprinting by secret-ref identity (with a clear credential-rotation story), or skipping `EnsureIndexer` when fingerprint-relevant inputs are unchanged. Any fix should stay consistent with vault-backed unexpected-exit restart.
 
 ### Logical object naming and incarnation
 

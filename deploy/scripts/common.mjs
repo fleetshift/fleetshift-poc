@@ -83,7 +83,6 @@ export function importKeyValueArgs(args) {
     "KC_CLUSTER_API",
     "CLUSTER_NAME",
     "ACME_EMAIL",
-    "GCPHCP_ENABLED",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
     "POSTGRES_DB",

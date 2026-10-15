@@ -1,8 +1,8 @@
 # FleetShift all-in-one image
 
 Single container (`quay.io/stolostron/fleetshift`) with API, baked-in UI, and
-peer Dex under s6-overlay. Documented and tested with **podman**. This is
-**not** the multi-service compose harness in
+peer Dex under s6-overlay. Documented and tested with **podman**. To launch
+this image through the Podman compose stack, see
 [deploy/podman/](../podman/README.md).
 
 Sandbox for demos, bootstrapping, and testing — not a production deployment.
@@ -10,6 +10,8 @@ Packaging owns PID 1, peer Dex (default), sandbox PKI, and the ordinary
 `fleetshift serve` argv. The server stays IdP-agnostic.
 
 ## Build
+
+### Podman
 
 ```bash
 npx nx run image:aio
@@ -27,6 +29,8 @@ podman build -f Dockerfile.fleetshift \
 ```
 
 ## Quick start (Dex-on)
+
+### Podman
 
 Bare run needs **no** OIDC flags. Packaging starts peer Dex behind the AIO TLS
 edge at `https://fleetshift-sandbox.localhost:8085/idp` and fills AuthMethod/UI
@@ -91,8 +95,8 @@ email:
 ## Packaging defaults
 
 AIO fills omitted AuthMethod/UI fields. These are **packaging** defaults, not
-`fleetshift serve` binary defaults. Compose/Kubernetes use a different config
-surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
+`fleetshift serve` binary defaults. The [OpenShift deployment example](../openshift/README.md)
+uses a different config surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 
 **Required from you** — everything else may be left unset.
 
@@ -100,7 +104,6 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 |---|---|
 | Dex-on (default) | nothing |
 | Dex-off | `OIDC_ISSUER_URL` |
-| Dex-off + GCP HCP | `OIDC_ISSUER_URL` and `GCPHCP_GATEWAY_URL` (or `GCPHCP_CONFIG`) |
 | Kind | a live engine socket mounted at `CONTAINER_HOST` |
 
 **Optional — packaging fills if omitted.** Set an env var only to override.
@@ -117,7 +120,7 @@ surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Public-key claim | `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` | unset (registry mapping is used instead) |
 | OIDC CA | `OIDC_CA_FILE` | sandbox CA on Dex-on. Dex-off: unset unless discovery/TLS needs non-system trust |
 | Log level | `LOG_LEVEL` | `error`. One control for FleetShift, peer Dex, and s6 lifecycle verbosity (`debug`, `info`, `warn`, `error`) |
-| Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` (`gcphcp` is appended when gateway/config is set) |
+| Addons | `FLEETSHIFT_SERVER_ADDONS` | `kind,kubernetes` |
 | Container socket | `CONTAINER_HOST` | image default `unix:///var/run/docker.sock`. Override only if the mount path differs |
 | Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | Dex-on + live socket: `fleetshift:8085`. Set empty to disable. Not written on Dex-off |
 
@@ -153,6 +156,8 @@ and forwards the resolved serve argv. The welcome banner still waits for public
 `/readyz`, then shows the FleetShift URL and external-IdP text without demo
 Dex credentials.
 
+### Podman
+
 Minimal:
 
 ```bash
@@ -186,6 +191,8 @@ To use a public-key claim instead of registry mapping, omit
 `-e OIDC_PUBLIC_KEY_CLAIM_EXPRESSION=claims.spk`.
 
 ## With kind
+
+### Podman
 
 Privileged + host container socket (full control of the host engine —
 local/dev only). Create the `kind` network once if needed:
@@ -233,33 +240,13 @@ podman run -d \
   quay.io/stolostron/fleetshift:latest
 ```
 
-## With GCP HCP
-
-GCP HCP requires an external OIDC issuer (peer Dex is not supported for this
-addon). Set `OIDC_ISSUER_URL` so packaging skips Dex. Supply
-`GCPHCP_GATEWAY_URL` alone to enable the addon. Optional `GCPHCP_*` overrides
-use shared renderer defaults:
-
-```bash
-podman run -d \
-  -p 127.0.0.1:8085:8085 \
-  -p 127.0.0.1:50051:50051 \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/fleetshift \
-  -e GCPHCP_GATEWAY_URL=https://your-cls-gateway \
-  quay.io/stolostron/fleetshift:latest
-```
-
-Combine with the kind flags above when you also need local cluster provisioning
-(still keep `OIDC_ISSUER_URL`). The AIO UI remains
-`https://fleetshift-sandbox.localhost:8085`; register that origin,
-`/app/auth/callback`, and `/app/silent-renew.html` on the external IdP. `/idp`
-is not used in this mode.
-
 ## Fleetctl against Dex-on
 
 Host CLIs do not inherit the browser certificate exception. Copy the sandbox CA
 for a scoped `--oidc-ca-file` only — do not install it into the system trust
 store:
+
+### Podman
 
 ```bash
 podman cp <container>:/data/sandbox/pki/ca.crt .
@@ -298,7 +285,7 @@ the AIO log-level wrapper, which `exec`s `/init` so s6 remains PID 1.
 | `cmd/aio-init` | Init helper: Dex-on/off branch, PKI, Dex config, serve argv, hosts alias, public.env |
 | `cmd/aio-proxy` | TLS edge: terminates the gateway cert and reverse-proxies Dex and FleetShift |
 | `cmd/kind-loopback-forward` | TCP proxy copied onto kind control-planes for the public origin |
-| `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `gcphcp`, `kind`, `hosts`) |
+| `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `kind`, `hosts`) |
 | `internal/aioproxy` | Reverse-proxy implementation used by `aio-proxy` |
 | `internal/loopbackforward` | Proxy implementation used by `kind-loopback-forward` |
 | `s6/` | s6-overlay v3 service defs (copied to `/etc/s6-overlay/`) |

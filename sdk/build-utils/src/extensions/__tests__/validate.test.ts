@@ -37,9 +37,9 @@ const validSetup: SetupProperties = {
 };
 
 const validClusterProvider: ClusterProviderProperties = {
-  id: "gcphcp",
-  label: "GCP HCP",
-  description: "Create a GCP cluster",
+  id: "kind",
+  label: "Kind",
+  description: "Create a local Kind cluster",
   icon: { $codeRef: "Card.Icon" },
   card: { $codeRef: "Card.default" },
   wizard: { $codeRef: "Wizard.default" },
@@ -272,8 +272,8 @@ describe("validateClusterProviderProperties", () => {
 });
 
 const validOnboardingAction: OnboardingActionProperties = {
-  id: "gcphcp-connect",
-  label: "GCP HCP",
+  id: "kind-connect",
+  label: "Kind",
   icon: { $codeRef: "Icon.default" },
   card: { $codeRef: "Card.default" },
   form: { $codeRef: "Form.default" },

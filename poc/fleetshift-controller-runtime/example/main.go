@@ -32,7 +32,7 @@ func main() {
 	fake := platform.NewFake()
 	target := contract.TargetInfo{
 		ID:   "demo-target",
-		Type: "gcphcp",
+		Type: "example",
 		Name: "demo",
 	}
 
@@ -82,7 +82,7 @@ func main() {
 	deliveryID := contract.DeliveryID("example-1")
 	logger.Info("dispatching delivery", "id", deliveryID)
 	if err := fake.Dispatch(ctx, prov, target, deliveryID, []contract.Manifest{{
-		ManifestType: "api.gcphcp.cluster",
+		ManifestType: "api.example.cluster",
 		Raw:          manifest,
 	}}, contract.DeliveryAuth{Token: "example-token"}, 1, contract.DeliveryOperationDeliver); err != nil {
 		logger.Error(err, "dispatch")

@@ -11,7 +11,7 @@ import (
 )
 
 // Target property keys used by both delivery and in-process indexing.
-// Provisioners (kind, gcphcp) write these onto kubernetes targets so one
+// Provisioners (such as Kind) write these onto kubernetes targets so one
 // target description drives both paths.
 const (
 	// PropAPIServer is the Kubernetes API server URL.

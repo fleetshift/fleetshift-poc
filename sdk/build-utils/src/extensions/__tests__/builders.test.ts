@@ -184,15 +184,15 @@ describe("createSetup", () => {
 describe("createClusterProvider", () => {
   it("returns extension with correct type", () => {
     const ext = createClusterProvider({
-      id: "gcphcp",
-      label: "GCP HCP",
-      description: "Create a GCP cluster",
-      icon: { $codeRef: "Card.GcpIcon" },
+      id: "kind",
+      label: "Kind",
+      description: "Create a local Kind cluster",
+      icon: { $codeRef: "Card.KindIcon" },
       card: { $codeRef: "Card.default" },
       wizard: { $codeRef: "Wizard.default" },
     });
     expect(ext.type).toBe("fleetshift.cluster-provider");
-    expect(ext.properties.icon).toEqual({ $codeRef: "Card.GcpIcon" });
+    expect(ext.properties.icon).toEqual({ $codeRef: "Card.KindIcon" });
   });
 
   it("throws on missing description", () => {
@@ -225,22 +225,22 @@ describe("createClusterProvider", () => {
 describe("createOnboardingAction", () => {
   it("returns extension with correct type", () => {
     const ext = createOnboardingAction({
-      id: "gcphcp-connect",
-      label: "GCP HCP",
+      id: "kind-connect",
+      label: "Kind",
       icon: { $codeRef: "Icon.default" },
       card: { $codeRef: "Card.default" },
       form: { $codeRef: "Form.default" },
     });
     expect(ext.type).toBe("fleetshift.onboarding-action");
-    expect(ext.properties.id).toBe("gcphcp-connect");
+    expect(ext.properties.id).toBe("kind-connect");
     expect(ext.properties.card).toEqual({ $codeRef: "Card.default" });
     expect(ext.properties.form).toEqual({ $codeRef: "Form.default" });
   });
 
   it("preserves optional overviewCta", () => {
     const ext = createOnboardingAction({
-      id: "gcphcp-connect",
-      label: "GCP HCP",
+      id: "kind-connect",
+      label: "Kind",
       icon: { $codeRef: "Icon.default" },
       card: { $codeRef: "Card.default" },
       form: { $codeRef: "Form.default" },
@@ -251,8 +251,8 @@ describe("createOnboardingAction", () => {
 
   it("omits overviewCta when not provided", () => {
     const ext = createOnboardingAction({
-      id: "gcphcp-connect",
-      label: "GCP HCP",
+      id: "kind-connect",
+      label: "Kind",
       icon: { $codeRef: "Icon.default" },
       card: { $codeRef: "Card.default" },
       form: { $codeRef: "Form.default" },

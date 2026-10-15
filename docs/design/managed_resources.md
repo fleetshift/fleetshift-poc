@@ -6,21 +6,21 @@ How do we offer an extensible core, but allow addons to offer "managed resource"
 
 Example: imagine a full featured cluster management addon. It should handle many domain specific use cases:
 
-- Provision & configure managed clusters directly targeting managed provider APIs, likely with passthrough auth (e.g. ROSA or ARO clusters)
-- Provision & configure clusters through native self managed options (e.g. wrapping openshift assisted installer)
-- Provision & configure clusters through operators like CAPI or HyperShift
+- Provision & configure managed clusters directly targeting managed provider APIs, likely with passthrough auth (e.g. managed Kubernetes clusters)
+- Provision & configure clusters through native self managed options (e.g. bootstrapping nodes with kubeadm)
+- Provision & configure clusters through operators like CAPI
 - Import existing clusters
 - Upgrade these clusters (either individually or through a campaign, see [https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81](https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81) )
 - Full exploitation of the core placement and rollout strategy abstractions for progressive delivery, maintenance windows, etc., encoding specific cluster management best practices
 - Assist in knowable operational issues in the course of provisioning, upgrades, or other configuration changes
 - Manage cluster pooling strategies
 - View the state of clusters and their underlying nodes (inventory)
-- Integration with other cluster-related addons, like ACS, MCOA, ODF, ...
+- Integration with other cluster-related addons for security, observability, or storage
 
 You could imagine similar domain specific experiences for other managed resource types:
 
 - VMs
-- Argo instances
+- GitOps instances
 - Model serving
 - ...
 
@@ -35,7 +35,7 @@ These are the consumer-facing "nouns" of the platform, in contrast to the addon-
 
 Managed resources are driven by the core Fulfillment abstraction. A managed resource is a *registered resource type* (as in, a manifest resource type). An addon defines how Fulfillments are derived from managed resources. In a typical case, a managed resource maps to a single, immediate placement with the addon itself as the target.
 
-Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a ROSA cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1/clusters`, while the shared platform identity lives separately at `//fleetshift.io/clusters/{id}`.**)
+Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a managed Kubernetes cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1/clusters`, while the shared platform identity lives separately at `//fleetshift.io/clusters/{id}`.**)
 
 #### Consumer-facing managed resource
 
@@ -44,13 +44,13 @@ POST /apis/kind.fleetshift.io/v1/clusters
 {
   "name": "prod-us-east-1",
   "spec": {
-    "provider": "rosa",
+    "provider": "example",
     "version": "4.16.2",
     "region": "us-east-1",
     "compute_pools": [
       {
         "name": "workers",
-        "instance_type": "m5.2xlarge",
+        "instance_type": "large",
         "replicas": 3,
         "autoscaling": { "min_replicas": 3, "max_replicas": 12 }
       }
@@ -62,7 +62,7 @@ POST /apis/kind.fleetshift.io/v1/clusters
     },
     "encryption": {
       "etcd_encryption": true,
-      "kms_key_arn": "arn:aws:kms:us-east-1:123456789012:key/mrk-abc123"
+      "key_reference": "keys/etcd-key"
     }
   }
 }
@@ -81,7 +81,7 @@ The consumer's agent signs this request. The platform validates the spec against
     {
       "type": "Provisioning",
       "status": "True",
-      "message": "Creating ROSA cluster infrastructure"
+      "message": "Creating cluster infrastructure"
     }
   ],
   "create_time": "2026-04-21T14:30:00Z",
@@ -207,7 +207,7 @@ sequenceDiagram
     participant Pipeline as Orchestration Pipeline
     participant Fleetlet as Addon Fleetlet
     participant Addon as Cluster Mgmt Addon
-    participant Cloud as Cloud Provider (ROSA API)
+    participant Cloud as Cloud Provider API
 
     User->>User: Sign managed resource spec
     User->>Platform: POST /apis/kind.fleetshift.io/v1/clusters (signed)
@@ -224,7 +224,7 @@ sequenceDiagram
     Fleetlet->>Addon: Delivery channel
 
     Addon->>Addon: Interpret resource spec
-    Addon->>Cloud: Create ROSA HostedCluster,<br/>configure networking, KMS, etc.
+    Addon->>Cloud: Create cluster,<br/>configure networking, KMS, etc.
     Cloud-->>Addon: Cluster provisioning started
 
     Addon-->>Fleetlet: State: PROVISIONING
@@ -248,7 +248,7 @@ sequenceDiagram
 
 
 
-The key property: the platform is a courier throughout. It stores the user's signed intent, mechanically derives a Fulfillment, and delivers the resource spec to the addon through the standard pipeline. The addon — a separate process with its own identity — is the only component that interprets the spec and interacts with the cloud provider. Provenance chains from the user's signature through the managed resource to the derived Fulfillment to the delivery attestation, without the platform ever needing to understand what a "ROSA cluster" is.
+The key property: the platform is a courier throughout. It stores the user's signed intent, mechanically derives a Fulfillment, and delivers the resource spec to the addon through the standard pipeline. The addon — a separate process with its own identity — is the only component that interprets the spec and interacts with the cloud provider. Provenance chains from the user's signature through the managed resource to the derived Fulfillment to the delivery attestation, without the platform ever needing to understand what a "managed cluster" is.
 
 ### Architectural layering
 
@@ -347,11 +347,11 @@ TODO: Reconcile between delivery conditions and inventoried conditions? Both are
 
 ### Inventory
 
-Inventory is the system for all historical observations — a point-in-time report of what an observer saw about a resource. It covers both managed and inventory resources. Comparable to ACM Search (stolostron/search-v2-api) in scope, but optimized for observation history and health querying.
+Inventory is the system for all historical observations — a point-in-time report of what an observer saw about a resource. It covers both managed and inventory resources, with a focus on observation history and health querying.
 
 Inventory stores per-resource projections keyed by extension resource identity and linked to the platform resource via identity equivalence. Management and inventory are composable type capabilities: inventory-only types declare inventory without management; managed types may also declare inventory and carry observed state on the same extension resource. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the resource identity model and capability axes.
 
-Inventory is a projection of what the addon extracts from the source resource, not a literal copy of that source (comparable to ACM search collectors extracting a subset of K8s fields). Once reported, those fields are the platform-held resource data — available the same way on typed Get/List and on `queryResources`.
+Inventory is a projection of what the addon extracts from the source resource, not a literal copy of that source (e.g., collectors extracting a subset of K8s fields). Once reported, those fields are the platform-held resource data — available the same way on typed Get/List and on `queryResources`.
 
 Each inventory item has:
 
@@ -366,7 +366,7 @@ For managed resources, the managed thing itself may have an inventory projection
 
 **Condition types** are both platform-defined and addon-defined. The platform defines conventional types (`Lifecycle`, `Healthy`) for universal fleet dashboards. Addons define domain-specific types (`ReplicationHealthy`, `KeyValid`, `Progressing`) without platform coordination. The platform defines conventions, not constraints — ecosystem conventions emerge from usage.
 
-Validated against real cloud APIs: EKS (health issues list), GKE (gRPC-coded conditions), AKS (provisioningState/powerState only), RDS (health encoded in status enum). Each maps onto the inventory shape with addon-side translation. The inconsistency across cloud APIs is the reason conditions exist as a platform abstraction.
+Validated against cloud APIs with health issue lists, gRPC-coded conditions, provisioning/power state only, or health encoded in a status enum. Each maps onto the inventory shape with addon-side translation. The inconsistency across cloud APIs is the reason conditions exist as a platform abstraction.
 
 #### Managed resource API projection
 
@@ -390,7 +390,7 @@ GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
                   [composition of these sources: TBD]
 ```
 
-> OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (ACS in a relational db, MCOA in prometheus/thanos, ...).
+> OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (a vulnerability scanner in a relational db, an observability addon in a time-series database, ...).
 
 #### Managed resource HEAD table
 

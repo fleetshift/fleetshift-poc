@@ -12,7 +12,7 @@ FleetShift's UI is a plugin shell — plugins contribute pages, wizards, and act
 
 ![Search proposal](images/search-proposal.png)
 
-Features and their extensions are grouped in a tree: the parent feature ("Create Cluster") with child extensions ("Create Kind cluster", "Create GCP HCP cluster") indented beneath it. The search index is built from plugin extension metadata — each `fleetshift.module` declares `id`, `description`, `keywords`, and `extensionPoints` which the shell indexes automatically.
+Features and their extensions are grouped in a tree: the parent feature ("Create Cluster") with child extensions ("Create Kind cluster", "Create Example provider cluster") indented beneath it. The search index is built from plugin extension metadata — each `fleetshift.module` declares `id`, `description`, `keywords`, and `extensionPoints` which the shell indexes automatically.
 
 ## Goal
 
@@ -130,6 +130,8 @@ interface SearchReservedProperties {
 }
 ```
 
+The example provider below is illustrative; it does not represent an implemented provisioner.
+
 ## Feature Graph
 
 The plugin registry forms a directed graph: plugins declare features (`fleetshift.module`), features declare extension points, and other plugins contribute extensions against those points.
@@ -142,8 +144,8 @@ graph TD
         F --> EP
     end
 
-    subgraph "gcphcp-plugin (key: gcphcp)"
-        E1["fleetshift.cluster-provider<br/>id: gcphcp<br/>label: GCP HCP"]
+    subgraph "example-plugin (key: example)"
+        E1["fleetshift.cluster-provider<br/>id: example<br/>label: Example provider"]
     end
 
     subgraph "kind-plugin (key: kind)"
@@ -178,14 +180,14 @@ Extension routes are composed by combining the feature's base path with the exte
 ```mermaid
 flowchart LR
     LABEL["Feature label:<br/>'Create Cluster'"] -->|slug| BASE["/create-cluster"]
-    TO["Extension to:<br/>{ pathname: 'gcphcp' }"] --> REL["gcphcp"]
-    BASE --> FULL["/create-cluster/gcphcp"]
+    TO["Extension to:<br/>{ pathname: 'example' }"] --> REL["example"]
+    BASE --> FULL["/create-cluster/example"]
     REL --> FULL
 ```
 
 ## Example: Cluster Creation
 
-The "Create Cluster" page lives at `/create-cluster` (slug derived from label). It shows a list of available cluster providers. Selecting a provider navigates to a sub-path like `/create-cluster/gcphcp`. Provider plugins extend this feature by registering a `fleetshift.cluster-provider` extension.
+The "Create Cluster" page lives at `/create-cluster` (slug derived from label). It shows a list of available cluster providers. Selecting a provider navigates to a sub-path like `/create-cluster/example`. Provider plugins extend this feature by registering a `fleetshift.cluster-provider` extension.
 
 ### Feature: Create Cluster page (day-one-plugin)
 
@@ -212,7 +214,7 @@ Plugin key: `"day-one"`, extension id: `"create-cluster"` → global feature ID:
 
 The Go backend resolves the route: `"Create Cluster"` → slug `create-cluster` → base path `/create-cluster`. The shell composes the global feature ID from the plugin registry key and the extension's local `id`.
 
-### Extension: GCP HCP provider (gcphcp-plugin)
+### Extension: Example provider provider (example-plugin)
 
 The extension type is `fleetshift.cluster-provider` — matching the extension point declaration. Domain-specific properties (`card`, `wizard`) are defined by the extension point contract. Search properties (`searchResult`, `searchIcon`) are reserved and handled by the shell.
 
@@ -220,30 +222,30 @@ The extension type is `fleetshift.cluster-provider` — matching the extension p
 {
   "type": "fleetshift.cluster-provider",
   "properties": {
-    "id": "gcphcp",
-    "label": "GCP HCP",
-    "description": "Managed OpenShift cluster on Google Cloud Platform",
-    "keywords": ["gcp", "google cloud", "hosted control plane", "managed"],
-    "to": { "pathname": "gcphcp" },
+    "id": "example",
+    "label": "Example provider",
+    "description": "Example Kubernetes cluster provider",
+    "keywords": ["kubernetes", "cluster", "example"],
+    "to": { "pathname": "example" },
 
-    "icon": { "$codeRef": "GcpHcpProviderCard.GcpHcpIcon" },
-    "card": { "$codeRef": "GcpHcpProviderCard.default" },
-    "wizard": { "$codeRef": "CreateGcpHcpWizard.default" },
+    "icon": { "$codeRef": "ExampleProvider.Icon" },
+    "card": { "$codeRef": "ExampleProvider.Card" },
+    "wizard": { "$codeRef": "ExampleProvider.Wizard" },
 
-    "searchResult": { "$codeRef": "GcpHcpSearchResult.default" },
-    "searchIcon": { "$codeRef": "GcpHcpProviderCard.GcpHcpIcon" }
+    "searchResult": { "$codeRef": "ExampleSearchResult.default" },
+    "searchIcon": { "$codeRef": "ExampleProvider.Icon" }
   }
 }
 ```
 
-The `to` is relative — `{ pathname: "gcphcp" }` resolves to `/create-cluster/gcphcp`. This is the same `to` you'd pass to `PluginLink` or `usePluginNavigate`:
+The `to` is relative — `{ pathname: "example" }` resolves to `/create-cluster/example`. This is the same `to` you'd pass to `PluginLink` or `usePluginNavigate`:
 
 ```tsx
-<PluginLink scope="day-one-plugin" module="CreateClusterPage" to="gcphcp">
-  GCP HCP
+<PluginLink scope="day-one-plugin" module="CreateClusterPage" to="example">
+  Example provider
 </PluginLink>
 
-// equivalent to navigating to /create-cluster/gcphcp
+// equivalent to navigating to /create-cluster/example
 ```
 
 ### Extension: Kind provider (kind-plugin)
@@ -274,14 +276,14 @@ Resolves to `/create-cluster/kind`.
 1. Reads `fleetshift.module` extensions from the plugin registry
 2. For plugin key `"day-one"`, extension id `"create-cluster"` → registers feature `"day-one.create-cluster"` with title "Create Cluster", description, keywords, route `/create-cluster`
 3. Reads all other extension types and matches them to features via extension point declarations
-4. For GCP HCP `fleetshift.cluster-provider`: the shell knows `fleetshift.cluster-provider` belongs to `"day-one.create-cluster"` (from its `extensionPoints`). Resolves base path `/create-cluster` + `to.pathname` → `/create-cluster/gcphcp`. Inserts child search entry grouped under the parent. Uses `searchResult` and `searchIcon` if provided, otherwise renders default.
+4. For Example provider `fleetshift.cluster-provider`: the shell knows `fleetshift.cluster-provider` belongs to `"day-one.create-cluster"` (from its `extensionPoints`). Resolves base path `/create-cluster` + `to.pathname` → `/create-cluster/example`. Inserts child search entry grouped under the parent. Uses `searchResult` and `searchIcon` if provided, otherwise renders default.
 5. Same for Kind → `/create-cluster/kind`
 
 Search result for "cluster":
 ```
 Pages
   Create Cluster — Launch the cluster creation wizard
-  ├── GCP HCP — Managed OpenShift cluster on Google Cloud Platform
+  ├── Example provider — Example Kubernetes cluster provider
   └── Kind — Create a local Kind cluster for development and testing
 ```
 
@@ -298,9 +300,9 @@ Route composition for extensions:
 | Component | Source | Example |
 |-----------|--------|---------|
 | Base path | Feature label → slug | `/create-cluster` |
-| Extension path | `to.pathname` (relative) | `gcphcp` |
-| Full path | base + `/` + extension | `/create-cluster/gcphcp` |
-| Query params | `to.search` | `?provider=gcphcp` |
+| Extension path | `to.pathname` (relative) | `example` |
+| Full path | base + `/` + extension | `/create-cluster/example` |
+| Query params | `to.search` | `?provider=example` |
 | Hash fragment | (planned) `to.hash` | `#notifications` |
 
 This matches the routing plugin's resolution: `PluginLink` and `usePluginNavigate` already compose paths as `${basePath}/${to.pathname}`.
@@ -312,7 +314,7 @@ Extensions should prefer defining their own `fleetshift.module` (own top-level r
 | Pattern | When to use | Example |
 |---------|-------------|---------|
 | Own `fleetshift.module` | Extension is a standalone page (no `<Outlet>` in parent) | Signing Keys page at `/signing-keys` |
-| Relative `to` under parent | Parent page renders child content via `<Outlet>` | GCP HCP wizard at `/create-cluster/gcphcp` |
+| Relative `to` under parent | Parent page renders child content via `<Outlet>` | Example provider wizard at `/create-cluster/example` |
 
 If an extension declares a relative `to` but the target feature's page has no `<Outlet>`, the child route will never render. Developers should check the parent feature's contract before using relative paths.
 
