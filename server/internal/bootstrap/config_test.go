@@ -448,15 +448,15 @@ func TestNewConfig(t *testing.T) {
 	}
 }
 
-func TestOmittedAddonRejected(t *testing.T) {
+func TestUnregisteredAddonRejected(t *testing.T) {
 	_, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr: ":50051",
 		HTTPAddr: ":8080",
 		DBPath:   bootstrap.DefaultSQLitePath,
-		Addons:   "gcphcp",
+		Addons:   "unregistered-addon",
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown addon "gcphcp"`) {
-		t.Fatalf("NewConfig() error = %v, want omitted addon rejection", err)
+	if err == nil || !strings.Contains(err.Error(), `unknown addon "unregistered-addon"`) {
+		t.Fatalf("NewConfig() error = %v, want unregistered addon rejection", err)
 	}
 }
 

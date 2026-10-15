@@ -43,7 +43,7 @@ Some capabilities register as API groups without CRDs. The metrics-server is the
 
 #### OpenShift ConsolePlugins
 
-OpenShift has a purpose-built mechanism for this. Operators can register a `ConsolePlugin` custom resource (under `console.openshift.io/v1`) that declares a UI plugin — its name, which service serves its frontend assets, and what backend endpoints it proxies. This optional discovery signal was designed specifically for frontend plugin registration.
+OpenShift has a purpose-built mechanism for this. Operators can register a `ConsolePlugin` custom resource (under `console.openshift.io/v1`) that declares a UI plugin — its name, which service serves its frontend assets, and what backend endpoints it proxies. Where available, this is the cleanest discovery path because it was designed specifically for frontend plugin registration.
 
 When we detect that a cluster is OpenShift, we list all ConsolePlugin resources and use them as an additional discovery signal.
 

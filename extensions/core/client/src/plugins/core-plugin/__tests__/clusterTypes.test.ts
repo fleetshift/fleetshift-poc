@@ -167,10 +167,10 @@ describe("serviceLabel", () => {
 });
 
 describe("buildAddonBasePath", () => {
-  it("rejects the omitted provider service", () => {
-    expect(() => buildAddonBasePath("gcphcp.fleetshift.io")).toThrow(
-      "Unsupported cluster service",
-    );
+  it("rejects an unregistered addon service", () => {
+    expect(() =>
+      buildAddonBasePath("unregistered-addon.fleetshift.io"),
+    ).toThrow("Unsupported cluster service");
   });
 
   it("builds path for known services", () => {
