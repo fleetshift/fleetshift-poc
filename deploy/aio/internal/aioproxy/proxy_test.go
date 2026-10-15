@@ -890,7 +890,7 @@ func writeGatewayCert(t *testing.T, dir string) (certFile, keyFile string) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Resource Manager AIO Gateway"},
+		Subject:               pkix.Name{CommonName: "OCM Resource Manager AIO gateway"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

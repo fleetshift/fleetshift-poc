@@ -2,7 +2,7 @@
 // independent of any real field mapping (see the package doc's
 // "Package split" section). They exercise it through a trivial stub
 // [querysql.FieldResolver] rather than a real one; the actual
-// Resource Manager/Postgres field shape (resource.labels[...], JSONB
+// Postgres field mapping (resource.labels[...], JSONB
 // extraction, schema-backed path validation, safe numeric/boolean
 // casts, and the injection-safety of label/condition keys) is tested
 // against the real resolver in

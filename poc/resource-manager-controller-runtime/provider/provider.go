@@ -1,5 +1,5 @@
 // Package provider implements a multicluster-runtime Provider that discovers
-// Resource Manager delivery targets and engages an rmruntime Cluster per target.
+// platform delivery targets and engages an rmruntime Cluster per target.
 //
 // It also implements contract.DeliveryAgent: platform Deliver/Remove calls
 // are projected into Delivery CRs in the target's store, which the
@@ -35,7 +35,7 @@ var (
 	_ contract.DeliveryAgent        = (*Provider)(nil)
 )
 
-// Options configures the Resource Manager delivery provider.
+// Options configures the platform delivery provider.
 type Options struct {
 	Scheme   *runtime.Scheme
 	Reporter contract.DeliveryReporter
@@ -46,7 +46,7 @@ type Options struct {
 	Targets []contract.TargetInfo
 }
 
-// Provider bridges Resource Manager's delivery contract to multicluster-runtime.
+// Provider bridges the platform's delivery contract to multicluster-runtime.
 type Provider struct {
 	scheme   *runtime.Scheme
 	reporter contract.DeliveryReporter

@@ -95,7 +95,7 @@ func ApplyServeDefaults(in ServeConfig) ServeConfig {
 	return in
 }
 
-// ResolveLogLevel maps a LOG_LEVEL string to a Resource Manager and Dex logger level.
+// ResolveLogLevel maps a LOG_LEVEL string to a logger level for the resource manager server and Dex.
 // Empty or whitespace becomes "error". Allowed values are debug, info, warn,
 // and error; any other value returns an error.
 func ResolveLogLevel(raw string) (string, error) {

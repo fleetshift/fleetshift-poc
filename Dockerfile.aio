@@ -1,4 +1,4 @@
-# Assembles the all-in-one Resource Manager image from component images.
+# Assembles the all-in-one OCM Resource Manager image from component images.
 # Packaging (deploy/aio) owns s6 PID 1, peer Dex (default), PKI, and serve argv.
 #
 # From-source (monorepo; preferred):
@@ -93,7 +93,7 @@ RUN set -eux; \
 	tar -C / -Jxpf /tmp/s6-overlay-${s6arch}.tar.xz; \
 	rm -f /tmp/s6-overlay-*.tar.xz; \
 	rm -rf /var/lib/apt/lists/*; \
-	# Resource Manager 1000:1000; Dex 1001:1001; aio-proxy 1002:1002.
+	# Resource manager server 1000:1000; Dex 1001:1001; aio-proxy 1002:1002.
 	if ! id -u ocm-resource-manager >/dev/null 2>&1; then \
 		useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin ocm-resource-manager; \
 	fi; \
@@ -105,7 +105,7 @@ RUN set -eux; \
 	fi; \
 	mkdir -p /data /data/sandbox /run/ocm-resource-manager; \
 	chown -R ocm-resource-manager:ocm-resource-manager /data /srv/web; \
-	# Sandbox tree is root-owned; Resource Manager may create ordinary /data state.
+	# Sandbox tree is root-owned; the resource manager may create ordinary /data state.
 	chown root:root /data/sandbox; \
 	chmod 0755 /data/sandbox
 
@@ -117,7 +117,7 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
 	CONTAINER_HOST=unix:///var/run/docker.sock
 
 # aio-entrypoint maps LOG_LEVEL to S6_VERBOSITY and execs /init so s6 is PID 1.
-# Do not set CMD: s6-rc longruns own Resource Manager and Dex. ENTRYPOINT already
+# Do not set CMD: s6-rc longruns own the resource manager server and Dex. ENTRYPOINT already
 # clears inherited CMD from the server image.
 ENTRYPOINT ["/etc/s6-overlay/scripts/aio-entrypoint"]
 

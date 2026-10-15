@@ -1,4 +1,4 @@
-// Resource Manager UI — Module Groups Architecture
+// OCM Resource Manager UI — Module Groups Architecture
 // Source of truth: docs/module-groups.md, build-utils/src/extensions/
 //
 // How plugins declare module groups for nested navigation,

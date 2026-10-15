@@ -46,7 +46,7 @@ class TrustUpdate:
 
 @dataclass(frozen=True)
 class TrustedMaterial:
-    """TUF-authenticated Sigstore roots and Resource Manager identity policies."""
+    """TUF-authenticated Sigstore roots and OCM Resource Manager identity policies."""
 
     sigstore_root: TrustedRoot
     anchors: dict[str, Any]
@@ -233,10 +233,10 @@ class TUFClient:
             raise ValueError("Sigstore trusted root contains no timestamp authorities")
         anchors = json.loads(resolved[OCM_RM_POLICY_TARGET])
         if not isinstance(anchors, dict):
-            raise ValueError("Resource Manager trust policy must be an anchor map")
+            raise ValueError("OCM Resource Manager trust policy must be an anchor map")
         for anchor_id, anchor in anchors.items():
             if not isinstance(anchor_id, str) or not anchor_id:
-                raise ValueError("Resource Manager trust policy has an empty anchor ID")
+                raise ValueError("OCM Resource Manager trust policy has an empty anchor ID")
             if not isinstance(anchor, dict):
                 raise ValueError(f"trust anchor {anchor_id!r} must be an object")
             for field in ("kinds", "certificate_authority_uris", "allowed_identities"):

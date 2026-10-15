@@ -6,7 +6,7 @@ importKeyValueArgs(process.argv.slice(2));
 const k8sDir = resolve(import.meta.dirname, "..");
 
 // Preconditions: fail early with actionable errors before changing resources.
-console.log("=== Resource Manager Kubernetes Teardown ===");
+console.log("=== OCM Resource Manager Kubernetes Teardown ===");
 await $`command -v oc`;
 await requireOcCluster("OCM_RM_CLUSTER_API");
 if (!(await $`oc get namespace ocm-resource-manager`.nothrow()).ok) {

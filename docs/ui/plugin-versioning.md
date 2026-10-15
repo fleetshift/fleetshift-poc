@@ -1,6 +1,6 @@
 # Plugin Versioning
 
-Resource Manager loads UI plugins from multiple connected clusters. Different clusters may have the same plugin installed but at different versions — for example, cluster A might run `monitoring-plugin@1.2.0` while cluster B runs `monitoring-plugin@1.4.0`.
+The OCM Resource Manager console loads UI plugins from multiple connected clusters. Different clusters may have the same plugin installed but at different versions — for example, cluster A might run `monitoring-plugin@1.2.0` while cluster B runs `monitoring-plugin@1.4.0`.
 
 ## The Problem
 

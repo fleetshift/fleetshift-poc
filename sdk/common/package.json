@@ -1,6 +1,6 @@
 {
   "name": "@ocm-resource-manager/common",
-  "description": "Shared types and fetch helpers for OCM resource manager packages.",
+  "description": "Shared types and fetch helpers for OCM Resource Manager packages.",
   "version": "0.0.0",
   "private": true,
   "sideEffects": false,

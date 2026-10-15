@@ -1,4 +1,4 @@
-// Package resourcemanager models Resource Manager's central resource-manager role.
+// Package resourcemanager models the platform's central resource manager role.
 // It performs ordinary authorization, stores ordered records, and couriers
 // evidence, but it is not a signing authority for user provenance.
 package resourcemanager

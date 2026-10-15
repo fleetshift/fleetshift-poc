@@ -1,6 +1,6 @@
 {
   "name": "@ocm-resource-manager/build-utils",
-  "description": "Shared rspack helpers for PatternFly modules and resource manager extensions.",
+  "description": "Shared rspack helpers for PatternFly modules and OCM Resource Manager extensions.",
   "version": "0.0.0",
   "private": true,
   "type": "module",

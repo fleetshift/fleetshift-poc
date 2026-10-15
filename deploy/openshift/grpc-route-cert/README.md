@@ -1,6 +1,6 @@
-# Resource Manager gRPC Route Certificate
+# OCM Resource Manager gRPC Route Certificate
 
-Scripted, repeatable workflow for attaching a trusted, unique certificate to the Resource Manager `grpc` OpenShift Route while keeping the working `edge + h2c` transport model.
+Scripted, repeatable workflow for attaching a trusted, unique certificate to the OCM Resource Manager `grpc` OpenShift Route while keeping the working `edge + h2c` transport model.
 
 The resulting path is:
 
@@ -14,7 +14,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manag
 
 1. Enables HTTP/2 on the default ingress controller if needed
 2. Installs cert-manager if needed
-3. Creates or updates a Resource Manager-specific `ClusterIssuer`
+3. Creates or updates an OCM Resource Manager-specific `ClusterIssuer`
 4. Grants `openshift-ingress:router` permission to read the TLS Secret
 5. Restores a backed-up TLS Secret first, unless `--fresh-cert` is requested
 6. Requests or reconciles a certificate for the **existing** gRPC Route hostname
@@ -27,7 +27,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manag
 1. Removes the Route certificate integration
 2. Backs up the Route TLS Secret to avoid unnecessary ACME reissuance on redeploy
 3. Deletes the namespace-scoped certificate resources
-4. Deletes the Resource Manager-specific `ClusterIssuer`
+4. Deletes the OCM Resource Manager-specific `ClusterIssuer`
 5. Asks interactively whether to uninstall cert-manager
 6. Leaves the ingress HTTP/2 annotation unchanged by default
 
@@ -35,7 +35,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manag
 
 - `oc` CLI installed
 - Logged into the target OpenShift cluster
-- Resource Manager already deployed (`route/grpc` and `service/ocm-resource-manager-server` must exist)
+- OCM Resource Manager already deployed (`route/grpc` and `service/ocm-resource-manager-server` must exist)
 - `appProtocol: kubernetes.io/h2c` already present on the Service `grpc` port
 - `openssl` and `curl` in PATH
 - `grpcurl` in PATH if you want the built-in gRPC verification step
@@ -57,7 +57,7 @@ Why this matters:
 - the ingress controller HTTP/2 annotation enables the frontend/client-facing HTTP/2 capability
 - both were required in the live investigation before the gRPC Route would negotiate ALPN `h2` correctly
 
-## Important note about normal Resource Manager deploys
+## Important note about normal OCM Resource Manager deploys
 
 The base OpenShift deploy still applies the plain `route-grpc.yaml` from `deploy/openshift/`.
 
@@ -151,8 +151,8 @@ By default, teardown:
 
 - backs up the current TLS Secret to `cert-manager-operator/<tls-secret-name>-backup`
 - removes the Route certificate integration
-- deletes the Resource Manager namespace-scoped cert resources
-- deletes the Resource Manager-specific `ClusterIssuer`
+- deletes the OCM Resource Manager namespace-scoped cert resources
+- deletes the OCM Resource Manager-specific `ClusterIssuer`
 - asks interactively before uninstalling cert-manager
 - **does not** revert the ingress HTTP/2 annotation
 

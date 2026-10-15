@@ -47,7 +47,7 @@
       "ocm-resource-manager": [
         {
           "name": "ocm-resource-manager-user",
-          "description": "Baseline role for all Resource Manager users"
+          "description": "Baseline role for all OCM Resource Manager users"
         }
       ]
     }
@@ -55,13 +55,13 @@
   "clients": [
     {
       "clientId": "ocm-resource-manager",
-      "name": "Resource Manager Platform",
+      "name": "OCM Resource Manager API",
       "standardFlowEnabled": false,
       "fullScopeAllowed": false
     },
     {
       "clientId": "ocm-resource-manager-ui",
-      "name": "Resource Manager UI",
+      "name": "OCM Resource Manager console",
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [
@@ -109,7 +109,7 @@
     },
     {
       "clientId": "ocm-resource-manager-cli",
-      "name": "Resource Manager CLI",
+      "name": "fleetctl",
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [
@@ -157,7 +157,7 @@
     },
     {
       "clientId": "ocm-resource-manager-signing",
-      "name": "Resource Manager Signing (Key Enrollment)",
+      "name": "OCM Resource Manager signing enrollment",
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [

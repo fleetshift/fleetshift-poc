@@ -1,4 +1,4 @@
-# Resource Manager CLI end-to-end tests
+# OCM Resource Manager CLI end-to-end tests
 
 This Playwright Test suite exercises Fleetctl, the HTTPS gateway, Dex login,
 Kind lifecycle and delivery, and resource queries. Playwright is the test

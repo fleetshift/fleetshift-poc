@@ -189,7 +189,7 @@ A target is any endpoint that maintains the delivery contract. Internally, targe
 2. **Apply it.** The delivery agent makes reality match the declared intent.
 3. **Continuously report health.** Health is a streaming signal used for rollout progression, placement decisions, and user-visible status.
 
-How those requirements are implemented is target-specific. Kubernetes targets use Server-Side Apply and resource watches. Platform targets create child deployments through the Resource Manager API. Addon-defined targets implement domain-specific apply and health behavior.
+How those requirements are implemented is target-specific. Kubernetes targets use Server-Side Apply and resource watches. Platform targets create child deployments through the child resource manager's API. Addon-defined targets implement domain-specific apply and health behavior.
 
 When a delivery agent supports provenance verification, it can independently verify that a real user authorized the operation before applying. Provenance verification is a target capability, not a universal requirement of the delivery contract.
 
@@ -201,7 +201,7 @@ The detailed target-side protocol — reliability guarantees, generation orderin
 
 **`kubernetes`**: a Kubernetes API server. The delivery agent uses Server-Side Apply, watches resource conditions for health, and prunes removed resources.
 
-**`platform`**: a Resource Manager platform instance. The delivery agent is a Resource Manager API client that creates, updates, and deletes deployments on the child platform. This makes recursive deployment a direct consequence of the target model rather than a separate system.
+**`platform`**: an OCM Resource Manager platform instance. The delivery agent is an API client that creates, updates, and deletes deployments through the child resource manager. This makes recursive deployment a direct consequence of the target model rather than a separate system.
 
 **`local`**: the platform itself, resolved by the `local` placement strategy. This is the degenerate in-process form of a platform target and is used for platform-local orchestration such as `DeploymentGroup` and provisioning flows.
 

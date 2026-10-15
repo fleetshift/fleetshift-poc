@@ -1,8 +1,8 @@
-# OCM resource manager console documentation
+# OCM Resource Manager console documentation
 
 ## Console scope
 
-The console is the browser application for the experimental OCM resource manager. It is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
+The console is the browser application for the experimental OCM Resource Manager platform. It is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
 
 ## Goals
 
@@ -24,8 +24,8 @@ The console is the browser application for the experimental OCM resource manager
 
 ## Requirements
 
-- [Plugin Discovery](./plugin-discovery.md) — how Resource Manager detects which UI plugins to enable for each cluster
-- [OCP Plugin Re-use](./ocp-plugin-reuse.md) — optional integration for re-using existing OpenShift console plugins in Resource Manager
+- [Plugin Discovery](./plugin-discovery.md) — how the platform detects which UI plugins to enable for each cluster
+- [OCP Plugin Re-use](./ocp-plugin-reuse.md) — optional integration for re-using existing OpenShift console plugins in the console
 - [Plugin Versioning](./plugin-versioning.md) — loading multiple versions of the same plugin from different clusters
 - [API Requirements](./api-requirements.md) — aggregate data layer and per-cluster drill-down proxy
 

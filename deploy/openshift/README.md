@@ -1,11 +1,11 @@
 # OpenShift Deployment Example
 
-This example deploys Resource Manager to an OpenShift cluster using Kustomize manifests. Everything runs in the `ocm-resource-manager` namespace. For a local Podman/Kind setup, see the [Podman stack guide](../podman/README.md).
+This example deploys OCM Resource Manager to an OpenShift cluster using Kustomize manifests. Everything runs in the `ocm-resource-manager` namespace. For a local Podman/Kind setup, see the [Podman stack guide](../podman/README.md).
 
 ## What gets deployed
 
 - **PostgreSQL** — StatefulSet with PVC (5Gi), headless Service, file-based secret mounting (`_FILE` convention)
-- **Resource Manager server** — Deployment with web UI init container, `--database-url-file` for credentials, the generic Kubernetes addon, and serve OIDC bootstrap flags that install the first AuthMethod when the store is empty
+- **Resource manager server** — Deployment with web UI init container, `--database-url-file` for credentials, the generic Kubernetes addon, and serve OIDC bootstrap flags that install the first AuthMethod when the store is empty
 - **Networking** — OpenShift Routes (edge TLS) for HTTP/UI and gRPC, Service with ports 8085 (http) and 50051 (grpc)
 - **ImageStreams** — Pull from quay.io with scheduled import and deployment triggers
 - **ConfigMap + Secret** — Generated from `.env` at deploy time via Kustomize generators
@@ -39,7 +39,7 @@ Tasks for this deployment use the `deploy:openshift:*` Nx targets.
 
 | Task | Description |
 |------|-------------|
-| `deploy:openshift:deploy` | Deploy Resource Manager (manifests and images) |
+| `deploy:openshift:deploy` | Deploy OCM Resource Manager (manifests and images) |
 | `deploy:openshift:teardown` | Remove all resources and namespace |
 | `deploy:openshift:status` | Show pods, services, routes; warn if image override is active |
 | `deploy:openshift:logs` | Tail logs from ocm-resource-manager-server (all containers) |
@@ -82,7 +82,7 @@ ImageStreams use `importPolicy.scheduled: true` for automatic periodic pulls. Th
 
 ## gRPC Route Certificate
 
-External gRPC access requires HTTP/2, which needs a trusted certificate on the Route. After deploying Resource Manager, run the certificate workflow as a post-deploy step:
+External gRPC access requires HTTP/2, which needs a trusted certificate on the Route. After deploying OCM Resource Manager, run the certificate workflow as a post-deploy step:
 
 ```bash
 npx nx run deploy:openshift:grpc-cert:deploy -- ACME_EMAIL=you@example.com

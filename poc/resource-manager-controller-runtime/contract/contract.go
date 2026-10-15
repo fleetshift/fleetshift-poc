@@ -1,4 +1,4 @@
-// Package contract is a Resource Manager-shaped delivery protocol surface copied
+// Package contract is a platform delivery protocol surface copied
 // for this POC. It intentionally does not import the server’s internal
 // packages (same constraint as poc/ocm-work-agent-adapter).
 //

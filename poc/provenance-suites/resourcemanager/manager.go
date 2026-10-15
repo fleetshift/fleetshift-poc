@@ -1,4 +1,4 @@
-// Package resourcemanager models Resource Manager's resource-manager role. It
+// Package resourcemanager models the platform's resource manager role. It
 // authenticates callers, performs primary authorization, stores immutable
 // TypedEvidence, assigns evidence-log positions at acceptance, and couriers
 // evidence to targets. Delivery and outbox records are a separate dispatch

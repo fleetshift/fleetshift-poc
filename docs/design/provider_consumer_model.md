@@ -1,8 +1,8 @@
 # Provider/consumer management model
 
-This document proposes extensions to the Resource Manager architecture to support the provider/consumer/factory topology observed in every managed infrastructure service at scale. These proposals emerge from analysis of managed Kubernetes services, hosted control plane implementations, and multicluster management systems, and from the observation that the provider/consumer split is not unique to cloud providers -- it is the natural structure of any organization managing infrastructure at scale, including enterprise IT teams and mid-market customers.
+This document proposes extensions to the resource manager architecture to support the provider/consumer/factory topology observed in every managed infrastructure service at scale. These proposals emerge from analysis of managed Kubernetes services, hosted control plane implementations, and multicluster management systems, and from the observation that the provider/consumer split is not unique to cloud providers -- it is the natural structure of any organization managing infrastructure at scale, including enterprise IT teams and mid-market customers.
 
-The core argument: the provider/consumer/factory/neighborhood model should be first-class structure in Resource Manager's kernel, not a pattern assembled from generic primitives. The generic Manifest x Placement x Rollout model remains the foundation, but provider-side concepts (managed resource types, factory pools, neighborhoods, signed intents) are built-in alongside it.
+The core argument: the provider/consumer/factory/neighborhood model should be first-class structure in the resource manager server's kernel, not a pattern assembled from generic primitives. The generic Manifest x Placement x Rollout model remains the foundation, but provider-side concepts (managed resource types, factory pools, neighborhoods, signed intents) are built-in alongside it.
 
 ## Context: the topology
 
@@ -16,10 +16,10 @@ This pattern repeats at every scale:
 
 1. **Laptop**: one instance, a few clusters. No explicit provider/consumer split -- the admin is both.
 2. **Small fleet**: neighborhoods start to emerge (workload clusters vs. virt clusters). Still one instance, but workspace structure reflects the separation.
-3. **Enterprise platform team**: full provider/consumer split. Platform team operates a provider instance with factory pools. Internal teams consume managed resources through the provider's API using their own tenant identity and IdP(s). Teams that also want fleet-wide workload management over their provisioned clusters can optionally run their own Resource Manager instance.
-4. **Managed service provider**: same topology as (3) with hard cryptographic boundaries, signed intents, and network curtain. Consumers interact with the provider API directly. Per-tenant Resource Manager instances are available for consumers who want their own fleet management plane on top of the managed clusters provisioned for them.
+3. **Enterprise platform team**: full provider/consumer split. Platform team operates a provider instance with factory pools. Internal teams consume managed resources through the provider's API using their own tenant identity and IdP(s). Teams that also want fleet-wide workload management over their provisioned clusters can optionally run their own platform instance.
+4. **Managed service provider**: same topology as (3) with hard cryptographic boundaries, signed intents, and network curtain. Consumers interact with the provider API directly. Per-tenant platform instances are available for consumers who want their own fleet management plane on top of the managed clusters provisioned for them.
 
-The progression is continuous. The product experience should guide users along this path naturally, not require a product switch at any step. Critically, consumers do not need their own Resource Manager instance to use a provider -- they can interact with the provider's API directly. The provider must know the consumer's tenant identity and IdP(s) in order to store, deliver, and validate deployments on their behalf. A consumer's own Resource Manager instance is an additive capability, not a prerequisite.
+The progression is continuous. The product experience should guide users along this path naturally, not require a product switch at any step. Critically, consumers do not need their own platform instance to use a provider -- they can interact with the provider's API directly. The provider must know the consumer's tenant identity and IdP(s) in order to store, deliver, and validate deployments on their behalf. A consumer's own platform instance is an additive capability, not a prerequisite.
 
 ## 1. First-class pool concept
 
@@ -41,9 +41,9 @@ Placement strategies that target a pool receive the pool's membership rather tha
 
 ## 2. Provider-surfaced managed resource types
 
-**Current state**: the `platform` target type enables a parent platform to deploy to child platform instances. But the consumer-side model -- how consumers request managed resources and how those requests flow to the provider -- isn't explicitly modeled. The implicit assumption is that consumers always have their own Resource Manager instance, which isn't true.
+**Current state**: the `platform` target type enables a parent platform to deploy to child platform instances. But the consumer-side model -- how consumers request managed resources and how those requests flow to the provider -- isn't explicitly modeled. The implicit assumption is that consumers always have their own platform instance, which isn't true.
 
-**Problem**: the contract between consumers and providers needs to work at two levels: (1) consumers using the provider's API directly with their own tenant identity and IdP(s), and (2) consumers who also run their own Resource Manager instance and want provisioned clusters registered as targets in their fleet. The current design only addresses (2), making recursive instantiation a prerequisite rather than an optional enhancement.
+**Problem**: the contract between consumers and providers needs to work at two levels: (1) consumers using the provider's API directly with their own tenant identity and IdP(s), and (2) consumers who also run their own platform instance and want provisioned clusters registered as targets in their fleet. The current design only addresses (2), making recursive instantiation a prerequisite rather than an optional enhancement.
 
 **Proposal**: the provider platform registers **managed resource types** that define the consumer-facing contract. A managed resource type is:
 
@@ -57,13 +57,13 @@ Placement strategies that target a pool receive the pool's membership rather tha
 
 A consumer interacts with the provider's API directly, authenticated by their own IdP. The provider registers the consumer's tenant identity and IdP(s) so it can store, deliver, and validate deployments on the consumer's behalf. The consumer requests managed resources against the provider's managed resource type schemas. The provider handles provisioning, placement, and lifecycle internally. The consumer observes status through the provider's API.
 
-This is the default integration mode. The consumer does not need a Resource Manager instance, a `platform` target type, or any cross-platform delivery. They use the provider's managed resource API the same way they would use any managed service API.
+This is the default integration mode. The consumer does not need a platform instance, a `platform` target type, or any cross-platform delivery. They use the provider's managed resource API the same way they would use any managed service API.
 
-### Enhanced consumer integration (own Resource Manager instance)
+### Enhanced consumer integration (own platform instance)
 
-A consumer can also run their own Resource Manager instance. This adds fleet-wide workload management on top of the managed clusters provisioned for them: the consumer can register provisioned clusters as targets in their own fleet, deploy workloads across them, search indexed resources, and use the full deployment pipeline (Manifest x Placement x Rollout) for their own applications.
+A consumer can also run their own platform instance. This adds fleet-wide workload management on top of the managed clusters provisioned for them: the consumer can register provisioned clusters as targets in their own fleet, deploy workloads across them, search indexed resources, and use the full deployment pipeline (Manifest x Placement x Rollout) for their own applications.
 
-When the provider provisions a cluster on behalf of such a consumer, the provider configures the new cluster's fleetlet to connect to the consumer's Resource Manager instance. The managed resource type's lifecycle includes this cross-instance target registration -- the provider knows the consumer instance's endpoint and injects it into the provisioned cluster's bootstrap configuration.
+When the provider provisions a cluster on behalf of such a consumer, the provider configures the new cluster's fleetlet to connect to the consumer's platform instance. The managed resource type's lifecycle includes this cross-instance target registration -- the provider knows the consumer instance's endpoint and injects it into the provisioned cluster's bootstrap configuration.
 
 The provider's managed resource types are also advertised to the consumer instance. The consumer instance can use a generic "managed resource" addon that adapts to whatever types the provider exposes, allowing the consumer to request managed resources through their own deployment pipeline rather than calling the provider API directly. This is the recursive instantiation path described in [architecture/platform_hierarchy.md](architecture/platform_hierarchy.md), but it is opt-in -- not the only way consumers interact with providers.
 
@@ -178,7 +178,7 @@ If the provider needs operational visibility into what's running on factory clus
 
 ## 8. Provider-adjacent domain-specific abstractions
 
-**Current state**: Resource Manager's core model is fully generic: Manifest x Placement x Rollout, with pluggable strategies, target types, and addon contracts. The provider/consumer/factory topology is partially achievable by composing these primitives (managed resource type APIs for direct consumer integration, recursive instantiation via the `platform` target type for consumers with their own instances, bespoke addons), but it is not structurally supported -- the framework doesn't know about providers, consumers, neighborhoods, or managed resources.
+**Current state**: the platform's core model is fully generic: Manifest x Placement x Rollout, with pluggable strategies, target types, and addon contracts. The provider/consumer/factory topology is partially achievable by composing these primitives (managed resource type APIs for direct consumer integration, recursive instantiation via the `platform` target type for consumers with their own instances, bespoke addons), but it is not structurally supported -- the framework doesn't know about providers, consumers, neighborhoods, or managed resources.
 
 **Problem**: if the provider/consumer/factory topology is the universal pattern for infrastructure management at scale, requiring users to assemble it from generic primitives is both error-prone and undiscoverable. The framework can't guide users toward the right structure if the structure isn't part of its vocabulary.
 
@@ -198,7 +198,7 @@ If the provider needs operational visibility into what's running on factory clus
 
 ### Consumer instance binpacking (own-instance mode only)
 
-For consumers who opt into running their own Resource Manager instance (the enhanced integration mode), those instances run on clusters. Should consumer instances be binpacked onto shared "consumer instance clusters" (with tenant density as a knob), or should each tenant get a dedicated cluster? This is another neighborhood type (the "consumer instance neighborhood") with its own density limits, blast radius considerations, and security profile. A density of 1 is the most isolated; higher density is more cost-efficient but increases blast radius. This question does not apply to consumers using direct API integration, who have no instance to host.
+For consumers who opt into running their own platform instance (the enhanced integration mode), those instances run on clusters. Should consumer instances be binpacked onto shared "consumer instance clusters" (with tenant density as a knob), or should each tenant get a dedicated cluster? This is another neighborhood type (the "consumer instance neighborhood") with its own density limits, blast radius considerations, and security profile. A density of 1 is the most isolated; higher density is more cost-efficient but increases blast radius. This question does not apply to consumers using direct API integration, who have no instance to host.
 
 ### Standing intent renewal protocol
 

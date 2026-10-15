@@ -1,4 +1,4 @@
-// Package testserver provides a fully wired in-process Resource Manager gRPC
+// Package testserver provides a fully wired in-process resource manager gRPC
 // server for integration testing. The server uses SQLite in-memory storage
 // and the in-memory workflow engine, making tests fast and deterministic.
 package testserver
@@ -47,7 +47,7 @@ func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL
 	}, nil
 }
 
-// Start launches an in-process Resource Manager server via bootstrap and returns
+// Start launches an in-process resource manager server via bootstrap and returns
 // its gRPC dial address. The server is stopped when the test finishes.
 func Start(t *testing.T) string {
 	t.Helper()

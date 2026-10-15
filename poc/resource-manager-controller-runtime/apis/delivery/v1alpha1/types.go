@@ -1,5 +1,5 @@
 // Package v1alpha1 defines the Delivery CR that controllers reconcile.
-// Desired state arrives via the Resource Manager delivery contract and is
+// Desired state arrives via the platform delivery contract and is
 // projected into these objects by the provider; controllers write status
 // through the kube client, and the provider mirrors status to
 // DeliveryReporter.
@@ -30,7 +30,7 @@ func init() {
 	metav1.AddToGroupVersion(Scheme, GroupVersion)
 }
 
-// Delivery is the controller-runtime view of a Resource Manager delivery.
+// Delivery is the controller-runtime view of a platform delivery.
 // Spec is desired state from the platform; Status is observed state
 // written by the reconciler. The provider status mirror translates
 // Status writes into DeliveryReporter calls.

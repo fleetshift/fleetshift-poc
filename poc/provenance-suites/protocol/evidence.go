@@ -183,7 +183,7 @@ type DeliveryPackage struct {
 }
 
 // Item is one slot in a couriered delivery package: a SignedStatement plus
-// that statement's optional Resource Manager evidence-log inclusion. It is a
+// that statement's optional resource manager evidence-log inclusion. It is a
 // package slot, not a provenance type. Embedding keeps the JSON object
 // flat (evidence, support, evidence_log) while keeping SignedStatement
 // distinct. SelectAndVerify takes Item so it can verify the sibling

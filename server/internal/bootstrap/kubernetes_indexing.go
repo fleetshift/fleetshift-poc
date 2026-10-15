@@ -78,7 +78,7 @@ func (b *directInventoryReportBackend) ReplaceBatch(ctx context.Context, resourc
 	return nil
 }
 
-// storeTargetLister adapts Resource Manager's target store onto the Kubernetes
+// storeTargetLister adapts the resource manager's target store onto the Kubernetes
 // startup replayer's TargetLister port at the server composition boundary.
 type storeTargetLister struct {
 	store domain.Store

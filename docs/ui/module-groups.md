@@ -6,7 +6,7 @@
 
 ## Context
 
-Resource Manager navigation is flat — each `ocm-resource-manager.module` gets a top-level `NavItem` in the sidebar and a route at `/{pluginKey}/{moduleId}`. As the number of plugins grows, the nav becomes an undifferentiated list. Plugins like `settings-plugin` already declare multiple modules (Navigation, Authentication, Extensions) that logically belong together but render as three separate nav items.
+OCM Resource Manager navigation is flat — each `ocm-resource-manager.module` gets a top-level `NavItem` in the sidebar and a route at `/{pluginKey}/{moduleId}`. As the number of plugins grows, the nav becomes an undifferentiated list. Plugins like `settings-plugin` already declare multiple modules (Navigation, Authentication, Extensions) that logically belong together but render as three separate nav items.
 
 We need **expandable nav groups** — a bucket of related modules that collapses and expands in the sidebar, with nested routes under a shared URL prefix. This also impacts search (hierarchical result grouping) and breadcrumbs.
 

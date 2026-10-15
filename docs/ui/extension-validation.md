@@ -577,7 +577,7 @@ sequenceDiagram
     Note over Core: properties.wizard is undefined (CodeRef failed to resolve)
     Core->>Core: console.warn("missing resolved 'wizard' component")
     Core-->>EPOwner: false
-    EPOwner->>EPOwner: console.warn("[Resource Manager] Extension 'example' rejected (provider)")
+    EPOwner->>EPOwner: console.warn("[OCM Resource Manager] Extension 'example' rejected (provider)")
     Note over EPOwner: Example provider excluded — self-validation skipped
 ```
 
@@ -598,7 +598,7 @@ sequenceDiagram
     ExampleProvider->>Backend: GET /api/v1/integrations/example/status
     Backend-->>ExampleProvider: 503 Service Unavailable
     ExampleProvider-->>EPOwner: { valid: false, reason: "Example backend unreachable" }
-    EPOwner->>EPOwner: console.warn("[Resource Manager] Extension 'example' rejected (self): Example backend unreachable")
+    EPOwner->>EPOwner: console.warn("[OCM Resource Manager] Extension 'example' rejected (self): Example backend unreachable")
     Note over EPOwner: Example provider excluded — not cached, retried next call
 ```
 

@@ -44,7 +44,7 @@ const (
 
 // ComparisonOperator is the named comparison the compiler asks a
 // [SQLExpr.Compare] hook to handle. Using a named type (rather than
-// raw SQL operator strings) keeps the Resource Manager field resolver from
+// raw SQL operator strings) keeps the platform field resolver from
 // depending on the compiler's SQL spelling of each operator.
 type ComparisonOperator int
 

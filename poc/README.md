@@ -15,5 +15,5 @@ Current POCs include:
 - `inventory-identity-reconciliation/`: inventory write-path experiment where
   reported identity assertions are accepted asynchronously into a platform
     identity read model
-- `ocm-work-agent-adapter/`: a standalone Go prototype showing how Resource Manager-style delivery could be materialized as OCM `ManifestWork` and consumed through a simplified spoke-side reconcile loop
-- `resource-manager-controller-runtime/`: adapt sig-multicluster controller-runtime so reconcilers run against Resource Manager delivery targets (via a custom `cluster.Cluster` + Provider) instead of kube-apiserver, reporting through the delivery contract
+- `ocm-work-agent-adapter/`: a standalone Go prototype showing how platform delivery could be materialized as OCM `ManifestWork` and consumed through a simplified spoke-side reconcile loop
+- `resource-manager-controller-runtime/`: adapt sig-multicluster controller-runtime so reconcilers run against platform delivery targets (via a custom `cluster.Cluster` + Provider) instead of kube-apiserver, reporting through the delivery contract

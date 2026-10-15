@@ -2,7 +2,7 @@
 
 This POC exercises the authentication-provenance and key-continuity core from
 [`docs/design/trust_model_v3.md`](../../docs/design/trust_model_v3.md) without
-committing to production storage or the full Resource Manager derivation model.
+committing to production storage or the full OCM Resource Manager derivation model.
 
 It asks:
 
@@ -15,7 +15,7 @@ It asks:
 The tests demonstrate that the answer is yes, subject to the deliberately
 local history and controlled-client limitations in the design.
 
-## The three Resource Manager roles
+## The three OCM Resource Manager roles
 
 ```text
 controlled client
@@ -45,7 +45,7 @@ delivery agent
     bounded set of exceptional event digests as cryptographic trust state
 ```
 
-The local OIDC provider is supporting infrastructure, not a Resource Manager role.
+The local OIDC provider is supporting infrastructure, not an OCM Resource Manager role.
 It serves discovery, authorization, token, and JWKS endpoints over TLS. The
 authorization endpoint uses a test-only automatic login selected by
 `login_hint`; the authentication UX is a test double, but the wire flow is a
@@ -67,7 +67,7 @@ The prototype instantiates all three authenticated structures from the design:
 The two logs use
 [`transparency-dev/merkle`](https://github.com/transparency-dev/merkle) for RFC
 6962 hashing, compact frontiers, proof construction, and proof verification.
-Resource Manager code supplies only an in-memory node store and the small adapter
+OCM Resource Manager code supplies only an in-memory node store and the small adapter
 needed to retrieve historical roots. Tests compare every retained test-vector
 root and proof against the library's own verifier.
 
@@ -75,7 +75,7 @@ The map uses Trillian's
 [`merkle/smt`](https://pkg.go.dev/github.com/google/trillian/merkle/smt) writer
 and HStar3 reconstruction plus its
 [`merkle/coniks`](https://pkg.go.dev/github.com/google/trillian/merkle/coniks)
-position-bound hashing. Resource Manager code supplies the in-memory node accessor,
+position-bound hashing. OCM Resource Manager code supplies the in-memory node accessor,
 proof serialization, and the small absent-leaf reconstruction needed because
 the package does not expose a standalone current-tree proof verifier. The
 implementation cross-checks every generated replacement root against the

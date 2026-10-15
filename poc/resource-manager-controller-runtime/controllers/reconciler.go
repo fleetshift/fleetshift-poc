@@ -4,7 +4,7 @@
 //
 // Controllers interact only with the Kubernetes-shaped client API. Delivery
 // outcomes are written to Delivery status; the provider's status mirror
-// translates those writes into Resource Manager DeliveryReporter calls.
+// translates those writes into platform DeliveryReporter calls.
 package controllers
 
 import (

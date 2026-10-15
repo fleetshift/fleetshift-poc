@@ -42,17 +42,17 @@ const (
 	UpdateModeReadOnly        UpdateMode = "ReadOnly"
 )
 
-// Manifest is the tiny Resource Manager-shaped input the POC translates into
+// Manifest is the small input type the POC translates into
 // OCM ManifestWork payloads. It is intentionally smaller than the real
 // server-side domain types so the POC can live under the top-level poc/
-// tree without importing Resource Manager internal packages.
+// tree without importing resource manager server internal packages.
 type Manifest struct {
 	Raw   json.RawMessage
 	Watch bool
 }
 
 // DeliveryEnvelope is a small stand-in for the orchestration output that
-// would normally be passed to a Resource Manager delivery agent.
+// would normally be passed to a platform delivery agent.
 type DeliveryEnvelope struct {
 	DeliveryID     DeliveryID
 	TargetID       TargetID
@@ -71,7 +71,7 @@ type manifestWorkClient interface {
 	UpdateStatus(ctx context.Context, work *workapiv1.ManifestWork, opts metav1.UpdateOptions) (*workapiv1.ManifestWork, error)
 }
 
-// Hub materializes Resource Manager-style deliveries into an in-memory desired
+// Hub materializes platform deliveries into an in-memory desired
 // work source. Each target sees that source through a target-scoped
 // informer/lister view, mirroring the spoke-side contract OCM expects
 // without persisting ManifestWork to any API server.
@@ -512,7 +512,7 @@ type SpokeOptions struct {
 	Journal *AppliedManifestJournal
 }
 
-// DeliveryFeedback is a Resource Manager-shaped status projection built from
+// DeliveryFeedback is a platform status projection built from
 // ManifestWork and AppliedManifestWork state.
 type DeliveryFeedback struct {
 	DeliveryID       DeliveryID

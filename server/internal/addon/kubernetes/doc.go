@@ -1,4 +1,4 @@
-// Package kubernetes is the Resource Manager addon for Kubernetes clusters.
+// Package kubernetes is the OCM Resource Manager addon for Kubernetes clusters.
 //
 // It declares one AddonID with two independent capabilities:
 //

@@ -1,4 +1,4 @@
-// Package platform is a fake Resource Manager control plane for the POC.
+// Package platform is a fake platform control plane for the POC.
 // It records DeliveryReporter calls and can dispatch Deliver/Remove to
 // a DeliveryAgent, simulating orchestration without the real server.
 package platform

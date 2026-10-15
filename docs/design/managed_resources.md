@@ -24,7 +24,7 @@ You could imagine similar domain specific experiences for other managed resource
 - Model serving
 - ...
 
-These are the consumer-facing "nouns" of the platform, in contrast to the addon-facing core abstractions. In some sense, the whole interesting architecture of Resource Manager is getting these two competing halves right:
+These are the consumer-facing "nouns" of the platform, in contrast to the addon-facing core abstractions. In some sense, the central challenge of the resource manager architecture is getting these two competing halves right:
 
 - An agnostic "fleet core" that encodes only the most generic, consistent, "meta" or cross cutting best practices. Things like durability, resilience, extensibility, pooling, fleet-awareness, placement and rollout control, inventory, IAM, metering, ...
 - Thoroughly domain specific "nouns" that are opinionated and encode all of the best practice and real world experience we can muster

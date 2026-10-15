@@ -12,7 +12,7 @@ import (
 //
 // It requires aio-proxy / aio-init / dex / ocm-resource-manager / aio-welcome
 // dependency files and the user bundle, then checks: aio-proxy runs as
-// 1002:1002 (not Resource Manager 1000); ocm-resource-manager drops to 1000, sources
+// 1002:1002 (not resource manager server 1000); ocm-resource-manager drops to 1000, sources
 // public.env, probes Dex with the sandbox CA, bypasses HTTP_PROXY for
 // PUBLIC_HOST, does not use curl -k, and exits non-zero if discovery is
 // not ready; aio-welcome is a oneshot that depends on ocm-resource-manager.
@@ -53,7 +53,7 @@ func TestS6ServiceGraph(t *testing.T) {
 		t.Fatalf("aio-proxy must run as 1002:1002:\n%s", body)
 	}
 	if strings.Contains(body, "s6-setuidgid 1000:1000") {
-		t.Fatalf("aio-proxy must not share the Resource Manager uid:\n%s", body)
+		t.Fatalf("aio-proxy must not share the resource manager server uid:\n%s", body)
 	}
 	if !strings.Contains(body, "/usr/local/bin/aio-proxy") {
 		t.Fatalf("aio-proxy run script missing binary:\n%s", body)

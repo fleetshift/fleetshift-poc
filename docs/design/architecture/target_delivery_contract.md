@@ -37,7 +37,7 @@ Read this when you need the full target-side delivery protocol — how targets a
 
 ## Overview
 
-A *Target* in the resource manager is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
+A *Target* in the platform is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
 
 Examples:
 
@@ -152,7 +152,7 @@ older work from overwriting the newer accepted generation. Checking only an
 already-applied object's annotations is insufficient when newer work is still
 queued.
 
-This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. The Resource Manager addon can use a smaller level-based loop because platform-side desired changes are durably delivered; an addon claiming continuous drift reconciliation still needs watch-gap recovery and a periodic rescan or equivalent completeness mechanism.
+This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. An addon using this delivery contract can use a smaller level-based loop because platform-side desired changes are durably delivered; an addon claiming continuous drift reconciliation still needs watch-gap recovery and a periodic rescan or equivalent completeness mechanism.
 
 #### Delivery authorization
 
@@ -238,7 +238,7 @@ crash recovery. It is distinct from the cryptographic
 [evidence log](provenance.md#common-append-only-evidence-log)
 used for provenance ordering and rollback detection.
 
-A goal of this delivery protocol is to minimize the amount of state that an addon needs to keep track of to participate as a high quality target. However, fulfillment guarantees MAY still require a journal of some kind (like AppliedMW in OCM) to inventory what is happening in the target in more detail as a result of a delivery. Resource Manager could potentially provide APIs to keep track of such a journal as a service to addon developers.
+A goal of this delivery protocol is to minimize the amount of state that an addon needs to keep track of to participate as a high quality target. However, fulfillment guarantees MAY still require a journal of some kind (like AppliedMW in OCM) to inventory what is happening in the target in more detail as a result of a delivery. The resource manager could potentially provide APIs to keep track of such a journal as a service to addon developers.
 
 There are two cases where this may be needed:
 
@@ -305,7 +305,7 @@ The codebase models deliveries with explicit lifecycle states: `pending`, `accep
 
 ### Should manifests be able to opt out of drift repair?
 
-Drift detection is optional (an addon may skip it entirely). But if an addon does detect drift, should it always repair it? Some resources are intentionally modified after initial delivery (e.g. a resource the target customizes post-apply, or a `CreateOnly` resource that should be applied once and then left alone). OCM models this with per-manifest update strategies (`Update`, `ServerSideApply`, `CreateOnly`, `ReadOnly`). Resource Manager may need a similar mechanism — either as a platform-level manifest annotation or as an addon-defined policy.
+Drift detection is optional (an addon may skip it entirely). But if an addon does detect drift, should it always repair it? Some resources are intentionally modified after initial delivery (e.g. a resource the target customizes post-apply, or a `CreateOnly` resource that should be applied once and then left alone). OCM models this with per-manifest update strategies (`Update`, `ServerSideApply`, `CreateOnly`, `ReadOnly`). The platform may need a similar mechanism — either as a platform-level manifest annotation or as an addon-defined policy.
 
 ### Should the platform ever diff? What does that buy us? What does it cost us?
 

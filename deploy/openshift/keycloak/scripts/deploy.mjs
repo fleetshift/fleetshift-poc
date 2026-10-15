@@ -208,5 +208,5 @@ if (consoleId) {
 for (const d of domains)
   await $`node ${resolve(import.meta.dirname, "add-base-domain.mjs")} --base-domain ${d} --cluster-name ${process.env.CLUSTER_NAME || arg("--cluster-name")}`;
 console.log(
-  `\n==========================================\n  Keycloak Deployment Complete\n==========================================\n\n  URL: https://${host}\n  Resource Manager Realm Users:\n    ops-user / ${passwords.ops}\n    dev-user / ${passwords.dev}\n\n  Run 'npx nx run deploy:openshift:keycloak:add-user' to create personal dev accounts.\n==========================================`,
+  `\n==========================================\n  Keycloak Deployment Complete\n==========================================\n\n  URL: https://${host}\n  OCM Resource Manager Realm Users:\n    ops-user / ${passwords.ops}\n    dev-user / ${passwords.dev}\n\n  Run 'npx nx run deploy:openshift:keycloak:add-user' to create personal dev accounts.\n==========================================`,
 );

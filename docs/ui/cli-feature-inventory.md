@@ -425,7 +425,7 @@ through one unified model.
 
 Runtime differences should be hidden behind Scalprum/SDK adapters, while
 extension contracts, API clients, capabilities, context, and validation remain
-shared. If Scalprum lacks required Node features, Resource Manager can extend or own
+shared. If Scalprum lacks required Node features, OCM Resource Manager can extend or own
 those additions rather than replacing the shared runtime with a separate CLI
 implementation.
 
@@ -703,7 +703,7 @@ coverage in the client architecture proposals; planned coverage does not mean im
 | JavaScript/TypeScript client runtime | TypeScript CLI rewrite |
 | Shared Dynamic Plugin SDK with Web UI | Shared client architecture, TypeScript CLI rewrite, and target SDK model in this document |
 | Module Federation loading for CLI | TypeScript CLI rewrite; Node loading prototype already exists |
-| Server-driven plugin metadata and client-specific enablement | `Implement runtime extension discovery and enablement`, `Design separation of client assets from Resource Manager`, `Implement independently served Web UI assets` |
+| Server-driven plugin metadata and client-specific enablement | `Implement runtime extension discovery and enablement`, `Design separation of client assets from OCM Resource Manager`, `Implement independently served Web UI assets` |
 | Typed plugin-provided CLI commands | `Define and enforce client context and action contracts` and `Spike: Define context-aware navigation and command palette behavior`; implementation follows spike outcome |
 | Named profiles and shared client configuration | `Define shared client configuration model` defines the model; implementation not yet created |
 | Live updates and shared extension subscriptions | `Define WebSocket live-update protocol and lifecycle` defines protocol; `Implement shared WebSocket client and extension subscription API` implements shared client subscription path |

@@ -26,7 +26,7 @@ if (process.env.DEV === "true" || process.env.BUILD === "true") {
   await $`npx nx run image:aio`;
 }
 
-console.log("==> Starting Resource Manager stack");
+console.log("==> Starting OCM Resource Manager stack");
 const upArgs = ["up", "-d"];
 if (process.env.DEV === "true" || process.env.BUILD === "true")
   upArgs.push("--build");
@@ -35,7 +35,7 @@ await compose(...upArgs);
 const httpPort = process.env.OCM_RM_SERVER_HTTP_PORT || "8085";
 const publicOrigin = `https://ocm-resource-manager.localhost:${httpPort}`;
 console.log(
-  `\n==> Resource Manager stack is running!\n    Resource Manager:      ${publicOrigin}  (opens /app after the certificate warning)`,
+  `\n==> OCM Resource Manager stack is running!\n    Console:               ${publicOrigin}  (opens /app after the certificate warning)`,
 );
 
 if (!process.env.OIDC_ISSUER_URL) {

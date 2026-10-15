@@ -42,7 +42,7 @@ type ResourceManagerAPI interface {
 // authenticated authority configuration and returns the unverified inner
 // assertion. Common predicate code, not the native implementation, decodes
 // tentative lookup fields. Successful Finish supplies authenticated content.
-// RequiresEvidenceLog reports config: this suite needs Resource Manager log
+// RequiresEvidenceLog reports config: this suite needs resource manager log
 // positions (for example continuity key events). It is not a session
 // method and does not describe the statement window.
 // BeginVerification creates a single-use session for one SignedStatement.

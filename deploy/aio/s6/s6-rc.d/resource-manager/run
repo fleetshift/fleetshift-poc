@@ -1,5 +1,5 @@
 #!/command/with-contenv sh
-# Resource Manager longrun. When peer Dex is enabled, wait for HTTPS discovery
+# Resource manager server longrun. When peer Dex is enabled, wait for HTTPS discovery
 # through the AIO TLS edge so the serve bootstrap budget is not consumed by Dex boot.
 set -eu
 if [ -f /run/ocm-resource-manager/dex.enabled ]; then
@@ -41,7 +41,7 @@ fi
 
 # Kind-capable launches mount an engine socket (CONTAINER_HOST). That socket is
 # often mode 0660; s6-setuidgid strips supplemental groups, so preserve the
-# socket's group via s6-applyuidgid without running Resource Manager as root.
+# socket's group via s6-applyuidgid without running the resource manager as root.
 sock="${CONTAINER_HOST-}"
 case "$sock" in
 	unix://*) sock=${sock#unix://} ;;

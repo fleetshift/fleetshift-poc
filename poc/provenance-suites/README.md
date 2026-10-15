@@ -30,7 +30,7 @@ ResourceManagerAPI
 
 TargetAPI
   ParseHints(TypedEvidence) -> TentativeHints (identity fields + unverified TypedAssertion)
-  RequiresEvidenceLog() -> whether this suite needs Resource Manager log positions
+  RequiresEvidenceLog() -> whether this suite needs OCM Resource Manager log positions
   BeginVerification(SignedStatement, authenticated profile and authority config)
       -> single-use session: Prepare identifies timestamp bindings;
          Finish authenticates and returns constraints
@@ -344,7 +344,7 @@ authenticated with the authority/profile configuration, use an explicit set
 of approved authorities, and reject unconfigured sources. The helper tests
 demonstrate coordinate semantics; they do not implement TSA trust policy.
 
-## The three Resource Manager roles
+## The three OCM Resource Manager roles
 
 ```text
 controlled producer

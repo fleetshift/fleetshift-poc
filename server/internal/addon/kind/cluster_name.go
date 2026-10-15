@@ -8,7 +8,7 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
-// kindClusterNamePrefix marks Resource Manager-owned kind/docker cluster
+// kindClusterNamePrefix marks OCM Resource Manager-owned kind/docker cluster
 // names. This is a naming convention, not cryptographic proof of
 // ownership — an externally created name with this prefix may be
 // adopted as ours.
@@ -43,7 +43,7 @@ func encodeKindClusterName(id domain.ResourceID) (string, error) {
 }
 
 // decodeKindClusterName parses an ownership-encoded kind name.
-// ok is false when name is not Resource Manager-owned encoding.
+// ok is false when name is not OCM Resource Manager-owned encoding.
 func decodeKindClusterName(name string) (id domain.ResourceID, ok bool) {
 	const prefix = kindClusterNamePrefix
 	if len(name) <= len(prefix) || name[:len(prefix)] != prefix {
@@ -73,7 +73,7 @@ func findOwnedCluster(listed []string, id domain.ResourceID) (kindName string, f
 }
 
 // foreignClusterConflict reports whether listed contains the bare
-// platform resource ID. An existing bare id means a non-Resource Manager
+// platform resource ID. An existing bare id means a non-OCM Resource Manager
 // cluster occupies the natural name and must not be adopted or
 // recreated.
 func foreignClusterConflict(listed []string, id domain.ResourceID) bool {

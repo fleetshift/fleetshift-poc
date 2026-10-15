@@ -33,7 +33,7 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/platformresource"
 )
 
-// Server is a fully ready Resource Manager process handle. Endpoints are immutable.
+// Server is a fully ready resource manager server process handle. Endpoints are immutable.
 // Stores, services, and transport servers are not exposed; exercise the
 // process through public endpoints. Wait surfaces unexpected background
 // termination; Close is concurrency-safe, idempotent, and bounded by the

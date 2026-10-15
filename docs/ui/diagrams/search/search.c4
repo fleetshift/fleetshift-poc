@@ -1,4 +1,4 @@
-// Resource Manager UI — Search Architecture
+// OCM Resource Manager UI — Search Architecture
 // Source of truth: web/src/components/Search/
 //
 // How global search leverages the feature contract to automatically

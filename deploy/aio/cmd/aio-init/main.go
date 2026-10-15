@@ -117,7 +117,7 @@ func enableDex() error {
 	return os.WriteFile(dexEnabledFlag, []byte("1\n"), 0644)
 }
 
-// prepareDataLayout ensures /data is writable by Resource Manager and /data/sandbox
+// prepareDataLayout ensures /data is writable by the resource manager server and /data/sandbox
 // remains root-owned after volume mounts replace image contents.
 func prepareDataLayout() error {
 	if err := ensureOwnedDir("/data", resourceManagerUID, resourceManagerGID); err != nil {

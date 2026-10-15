@@ -1,6 +1,6 @@
 # Rules for Agents
 
-This is the monorepo for Resource Manager, a fleet management platform. It contains the management-plane server, CLI, proto definitions, React web UI, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
+This is the monorepo for OCM Resource Manager, an experimental Open Cluster Management variant using a resource manager architecture. It contains the resource manager server, CLI, proto definitions, React web UI, addons, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->
@@ -30,6 +30,8 @@ This is the monorepo for Resource Manager, a fleet management platform. It conta
 ## Understanding the domain
 
 The architecture documentation lives in docs/design/ and is the primary source of truth for domain concepts, system design, and open questions.
+
+Use **OCM Resource Manager** for the whole project or platform, **resource manager architecture** for the architectural approach, and **resource manager server** (or **resource manager** once scoped) for the API, authorization, persistence, and orchestration component. The console, CLI, and addons are separate platform components. Use **management plane** for services that manage targets, rather than as a universal synonym for the platform. See the vocabulary in docs/design/architecture.md.
 
 - Start with docs/design/architecture.md -- it gives the system's core mental model, names the major subsystems, and contains a reading guide that routes to the detailed sub-documents in docs/design/architecture/:
  - core_model.md -- core vocabulary, strategy axes, fulfillment kernel primitive, target model, delivery contract, single-pod invariant
@@ -76,6 +78,6 @@ For how to...
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.
 
-## Resource Manager UI
+## OCM Resource Manager console
 
 This is the complete frontend web app for ocm-resource-manager. See docs/ui/AGENTS.md for agent instructions.

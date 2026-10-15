@@ -1,6 +1,6 @@
 {
   "name": "@ocm-resource-manager/kind-plugin",
-  "description": "Resource manager console plugin for Kind local clusters",
+  "description": "OCM Resource Manager console plugin for Kind local clusters",
   "version": "0.0.0",
   "private": true,
   "type": "module",

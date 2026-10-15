@@ -107,7 +107,7 @@ func createCA(paths SandboxPKIPaths) (*x509.Certificate, *ecdsa.PrivateKey, erro
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "Resource Manager Sandbox CA"},
+		Subject:               pkix.Name{CommonName: "OCM Resource Manager sandbox CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(caValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
@@ -147,7 +147,7 @@ func ensureLeaf(paths SandboxPKIPaths, caCert *x509.Certificate, caKey *ecdsa.Pr
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "Resource Manager AIO Gateway"},
+		Subject:      pkix.Name{CommonName: "OCM Resource Manager AIO gateway"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(leafValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>Resource manager</title>
+  <title>OCM Resource Manager</title>
   <g fill="none" stroke="#2563a6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
     <path d="M32 24V14M24 36l-9 6m25-6 9 6"/>
     <rect x="23" y="24" width="18" height="18" rx="4"/>

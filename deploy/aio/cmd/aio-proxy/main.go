@@ -1,5 +1,5 @@
 // Command aio-proxy terminates the sandbox gateway certificate and
-// reverse-proxies peer Dex and Resource Manager on one origin.
+// reverse-proxies peer Dex and the resource manager server on one origin.
 package main
 
 import (

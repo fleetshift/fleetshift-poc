@@ -79,7 +79,7 @@ func (a *applier) apply(ctx context.Context, raw json.RawMessage) error {
 	}
 
 	gvk := obj.GroupVersionKind()
-	// TODO: consider Force:true so Resource Manager reclaims fields owned by other
+	// TODO: consider Force:true so the Kubernetes addon reclaims fields owned by other
 	// managers (kubectl, HPA, etc.). Without Force, SSA 409 conflicts fail delivery.
 	_, err = dr.Patch(ctx, obj.GetName(), "application/apply-patch+yaml", data, metav1.PatchOptions{
 		FieldManager: fieldManager,

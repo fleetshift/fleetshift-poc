@@ -6,7 +6,7 @@
 
 ## Problem
 
-Resource Manager needs a CLI tool alongside the web UI. Some users prefer working in the terminal — scripting, automation, SSH sessions where there is no browser, or simply personal preference. The CLI needs to cover the same core operations as the GUI: listing resources, managing clusters, installing and enabling plugins.
+OCM Resource Manager needs a CLI tool alongside the web UI. Some users prefer working in the terminal — scripting, automation, SSH sessions where there is no browser, or simply personal preference. The CLI needs to cover the same core operations as the GUI: listing resources, managing clusters, installing and enabling plugins.
 
 Building a CLI from scratch with raw stdout writes and manual input handling is tedious and error-prone. Layout, colors, spinners, tables — all of this has to be reinvented. And since the team already knows React from building the GUI, it would be ideal to use the same mental model for the terminal.
 

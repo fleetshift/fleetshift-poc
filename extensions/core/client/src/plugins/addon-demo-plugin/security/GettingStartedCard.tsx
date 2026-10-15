@@ -62,7 +62,7 @@ const COLUMNS: GsColumnConfig[] = [
         suffix: "6 min read",
       },
       {
-        text: "Fleet-wide vulnerability dashboards in resource manager",
+        text: "Fleet-wide vulnerability dashboards in the console",
         external: true,
         suffix: "4 min read",
       },

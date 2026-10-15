@@ -1,4 +1,4 @@
-name: Set up Resource Manager E2E
+name: Set up OCM Resource Manager E2E
 description: |
   Prepares a GitHub Actions job to use an AIO image.
 
@@ -36,7 +36,7 @@ inputs:
        cache — `aio-image` job, cache writer. Restore the tar. On a miss: install
        Node, run `npx nx run image:aio`, save the four
       tags, write the cache, upload the artifact. On a hit: restore the tar and
-       stop (no Node or Playwright). Never podman-runs Resource Manager.
+       stop (no Node or Playwright). Never podman-runs the all-in-one image.
 
        e2e — the `e2e-playwright` matrix. Restore (or download) the tar, podman
        load, install Node and Playwright, start user podman.socket and

@@ -1,6 +1,6 @@
 # OpenShift Keycloak
 
-This OpenShift example provides production-like Keycloak for OIDC integration testing and demos. It deploys RHBK (operator-managed), PostgreSQL, TLS via cert-manager, and the Resource Manager realm.
+This OpenShift example provides production-like Keycloak for OIDC integration testing and demos. It deploys RHBK (operator-managed), PostgreSQL, TLS via cert-manager, and the OCM Resource Manager realm.
 
 Everything runs in the `keycloak-prod` namespace.
 
@@ -35,7 +35,7 @@ oc get secret ocp-console-client-secret -n keycloak-prod \
   -o jsonpath='{.data.clientSecret}' | base64 -d
 ```
 
-This is the `ocp-console` client secret (cluster console OIDC), not the Resource Manager UI.
+This is the `ocp-console` client secret (cluster console OIDC), not the OCM Resource Manager UI.
 
 ## Add Users
 

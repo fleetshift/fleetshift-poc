@@ -1,6 +1,6 @@
 # Rules for Agents
 
-Resource Manager UI — React 18 shell + Scalprum micro-frontend plugins, rspack + Module Federation.
+OCM Resource Manager console — React 18 shell + Scalprum micro-frontend plugins, rspack + Module Federation.
 
 ## Source of truth
 

@@ -154,7 +154,7 @@ staticPasswords:
     hash: "{{.OpsHash}}"
     username: "ops-user"
     userID: "ocm-resource-manager-sandbox-ops-v1"
-    name: "Resource Manager Operator"
+    name: "OCM Resource Manager operator"
     preferredUsername: "ops-user"
     groups:
       - "ops"
@@ -162,28 +162,28 @@ staticPasswords:
     hash: "{{.DevHash}}"
     username: "dev-user"
     userID: "ocm-resource-manager-sandbox-dev-v1"
-    name: "Resource Manager Developer"
+    name: "OCM Resource Manager developer"
     preferredUsername: "dev-user"
     groups:
       - "dev"
 staticClients:
   - id: ocm-resource-manager
-    name: Resource Manager Resource Server
+    name: OCM Resource Manager API
     secret: {{.ResourceSecret}}
     public: false
     trustedPeers:
       - ocm-resource-manager-ui
       - ocm-resource-manager-cli
   - id: ocm-resource-manager-ui
-    name: Resource Manager UI
+    name: OCM Resource Manager console
     public: true
     redirectURIs:
       - {{.UICallback}}
       - {{.SilentRenew}}
   - id: ocm-resource-manager-cli
-    name: Resource Manager CLI
+    name: fleetctl
     public: true
   - id: ocm-resource-manager-signing
-    name: Resource Manager Signing Enrollment
+    name: OCM Resource Manager signing enrollment
     public: true
 `))

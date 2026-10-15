@@ -1,8 +1,8 @@
-# ocm-resource-manager
+# OCM Resource Manager
 
-This repository explores an experimental variant of Open Cluster Management (OCM) using a resource manager-based architecture. A standalone resource manager and database provide the foundation for consolidated management and inventory, with native multitenancy and role-based access control as architectural goals. Kubernetes is the primary built-in target; addons support additional target types. Standalone proofs of concept explore individual parts of the design.
+OCM Resource Manager is an experimental variant of Open Cluster Management (OCM) using a resource manager architecture. The platform includes the resource manager server, console, `fleetctl` CLI, and an extension framework. Addons extend the platform through API, UI, orchestration, and delivery capabilities. Kubernetes is the primary built-in target; addons support additional target types. Standalone proofs of concept explore individual parts of the design.
 
-The resource manager owns domain APIs and persistence directly in SQLite or PostgreSQL. This differs from OCM's Kubernetes API-based management plane; standalone operation itself is already supported by OCM. This experiment is preparation for OCM upstream discussions, without a claim of formal acceptance or complete component compatibility.
+The resource manager server owns domain APIs and persistence directly in SQLite or PostgreSQL, providing the foundation for consolidated management and inventory. Native multitenancy and role-based access control are architectural goals. This differs from OCM's Kubernetes API-based management plane; standalone operation itself is already supported by OCM. This experiment is preparation for OCM upstream discussions, without a claim of formal acceptance or complete component compatibility.
 
 See the [architecture](docs/design/architecture.md) and [contributor acknowledgment](docs/contributors.md).
 
@@ -10,7 +10,7 @@ See the [architecture](docs/design/architecture.md) and [contributor acknowledgm
 
 ### Podman
 
-One way to try Resource Manager is the all-in-one image (API, UI, and peer
+One way to try OCM Resource Manager is the all-in-one image (API, UI, and peer
 Dex in one container). Needs **podman**. Sandbox only — not a production
 deployment.
 

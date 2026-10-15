@@ -12,7 +12,7 @@ if (!(await $`oc get keycloak/keycloak -n keycloak-prod`.nothrow()).ok)
   throw new Error(
     "Keycloak CR 'keycloak' not found in namespace 'keycloak-prod'. Is Keycloak deployed?",
   );
-console.log("This will delete and re-import Resource Manager realm state.");
+console.log("This will delete and re-import OCM Resource Manager realm state.");
 if (!/^y$/i.test(await question("Continue? (y/N): "))) process.exit(0);
 const ns = "keycloak-prod";
 const domain = (

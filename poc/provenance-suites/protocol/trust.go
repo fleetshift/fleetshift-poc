@@ -66,7 +66,7 @@ func (m PolicyMatch) Matches(ctx DeliveryContext) bool {
 }
 
 // AuthorityConfig is keyed by canonical principal authority, not by a
-// Resource Manager tenant and not by a globally named trust-domain object.
+// platform tenant and not by a globally named trust-domain object.
 // Published configurations and their nested values are immutable. Common
 // lookups return shared views; copy at an ownership boundary when needed.
 type AuthorityConfig struct {

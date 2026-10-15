@@ -33,7 +33,7 @@ func registerGatewayHandlers(ctx context.Context, gwMux *runtime.ServeMux, conn 
 	return nil
 }
 
-// registerStaticGRPCServices registers the core Resource Manager gRPC services and
+// registerStaticGRPCServices registers the core platform gRPC services and
 // composite reflection.
 func registerStaticGRPCServices(
 	grpcServer *grpc.Server,

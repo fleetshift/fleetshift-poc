@@ -68,7 +68,7 @@ export function usesPulledImage(env) {
   return env.OCM_RM_E2E_AIO_PULL === "1";
 }
 
-// E2E defaults to debug so CI logs and dumpDiagnostics include Resource Manager,
+// E2E defaults to debug so CI logs and dumpDiagnostics include the resource manager server,
 // Dex, and s6 output. The image ENV is error. An explicit LOG_LEVEL wins.
 export function sandboxLogLevel(env = process.env) {
   const raw = typeof env.LOG_LEVEL === "string" ? env.LOG_LEVEL.trim() : "";

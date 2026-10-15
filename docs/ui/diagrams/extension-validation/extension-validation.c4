@@ -1,4 +1,4 @@
-// Resource Manager UI — Extension Validation Architecture
+// OCM Resource Manager UI — Extension Validation Architecture
 // Source of truth: docs/extension-validation.md, build-utils/src/extensions/
 //
 // Two-sided trust boundary for ALL extension types:

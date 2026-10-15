@@ -56,7 +56,7 @@ type PendingSet struct {
 	committed    bool
 }
 
-// New returns an empty sparse map separated by domain. Resource Manager passes the
+// New returns an empty sparse map separated by domain. The resource manager passes the
 // tenant ID as the domain so otherwise identical maps have different roots.
 func New(domain string) *Tree {
 	treeID := deriveTreeID(domain)

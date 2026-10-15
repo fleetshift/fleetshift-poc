@@ -2,7 +2,7 @@
 
 ## Overview
 
-Resource Manager supports two key registry types for signing key enrollment. Each registry resolves a user's ECDSA P-256 public key for signature verification. The admin configures one registry at a time via `fleetctl auth setup`.
+OCM Resource Manager supports two key registry types for signing key enrollment. Each registry resolves a user's ECDSA P-256 public key for signature verification. The admin configures one registry at a time via `fleetctl auth setup`.
 
 - **OIDC** — the public key is embedded as a claim in the enrollment ID token. Works with any OIDC-capable IdP (Keycloak, Auth0, Ping, etc.).
 - **GitHub** — the user uploads their SSH signing key to GitHub; the server fetches it from the public API.

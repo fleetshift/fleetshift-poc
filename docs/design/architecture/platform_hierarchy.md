@@ -180,8 +180,8 @@ The bootstrap story is intentionally ambitious: a local ephemeral distribution c
 2. It deploys a provisioning addon such as CAPI
 3. It provisions a real cluster and obtains kubeconfig
 4. It deploys a proxy fleetlet so the new cluster can be managed before it can connect back on its own
-5. It deploys infrastructure management, Resource Manager, configuration, and a co-located fleetlet to the remote cluster
-6. The co-located fleetlet connects to the production Resource Manager
+5. It deploys infrastructure management, the resource manager server, configuration, and a co-located fleetlet to the remote cluster
+6. The co-located fleetlet connects to the production resource manager
 7. The local bootstrap instance is shut down
 
 This is a pivot from bootstrap control to self-management rather than a throwaway evaluation install.

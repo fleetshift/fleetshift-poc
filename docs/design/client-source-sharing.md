@@ -29,7 +29,7 @@ client/
 
 This separates two different decisions:
 
-- Code is shared by Resource Manager clients.
+- Code is shared by OCM Resource Manager clients.
 - Code is stable and intentionally exposed to community plugin or SDK users.
 
 The first does not require the second.

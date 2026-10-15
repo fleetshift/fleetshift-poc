@@ -1,5 +1,5 @@
 // Package aioproxy terminates the AIO gateway certificate and reverse-proxies
-// peer Dex and Resource Manager on one public origin.
+// peer Dex and the resource manager server on one public origin.
 package aioproxy
 
 import (
@@ -30,7 +30,7 @@ const (
 // ForwardingHeaders are extra hop and identity headers a client can spoof
 // (address, proto, or authenticated user). ReverseProxy.Rewrite already
 // drops Forwarded and X-Forwarded-For/Host/Proto; these names are not in
-// that set and must not reach Dex or Resource Manager.
+// that set and must not reach Dex or the resource manager server.
 var ForwardingHeaders = []string{
 	"X-Forwarded-Port",
 	"X-Forwarded-Ssl",
@@ -46,7 +46,7 @@ var ForwardingHeaders = []string{
 }
 
 // Config is the AIO TLS-edge configuration. DexURL and ResourceManagerURL are the
-// Dex and Resource Manager loopback upstreams. The accepted Host header is derived
+// Dex and the resource manager server loopback upstreams. The accepted Host header is derived
 // from PublicOrigin.
 type Config struct {
 	ListenAddr         string
@@ -58,7 +58,7 @@ type Config struct {
 }
 
 // Proxy terminates the AIO gateway certificate and multiplexes /idp to Dex
-// and every other path to Resource Manager.
+// and every other path to the resource manager server.
 type Proxy struct {
 	certFile        string
 	keyFile         string
@@ -104,7 +104,7 @@ func New(cfg Config) (*Proxy, error) {
 	return p, nil
 }
 
-// ServeHTTP routes a request to Dex or Resource Manager after Host and WebSocket
+// ServeHTTP routes a request to Dex or the resource manager server after Host and WebSocket
 // Origin checks. Encoded paths are classified with EscapedPath so a cleaned
 // path cannot cross the /idp routing boundary.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +226,7 @@ func newUpstream(target *url.URL, transport http.RoundTripper) *httputil.Reverse
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			// Readiness probes hit the edge before Dex and Resource Manager bind. Skipping
+			// Readiness probes hit the edge before Dex and the resource manager server bind. Skipping
 			// ECONNREFUSED logs to reduce log noise.
 			if !errors.Is(err, syscall.ECONNREFUSED) {
 				log.Printf("aio-proxy: upstream error method=%s path=%s: %v", r.Method, r.URL.Path, err)

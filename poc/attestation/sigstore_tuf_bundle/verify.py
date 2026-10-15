@@ -1,4 +1,4 @@
-"""Stateful, offline verification of couriered Resource Manager delivery packages."""
+"""Stateful, offline verification of couriered OCM Resource Manager delivery packages."""
 
 from __future__ import annotations
 

@@ -46,7 +46,7 @@ func newServeCmd() *cobra.Command {
 	f := &serveFlags{}
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the Resource Manager gRPC and HTTP servers",
+		Short: "Start the resource manager server (gRPC and HTTP)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			sel := serveSelections{DBExplicit: cmd.Flags().Changed("db")}
 			return runServe(cmd.Context(), f, sel)

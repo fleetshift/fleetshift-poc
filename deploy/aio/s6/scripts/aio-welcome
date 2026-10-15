@@ -23,7 +23,7 @@ if [ "$i" -ge 30 ]; then
 	exit 1
 fi
 
-echo "Resource manager is ready."
+echo "OCM Resource Manager is ready."
 
 if [ -f /run/ocm-resource-manager/dex.enabled ]; then
 	cat <<EOF

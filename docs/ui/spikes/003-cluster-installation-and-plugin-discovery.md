@@ -6,7 +6,7 @@
 
 ## Problem
 
-When a user adds a cluster to Resource Manager, the UI needs to figure out two things: how to connect to it, and what plugins are relevant for it. Different clusters have different things installed — one might have Prometheus, another might have cert-manager, a third might be a plain Kubernetes cluster with nothing extra. The UI needs to discover what is available and load the right plugins automatically, without the user having to manually configure what features to show.
+When a user adds a cluster to OCM Resource Manager, the UI needs to figure out two things: how to connect to it, and what plugins are relevant for it. Different clusters have different things installed — one might have Prometheus, another might have cert-manager, a third might be a plain Kubernetes cluster with nothing extra. The UI needs to discover what is available and load the right plugins automatically, without the user having to manually configure what features to show.
 
 On top of that, different Kubernetes distributions come with different built-in capabilities. OpenShift has Routes and ConsolePlugins. Vanilla Kubernetes does not. Some things like pods, nodes, and storage are always there regardless of distribution. The discovery system needs to handle all of this.
 

@@ -1,18 +1,18 @@
 # OCM Work-Agent Adapter POC
 
-This is a standalone Go proof of concept for reusing Open Cluster Management's (OCM's) work agent within the resource manager experiment:
+This is a standalone Go proof of concept for reusing Open Cluster Management's (OCM's) work agent within the OCM Resource Manager experiment:
 
-Can Resource Manager project its delivery output into an OCM-shaped compatibility view and then reuse the spoke-side `work-agent` shape, without adopting the whole `klusterlet` or persisting extra OCM state?
+Can the resource manager server project its delivery output into an OCM-shaped compatibility view and then reuse the spoke-side `work-agent` shape, without adopting the whole `klusterlet` or persisting extra OCM state?
 
 The answer from this POC is "probably yes, at the `ManifestWork` seam."
 
 ## What this demonstrates
 
-- A tiny Resource Manager-shaped delivery envelope is translated into an OCM `ManifestWork` shape.
+- A tiny platform-shaped delivery envelope is translated into an OCM `ManifestWork` shape.
 - Desired work is exposed through a **virtual**, target-scoped informer/lister view that matches the namespace-scoped model used by OCM spoke agents.
 - No `ManifestWork` objects are persisted to a Kubernetes API server, locally or remotely.
 - A small target-local reconcile loop watches that scoped compatibility view, keeps a **minimal local journal**, and projects a real OCM-shaped `AppliedManifestWork` only when needed.
-- The resulting desired-work view and projected local state are turned back into a small Resource Manager-shaped feedback struct.
+- The resulting desired-work view and projected local state are turned back into a small platform-shaped feedback struct.
 - A focused integration test also shows that the projected `ManifestWork` shape can drive OCM's real `manifestcontroller.NewManifestWorkController` with no controller fork, if we accept OCM's client/informer assumptions.
 
 ## What is real reuse
@@ -53,12 +53,12 @@ That is meaningful reuse, but it also shows why "reuse as-is" conflicts with the
 
 ## What a fork could simplify
 
-If Resource Manager wants to keep the in-memory `ManifestWork` view and the minimal journal from this POC, the clearest fork points are:
+If the resource manager is to keep the in-memory `ManifestWork` view and the minimal journal from this POC, the clearest fork points are:
 
 - replace `AppliedManifestWork` client/lister/patcher dependencies with a narrow journal interface
 - split the manifest apply reconciler from the `AppliedManifestWork` inventory reconciler so apply can be reused without the full local CR shape
 - make `objectreader` and feedback watches optional or pluggable
-- drop or collapse the extra finalizer and unmanaged-work controllers if Resource Manager owns deletion semantics centrally
+- drop or collapse the extra finalizer and unmanaged-work controllers if the resource manager owns deletion semantics centrally
 
 ## What is intentionally stubbed
 
@@ -69,7 +69,7 @@ If Resource Manager wants to keep the in-memory `ManifestWork` view and the mini
 - No Kubernetes API server for `ManifestWork`
 - No direct imports from `server/internal/...`
 
-That last point is intentional: this POC lives under top-level `poc/`, so it cannot legally import Resource Manager internal packages. Instead it uses a tiny copied Resource Manager-shaped interface and payload model as demonstration glue.
+That last point is intentional: this POC lives under top-level `poc/`, so it cannot legally import resource manager server internal packages. Instead it uses a tiny copied platform-shaped interface and payload model as demonstration glue.
 
 ## Files
 
@@ -87,9 +87,9 @@ go test ./...
 
 The promising boundary is not "run klusterlet as-is." It is:
 
-1. Resource Manager orchestration emits a delivery envelope.
+1. Resource manager orchestration emits a delivery envelope.
 2. An adapter projects that envelope into an **in-memory `ManifestWork` compatibility view** for one target.
 3. A target-local spoke loop consumes that view and manages local apply/inventory/status state.
 4. The local checkpoint stores only the minimal data needed for restart/cleanup and projects `AppliedManifestWork` on demand.
 
-That suggests a realistic next step would be a Resource Manager fleetlet-side adapter that reuses more of OCM's spoke reconciliation internals while keeping Resource Manager's own transport, identity, and routing model, and without introducing a second persisted desired-state store.
+That suggests a realistic next step would be a platform fleetlet-side adapter that reuses more of OCM's spoke reconciliation internals while keeping the platform's own transport, identity, and routing model, and without introducing a second persisted desired-state store.

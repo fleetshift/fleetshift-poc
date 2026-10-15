@@ -36,7 +36,7 @@ func TestAIOWelcomeScript(t *testing.T) {
 		"dev@ocm-resource-manager.local",
 		"ocm-resource-manager-dev",
 		"configured external identity provider",
-		"Resource manager is ready.",
+		"OCM Resource Manager is ready.",
 		"Press Ctrl+C to stop.",
 		"exit 1",
 	} {

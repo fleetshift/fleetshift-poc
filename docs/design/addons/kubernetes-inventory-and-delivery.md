@@ -390,7 +390,7 @@ Every watched resource gets the following projected into the inventory report, w
 | --- | --- |
 | Resource name | namespaced: `clusters/{cluster}/namespaces/{ns}/apiResources/{groupResourceKey}/objects/{uid}`; cluster-scoped omits `namespaces/{ns}` |
 | Labels | Kubernetes `metadata.labels` (complete latest set; empty map clears) |
-| Conditions | Kubernetes `status.conditions` projected to Resource Manager conditions (True/False/Unknown only; empty type dropped; missing transition time falls back to observed-at) |
+| Conditions | Kubernetes `status.conditions` projected to platform conditions (True/False/Unknown only; empty type dropped; missing transition time falls back to observed-at) |
 | Observation GVR | group, version, resource, scope |
 | Observation apiVersion / kind | from the object |
 | Observation metadata | uid, namespace, name, resourceVersion, generation, creationTimestamp, deletionTimestamp, annotations, ownerReferences |
@@ -478,7 +478,7 @@ When a GVR leaves the desired set, or when an indexer is stopped / a target is d
 
 ### Producer indexing handshake durability
 
-Producers call `EnsureIndexer` before reporting `Delivered`, and a one-shot startup replay recovers indexers after server restart from persisted targets with resolvable vault credentials. The happy path and the ordinary failure path are sound: if `EnsureIndexer` fails, the producer reports `Failed` and Resource Manager's durable workflow redelivers. That is not the open gap.
+Producers call `EnsureIndexer` before reporting `Delivered`, and a one-shot startup replay recovers indexers after server restart from persisted targets with resolvable vault credentials. The happy path and the ordinary failure path are sound: if `EnsureIndexer` fails, the producer reports `Failed` and the resource manager's durable workflow redelivers. That is not the open gap.
 
 What remains open are crash and signal windows around that handshake:
 

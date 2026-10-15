@@ -1,6 +1,6 @@
 {
   "name": "@ocm-resource-manager/cli",
-  "description": "TypeScript command-line client for the OCM resource manager experiment.",
+  "description": "TypeScript command-line client for OCM Resource Manager.",
   "version": "0.0.0",
   "private": true,
   "type": "module",

@@ -50,7 +50,7 @@ export default function WelcomeModal() {
           </SplitItem>
           <SplitItem isFilled>
             <Content component="h2" className="pf-v6-u-mb-sm">
-              Welcome to Security in resource manager
+              Welcome to Security in OCM Resource Manager
             </Content>
             <Content
               component="p"

@@ -38,7 +38,7 @@ type Options struct {
 	Store  *store.Store
 	Logger logr.Logger
 	// StatusHook is invoked on Status().Update before the store write.
-	// Used to mirror Delivery status to the Resource Manager DeliveryReporter.
+	// Used to mirror Delivery status to the platform DeliveryReporter.
 	// Full-object Create/Update (projection) do not invoke the hook.
 	StatusHook StatusHook
 }

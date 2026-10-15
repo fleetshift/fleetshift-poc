@@ -15,7 +15,7 @@ if (argv.includes("--help") || argv.includes("-h")) {
   console.log(`Usage: teardown.mjs [options]
 
 Options:
-  --namespace <namespace>         Resource Manager namespace (default: ocm-resource-manager)
+  --namespace <namespace>         OCM Resource Manager namespace (default: ocm-resource-manager)
   --route-name <name>             gRPC Route name (default: grpc)
   --issuer-name <name>            ClusterIssuer name (default: ocm-resource-manager-grpc-letsencrypt-prod)
   --tls-secret-name <name>        TLS Secret name (default: ocm-resource-manager-grpc-route-tls)
@@ -91,7 +91,7 @@ if (tlsSecret.ok && backupNamespaceExists.ok) {
   );
 }
 
-// Delete namespace-scoped certificate resources, then Resource Manager issuer.
+// Delete namespace-scoped certificate resources, then OCM Resource Manager issuer.
 console.log("==> Deleting certificate resources...");
 for (const [kind, name] of [
   ["certificate", "ocm-resource-manager-grpc-route"],
@@ -110,7 +110,7 @@ if (issuer.ok) {
     owned ||
     /^y$/i.test(
       await question(
-        `ClusterIssuer ${issuerName} is not marked as Resource Manager-owned. Delete it? (y/N): `,
+        `ClusterIssuer ${issuerName} is not marked as OCM Resource Manager-owned. Delete it? (y/N): `,
       ),
     )
   ) {

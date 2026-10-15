@@ -176,6 +176,6 @@ def test_fulcio_leaf_expiry_after_signing_does_not_invalidate_timestamped_bundle
     env = PoCEnvironment()
     package = _delivery(env)
     # Sigstore checks the short-lived certificate at trusted signing time. The
-    # separate Resource Manager authorization validity remains enforced at use time.
+    # separate OCM Resource Manager authorization validity remains enforced at use time.
     result = env.delivery_agent().verify(package, now=time.time() + 15 * 60)
     assert result.valid, result

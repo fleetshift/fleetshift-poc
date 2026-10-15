@@ -1,7 +1,7 @@
-# Resource Manager Controller-Runtime POC
+# OCM Resource Manager controller-runtime POC
 
 Standalone proof of concept: run **controller-runtime** reconcilers against
-**Resource Manager delivery targets** instead of kube-apiserver, using
+**platform delivery targets** instead of kube-apiserver, using
 [sig-multicluster/multicluster-runtime](https://github.com/kubernetes-sigs/multicluster-runtime)
 and the same manager-swap idea as
 [postgres-controller-backend](https://github.com/jmelis/postgres-controller-backend).
@@ -10,7 +10,7 @@ and the same manager-swap idea as
 
 Can addon authors keep the controller-runtime mental model (reconcile loops,
 informers, `SetupWithManager`, optimistic concurrency) while the objects they
-reconcile are **Resource Manager deliveries** — with placement, rollout, attestation,
+reconcile are **platform deliveries** — with placement, rollout, attestation,
 and platform feedback — rather than Kubernetes API resources?
 
 This POC says **yes, at the `cluster.Cluster` / Provider seam**. Controllers
@@ -21,7 +21,7 @@ talk only to the kube-shaped client; status write-back is mirrored to
 
 The store is a **projection shim**, not a second source of truth.
 
-Resource Manager already owns durable desired state and pushes work via
+The resource manager server already owns durable desired state and pushes work via
 `Deliver` / `Remove` (with restart recovery via `ListActiveDeliveries`).
 Controller-runtime still needs a Kubernetes-shaped list/watch surface.
 The local store is only that surface: hydrate on deliver, drop on
@@ -58,7 +58,7 @@ generation fencing / a small journal — not a full object database.
 └─────────┬───────────────────────────────────────────────────────┘
           │ Deliver / Remove / Report*
 ┌─────────▼───────────────────────────────────────────────────────┐
-│  platform.Fake (stand-in for Resource Manager orchestration)          │
+│  platform.Fake (stand-in for resource manager orchestration)          │
 │  same API surface as domain.DeliveryAgent / DeliveryReporter    │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -67,7 +67,7 @@ generation fencing / a small journal — not a full object database.
 |-------|------|-------------|
 | `rmruntime` | Drop-in `cluster.Cluster` / `manager.Manager` over an in-memory list/watch store | `pgruntime.NewManager` |
 | `provider` | Discovers targets, engages clusters, implements `DeliveryAgent`, mirrors status | multicluster-runtime providers + delivery agent |
-| `contract` | Resource Manager-shaped delivery types (no `internal/` imports) | `poc/ocm-work-agent-adapter` |
+| `contract` | platform-shaped delivery types (no `internal/` imports) | `poc/ocm-work-agent-adapter` |
 | `controllers` | Ordinary reconciler; kube client only | greeting controller / addon reconcile |
 | `platform` | Fake control plane for tests | recording delivery + DeliveryReportService |
 
@@ -140,7 +140,7 @@ store (projection + RV journal)
 | Standard CR | This POC |
 |-------------|----------|
 | `ctrl.NewManager(kubeconfig, …)` | `rmruntime.NewManager` + `mcmanager.WithMultiCluster` |
-| Cluster = kube API server | Cluster = Resource Manager **target** (rmruntime store) |
+| Cluster = kube API server | Cluster = platform **target** (rmruntime store) |
 | Desired state from etcd watch | Desired state from `DeliveryAgent.Deliver` → projected CR |
 | Status stays in etcd | Status mirrored to platform via `StatusHook` → `DeliveryReporter` |
 | Leader election | Not used (POC); production would use target leases / buckets |
@@ -153,7 +153,7 @@ go test ./...
 go run ./example
 ```
 
-## Mapping to real Resource Manager
+## Mapping to the platform
 
 | POC | Production |
 |-----|------------|
@@ -175,6 +175,6 @@ the controller-runtime watch/reconcile loop and status-only write-back.
 - `provider/` — multicluster Provider + DeliveryAgent + status mirror
 - `apis/delivery/v1alpha1/` — Delivery CR
 - `controllers/` — Delivery reconciler (kube client only)
-- `platform/` — fake Resource Manager control plane
+- `platform/` — fake platform control plane
 - `example/` — runnable wiring
 - `e2e_test.go` — end-to-end deliver → reconcile → report

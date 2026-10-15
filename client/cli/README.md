@@ -1,6 +1,6 @@
 # TypeScript Fleetctl CLI
 
-TypeScript `fleetctl` CLI for Resource Manager. The local setup examples below use
+TypeScript `fleetctl` CLI for OCM Resource Manager. The local setup examples below use
 the [Podman AIO stack](../../deploy/podman/README.md).
 
 ## Prerequisites
@@ -239,7 +239,7 @@ rm -rf "$FLEETCTL_CONFIG_DIR"
 rm -rf client/cli/bin
 ```
 
-If `FLEETCTL_CONFIG_DIR` is unset, remove the default `~/.config/ocm-resource-manager` only when no other Resource Manager CLI setup uses it. Do not print or commit `credentials.json`.
+If `FLEETCTL_CONFIG_DIR` is unset, remove the default `~/.config/ocm-resource-manager` only when no other OCM Resource Manager CLI setup uses it. Do not print or commit `credentials.json`.
 
 Remove global npm link, if created:
 

@@ -23,7 +23,7 @@ const SetupMasthead = () => (
         <MastheadLogo component="span" className="ocm-rm-masthead-brand">
           <img src={logo} alt="" className="ocm-rm-masthead-logo" />
           <span>
-            OCM resource manager <small>Experimental</small>
+            OCM Resource Manager <small>Experimental</small>
           </span>
         </MastheadLogo>
       </MastheadBrand>

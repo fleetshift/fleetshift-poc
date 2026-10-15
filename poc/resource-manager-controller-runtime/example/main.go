@@ -1,6 +1,6 @@
-// Command example wires the Resource Manager multicluster provider, an rmruntime
+// Command example wires the platform multicluster provider, an rmruntime
 // host manager, and a Delivery reconciler — the same shape as
-// multicluster-runtime's kind example, but with Resource Manager delivery targets
+// multicluster-runtime's kind example, but with platform delivery targets
 // instead of kube API servers.
 package main
 

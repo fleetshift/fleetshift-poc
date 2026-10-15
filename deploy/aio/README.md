@@ -1,4 +1,4 @@
-# Resource Manager all-in-one image
+# OCM Resource Manager all-in-one image
 
 Single container (`quay.io/stolostron/ocm-resource-manager`) with API, baked-in UI, and
 peer Dex under s6-overlay. Documented and tested with **podman**. To launch
@@ -56,15 +56,15 @@ stream beneath the banner if something fails later.
 Routing on this origin is prefix-based, not a catch-all into the SPA:
 
 1. **Edge** — `/idp`… goes to peer Dex (Dex-on only). Every other path is
-   forwarded to Resource Manager.
-2. **Resource Manager** — serves the paths below. Only exact `/` and `/app` redirect
+   forwarded to the resource manager server.
+2. **Resource manager server** — serves the paths below. Only exact `/` and `/app` redirect
    to `/app/`. Unknown paths return 404; they are not rewritten into `/app`.
 
 | Path | Serves |
 |------|--------|
 | `/idp`… | Peer Dex (Dex-on only) |
 | `/app`… | SPA and static assets |
-| `/api`, `/v1alpha`, `/apis`… | Resource Manager HTTP APIs |
+| `/api`, `/v1alpha`, `/apis`… | Resource manager HTTP APIs |
 | `/livez`, `/readyz` | Health probes |
 | `/` or `/app` (exact) | 302 to `/app/` |
 
@@ -119,7 +119,7 @@ uses a different config surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Registry subject | `OIDC_REGISTRY_SUBJECT_EXPRESSION` | `claims.preferred_username`, unless a public-key claim is set |
 | Public-key claim | `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` | unset (registry mapping is used instead) |
 | OIDC CA | `OIDC_CA_FILE` | sandbox CA on Dex-on. Dex-off: unset unless discovery/TLS needs non-system trust |
-| Log level | `LOG_LEVEL` | `error`. One control for Resource Manager, peer Dex, and s6 lifecycle verbosity (`debug`, `info`, `warn`, `error`) |
+| Log level | `LOG_LEVEL` | `error`. One control for the resource manager server, peer Dex, and s6 lifecycle verbosity (`debug`, `info`, `warn`, `error`) |
 | Addons | `OCM_RM_SERVER_ADDONS` | `kind,kubernetes` |
 | Container socket | `CONTAINER_HOST` | image default `unix:///var/run/docker.sock`. Override only if the mount path differs |
 | Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | Dex-on + live socket: `ocm-resource-manager:8085`. Set empty to disable. Not written on Dex-off |
@@ -128,7 +128,7 @@ If you override registry ID or subject expression, set both. Registry mapping an
 `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive (`resource-manager serve`
 enforces this).
 
-`LOG_LEVEL` is the only AIO logging control. It is passed to Resource Manager
+`LOG_LEVEL` is the only AIO logging control. It is passed to the resource manager
 (`--log-level`), rendered into peer Dex's logger, and mapped to s6-overlay
 verbosity. Restore diagnostic output without rebuilding:
 
@@ -153,7 +153,7 @@ instead of Dex cross-client audience scopes that Keycloak rejects as
 trust. Issuer URL shape, CA readability/PEM, and registry/claim pairing are
 validated by `resource-manager serve`. Packaging fills omitted AuthMethod/UI defaults
 and forwards the resolved serve argv. The welcome banner still waits for public
-`/readyz`, then shows the Resource Manager URL and external-IdP text without demo
+`/readyz`, then shows the console URL and external-IdP text without demo
 Dex credentials.
 
 ### Podman
@@ -283,7 +283,7 @@ the AIO log-level wrapper, which `exec`s `/init` so s6 remains PID 1.
 | Path | Role |
 |---|---|
 | `cmd/aio-init` | Init helper: Dex-on/off branch, PKI, Dex config, serve argv, hosts alias, public.env |
-| `cmd/aio-proxy` | TLS edge: terminates the gateway cert and reverse-proxies Dex and Resource Manager |
+| `cmd/aio-proxy` | TLS edge: terminates the gateway cert and reverse-proxies Dex and the resource manager server |
 | `cmd/kind-loopback-forward` | TCP proxy copied onto kind control-planes for the public origin |
 | `internal/aioinit` | Packaging helpers (same package, separate files: `endpoints`, `pki`, `dexconfig`, `serveargv`, `kind`, `hosts`) |
 | `internal/aioproxy` | Reverse-proxy implementation used by `aio-proxy` |
@@ -314,7 +314,7 @@ source format:
 
 ### Identities
 
-- Resource Manager: `1000:1000`
+- Resource manager server: `1000:1000`
 - Dex: `1001:1001`
 - aio-proxy: `1002:1002` (owns the gateway leaf key; cannot read `/data` or Dex state)
 - s6 starts as container root only to initialize and drop privileges

@@ -1,4 +1,4 @@
-// Resource Manager UI — Feature Contract Architecture
+// OCM Resource Manager UI — Feature Contract Architecture
 // Source of truth: docs/feature-contracts.md, build-utils/src/extensions/
 //
 // How plugins declare capabilities via typed extension builders,

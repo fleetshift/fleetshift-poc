@@ -1,4 +1,4 @@
-// Package aioinit holds Resource Manager AIO packaging helpers: public origin and
+// Package aioinit holds OCM Resource Manager AIO packaging helpers: public origin and
 // listen addresses, sandbox PKI, peer Dex config, serve argv,
 // and kind networking.
 package aioinit
@@ -36,7 +36,7 @@ var PeerDexIssuer = publicOrigin() + "/idp"
 
 // Endpoints is the AIO public origin plus internal listen addresses.
 // PublicOrigin is the browser-facing URL. HTTPListen and DexListen are the
-// Resource Manager and Dex container-loopback binds.
+// The resource manager server and Dex bind to container-loopback addresses.
 type Endpoints struct {
 	PublicOrigin  string
 	UICallback    string

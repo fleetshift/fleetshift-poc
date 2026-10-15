@@ -95,8 +95,8 @@ class PoCEnvironment:
         self.platform_issuer = "https://idp.ocm-resource-manager.local/platform"
         self.platform_idp = OIDCIssuer(self.platform_issuer)
         self.user_fulcio = FulcioCA(f"{tenant_id} Fulcio", self.tenant_idp)
-        self.workload_fulcio = FulcioCA("Resource Manager platform Fulcio", self.platform_idp)
-        self.tsa = RFC3161TimestampAuthority("Resource Manager external TSA")
+        self.workload_fulcio = FulcioCA("OCM Resource Manager platform Fulcio", self.platform_idp)
+        self.tsa = RFC3161TimestampAuthority("OCM Resource Manager external TSA")
         self.user_ca_uri = f"https://fulcio.ocm-resource-manager.local/tenants/{tenant_id}"
         self.platform_ca_uri = "https://fulcio.ocm-resource-manager.local/platform"
         self.tsa_uri = "https://tsa.ocm-resource-manager.local"

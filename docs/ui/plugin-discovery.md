@@ -2,7 +2,7 @@
 
 Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
 
-Resource Manager dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
+OCM Resource Manager dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
 
 ## Overview
 
@@ -43,7 +43,7 @@ These plugins are enabled for every cluster unconditionally. They rely on core K
 
 ### 2. CRD-based Discovery
 
-Resource Manager lists all CustomResourceDefinitions on the cluster (`apiextensions.k8s.io/v1`) and matches their API group against a known map:
+The platform lists all CustomResourceDefinitions on the cluster (`apiextensions.k8s.io/v1`) and matches their API group against a known map:
 
 | CRD API Group | Plugin Key | What it enables |
 |---------------|------------|-----------------|
@@ -59,7 +59,7 @@ In the current prototype, if the CRD listing fails, CRD-based discovery is skipp
 
 ### 3. API Group Discovery (prototype only)
 
-As a prototyping convenience, Resource Manager queries the cluster's aggregated API groups (`/apis`) to get a rough idea of cluster capabilities. API aggregation is **not** a problem this project is trying to solve — this check exists only to bootstrap the UI during development.
+As a prototyping convenience, the platform queries the cluster's aggregated API groups (`/apis`) to get a rough idea of cluster capabilities. API aggregation is **not** a problem this project is trying to solve — this check exists only to bootstrap the UI during development.
 
 - **Metrics API** (`metrics.k8s.io`): If present, enables the `observability` plugin. This API group is registered by the Metrics Server and provides pod/node resource usage data.
 
@@ -67,7 +67,7 @@ In production, the plugin list should come from an authoritative source (CRDs, C
 
 ### 4. OpenShift ConsolePlugin Discovery (OpenShift only)
 
-On OpenShift clusters, Resource Manager also queries `console.openshift.io/v1` ConsolePlugin resources. This allows plugins that are deployed as OpenShift console plugins to be discovered:
+On OpenShift clusters, the platform also queries `console.openshift.io/v1` ConsolePlugin resources. This allows plugins that are deployed as OpenShift console plugins to be discovered:
 
 - If a ConsolePlugin named `clowder-plugin` exists → enables the `clowder` plugin
 
@@ -75,7 +75,7 @@ This check silently fails on vanilla Kubernetes clusters where the `console.open
 
 ## Platform Detection
 
-During connection, Resource Manager also determines whether the cluster is OpenShift or vanilla Kubernetes by checking API groups:
+During connection, the platform also determines whether the cluster is OpenShift or vanilla Kubernetes by checking API groups:
 
 - If `route.openshift.io` or `apps.openshift.io` is present → `platform: "openshift"`
 - Otherwise → `platform: "kubernetes"`
@@ -141,4 +141,4 @@ Discovery must not silently fall back to a minimal plugin set. If capabilities c
 
 ### Plugin list must react to changes
 
-When a cluster is added, updated, or a plugin is installed or removed, Resource Manager must be notified so it can adjust the environment accordingly. A full page refresh in the UI is acceptable if needed, but restarting the server from which the data is sourced must not be required.
+When a cluster is added, updated, or a plugin is installed or removed, the platform must be notified so it can adjust the environment accordingly. A full page refresh in the UI is acceptable if needed, but restarting the server from which the data is sourced must not be required.

@@ -1,4 +1,4 @@
-// Package bootstrap is the sole composition edge for Resource Manager.
+// Package bootstrap is the sole composition edge for the resource manager server.
 // It owns normalized production configuration, eager construction of the
 // complete application graph, listener authority, semantic readiness,
 // background supervision, and bounded shutdown. resource-manager serve and the

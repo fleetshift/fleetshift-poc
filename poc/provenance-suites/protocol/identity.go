@@ -24,7 +24,7 @@ type TenantPartition string
 // Tenant is the external tenant identity established by a provenance profile.
 // Its partition is scoped by principal authority, just like a subject. An
 // empty partition denotes the unpartitioned tenant under that authority.
-// Internal Resource Manager routing IDs remain local to the resource manager.
+// Internal platform routing IDs remain local to the resource manager.
 type Tenant struct {
 	PrincipalAuthority
 	Partition TenantPartition `json:"partition,omitempty"`

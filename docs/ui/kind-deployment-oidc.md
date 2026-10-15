@@ -68,7 +68,7 @@ kind get kubeconfig --name <cluster-name> | kubectl --kubeconfig /dev/stdin get 
 
 **Symptom:** After fixing the manifest format, reusing the same deployment ID still fails. The Go backend logs show `workflows.is_replaying=true` and the old broken payload is replayed.
 
-**Root cause:** Resource Manager uses a durable workflow engine (`go-workflows`). Failed workflow activities persist in SQLite and are replayed with the original payload when the server restarts or the workflow is re-triggered.
+**Root cause:** OCM Resource Manager uses a durable workflow engine (`go-workflows`). Failed workflow activities persist in SQLite and are replayed with the original payload when the server restarts or the workflow is re-triggered.
 
 **Workaround:** Use a different deployment ID, or delete the database and restart:
 

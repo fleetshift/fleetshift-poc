@@ -139,7 +139,7 @@ pulls `quay.io/stolostron/ocm-resource-manager:latest` instead of building, then
 suite. That path tests the **already published** Quay AIO, not
 the image that would be built from the current branch. After pull or restore,
 `podman run` uses `--pull=never` and `-e LOG_LEVEL=debug` (the image default
-is `error`) so Resource Manager, Dex, and s6 diagnostics reach CI logs and the
+is `error`) so OCM Resource Manager, Dex, and s6 diagnostics reach CI logs and the
 failure dump. `LOG_LEVEL` in the GitHub job env is forwarded; unset local
 runs still use debug. Set `OCM_RM_E2E_KEEP=1` only for local debugging
 when the sandbox should remain after the command exits.
@@ -327,7 +327,7 @@ parallel. They do not share a running container.
 
 `setup-e2e` is the only place that should install Node or Playwright,
 load or pull the image, start user `podman.socket`, and ensure the `kind`
-network. The `cache` role never starts Resource Manager. The `e2e` role never
+network. The `cache` role never starts OCM Resource Manager. The `e2e` role never
 rebuilds the image because every test job sets `OCM_RM_E2E_AIO_PREBUILT=1`.
 The `published` role never restores the checkout tar; it pulls the published
 tag. The test job sets `OCM_RM_E2E_AIO_PULL=1` and runs Playwright

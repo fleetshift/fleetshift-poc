@@ -7,7 +7,7 @@ const _origDocument = globalThis.document;
 
 beforeEach(() => {
   const store: Record<string, string> = {};
-  globalThis.document = { title: "Resource Manager" } as unknown as Document;
+  globalThis.document = { title: "OCM Resource Manager" } as unknown as Document;
   globalThis.window = {
     location: {
       origin: "https://ocm-resource-manager.localhost:8085",

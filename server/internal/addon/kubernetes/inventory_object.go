@@ -17,7 +17,7 @@ import (
 // ObjectResourceType is the single [domain.ResourceType] used to
 // report every watched Kubernetes object, regardless of GVR or kind.
 // One generic type means new CRDs and API versions never require
-// registering a new Resource Manager resource type. Object identity is split
+// registering a new platform resource type. Object identity is split
 // across the resource name (cluster, optional namespace, versionless
 // group-resource, UID) and the observation payload (apiVersion, kind,
 // metadata.name, and related fields). Built from [AddonID] rather than
@@ -282,7 +282,7 @@ func requireClusterResourceName(name domain.ResourceName) error {
 	return nil
 }
 
-// ObjectLabels projects the object's metadata.labels into Resource Manager
+// ObjectLabels projects the object's metadata.labels into platform
 // localLabels: the complete latest set, keys and values unchanged.
 // This mirrors [ObjectConditions] lifting status.conditions into the
 // inventory envelope. Nil or empty source labels become an empty map
@@ -372,7 +372,7 @@ type RawCondition struct {
 }
 
 // ObjectConditions projects raw Kubernetes status.conditions into
-// Resource Manager conditions: the complete latest set is reported, using
+// platform conditions: the complete latest set is reported, using
 // the Kubernetes condition type directly with no prefix. Conditions
 // with an empty type are dropped, since they cannot be a valid
 // [domain.ConditionType]. Only the standard True/False/Unknown

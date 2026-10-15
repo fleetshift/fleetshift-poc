@@ -1,5 +1,5 @@
 /**
- * TypeScript types for the Resource Manager management API.
+ * TypeScript types for the platform management API.
  *
  * Derived from the finalized OpenAPI spec:
  * `docs/openapi/ocm-resource-manager.swagger.yaml` in ocm-resource-manager.

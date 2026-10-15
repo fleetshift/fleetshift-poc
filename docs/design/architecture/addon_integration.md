@@ -2,7 +2,11 @@
 
 ## What this doc covers
 
-The platform's primary extension surface:
+Addons extend the OCM Resource Manager platform through API, UI, orchestration,
+and delivery contracts. The resource manager server coordinates their lifecycle;
+addon capabilities may execute in clients or independent workloads.
+
+This document covers the platform's primary extension surface:
 
 - addon lifecycle: defined, enabled, connected
 - the capability model and schema reconciliation

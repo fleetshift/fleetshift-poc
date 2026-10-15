@@ -1,6 +1,6 @@
 # API Requirements
 
-Resource Manager's UI layer does not own API aggregation or authentication — those are handled elsewhere in the platform. However, the UI does require specific API capabilities from the platform to function correctly. This document describes what the UI needs.
+The OCM Resource Manager console does not own API aggregation or authentication — those are handled elsewhere in the platform. However, the UI does require specific API capabilities from the platform to function correctly. This document describes what the UI needs.
 
 ## API Layers
 
