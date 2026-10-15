@@ -167,5 +167,5 @@ Nx loads these from `.env` automatically.
 - Proxy: [`sdk/nx-cache-proxy/`](../sdk/nx-cache-proxy/)
 - Dockerfile: [`Dockerfile.nx-cache`](../Dockerfile.nx-cache)
 - OCP manifests: [`deploy/openshift/minio-nx-cache/manifests/`](../deploy/openshift/minio-nx-cache/manifests/)
-- Compose override: [`deploy/podman/overrides/nx-cache.yaml`](../deploy/podman/overrides/nx-cache.yaml)
+- Podman compose override: [`deploy/podman/overrides/nx-cache.yaml`](../deploy/podman/overrides/nx-cache.yaml)
 - OpenAPI spec: [`sdk/nx-cache-proxy/cache-openapi.json`](../sdk/nx-cache-proxy/cache-openapi.json)
