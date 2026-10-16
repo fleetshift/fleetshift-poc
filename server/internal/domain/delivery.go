@@ -281,7 +281,7 @@ func (d *Delivery) Operation() DeliveryOperation { return d.operation }
 // TODO: A Pending delivery returned here may also arrive via
 // [DeliveryAgent.Deliver] if the addon starts up while a
 // DeliverToTarget activity is in flight. Addons must deduplicate
-// by DeliveryID across both paths. See Delivery protocol: disambiguate Pending deliveries in ListActiveDeliveries from concurrent Deliver dispatch.
+// by DeliveryID across both paths. See OME-77.
 type ActiveDelivery struct {
 	Delivery    Delivery
 	Target      TargetInfo

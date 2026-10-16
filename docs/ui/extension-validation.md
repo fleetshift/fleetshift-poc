@@ -1,6 +1,6 @@
 # Extension Validation — Runtime Trust Boundary for Cross-Plugin Extensions
 
-**Epic:** Addon / Extension Model
+**Epic:** OME-3 — Addon / Extension Model
 **Depends on:** [Feature Contracts](./feature-contracts.md)
 **Status:** Draft
 

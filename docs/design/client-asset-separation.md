@@ -2,7 +2,7 @@
 
 **Status:** Draft
 
-**Related issue:** Design separation of client assets from the resource manager server
+**Related issue:** OME-313
 
 This document defines browser asset delivery, ownership, and trust boundaries. See [Client Source Sharing](client-source-sharing.md) for source sharing and runtime boundaries between CLI and Web clients.
 
@@ -268,7 +268,7 @@ An independently provisioned asset distribution component could replace Gateway 
 
 ## Open Questions
 
-1. Are deployment allowlists sufficient for separating client assets from the resource manager, or are signed route/catalog updates required?
+1. Are deployment allowlists sufficient for OME-313, or are signed route/catalog updates required?
 2. Is `PluginClientPolicy` correct resource name and scope?
 3. Which operator policy source is preferred: mounted file, CRD, or administrator service?
 4. Which artifact provenance or manifest-signature format is required?

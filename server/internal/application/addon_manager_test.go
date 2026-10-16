@@ -1311,7 +1311,7 @@ func TestAddonManager_ConnectRejectsServiceNameMismatch(t *testing.T) {
 	}
 }
 
-// --- Create-or-verify target tests (Fix connectTargets blind ErrAlreadyExists skip with create-or-verify) ---
+// --- Create-or-verify target tests (OME-291) ---
 
 // scriptedLocalTarget returns the canonical scripted-local target shape
 // used in production bootstrap.
@@ -1573,7 +1573,7 @@ func TestAddonManager_ConnectTargetNameCollisionFatal(t *testing.T) {
 	}
 }
 
-// --- Connect compensation tests (Fix connectTargets blind ErrAlreadyExists skip with create-or-verify) ---
+// --- Connect compensation tests (OME-291) ---
 
 func TestAddonManager_ConnectCompensatesOnTargetFailure(t *testing.T) {
 	db := sqlite.OpenTestDB(t)

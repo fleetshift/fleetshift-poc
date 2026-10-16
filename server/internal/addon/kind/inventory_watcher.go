@@ -162,8 +162,8 @@ func (w *InventoryWatcher) Watch(clusterName domain.ResourceName, kubeconfig []b
 			if node == nil {
 				return
 			}
-			// Stop reporting this node; deleting its inventory resource remains
-			// separate work. Drop any pending delta for the name.
+			// Stop reporting this node; resource delete is out of scope
+			// (OME-189). Drop any pending delta for the name.
 			w.dropPending(nodeResourceName(node.Name))
 		},
 	})

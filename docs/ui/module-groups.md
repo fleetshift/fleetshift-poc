@@ -1,6 +1,6 @@
 # Module Groups — Nested Navigation and Hierarchical Search
 
-**Epic:** Addon / Extension Model
+**Epic:** OME-3 — Addon / Extension Model
 **Depends on:** [Feature Contracts](./feature-contracts.md)
 **Status:** Implemented
 
@@ -407,8 +407,8 @@ The flat `string[]` storage works for groups. Groups are treated as atomic dragg
 
 ## Related Issues
 
-- Extract search system into a plugin loaded via Module Federation — Extract search system into a plugin loaded via MF
-- Spike: Navigation customization design — custom groups, icon overrides, hidden items — User-created custom nav groups with PF icon gallery
+- OME-145 — Extract search system into a plugin loaded via MF
+- OME-146 — User-created custom nav groups with PF icon gallery
 
 ## Open Questions
 

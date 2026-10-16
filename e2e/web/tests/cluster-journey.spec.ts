@@ -8,7 +8,7 @@ import {
 } from "./clusters";
 import { expect, test } from "./fixtures";
 
-// Exercise the create-cluster-to-ready / delete-cluster-to-gone UI journey,
+// OME-257: the create-cluster-to-ready / delete-cluster-to-gone UI journey,
 // run as the operator against the bundled Kind addon. Kind provisioning is
 // slow, so the whole journey gets a wide timeout.
 test.describe("kind cluster lifecycle", () => {

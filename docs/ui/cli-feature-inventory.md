@@ -1,6 +1,6 @@
 # CLI Feature Inventory
 
-**Design context:** shared CLI and Web UI client architecture
+**Related Jira:** OME-305
 **Status:** Historical Go CLI baseline; superseded by `client/cli/`
 **Scope:** Historical `cli/`
 
@@ -9,14 +9,14 @@ for the shared CLI/Web UI client architecture. It describes feature behavior,
 not terminal presentation. The same feature may later have a CLI and Web UI
 representation.
 
-Sections describing a target model are proposals for the shared client architecture, not claims about
+Sections describing a target model are proposals for OME-305, not claims about
 current implementation. Current behavior is identified explicitly and grounded
 in the source paths listed below.
 
 ## Important Baseline
 
 This document records the removed Go CLI implementation. The Go source under
-`cli/` was removed during the TypeScript CLI rewrite. Current CLI implementation lives under
+`cli/` was removed as part of OME-306. Current CLI implementation lives under
 `client/cli/`; see [client/cli/README.md](../../client/cli/README.md).
 
 The historical Go CLI was a Cobra application. It was not the older
@@ -32,7 +32,7 @@ are stale. Current source code is authoritative.
 
 The historical CLI had no JavaScript Module Federation plugin loader. Its
 dynamic behavior came from gRPC reflection and dynamically constructed
-protobuf messages for addon-provided resource services. The CLI rewrite moved this
+protobuf messages for addon-provided resource services. OME-306 moved this
 client to TypeScript so it can share client and plugin infrastructure with the
 Web UI.
 
@@ -457,7 +457,7 @@ definition and produce two target-specific compilations or configurations: one
 for Web UI and one for Node-based CLI. This would avoid duplicated plugin build
 logic while preserving correct runtime bundles and manifests. Whether this is
 implemented as one wrapper with two entries, two configurations, or another
-Rspack abstraction remains a shared client architecture design decision.
+Rspack abstraction remains an OME-305 design decision.
 
 The extension `client/` area can contain shared contracts and API integration
 plus target-specific entrypoints and renderers. Separate compilation does not
@@ -644,7 +644,7 @@ OpenAPI output from `buf.gen.yaml`. It has no TypeScript generation target yet.
 The current Buf configuration also excludes `proto/addons` from generated Go
 output because addon schemas are compiled dynamically by the server at runtime.
 
-The shared client architecture should add a separate TypeScript SDK generation target for core APIs.
+OME-305 should add a separate TypeScript SDK generation target for core APIs.
 Addon and plugin builds should invoke the same TypeScript SDK generation and
 validation tooling for addon-owned protos. Excluding addon protos from the
 server's generated Go output should not prevent client-side TypeScript
@@ -700,24 +700,24 @@ coverage in the client architecture proposals; planned coverage does not mean im
 
 | Current gap | Planned coverage |
 | --- | --- |
-| JavaScript/TypeScript client runtime | TypeScript CLI rewrite |
-| Shared Dynamic Plugin SDK with Web UI | Shared client architecture, TypeScript CLI rewrite, and target SDK model in this document |
-| Module Federation loading for CLI | TypeScript CLI rewrite; Node loading prototype already exists |
-| Server-driven plugin metadata and client-specific enablement | `Implement runtime extension discovery and enablement`, `Design separation of client assets from OCM Resource Manager`, `Implement independently served Web UI assets` |
-| Typed plugin-provided CLI commands | `Define and enforce client context and action contracts` and `Spike: Define context-aware navigation and command palette behavior`; implementation follows spike outcome |
-| Named profiles and shared client configuration | `Define shared client configuration model` defines the model; implementation not yet created |
-| Live updates and shared extension subscriptions | `Define WebSocket live-update protocol and lifecycle` defines protocol; `Implement shared WebSocket client and extension subscription API` implements shared client subscription path |
-| Interactive command discovery and command palette | `Spike: Define context-aware navigation and command palette behavior` defines behavior; implementation follows spike outcome |
+| JavaScript/TypeScript client runtime | `OME-306` Rewrite CLI client in TypeScript |
+| Shared Dynamic Plugin SDK with Web UI | `OME-305`, `OME-306`, and target SDK model in this document |
+| Module Federation loading for CLI | `OME-306`; Node loading prototype already exists |
+| Server-driven plugin metadata and client-specific enablement | `OME-309`, `OME-313`, `OME-316` |
+| Typed plugin-provided CLI commands | `OME-319` and `OME-320`; implementation follows spike outcome |
+| Named profiles and shared client configuration | `OME-310` defines the model; implementation not yet created |
+| Live updates and shared extension subscriptions | `OME-322` defines protocol; `OME-325` implements shared client subscription path |
+| Interactive command discovery and command palette | `OME-320` defines behavior; implementation follows spike outcome |
 
 ### Partially addressed
 
 - **Resource watch/live updates:** protocol and shared client architecture are
-  planned in `Define WebSocket live-update protocol and lifecycle` and `Implement shared WebSocket client and extension subscription API`, but server implementation and CLI-specific
+  planned in `OME-322` and `OME-325`, but server implementation and CLI-specific
   rendering behavior remain open.
 - **Dynamic resource HTTP parity:** backend has dynamic HTTP routes, but the
   current CLI still uses gRPC reflection and dynamic gRPC invocation.
 - **Schema metadata:** CLI can inspect recursive protobuf `spec` fields, while
-  richer resource metadata and server-backed hints are covered by `Implement server-backed dynamic search hints`.
+  richer resource metadata and server-backed hints are covered by `OME-321`.
 - **TypeScript plugin loading:** Node Module Federation is proven by prototype,
   but shared SDK/Scalprum integration and production builds remain open.
 
@@ -728,11 +728,11 @@ coverage in the client architecture proposals; planned coverage does not mean im
 - Deployment watch or wait command and its CLI representation.
 - Full pagination controls for deployment and dynamic resource list commands.
 - Managed-resource create signing. This is distinct from deployment signing and
-  client artifact verification in `Implement client artifact trust and verification`.
+  client artifact verification in `OME-317`.
 - Full resource metadata output beyond the protobuf `spec` tree.
 - Persistent interactive CLI session and its target behavior. The old Ink POC
   explored this, but current Go CLI is command-per-process.
-- Server-side WebSocket implementation tickets, pending `Define WebSocket live-update protocol and lifecycle` outcome.
+- Server-side WebSocket implementation tickets, pending `OME-322` outcome.
 
 ### Intentional non-goal
 

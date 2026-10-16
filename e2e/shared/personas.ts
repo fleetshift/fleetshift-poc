@@ -8,7 +8,7 @@
  * currently resolve to the same role and identical navigation. The only
  * user-visible persona signal today is the masthead user-menu label, which is
  * the capitalized `preferred_username` (see AuthContext.display_name). Proper
- * group-to-role mapping is separate from the sandbox identity-provider setup.
+ * group-to-role mapping is tracked separately (OME-206).
  */
 export type PersonaId = "ops" | "dev";
 

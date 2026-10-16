@@ -101,7 +101,7 @@ Consequences:
 
 - Exact config surface for bootstrap (issuer only vs full auth-method fields, default auth method id, audience set). I'm not sure whether this should also include trust signature policy, or if that should come from later UI set up. Ideally, we would define that up front too, or at least support defining it. Or, we just default it to the "easy mode" out of the box and let you override as an advanced use case.
 - Shape of the eventual recovery channel when the configured IdP is wrong or unavailable (ties to the "root user / out-of-band trust" note in [authentication.md](authentication.md#idp-bootstrap-and-recovery)).
-- How provider-tenant bootstrap composes with later consumer-tenant IdPs under multitenancy (Support multiple OIDC endpoints for multitenancy).
+- How provider-tenant bootstrap composes with later consumer-tenant IdPs under multitenancy (OME-53).
 
 
 
@@ -110,7 +110,7 @@ Consequences:
 - [authentication.md](authentication.md) — delivery authorization, IdP trust at targets, open "root user" challenge
 - [architecture/platform_hierarchy.md](architecture/platform_hierarchy.md) — platform bootstrap/pivot (instance lifecycle, not IdP trust)
 - [architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) — provider/tenant model that IdP binding must eventually serve
-- Sandbox console without a prerequisite external IdP
-- Day 1 Trust Setup — Day 1 trust setup (user-facing ceremony once an IdP exists)
-- Support multiple OIDC endpoints for multitenancy — multiple OIDC endpoints for multitenancy
+- OME-206 — sandbox console without a prerequisite external IdP
+- OME-7 — Day 1 trust setup (user-facing ceremony once an IdP exists)
+- OME-53 — multiple OIDC endpoints for multitenancy
 

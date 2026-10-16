@@ -1,7 +1,7 @@
 # Feature Contracts — Plugin Extension Points and Automated Search
 
-**Design context:** feature contracts for plugin extension points and automated search
-**Epic:** Addon / Extension Model
+**Jira:** OME-102
+**Epic:** OME-3 — Addon / Extension Model
 **Status:** Draft
 
 ## Context
@@ -328,7 +328,7 @@ Affected code: `generatePluginPages` in `server/internal/transport/http/uiconfig
 
 ## Open Questions
 
-- [ ] **Backend awareness of extension points (post-POC):** For now, extension points are resolved purely in the UI shell at runtime. In the future, the backend addon registration API could also track extension points — enabling validation (reject unknown types), discovery (query available extension points), and dependency ordering. Not in scope for the initial POC milestone, but worth keeping in mind as the addon model (Addon / Extension Model) matures.
+- [ ] **Backend awareness of extension points (post-POC):** For now, extension points are resolved purely in the UI shell at runtime. In the future, the backend addon registration API could also track extension points — enabling validation (reject unknown types), discovery (query available extension points), and dependency ordering. Not in scope for the initial POC milestone, but worth keeping in mind as the addon model (OME-3) matures.
 - [ ] **Developer tooling for the feature graph (post-POC):** The feature graph is internal — end users see pages and actions, not extensions. A developer-facing tool (MCP server, CLI skill, or Claude Code agent) that queries the graph ("show all extensions registered against `day-one.create-cluster`") would improve the plugin developer experience. Could also power the `/debug` console. Not POC scope.
 - [ ] **Non-page features (settings, toolbar actions):** Most non-page features are core platform concerns. If the feature has a page (e.g., Settings), search navigates there via normal routing. Hash fragments (`#section-id`) can deep-link to a specific section — the contract is that a `to` with a hash (e.g., `{ pathname: "settings", hash: "notifications" }`) requires a matching heading ID in the target page. Note: `hash` support is not yet implemented in the routing runtime. Toolbar actions (e.g., "Toggle glass theme") are trickier — selecting them in search would need to trigger a callback rather than a navigation. Needs design for action-type results.
 - [ ] **Inline actions from search:** Should some search results trigger actions directly (e.g., toggling a theme, opening a modal) rather than navigating? This is a UX question — command palette patterns (VS Code, Spotlight) do this, but it adds complexity and may confuse users who expect search to mean "find and go to". Needs UX input.
@@ -336,8 +336,8 @@ Affected code: `generatePluginPages` in `server/internal/transport/http/uiconfig
 - [ ] **Feature visibility and permissions (post-POC):** Features and extensions should respect the platform's RBAC model — a feature can declare a required permission (e.g., `"requires": "clusters.create"`) and the shell only shows it in search and navigation if the current user has that permission. This follows the same pattern as the rest of the platform's access control and will be designed alongside it. Not in POC scope.
 - [ ] **Reserved property enforcement:** `searchResult` and `searchIcon` are reserved across all extension types. The future SDK should enforce this at build time — error if a domain extension type redefines them with an incompatible signature. At runtime, the server should discard extensions that reference features which don't exist or aren't enabled for the current user.
 
-## Relationship to Addon Model (Addon / Extension Model)
+## Relationship to Addon Model (OME-3)
 
-The addon/extension model (Addon / Extension Model) covers the full lifecycle: registration, discovery, delivery. Feature contracts are the **UI-facing slice** — how addons surface capabilities in the shell. An addon registers with the management plane (backend), and its UI plugin declares features and extensions that the shell indexes for search and navigation.
+The addon/extension model (OME-3) covers the full lifecycle: registration, discovery, delivery. Feature contracts are the **UI-facing slice** — how addons surface capabilities in the shell. An addon registers with the management plane (backend), and its UI plugin declares features and extensions that the shell indexes for search and navigation.
 
 The feature contract model should be designed so that when the addon registration API lands, a registered addon's UI plugin can declare its features and have them automatically discoverable via search.

@@ -1,6 +1,6 @@
 # Advanced Search with CEL Expressions
 
-**Design context:** advanced search with CEL expressions
+**Jira:** OME-210
 **Status:** Draft
 **Authors:** Martin Marosi
 
@@ -48,8 +48,8 @@ The Go backend already has a `QueryResources` gRPC/REST endpoint that accepts a 
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `name` | `string` | Full resource name, e.g. `//resource-manager.open-cluster-management.io/clusters/my-cluster` |
-| `resourceType` | `string` | Resource type, e.g. `resource-manager.open-cluster-management.io/Cluster` |
+| `name` | `string` | Full resource name, e.g. `//kind.resource-manager.open-cluster-management.io/clusters/my-cluster` |
+| `resourceType` | `string` | Resource type, e.g. `kind.resource-manager.open-cluster-management.io/Cluster` |
 | `resource` | `dyn` | Dynamic — access `.labels`, `.state`, `.spec.*`, `.conditions`, etc. |
 
 **Supported CEL operators** (built-in only, no custom functions):
@@ -83,10 +83,10 @@ The Go backend already has a `QueryResources` gRPC/REST endpoint that accepts a 
 
 ### Filtering (exists today)
 
-The UI sends CEL expressions directly as the `filter` query parameter to the existing `QueryResources` endpoint:
+The UI sends CEL expressions as the `filter` query parameter to the existing `QueryResources` endpoint; `-` selects the whole platform. The example shows a decoded filter for readability; clients URL-encode query parameters:
 
 ```
-GET /v1/resources?filter=resource.state == "ACTIVE" && name.startsWith("clusters/prod")&pageSize=50
+GET /apis/resource-manager.open-cluster-management.io/v1alpha/-:queryResources?filter=resource.state == "ACTIVE" && resource.name.startsWith("clusters/prod")&pageSize=50
 ```
 
 No new endpoints needed for basic filtering. The backend compiles the CEL to SQL and returns paginated results.
@@ -95,19 +95,19 @@ No new endpoints needed for basic filtering. The backend compiles the CEL to SQL
 
 The backend holds resource type schemas in an in-memory `ActiveResourceRegistry`, populated when addons connect and activate resource types via `DynamicSchemaActivator`. The registry stores compiled proto descriptors per resource type, which the `FieldResolver` already walks to validate CEL field paths. **No API currently exposes this data to the UI.**
 
-New endpoints needed:
+Proposed endpoints (not yet implemented), using Kind addon resource types as examples:
 
 ```
-GET /v1/resourceTypes
+GET /v1alpha/resourceTypes
 → [
-    { "type": "resource-manager.open-cluster-management.io/Cluster", "apiVersion": "v1" },
-    { "type": "ocm-resource-manager/Target",  "apiVersion": "v1" },
+    { "type": "kind.resource-manager.open-cluster-management.io/Cluster", "apiVersion": "v1alpha" },
+    { "type": "kind.resource-manager.open-cluster-management.io/Node",    "apiVersion": "v1alpha" },
     ...
   ]
 
-GET /v1/resourceTypes/{type}/schema
+GET /v1alpha/resourceTypes/{type}/schema
 → {
-    "type": "resource-manager.open-cluster-management.io/Cluster",
+    "type": "kind.resource-manager.open-cluster-management.io/Cluster",
     "fields": [
       { "path": "spec.name",                "type": "string" },
       { "path": "spec.nodes",               "type": "repeated", "itemType": "message" },
@@ -133,7 +133,7 @@ This is a **type-level** event, not per-instance. It fires on structural changes
 WS /api/ui/events/ws
 
 ← { "eventKind": "schema.registry.changed",
-    "resourceType": "resource-manager.open-cluster-management.io/Cluster",
+    "resourceType": "kind.resource-manager.open-cluster-management.io/Cluster",
     "action": "activated",
     "timestamp": 1721474400 }
 ```
@@ -345,7 +345,7 @@ const baseFields = [
 
 ### Spec/observation fields (dynamic — fetched from backend)
 
-Fetched from `GET /v1/resourceTypes/{type}/schema` and merged with base fields when the user selects a resource type (or inferred from page context, e.g. "I'm on the clusters page").
+Fetched from `GET /v1alpha/resourceTypes/{type}/schema` and merged with base fields when the user selects a resource type (or inferred from page context, e.g. "I'm on the clusters page").
 
 The UI caches per-type schemas and invalidates on `schema.registry.changed` WebSocket events.
 
@@ -400,7 +400,7 @@ No backend changes. Uses existing `QueryResources` endpoint with `?filter=`.
 
 Backend discussion needed before starting.
 
-1. **Backend:** expose `GET /v1/resourceTypes` and `GET /v1/resourceTypes/{type}/schema` from `ActiveResourceRegistry`
+1. **Backend:** expose `GET /v1alpha/resourceTypes` and `GET /v1alpha/resourceTypes/{type}/schema` from `ActiveResourceRegistry`
 2. **Backend:** broadcast `schema.registry.changed` WS events on addon lifecycle mutations
 3. **Frontend:** `useResourceTypeSchema(type)` hook — fetches and caches per-type field schemas, invalidates on WS event
 4. **Frontend:** merge dynamic spec/observation fields into query builder field picker based on selected resource type

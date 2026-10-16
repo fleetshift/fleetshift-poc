@@ -1,6 +1,6 @@
 # Client Source Sharing
 
-Status: Proposed shared client configuration model
+Status: Proposed for OME-310
 
 This document defines source sharing and runtime boundaries between CLI and Web clients. See [Client Asset Separation](client-asset-separation.md) for browser asset delivery, ownership, and trust boundaries.
 
@@ -44,7 +44,7 @@ The approach was validated by importing a shared helper into Web UI code. Rspack
 
 ## Shared Configuration
 
-The proposal defines a shared configuration model with separate configuration loaders. Web and CLI fill the model differently:
+OME-310 defines a shared configuration model, not one configuration loader. Web and CLI fill the model differently:
 
 ```text
 Web API/bootstrap -> Web composition -> resolved Web context

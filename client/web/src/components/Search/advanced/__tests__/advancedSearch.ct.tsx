@@ -222,8 +222,8 @@ test.describe("Advanced CEL search", () => {
     await expect(menu).toBeVisible();
     await menu.getByRole("menuitem", { name: /^Observation/ }).click();
     await expect(menu).toBeVisible();
-    const value = input;
-    await expect(value).toHaveValue("resource.observation.");
+    const value = await input.inputValue();
+    expect(value).toBe("resource.observation.");
   });
 
   test("clicking operator chip keeps menu open", async ({ mount }) => {
@@ -429,8 +429,8 @@ test.describe("Advanced CEL search", () => {
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("Tab");
-      const value = input;
-      await expect(value).toHaveValue("resource.conditions.Ready.status");
+      const value = await input.inputValue();
+      expect(value).toBe("resource.conditions.Ready.status");
       expect(executed).toBe("");
     });
 
@@ -457,8 +457,8 @@ test.describe("Advanced CEL search", () => {
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("Enter");
-      const value = input;
-      await expect(value).toHaveValue("resource.conditions.Ready.status");
+      const value = await input.inputValue();
+      expect(value).toBe("resource.conditions.Ready.status");
       expect(executed).toBe("resource.conditions.Ready.status");
     });
 
@@ -473,8 +473,8 @@ test.describe("Advanced CEL search", () => {
       await menu
         .getByRole("menuitem", { name: /resource\.conditions\.Ready\.status/ })
         .click();
-      const value = input;
-      await expect(value).toHaveValue("resource.conditions.Ready.status");
+      const value = await input.inputValue();
+      expect(value).toBe("resource.conditions.Ready.status");
     });
   });
 
@@ -546,8 +546,8 @@ test.describe("Advanced CEL search", () => {
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("Tab");
-      const value = input;
-      await expect(value).toHaveValue("resource.localLabels ");
+      const value = await input.inputValue();
+      expect(value).toBe("resource.localLabels ");
     });
 
     test("ArrowLeft/Right do not intercept in non-operator context", async ({

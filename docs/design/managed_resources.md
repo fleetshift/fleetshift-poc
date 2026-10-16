@@ -10,7 +10,7 @@ Example: imagine a full featured cluster management addon. It should handle many
 - Provision & configure clusters through native self managed options (e.g. bootstrapping nodes with kubeadm)
 - Provision & configure clusters through operators like CAPI
 - Import existing clusters
-- Upgrade these clusters (either individually or through a campaign, see [https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81](https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81) )
+- Upgrade these clusters (either individually or through a campaign, see FM-81)
 - Full exploitation of the core placement and rollout strategy abstractions for progressive delivery, maintenance windows, etc., encoding specific cluster management best practices
 - Assist in knowable operational issues in the course of provisioning, upgrades, or other configuration changes
 - Manage cluster pooling strategies
@@ -520,7 +520,7 @@ Whether resource types can be defined through configuration alone (no addon proc
 
 #### Fulfillment rename in codebase
 
-Completed in Extract Fulfillment abstraction from Deployment. The codebase now has `Fulfillment` as its own aggregate with `FulfillmentRepository`, and `Deployment` is a thin aggregate holding a `FulfillmentID` reference. Orchestration operates on `Fulfillment` directly. A `DeploymentView` read model joins the two for the user-facing API. The user-facing proto/gRPC layer still uses "Deployment" terminology.
+Completed in OME-43. The codebase now has `Fulfillment` as its own aggregate with `FulfillmentRepository`, and `Deployment` is a thin aggregate holding a `FulfillmentID` reference. Orchestration operates on `Fulfillment` directly. A `DeploymentView` read model joins the two for the user-facing API. The user-facing proto/gRPC layer still uses "Deployment" terminology.
 
 ### Phasing
 

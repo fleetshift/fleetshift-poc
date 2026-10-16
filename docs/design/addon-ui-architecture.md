@@ -111,7 +111,7 @@ catalog adds versioning and asset location:
 | `capabilities` | Declared capability types (maps to `AddonDescriptor.Capabilities`) |
 | `install_spec` | OCI artifact reference for the backend workload (e.g. `registry.example.com/org/addon-monitoring:v1.2.0`), if backend capabilities present |
 | `manifest_url` | URL to the `plugin-manifest.json` on the external asset host, if UI plugin capability present |
-| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0`), if UI plugin capability present |
+| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/addons/monitoring/v1.2.0`), if UI plugin capability present |
 | `extends_core` | Which core plugin surface this addon extends (if any) |
 | `dependencies` | Other addons or core APIs this addon requires |
 
@@ -331,8 +331,8 @@ not the engine:
 {
   "addon-monitoring-plugin": {
     "name": "addon-monitoring-plugin",
-    "manifestLocation": "https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0/plugin-manifest.json",
-    "assetsHost": "https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0"
+    "manifestLocation": "https://cdn.example.com/addons/monitoring/v1.2.0/plugin-manifest.json",
+    "assetsHost": "https://cdn.example.com/addons/monitoring/v1.2.0"
   }
 }
 ```
@@ -444,7 +444,7 @@ runtime:
 ```
 manifest.loadScripts = ["plugin-entry.js"]
               ↓  transformManifest(manifest, assetsHost)
-manifest.loadScripts = ["https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0/plugin-entry.js"]
+manifest.loadScripts = ["https://cdn.example.com/addons/monitoring/v1.2.0/plugin-entry.js"]
 ```
 
 The engine only stores the base URL. The shell does the resolution. The
@@ -468,9 +468,9 @@ The same OCI artifact works across all environments:
 
 | Environment | Asset Host | `assets_base_url` |
 |-------------|-----------|-------------------|
-| Dev (local) | `localhost:8001` | `http://localhost:8001/ocm/resource_manager/monitoring/v1alpha.2.0` |
-| Staging | Internal nginx | `https://assets.staging.internal/ocm/resource_manager/monitoring/v1alpha.2.0` |
-| Production | CDN | `https://cdn.example.com/ocm/resource_manager/monitoring/v1alpha.2.0` |
+| Dev (local) | `localhost:8001` | `http://localhost:8001/addons/monitoring/v1.2.0` |
+| Staging | Internal nginx | `https://assets.staging.internal/addons/monitoring/v1.2.0` |
+| Production | CDN | `https://cdn.example.com/addons/monitoring/v1.2.0` |
 
 The artifact is built once. Where it is hosted and how it is registered
 are deployment decisions, not build decisions.
@@ -869,9 +869,9 @@ rather than Connect. See
 [addon_integration.md](architecture/addon_integration.md#addon-lifecycle)
 for the unified addon lifecycle.
 
-### Addon discovery flows from the platform (Addon registration and discovery)
+### Addon discovery flows from the platform (OME-12)
 
-The foundational addon story (Addon registration and discovery: Addon registration and discovery)
+The foundational addon story (OME-12: Addon registration and discovery)
 specifies:
 
 > Addons can be registered with the platform and declare their capabilities.
@@ -880,9 +880,9 @@ specifies:
 Registration is with the platform. Discovery flows from the platform. This
 applies equally to backend capabilities and frontend plugins.
 
-### UI plugin discovery is based on backend registration (Web UI addon integration)
+### UI plugin discovery is based on backend registration (OME-13)
 
-Web UI addon integration (Web UI addon integration) specifies:
+OME-13 (Web UI addon integration) specifies:
 
 > UI plugins are discoverable based on backend addon registration. The addon
 > model provides the metadata the frontend needs to load the correct plugin.
@@ -890,14 +890,14 @@ Web UI addon integration (Web UI addon integration) specifies:
 The frontend asks the platform what plugins exist. The platform answers based
 on what addons have registered, providing the URLs where assets are hosted.
 
-### The kernel owns the UI shell
+### The kernel owns the UI shell (OME-30 layered model)
 
-The cluster provisioning design defines a four-layer architecture.
+The cluster provisioning design (OME-30) defines a four-layer architecture.
 The UI shell and plugin system sit at Layer 1 (kernel) -- platform
 infrastructure that addons at higher layers contribute to. The kernel
 manages the plugin catalog; addons populate it.
 
-### All addon stories follow the same pattern
+### All addon stories follow the same pattern (OME-18 through OME-21)
 
 Observability and security addons, manifest strategies, and API extensions
 all register with the management plane. The management plane stores their

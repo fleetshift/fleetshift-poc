@@ -1,23 +1,23 @@
 # Navigation Customization — User-Created Groups and Full Layout Editing
 
-**Epic:** Navigation Customization
-**Spike:** Spike: Navigation customization design
+**Epic:** OME-151 — Navigation Customization
+**Spike:** OME-146 — Spike: Navigation customization design
 **Depends on:** [Module Groups](./module-groups.md) (implemented)
 **Status:** Draft
 
 **Phase stories:**
 | Phase | Story | Summary |
 |-------|-------|---------|
-| 1 | Phase 1: Storage and merge — NavLayoutOverride + reconciliation | Storage and merge — NavLayoutOverride + reconciliation |
-| 2 | Phase 2: Tree editor — wire NavLayoutTree into settings plugin | Tree editor — wire NavLayoutTree into settings |
-| 3 | Phase 3: Custom group CRUD — create, edit, delete with user-* prefix | Custom group CRUD — create, edit, delete |
-| 4 | Phase 4: PF Icon Gallery — build-time manifest, Orama search, virtualized grid | PF Icon Gallery — manifest, Orama, virtualized grid |
-| 5 | Phase 5: "More" hidden items — ghost list in editor, collapsed NavExpandable | "More" hidden items — ghost list, collapsed NavExpandable |
-| 6 | Phase 6: Search + AppNav updates — merged layout in search index | Search + AppNav updates — merged layout in search |
+| 1 | OME-152 | Storage and merge — NavLayoutOverride + reconciliation |
+| 2 | OME-153 | Tree editor — wire NavLayoutTree into settings |
+| 3 | OME-154 | Custom group CRUD — create, edit, delete |
+| 4 | OME-155 | PF Icon Gallery — manifest, Orama, virtualized grid |
+| 5 | OME-156 | "More" hidden items — ghost list, collapsed NavExpandable |
+| 6 | OME-157 | Search + AppNav updates — merged layout in search |
 
 ## Context
 
-Module groups (Implement module groups extension system/150) introduced plugin-defined expandable nav sections. The settings page can reorder groups and pages at the top level via `NavOrderEditor`, which uses PF `DragDropSort` on a flat list.
+Module groups (OME-149/150) introduced plugin-defined expandable nav sections. The settings page can reorder groups and pages at the top level via `NavOrderEditor`, which uses PF `DragDropSort` on a flat list.
 
 Users need richer customization:
 
@@ -399,5 +399,5 @@ The reconciliation logic lives in `@ocm-resource-manager/common` so both AppNav 
 ## Related
 
 - [Module Groups design](./module-groups.md) — plugin-defined groups (implemented)
-- Settings plugin with DnD navigation ordering — Settings plugin with DnD navigation ordering (closed, current flat implementation)
+- OME-123 — Settings plugin with DnD navigation ordering (closed, current flat implementation)
 - [Feature Contracts](./feature-contracts.md) — extension model fundamentals

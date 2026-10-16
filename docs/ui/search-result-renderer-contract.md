@@ -1,7 +1,7 @@
 # Search Result Renderer Contract — Extension-Driven Inventory Display
 
-**Contract:** `ocm-resource-manager.render-search` for inventory search results
-**Epic:** Addon / Extension Model
+**Jira:** OME-194
+**Epic:** OME-3 — Addon / Extension Model
 **Status:** Implemented
 **Depends on:** [Feature Contracts](feature-contracts.md), [Search Architecture](diagrams/search/search.c4)
 
