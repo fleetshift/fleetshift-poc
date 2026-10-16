@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
 func clusterPlatformConfig() *Config {
@@ -26,7 +26,7 @@ func TestBuildServiceDescriptors_Success(t *testing.T) {
 	}
 
 	// Service name.
-	if got, want := string(desc.Service.FullName()), "fleetshift.v1.PlatformClusterService"; got != want {
+	if got, want := string(desc.Service.FullName()), "ocm.v1alpha.PlatformClusterService"; got != want {
 		t.Errorf("service full name = %q, want %q", got, want)
 	}
 

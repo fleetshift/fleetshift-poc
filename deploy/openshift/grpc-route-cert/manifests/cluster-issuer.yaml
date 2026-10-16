@@ -3,7 +3,7 @@ kind: ClusterIssuer
 metadata:
   name: __ISSUER_NAME__
   labels:
-    app.kubernetes.io/managed-by: fleetshift-grpc-route-cert
+    app.kubernetes.io/managed-by: ocm-resource-manager-grpc-route-cert
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory

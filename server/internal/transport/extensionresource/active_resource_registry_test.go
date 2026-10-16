@@ -7,15 +7,15 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
 )
 
 func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
 	ctx := context.Background()
 
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	desc := (&timestamppb.Timestamp{}).ProtoReflect().Descriptor()
 
 	if _, ok, err := r.GetResourceQuerySchema(ctx, rt); err != nil || ok {
@@ -24,12 +24,12 @@ func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
 
 	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
-		GRPCServiceName: "kind.fleetshift.io.v1.ClusterService",
-		HTTPPrefix:      "/apis/kind.fleetshift.io/v1/clusters",
-		DescriptorPath:  "dynamic/kind/fleetshift/io/v1/cluster_service.proto",
+		GRPCServiceName: "kind.open-cluster-management.io.v1.ClusterService",
+		HTTPPrefix:      "/apis/kind.open-cluster-management.io/v1alpha/clusters",
+		DescriptorPath:  "dynamic/kind/ocm-resource-manager/io/v1/cluster_service.proto",
 		QuerySchema: domain.ResourceQuerySchema{
 			ResourceType:   rt,
-			ServiceName:    "kind.fleetshift.io",
+			ServiceName:    "kind.open-cluster-management.io",
 			TypeName:       "Cluster",
 			APIVersion:     "v1",
 			CollectionName: "clusters",
@@ -69,15 +69,15 @@ func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
 	if !ok {
 		t.Fatal("Versions[v1] missing")
 	}
-	if ver.GRPCServiceName != "kind.fleetshift.io.v1.ClusterService" {
-		t.Errorf("GRPCServiceName = %q, want kind.fleetshift.io.v1.ClusterService", ver.GRPCServiceName)
+	if ver.GRPCServiceName != "kind.open-cluster-management.io.v1.ClusterService" {
+		t.Errorf("GRPCServiceName = %q, want kind.open-cluster-management.io.v1.ClusterService", ver.GRPCServiceName)
 	}
 }
 
 func TestActiveResourceRegistry_Unregister(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
 	ctx := context.Background()
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
@@ -102,7 +102,7 @@ func TestActiveResourceRegistry_Unregister(t *testing.T) {
 
 func TestActiveResourceRegistry_RegisterSameVersionReplaces(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
@@ -142,7 +142,7 @@ func TestActiveResourceRegistry_RegisterSameVersionReplaces(t *testing.T) {
 
 func TestActiveResourceRegistry_RegisterSecondVersionErrors(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
@@ -175,7 +175,7 @@ func TestActiveResourceRegistry_RegisterSecondVersionErrors(t *testing.T) {
 
 func TestActiveResourceRegistry_GetByGRPCServiceName(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
@@ -199,7 +199,7 @@ func TestActiveResourceRegistry_GetByGRPCServiceName(t *testing.T) {
 
 func TestActiveResourceRegistry_Contains(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	hash := [32]byte{9}
 
 	if r.Contains(rt, "v1", "svc", hash) {
@@ -227,7 +227,7 @@ func TestActiveResourceRegistry_Contains(t *testing.T) {
 	if r.Contains(rt, "v2", "svc", hash) {
 		t.Fatal("Contains different API version: true, want false")
 	}
-	if r.Contains("other.fleetshift.io/Cluster", "v1", "svc", hash) {
+	if r.Contains("other.open-cluster-management.io/Cluster", "v1", "svc", hash) {
 		t.Fatal("Contains different resource type: true, want false")
 	}
 }
@@ -239,7 +239,7 @@ func TestActiveResourceRegistry_RegisterRejectsForeignGRPCName(t *testing.T) {
 		APIVersion:      "v1",
 		GRPCServiceName: "shared.Service",
 		QuerySchema: domain.ResourceQuerySchema{
-			ResourceType: "a.fleetshift.io/Widget",
+			ResourceType: "a.open-cluster-management.io/Widget",
 			APIVersion:   "v1",
 		},
 	}); err != nil {
@@ -250,7 +250,7 @@ func TestActiveResourceRegistry_RegisterRejectsForeignGRPCName(t *testing.T) {
 		APIVersion:      "v1",
 		GRPCServiceName: "shared.Service",
 		QuerySchema: domain.ResourceQuerySchema{
-			ResourceType: "b.fleetshift.io/Widget",
+			ResourceType: "b.open-cluster-management.io/Widget",
 			APIVersion:   "v1",
 		},
 	})
@@ -258,11 +258,11 @@ func TestActiveResourceRegistry_RegisterRejectsForeignGRPCName(t *testing.T) {
 		t.Fatalf("Register B with A's gRPC name: err = %v, want ErrInvalidArgument", err)
 	}
 
-	if _, ok := r.Get("b.fleetshift.io/Widget"); ok {
+	if _, ok := r.Get("b.open-cluster-management.io/Widget"); ok {
 		t.Fatal("rejected registration must not create type B")
 	}
 	owner, ver, ok := r.GetByGRPCServiceName("shared.Service")
-	if !ok || owner != "a.fleetshift.io/Widget" || ver.QuerySchema.ResourceType != "a.fleetshift.io/Widget" {
+	if !ok || owner != "a.open-cluster-management.io/Widget" || ver.QuerySchema.ResourceType != "a.open-cluster-management.io/Widget" {
 		t.Fatalf("gRPC ownership = (%q, %+v, %v), want type A", owner, ver, ok)
 	}
 }
@@ -274,9 +274,9 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 
 	transport := extensionresource.ActivePlatformRegistration{
 		APIVersion:      "v1",
-		GRPCServiceName: "fleetshift.v1.PlatformClusterService",
-		HTTPPrefix:      "/apis/fleetshift.io/v1/clusters",
-		DescriptorPath:  "dynamic/fleetshift/v1/platform_cluster_service.proto",
+		GRPCServiceName: "ocm.v1alpha.PlatformClusterService",
+		HTTPPrefix:      "/apis/open-cluster-management.io/v1alpha/clusters",
+		DescriptorPath:  "dynamic/ocm/v1alpha/platform_cluster_service.proto",
 	}
 
 	created, err := r.AddPlatformOwner(key, "kind.ClusterService", transport)
@@ -350,13 +350,13 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 
 func TestActiveResourceRegistry_PlatformRejectsExtensionGRPCCollision(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const name = "fleetshift.v1.PlatformClusterService"
+	const name = "ocm.v1alpha.PlatformClusterService"
 
 	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: name,
 		QuerySchema: domain.ResourceQuerySchema{
-			ResourceType: "kind.fleetshift.io/Cluster",
+			ResourceType: "kind.open-cluster-management.io/Cluster",
 			APIVersion:   "v1",
 		},
 	}); err != nil {
@@ -375,7 +375,7 @@ func TestActiveResourceRegistry_PlatformRejectsExtensionGRPCCollision(t *testing
 
 func TestActiveResourceRegistry_ExtensionRejectsPlatformGRPCCollision(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const name = "fleetshift.v1.PlatformClusterService"
+	const name = "ocm.v1alpha.PlatformClusterService"
 
 	if _, err := r.AddPlatformOwner(
 		extensionresource.PlatformRegistrationKey{Collection: "clusters"},
@@ -389,7 +389,7 @@ func TestActiveResourceRegistry_ExtensionRejectsPlatformGRPCCollision(t *testing
 		APIVersion:      "v1",
 		GRPCServiceName: name,
 		QuerySchema: domain.ResourceQuerySchema{
-			ResourceType: "kind.fleetshift.io/Cluster",
+			ResourceType: "kind.open-cluster-management.io/Cluster",
 			APIVersion:   "v1",
 		},
 	})
@@ -400,7 +400,7 @@ func TestActiveResourceRegistry_ExtensionRejectsPlatformGRPCCollision(t *testing
 
 func TestActiveResourceRegistry_GetVersion(t *testing.T) {
 	r := extensionresource.NewActiveResourceRegistry()
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 	if _, ok := r.GetVersion(rt, "v1"); ok {
 		t.Fatal("GetVersion empty: ok=true, want false")

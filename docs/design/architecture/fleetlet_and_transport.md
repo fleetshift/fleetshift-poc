@@ -188,11 +188,11 @@ users:
   user:
     exec:
       apiVersion: client.authentication.k8s.io/v1
-      command: fleetshift
+      command: ocm-resource-manager
       args: ["auth", "token"]
 ```
 
-`kubectl` sends requests to the platform URL; the platform authorizes and proxies through the fleetlet. A CLI helper such as `fleetshift kubeconfig generate cluster-abc` can generate these kubeconfig entries, while `fleetshift auth token` handles OIDC token refresh. Multiple targets become multiple kubeconfig contexts that point at different paths on the same platform URL.
+`kubectl` sends requests to the platform URL; the platform authorizes and proxies through the fleetlet. A CLI helper such as `fleetctl kubeconfig generate cluster-abc` can generate these kubeconfig entries, while `fleetctl auth token` handles OIDC token refresh. Multiple targets become multiple kubeconfig contexts that point at different paths on the same platform URL.
 
 This also enables a fleet console to provide single-target management for managed Kubernetes targets without direct network access to their API servers, such as viewing workloads, restarting VMs, scaling deployments, or reading logs. Existing `kubectl` workflows, scripts, and CI/CD pipelines keep working too; they simply target the platform URL instead of the cluster's direct API address.
 

@@ -74,7 +74,7 @@ mTLS certificate provisioning remains open as a separate transport concern.
 
 **Question:** Should enabling an addon only make its capabilities available, with fulfillment intent established separately, or should enablement also be able to establish an initial fulfillment that uses those capabilities on selected targets?
 
-**Context:** In the resource manager design, [enabling and connecting an addon](addon_integration.md#addon-lifecycle) makes its capabilities available; a fulfillment uses them to deliver workloads to targets. The question concerns when fulfillment intent is established, leaving open which user-facing resource or workflow creates and owns the fulfillment. OCM also distinguishes hub registration (`ClusterManagementAddOn`) from per-cluster enablement (`ManagedClusterAddOn`), with an [install strategy](https://open-cluster-management.io/docs/getting-started/installation/addon-management/#install-strategy) able to automate per-cluster enablement using Placement decisions.
+**Context:** In the resource manager architecture, [enabling and connecting an addon](addon_integration.md#addon-lifecycle) makes its capabilities available; a fulfillment uses them to deliver workloads to targets. The question concerns when fulfillment intent is established, leaving open which user-facing resource or workflow creates and owns the fulfillment. OCM also distinguishes hub registration (`ClusterManagementAddOn`) from per-cluster enablement (`ManagedClusterAddOn`), with an [install strategy](https://open-cluster-management.io/docs/getting-started/installation/addon-management/#install-strategy) able to automate per-cluster enablement using Placement decisions.
 
 MCOA combines these choices in its enablement flow: when MCOA is enabled through the `MultiClusterObservability` resource, the MCO operator creates a `ClusterManagementAddOn` whose [initial install strategy](https://github.com/stolostron/multicluster-observability-operator/blob/main/operators/multiclusterobservability/manifests/base/multicluster-observability-addon/cluster_management_addon.yaml#L43-L48) references the `global` Placement in `open-cluster-management-global-set`. The addon manager enables MCOA on the selected clusters. This is MCOA's supplied installation policy; the Placement itself only selects clusters. See the [MCOA migration flow](../mcoa_migration.md#before-current-mcoa-path).
 
@@ -98,7 +98,7 @@ MCOA combines these choices in its enablement flow: when MCOA is enabled through
 
 **Question:** Should rollback use the fulfillment's rollout strategy or bypass it with immediate rollback to all targets?
 
-**Context:** KubeFleet has no built-in rollback; operators manually stop the update run and fix the CRP. FleetShift's `Rollback` endpoint is an explicit addition. The trade-off is safety versus speed: staged rollback is safer if the rollback itself is risky, but rollback also exists to recover quickly. The current leaning is immediate rollback by default with an optional `"paced": true` flag that reuses the fulfillment's rollout strategy.
+**Context:** KubeFleet has no built-in rollback; operators manually stop the update run and fix the CRP. The resource manager's `Rollback` endpoint is an explicit addition. The trade-off is safety versus speed: staged rollback is safer if the rollback itself is risky, but rollback also exists to recover quickly. The current leaning is immediate rollback by default with an optional `"paced": true` flag that reuses the fulfillment's rollout strategy.
 
 ### Delivery-agent rollback mechanics
 

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // Factory creates a fresh [domain.AuthMethodRepository] for each test invocation.

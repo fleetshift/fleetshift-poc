@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "ocm/v1alpha/delivery_request.proto";
+import "ocm/v1alpha/remove_request.proto";
+
+// DeliverInstruction is the envelope for platform-to-fleetlet messages
+// on the delivery channel.
+message DeliverInstruction {
+  oneof instruction {
+    DeliveryRequest delivery_request = 1;
+    RemoveRequest remove_request = 2;
+  }
+}

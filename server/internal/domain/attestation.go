@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/canonical"
+	"github.com/stolostron/ocm-resource-manager/server/pkg/canonical"
 )
 
 // Signature is a detached signature over a canonical content hash.

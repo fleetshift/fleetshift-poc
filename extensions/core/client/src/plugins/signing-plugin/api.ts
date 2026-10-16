@@ -1,4 +1,4 @@
-const MGMT_BASE = "/v1";
+const MGMT_BASE = "/v1alpha";
 
 async function mgmtFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${MGMT_BASE}${path}`, init);

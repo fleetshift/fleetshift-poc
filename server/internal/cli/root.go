@@ -4,11 +4,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// New returns the root command for the fleetshift CLI.
+// New returns the root command for the resource manager server.
 func New() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "fleetshift",
-		Short: "FleetShift management plane",
+		Use:   "resource-manager",
+		Short: "API and orchestration server for OCM Resource Manager",
 	}
 
 	root.AddCommand(newServeCmd())

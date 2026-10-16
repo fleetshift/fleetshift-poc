@@ -1,7 +1,7 @@
-// Package bootstrap is the sole composition edge for FleetShift.
+// Package bootstrap is the sole composition edge for the resource manager server.
 // It owns normalized production configuration, eager construction of the
 // complete application graph, listener authority, semantic readiness,
-// background supervision, and bounded shutdown. fleetshift serve and the
+// background supervision, and bounded shutdown. resource-manager serve and the
 // frozen testserver facade both use Start; packages below this edge must
 // not import bootstrap.
 package bootstrap
@@ -18,7 +18,7 @@ import (
 )
 
 // DefaultSQLitePath is the serve --db default when PostgreSQL is not selected.
-const DefaultSQLitePath = "fleetshift.db"
+const DefaultSQLitePath = "ocm-resource-manager.db"
 
 // DefaultInitialAuthMethodTimeout bounds implicit initial-AuthMethod discovery/install
 // when the AuthMethod store is empty and OIDC initial-AuthMethod config is present.

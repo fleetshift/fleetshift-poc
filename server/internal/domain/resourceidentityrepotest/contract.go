@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func collectAliases(set domain.AliasSet) []domain.Alias {
@@ -177,8 +177,8 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		name := domain.ResourceName("clusters/multi")
-		rt1 := seedExtensionResourceType(t, tx, "kind.fleetshift.io", "v1alpha1", now)
-		rt2 := seedExtensionResourceType(t, tx, "gcp.fleetshift.io", "v1", now)
+		rt1 := seedExtensionResourceType(t, tx, "kind.open-cluster-management.io", "v1alpha1", now)
+		rt2 := seedExtensionResourceType(t, tx, "gcp.open-cluster-management.io", "v1", now)
 		seedExtensionResourceInstance(t, tx, rt1, name, now)
 		seedExtensionResourceInstance(t, tx, rt2, name, now)
 
@@ -203,7 +203,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		name := domain.ResourceName("clusters/tomb")
-		rt := seedExtensionResourceType(t, tx, "kind.fleetshift.io", "v1", now)
+		rt := seedExtensionResourceType(t, tx, "kind.open-cluster-management.io", "v1", now)
 		seedExtensionResourceInstance(t, tx, rt, name, now)
 
 		r := domain.NewPlatformResource(name, nil, now)
@@ -241,7 +241,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		name := domain.ResourceName("clusters/er-link")
-		rt := seedExtensionResourceType(t, tx, "kind.fleetshift.io", "v1", now)
+		rt := seedExtensionResourceType(t, tx, "kind.open-cluster-management.io", "v1", now)
 		erUID := seedExtensionResourceInstance(t, tx, rt, name, now)
 
 		r := domain.NewPlatformResource(name, nil, now)
@@ -271,7 +271,7 @@ func Run(t *testing.T, factory Factory) {
 		// No repo.Create call at all -- the name only ever gets an
 		// extension resource, never its own platform_resources row.
 		name := domain.ResourceName("clusters/virtual")
-		rt := seedExtensionResourceType(t, tx, "kind.fleetshift.io", "v1", now)
+		rt := seedExtensionResourceType(t, tx, "kind.open-cluster-management.io", "v1", now)
 		erUID := seedExtensionResourceInstance(t, tx, rt, name, now)
 
 		got, err := repo.GetByName(ctx, name)
@@ -472,7 +472,7 @@ func Run(t *testing.T, factory Factory) {
 
 		r1 := domain.NewPlatformResource(name1, nil, now)
 		_ = r1.AddRelationship(domain.NewResourceRelationship(
-			name1, "runs-on", name2, "kind.fleetshift.io", now,
+			name1, "runs-on", name2, "kind.open-cluster-management.io", now,
 		))
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("Create r1: %v", err)
@@ -501,8 +501,8 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		name := domain.ResourceName("clusters/full-identity")
-		rt1 := seedExtensionResourceType(t, tx, "kind.fleetshift.io", "v1", now)
-		rt2 := seedExtensionResourceType(t, tx, "gcp.fleetshift.io", "v1alpha1", now)
+		rt1 := seedExtensionResourceType(t, tx, "kind.open-cluster-management.io", "v1", now)
+		rt2 := seedExtensionResourceType(t, tx, "gcp.open-cluster-management.io", "v1alpha1", now)
 		seedExtensionResourceInstance(t, tx, rt1, name, now)
 		seedExtensionResourceInstance(t, tx, rt2, name, now)
 
@@ -517,15 +517,15 @@ func Run(t *testing.T, factory Factory) {
 
 		r := domain.NewPlatformResource(name, map[string]string{"env": "prod"}, now)
 		projectID, _ := domain.NewAlias("gcp", "project_id", "full-identity-project")
-		clusterID, _ := domain.NewAlias("fleetshift", "cluster_id", "full-identity-cluster")
+		clusterID, _ := domain.NewAlias("ocm-resource-manager", "cluster_id", "full-identity-cluster")
 		if err := r.AddAlias(projectID); err != nil {
 			t.Fatalf("AddAlias project_id: %v", err)
 		}
 		if err := r.AddAlias(clusterID); err != nil {
 			t.Fatalf("AddAlias cluster_id: %v", err)
 		}
-		_ = r.AddRelationship(domain.NewResourceRelationship(name, "runs-on", target1, "kind.fleetshift.io", now))
-		_ = r.AddRelationship(domain.NewResourceRelationship(name, "member-of", target2, "gcp.fleetshift.io", now))
+		_ = r.AddRelationship(domain.NewResourceRelationship(name, "runs-on", target1, "kind.open-cluster-management.io", now))
+		_ = r.AddRelationship(domain.NewResourceRelationship(name, "member-of", target2, "gcp.open-cluster-management.io", now))
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create source: %v", err)
 		}

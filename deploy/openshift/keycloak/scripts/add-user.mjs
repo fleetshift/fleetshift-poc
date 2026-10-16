@@ -75,35 +75,35 @@ const body = {
   realmRoles: roles ? roles.split(",") : [],
 };
 const response =
-  await $`curl -sk -w '\n%{http_code}' -X POST ${url}/admin/realms/fleetshift/users -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${JSON.stringify(body)}`;
+  await $`curl -sk -w '\n%{http_code}' -X POST ${url}/admin/realms/ocm-resource-manager/users -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${JSON.stringify(body)}`;
 const status = response.stdout.trim().split("\n").pop();
 let userId;
 if (/^2/.test(status)) console.log("User created successfully.");
 else if (status === "409") {
   userId = (
-    await $`curl -sk ${url}/admin/realms/fleetshift/users?username=${username}&exact=true -H ${`Authorization: Bearer ${token}`}`
+    await $`curl -sk ${url}/admin/realms/ocm-resource-manager/users?username=${username}&exact=true -H ${`Authorization: Bearer ${token}`}`
   ).stdout;
   userId = JSON.parse(userId)[0]?.id;
   if (!userId) error("Could not find user ID");
-  await $`curl -sk -X PUT ${url}/admin/realms/fleetshift/users/${userId} -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${JSON.stringify({ attributes: { github_username: [github] } })}`;
-  await $`curl -sk -X PUT ${url}/admin/realms/fleetshift/users/${userId}/reset-password -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${JSON.stringify({ type: "password", value: password, temporary: false })}`;
+  await $`curl -sk -X PUT ${url}/admin/realms/ocm-resource-manager/users/${userId} -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${JSON.stringify({ attributes: { github_username: [github] } })}`;
+  await $`curl -sk -X PUT ${url}/admin/realms/ocm-resource-manager/users/${userId}/reset-password -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${JSON.stringify({ type: "password", value: password, temporary: false })}`;
   console.log(`User '${username}' already exists. Updated.`);
 } else error(`Failed to create user (HTTP ${status}).`);
 
 if (roles) {
   userId ||= JSON.parse(
     (
-      await $`curl -sk ${url}/admin/realms/fleetshift/users?username=${username}&exact=true -H ${`Authorization: Bearer ${token}`}`
+      await $`curl -sk ${url}/admin/realms/ocm-resource-manager/users?username=${username}&exact=true -H ${`Authorization: Bearer ${token}`}`
     ).stdout,
   )[0]?.id;
   for (const role of roles.split(",")) {
     const roleResult =
-      await $`curl -sk ${url}/admin/realms/fleetshift/roles/${role} -H ${`Authorization: Bearer ${token}`}`;
+      await $`curl -sk ${url}/admin/realms/ocm-resource-manager/roles/${role} -H ${`Authorization: Bearer ${token}`}`;
     if (JSON.parse(roleResult.stdout).name === role)
-      await $`curl -sk -X POST ${url}/admin/realms/fleetshift/users/${userId}/role-mappings/realm -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${`[${roleResult.stdout}]`}`;
+      await $`curl -sk -X POST ${url}/admin/realms/ocm-resource-manager/users/${userId}/role-mappings/realm -H ${`Authorization: Bearer ${token}`} -H Content-Type:application/json -d ${`[${roleResult.stdout}]`}`;
     else console.warn(`WARNING: Role '${role}' not found, skipping.`);
   }
 }
 console.log(
-  `\n  User: ${username}\n  Password: ${password}\n  GitHub: ${github}\n  Roles: ${roles || "none"}\n  Keycloak: ${url}/realms/fleetshift/account`,
+  `\n  User: ${username}\n  Password: ${password}\n  GitHub: ${github}\n  Roles: ${roles || "none"}\n  Keycloak: ${url}/realms/ocm-resource-manager/account`,
 );

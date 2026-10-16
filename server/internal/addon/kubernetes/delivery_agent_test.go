@@ -22,11 +22,11 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/keyregistry"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/testutil"
 )
 
 // awaitDone drains one result from ch with a safety-net timeout so
@@ -926,7 +926,7 @@ type unitTestAttestationBundle struct {
 func buildUnitTestAttestation(t *testing.T) unitTestAttestationBundle {
 	t.Helper()
 
-	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
+	provider := oidctest.Start(t, oidctest.WithAudience("ocm-resource-manager-enroll"))
 	signerID := domain.SubjectID("unit-test-user")
 	issuer := provider.IssuerURL()
 	registrySubject := domain.RegistrySubject("gh-unit-test-user")
@@ -938,7 +938,7 @@ func buildUnitTestAttestation(t *testing.T) unitTestAttestationBundle {
 
 	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(signerID),
-		Audience: "fleetshift-enroll",
+		Audience: "ocm-resource-manager-enroll",
 		Extra:    map[string]any{"preferred_username": registrySubject},
 	})
 
@@ -1008,7 +1008,7 @@ func buildUnitTestAttestation(t *testing.T) unitTestAttestationBundle {
 	trustBundle := []domain.TrustBundleEntry{{
 		IssuerURL:          issuer,
 		JWKSURI:            domain.EndpointURL(jwksURI),
-		EnrollmentAudience: "fleetshift-enroll",
+		EnrollmentAudience: "ocm-resource-manager-enroll",
 		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 			RegistryID: "github.com",
 			Expression: `claims.preferred_username`,

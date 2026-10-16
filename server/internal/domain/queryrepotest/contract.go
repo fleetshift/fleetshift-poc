@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // Factory creates a fresh [domain.Tx] for each test. The Tx is needed
@@ -145,7 +145,7 @@ func runEmptyFilterTests(t *testing.T, factory Factory) {
 		// Platform-only fixtures remain seeded for other repositories,
 		// but QueryResources must not surface them.
 		results := queryAll(t, tx, "")
-		platformName := string(domain.NewFullResourceName("fleetshift.io", fx.PlatformOnlyName))
+		platformName := string(domain.NewFullResourceName("open-cluster-management.io", fx.PlatformOnlyName))
 		if _, ok := findByName(results, platformName); ok {
 			t.Errorf("unexpected platform-only result %q", platformName)
 		}

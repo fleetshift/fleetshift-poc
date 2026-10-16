@@ -1,5 +1,5 @@
 {
-  "name": "fleetshift-poc",
+  "name": "ocm-resource-manager",
   "root": ".",
   "targets": {
     "fleetctl": {
@@ -14,9 +14,9 @@
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "podman build -t localhost/fleetshift-server:latest .",
-          "podman build -f Dockerfile.local -t localhost/fleetshift-server-local:latest .",
-          "podman build --ulimit nofile=65536:65536 -f Dockerfile.web -t localhost/fleetshift-web:latest ."
+          "podman build -t localhost/ocm-resource-manager-server:latest .",
+          "podman build -f Dockerfile.local -t localhost/ocm-resource-manager-server-local:latest .",
+          "podman build --ulimit nofile=65536:65536 -f Dockerfile.web -t localhost/ocm-resource-manager-web:latest ."
         ],
         "parallel": false
       },
@@ -25,7 +25,7 @@
     "image:aio": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "podman build -f Dockerfile.fleetshift --build-arg SERVER_IMAGE=localhost/fleetshift-server-local:latest --build-arg WEB_IMAGE=localhost/fleetshift-web:latest -t localhost/fleetshift:latest -t quay.io/stolostron/fleetshift:latest ."
+        "command": "podman build -f Dockerfile.aio --build-arg SERVER_IMAGE=localhost/ocm-resource-manager-server-local:latest --build-arg WEB_IMAGE=localhost/ocm-resource-manager-web:latest -t localhost/ocm-resource-manager:latest -t quay.io/stolostron/ocm-resource-manager:latest ."
       },
       "cache": false,
       "dependsOn": ["image:build"]
@@ -35,12 +35,12 @@
       "options": {
         "commands": [
           "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
-          "podman tag localhost/fleetshift-server:latest ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
-          "podman push ${DEV_REGISTRY}/fleetshift-server:${IMAGE_TAG:-latest}",
-          "podman tag localhost/fleetshift-server-local:latest ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
-          "podman push ${DEV_REGISTRY}/fleetshift-server-local:${IMAGE_TAG:-latest}",
-          "podman tag localhost/fleetshift-web:latest ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}",
-          "podman push ${DEV_REGISTRY}/fleetshift-web:${IMAGE_TAG:-latest}"
+          "podman tag localhost/ocm-resource-manager-server:latest ${DEV_REGISTRY}/ocm-resource-manager-server:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/ocm-resource-manager-server:${IMAGE_TAG:-latest}",
+          "podman tag localhost/ocm-resource-manager-server-local:latest ${DEV_REGISTRY}/ocm-resource-manager-server-local:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/ocm-resource-manager-server-local:${IMAGE_TAG:-latest}",
+          "podman tag localhost/ocm-resource-manager-web:latest ${DEV_REGISTRY}/ocm-resource-manager-web:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/ocm-resource-manager-web:${IMAGE_TAG:-latest}"
         ],
         "parallel": false
       },
@@ -51,8 +51,8 @@
       "options": {
         "commands": [
           "test -n \"${DEV_REGISTRY}\" || { echo 'DEV_REGISTRY not set. Push only targets your personal dev registry.'; exit 1; }",
-          "podman tag localhost/fleetshift:latest ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}",
-          "podman push ${DEV_REGISTRY}/fleetshift:${IMAGE_TAG:-latest}"
+          "podman tag localhost/ocm-resource-manager:latest ${DEV_REGISTRY}/ocm-resource-manager:${IMAGE_TAG:-latest}",
+          "podman push ${DEV_REGISTRY}/ocm-resource-manager:${IMAGE_TAG:-latest}"
         ],
         "parallel": false
       },
@@ -72,7 +72,7 @@
       "options": {
         "command": "node tools/generate-plugin-registry.mjs"
       },
-      "dependsOn": ["plugins:build", "@fleetshift/kind-plugin:build"],
+      "dependsOn": ["plugins:build", "@ocm-resource-manager/kind-plugin:build"],
       "cache": true,
       "inputs": [
         "{workspaceRoot}/tools/generate-plugin-registry.mjs",

@@ -1,0 +1,124 @@
+# Assembles the all-in-one OCM Resource Manager image from component images.
+# Packaging (deploy/aio) owns s6 PID 1, peer Dex (default), PKI, and serve argv.
+#
+# From-source (monorepo; preferred):
+#   npx nx run image:aio
+#
+# Or manually:
+#   podman build -t localhost/ocm-resource-manager-server:latest .
+#   podman build -f Dockerfile.local -t localhost/ocm-resource-manager-server-local:latest .
+#   podman build -f Dockerfile.web -t localhost/ocm-resource-manager-web:latest .
+#   podman build -f Dockerfile.aio \
+#     --build-arg SERVER_IMAGE=localhost/ocm-resource-manager-server-local:latest \
+#     --build-arg WEB_IMAGE=localhost/ocm-resource-manager-web:latest \
+#     -t localhost/ocm-resource-manager:latest \
+#     -t quay.io/stolostron/ocm-resource-manager:latest .
+#
+# Base is ocm-resource-manager-server-local so the kind library can shell out to a
+# container runtime CLI (podman) against a mounted host socket. For kind,
+# run --privileged with the socket mounted and join
+# --network kind:alias=ocm-resource-manager. CONTAINER_HOST, KIND_EXPERIMENTAL_DOCKER_NETWORK,
+# and KIND_LOOPBACK_FORWARD_TO=ocm-resource-manager:8085 are packaging defaults
+# (see deploy/aio/README.md).
+#
+# Default: peer Dex under s6; bare podman run needs no OIDC flags.
+# Presence of OIDC_ISSUER_URL selects Dex-off and forwards that issuer.
+
+ARG SERVER_IMAGE=quay.io/stolostron/ocm-resource-manager-server-local:latest
+ARG WEB_IMAGE=quay.io/stolostron/ocm-resource-manager-web:latest
+# Immutable build inputs (edit here when bumping).
+# Dex v2.45.1 — multi-arch index digest for docker.io/dexidp/dex:v2.45.1
+# Platform digests (informational; index digest is the pin used at build):
+#   linux/amd64: sha256:f5f9fb373188b0f701b80edd68b3f4745ced69306c9d382999f11b7774335a98
+#   linux/arm64: sha256:b79cf220951b3851b322a85ac9eeacdc38cfcca49dbe3cdbc55d2b2020f35feb
+ARG DEX_IMAGE=docker.io/dexidp/dex:v2.45.1@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462
+# s6-overlay v3.2.3.2 — tarball SHA-256 verified at build after download
+ARG S6_OVERLAY_VERSION=3.2.3.2
+ARG S6_OVERLAY_NOARCH_SHA256=5379750ed30a84bbd2e2dd74847ba6b5bd29cd0b2e3ea2ec58049b57eb2eda12
+ARG S6_OVERLAY_X86_64_SHA256=e6befcc96a437a3831386ecfc51808c5d3e939dc5fe3c02ae9284599e8aa2408
+ARG S6_OVERLAY_AARCH64_SHA256=b17f17a82e7a515c682a91edaf2ffdabb73f891981b6c1fd712115693a2f8b4c
+ARG TARGETARCH
+
+FROM ${WEB_IMAGE} AS web-assets
+FROM ${DEX_IMAGE} AS dex-bin
+FROM golang:1.26.6@sha256:0d1d3a794be25f809dd2cb3160d8c73276c4056a9f8242a138e908ddeee7b6b6 AS aio-builder
+WORKDIR /src
+COPY deploy/aio/go.mod deploy/aio/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    for attempt in 1 2 3 4 5; do \
+        if GODEBUG=http2client=0 go mod download; then exit 0; fi; \
+        sleep "$((attempt * 5))"; \
+    done; \
+    exit 1
+COPY deploy/aio/ ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+	--mount=type=cache,target=/root/.cache/go-build \
+	CGO_ENABLED=0 go build -o /bin/aio-init ./cmd/aio-init && \
+	CGO_ENABLED=0 go build -o /bin/kind-loopback-forward ./cmd/kind-loopback-forward && \
+	CGO_ENABLED=0 go build -o /bin/aio-proxy ./cmd/aio-proxy
+
+FROM ${SERVER_IMAGE}
+
+ARG S6_OVERLAY_VERSION
+ARG S6_OVERLAY_NOARCH_SHA256
+ARG S6_OVERLAY_X86_64_SHA256
+ARG S6_OVERLAY_AARCH64_SHA256
+ARG TARGETARCH
+
+COPY --from=web-assets /srv/web /srv/web
+COPY --from=dex-bin /usr/local/bin/dex /usr/local/bin/dex
+COPY --from=aio-builder /bin/aio-init /usr/local/bin/aio-init
+COPY --from=aio-builder /bin/kind-loopback-forward /usr/local/bin/kind-loopback-forward
+COPY --from=aio-builder /bin/aio-proxy /usr/local/bin/aio-proxy
+COPY deploy/aio/s6/ /etc/s6-overlay/
+
+RUN set -eux; \
+	chmod +x /usr/local/bin/aio-init /usr/local/bin/kind-loopback-forward /usr/local/bin/aio-proxy; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends curl ca-certificates xz-utils; \
+	arch="$TARGETARCH"; \
+	if [ -z "$arch" ]; then arch="$(dpkg --print-architecture)"; fi; \
+	case "$arch" in \
+		amd64|x86_64) s6arch=x86_64; s6sha="$S6_OVERLAY_X86_64_SHA256" ;; \
+		arm64|aarch64) s6arch=aarch64; s6sha="$S6_OVERLAY_AARCH64_SHA256" ;; \
+		*) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+	esac; \
+	curl -fsSL -o /tmp/s6-overlay-noarch.tar.xz \
+		"https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz"; \
+	curl -fsSL -o /tmp/s6-overlay-${s6arch}.tar.xz \
+		"https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${s6arch}.tar.xz"; \
+	echo "${S6_OVERLAY_NOARCH_SHA256}  /tmp/s6-overlay-noarch.tar.xz" | sha256sum -c -; \
+	echo "${s6sha}  /tmp/s6-overlay-${s6arch}.tar.xz" | sha256sum -c -; \
+	tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz; \
+	tar -C / -Jxpf /tmp/s6-overlay-${s6arch}.tar.xz; \
+	rm -f /tmp/s6-overlay-*.tar.xz; \
+	rm -rf /var/lib/apt/lists/*; \
+	# Resource manager server 1000:1000; Dex 1001:1001; aio-proxy 1002:1002.
+	if ! id -u ocm-resource-manager >/dev/null 2>&1; then \
+		useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin ocm-resource-manager; \
+	fi; \
+	if ! id -u dex >/dev/null 2>&1; then \
+		useradd --uid 1001 --system --home-dir /nonexistent --shell /usr/sbin/nologin dex; \
+	fi; \
+	if ! id -u aio-proxy >/dev/null 2>&1; then \
+		useradd --uid 1002 --system --home-dir /nonexistent --shell /usr/sbin/nologin aio-proxy; \
+	fi; \
+	mkdir -p /data /data/sandbox /run/ocm-resource-manager; \
+	chown -R ocm-resource-manager:ocm-resource-manager /data /srv/web; \
+	# Sandbox tree is root-owned; the resource manager may create ordinary /data state.
+	chown root:root /data/sandbox; \
+	chmod 0755 /data/sandbox
+
+# CONTAINER_HOST defaults to the documented in-container socket mount path.
+# Override when mounting the engine socket elsewhere. Missing sockets are ignored.
+ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
+	S6_KEEP_ENV=1 \
+	LOG_LEVEL=error \
+	CONTAINER_HOST=unix:///var/run/docker.sock
+
+# aio-entrypoint maps LOG_LEVEL to S6_VERBOSITY and execs /init so s6 is PID 1.
+# Do not set CMD: s6-rc longruns own the resource manager server and Dex. ENTRYPOINT already
+# clears inherited CMD from the server image.
+ENTRYPOINT ["/etc/s6-overlay/scripts/aio-entrypoint"]
+
+EXPOSE 8085 50051

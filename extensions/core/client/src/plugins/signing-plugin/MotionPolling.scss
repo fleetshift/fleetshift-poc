@@ -1,6 +1,6 @@
-.ome-signing-poll {
-  --ome-signing-blob-color: var(--pf-t--global--color--brand--default);
-  --ome-signing-bg: var(--pf-t--global--background--color--primary--default);
+.ocm-rm-signing-poll {
+  --ocm-rm-signing-blob-color: var(--pf-t--global--color--brand--default);
+  --ocm-rm-signing-bg: var(--pf-t--global--background--color--primary--default);
 
   position: relative;
   margin-top: var(--pf-t--global--spacer--md);
@@ -20,7 +20,7 @@
   &__bg {
     position: absolute;
     inset: 0;
-    background-color: var(--ome-signing-bg);
+    background-color: var(--ocm-rm-signing-bg);
   }
 
   &__goo {
@@ -34,7 +34,7 @@
 
   &__pool {
     position: absolute;
-    background-color: var(--ome-signing-blob-color);
+    background-color: var(--ocm-rm-signing-blob-color);
 
     &--left,
     &--right {
@@ -80,7 +80,7 @@
   &__blob {
     position: absolute;
     border-radius: 50%;
-    background-color: var(--ome-signing-blob-color);
+    background-color: var(--ocm-rm-signing-blob-color);
     opacity: 0.7;
 
     &--shadow {
@@ -97,7 +97,7 @@
   }
 
   .pf-v6-theme-glass & {
-    --ome-signing-bg: transparent;
-    --ome-signing-blob-color: var(--pf-t--global--color--brand--subtle--200);
+    --ocm-rm-signing-bg: transparent;
+    --ocm-rm-signing-blob-color: var(--pf-t--global--color--brand--subtle--200);
   }
 }

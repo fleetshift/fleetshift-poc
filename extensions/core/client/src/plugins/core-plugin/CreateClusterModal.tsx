@@ -1,7 +1,7 @@
 import type {
   ClusterProviderCardProps,
   ClusterProviderWizardProps,
-} from "@fleetshift/common";
+} from "@ocm-resource-manager/common";
 import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
 import {
   useExtensions,
@@ -28,7 +28,7 @@ import type { ComponentType } from "react";
 import { useCallback, useMemo } from "react";
 
 type ClusterProviderExtension = Extension<
-  "fleetshift.cluster-provider",
+  "ocm-resource-manager.cluster-provider",
   {
     id: string;
     label: string;
@@ -40,7 +40,7 @@ type ClusterProviderExtension = Extension<
 >;
 
 function isClusterProvider(e: Extension): e is ClusterProviderExtension {
-  return e.type === "fleetshift.cluster-provider";
+  return e.type === "ocm-resource-manager.cluster-provider";
 }
 
 interface CreateClusterModalProps {

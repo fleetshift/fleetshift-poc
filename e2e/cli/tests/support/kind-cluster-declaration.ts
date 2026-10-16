@@ -7,7 +7,8 @@ import {
 } from "./kind-pool";
 import { parseKindClusterCreateSpec } from "./kind-spec";
 
-export const KIND_CLUSTERS_ANNOTATION_TYPE = "fleetshift.kindClusters";
+export const KIND_CLUSTERS_ANNOTATION_TYPE =
+  "ocm-resource-manager.kindClusters";
 
 export type KindClusterTestDetails = TestDetails & {
   kindClusters: readonly KindClusterRequest[];

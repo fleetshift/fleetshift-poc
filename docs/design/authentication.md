@@ -24,7 +24,7 @@ resuming a fulfillment that lacks acceptable authorization material.
   [architecture/provenance.md](architecture/provenance.md)
 - Target apply, acknowledgement, generation, journaling, and recovery:
   [architecture/target_delivery_contract.md](architecture/target_delivery_contract.md)
-- Resource-manager tenant, workspace, and resource authorization:
+- Platform tenant, workspace, and resource authorization:
   [architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md)
 - The superseded raw-signature and JWT key-binding provenance design:
   [archive/jwt_and_raw_key_provenance.md](archive/jwt_and_raw_key_provenance.md)
@@ -39,7 +39,7 @@ resuming a fulfillment that lacks acceptable authorization material.
 
 ## Overview
 
-FleetShift separates two concerns in delivery authorization:
+The OCM Resource Manager architecture separates two concerns in delivery authorization:
 
 - **Provenance** is durable cryptographic proof of who authenticated an exact
   typed intent or supporting assertion.
@@ -314,7 +314,7 @@ the relevant request components, destination or audience, body digest,
 freshness value, and replay protection.
 
 This is useful when an IdP issues only bearer tokens. Theft of the token alone
-is then insufficient to reproduce the signed FleetShift request. It can also
+is then insufficient to reproduce the signed platform API request. It can also
 protect operations that have no delivery or durable provenance, including
 read-only queries.
 
@@ -414,10 +414,10 @@ therefore largely reusable as another transport for the same signed
 assertions, with apply authority left intact. It does not need a
 GitOps-specific token-binding or authorization model. Ordinary git commit
 signing is independent unless a configured provenance profile explicitly
-defines how it authenticates FleetShift content.
+defines how it authenticates platform content.
 
 The credential-presentation modes above still apply. Details of GitOps as a
-FleetShift transport are left for later work.
+platform delivery transport are left for later work.
 
 ## Operational Concerns
 
@@ -458,7 +458,7 @@ the IdP is unavailable, compromised, or misconfigured. See
   provenance plus delegated or target-local apply identity?
 - How should user-permission changes reconcile existing delegated workload
   identities across target types?
-- Which CIBA, token-exchange, and DPoP capabilities can FleetShift rely on in
+- Which CIBA, token-exchange, and DPoP capabilities can the resource manager rely on in
   the first supported IdP integrations?
 - Which `PausedAuth` causes and requested repairs should be represented in the
   public API without exposing security-sensitive detail?

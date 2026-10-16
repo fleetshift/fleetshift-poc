@@ -18,7 +18,7 @@ const nxEnvironmentKeys = new Set([
   "BUILD",
   "PODMAN_SOCKET",
   "DOCKER_HOST",
-  "FLEETSHIFT_SERVER_HTTP_PORT",
+  "OCM_RM_SERVER_HTTP_PORT",
   "OIDC_ISSUER_URL",
 ]);
 export function importKeyValueArgs(args) {
@@ -115,7 +115,7 @@ export async function copySandboxCA() {
     try {
       await compose(
         "cp",
-        "fleetshift-server:/data/sandbox/pki/ca.crt",
+        "ocm-resource-manager-server:/data/sandbox/pki/ca.crt",
         destination,
       );
       return;

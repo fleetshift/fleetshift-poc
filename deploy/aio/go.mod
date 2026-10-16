@@ -1,4 +1,4 @@
-module github.com/fleetshift/fleetshift-poc/deploy/aio
+module github.com/stolostron/ocm-resource-manager/deploy/aio
 
 go 1.26.0
 toolchain go1.26.6

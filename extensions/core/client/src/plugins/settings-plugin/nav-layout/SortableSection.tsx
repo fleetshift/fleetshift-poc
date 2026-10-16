@@ -1,5 +1,5 @@
-import type { FlatNode } from "@fleetshift/common";
-import { MORE_ENTRY_ID, NodeKind } from "@fleetshift/common";
+import type { FlatNode } from "@ocm-resource-manager/common";
+import { MORE_ENTRY_ID, NodeKind } from "@ocm-resource-manager/common";
 import clsx from "clsx";
 import type { MotionValue } from "motion/react";
 
@@ -199,11 +199,11 @@ export function SortableSection({
           <li
             key={`${node.id}-empty`}
             className={clsx(
-              "ome-settings-tree-item ome-settings-tree-item--nested pf-v6-u-mr-2xl",
-              isDropTarget && "ome-settings-tree-item--drop-target",
+              "ocm-rm-settings-tree-item ocm-rm-settings-tree-item--nested pf-v6-u-mr-2xl",
+              isDropTarget && "ocm-rm-settings-tree-item--drop-target",
             )}
           >
-            <div className="ome-settings-tree-item__empty-group">
+            <div className="ocm-rm-settings-tree-item__empty-group">
               Drop items here to add to this group
             </div>
           </li>,
@@ -216,12 +216,12 @@ export function SortableSection({
 
   return (
     <div>
-      <div className="ome-settings-nav-editor__section-label">
+      <div className="ocm-rm-settings-nav-editor__section-label">
         {sectionLabel}
       </div>
       <ul
         ref={containerRef}
-        className="ome-settings-nav-editor__tree-list"
+        className="ocm-rm-settings-nav-editor__tree-list"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

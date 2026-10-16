@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // FulfillmentRepo implements [domain.FulfillmentRepository] backed by Postgres.

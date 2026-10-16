@@ -8,7 +8,7 @@ import {
   type NavLayoutGroup as CommonNavLayoutGroup,
   useExtensionInstall,
   useNavLayout,
-} from "@fleetshift/common";
+} from "@ocm-resource-manager/common";
 import {
   useExtensions,
   useResolvedExtensions,
@@ -292,7 +292,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         for (const ep of Object.values(extensionPoints)) {
           typeToFeatureId.set(ep.type, globalFeatureId);
 
-          if (ep.type === "fleetshift.cluster-provider") {
+          if (ep.type === "ocm-resource-manager.cluster-provider") {
             const createId = `ext-${globalFeatureId}-create`;
             inserts.push(
               insertEntry(db, {
@@ -319,7 +319,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         ext.properties;
 
       const parentFeatureId = typeToFeatureId.get(
-        "fleetshift.cluster-provider",
+        "ocm-resource-manager.cluster-provider",
       );
       const parent = parentFeatureId
         ? featureParentRef.current.get(parentFeatureId)

@@ -184,15 +184,15 @@ type scenario struct {
 var scenarios = []scenario{
 	{
 		name: "never_alias_defensive_retract_noop",
-		sql:  defensiveRetractNoopSQL(1_001, 2_000, "bench.fleetshift.io"),
+		sql:  defensiveRetractNoopSQL(1_001, 2_000, "bench.open-cluster-management.io"),
 	},
 	{
 		name: "same_alias_fingerprint_skip",
-		sql:  fingerprintSkipSQL(15_001, 16_000, "bench.fleetshift.io"),
+		sql:  fingerprintSkipSQL(15_001, 16_000, "bench.open-cluster-management.io"),
 	},
 	{
 		name: "steady_source_first_noop_classification",
-		sql: inputAliasesSQL(15_001, 16_000, "bench.fleetshift.io", "source-id", "ext") + `
+		sql: inputAliasesSQL(15_001, 16_000, "bench.open-cluster-management.io", "source-id", "ext") + `
 , self_claim AS (
 	SELECT ia.*, c.claim_id, cl.value AS existing_value, cl.platform_collection_name, cl.platform_resource_id
 	FROM input_aliases ia
@@ -219,11 +219,11 @@ WHERE claim_id IS NULL
 	},
 	{
 		name: "new_secondary_alias_classification",
-		sql:  classifyChangedAliasesSQL(25_001, 26_000, "bench.fleetshift.io", "secondary-id", "new-secondary"),
+		sql:  classifyChangedAliasesSQL(25_001, 26_000, "bench.open-cluster-management.io", "secondary-id", "new-secondary"),
 	},
 	{
 		name: "value_claimed_by_other_classification",
-		sql: inputAliasesSQL(35_001, 36_000, "bench.fleetshift.io", "secondary-id", "victim") + `
+		sql: inputAliasesSQL(35_001, 36_000, "bench.open-cluster-management.io", "secondary-id", "victim") + `
 , by_value AS (
 	SELECT ia.idx, vc.id, vc.platform_collection_name, vc.platform_resource_id
 	FROM input_aliases ia
@@ -242,15 +242,15 @@ WHERE bv.id IS NOT NULL
 	},
 	{
 		name: "cross_contributor_resource_conflict_classification",
-		sql:  classifyChangedAliasesSQL(75_001, 76_000, "bench-b.fleetshift.io", "source-id", "ext-b"),
+		sql:  classifyChangedAliasesSQL(75_001, 76_000, "bench-b.open-cluster-management.io", "source-id", "ext-b"),
 	},
 	{
 		name: "self_replace_allowed_classification",
-		sql:  classifyChangedAliasesSQL(65_001, 66_000, "bench.fleetshift.io", "source-id", "ext-changed"),
+		sql:  classifyChangedAliasesSQL(65_001, 66_000, "bench.open-cluster-management.io", "source-id", "ext-changed"),
 	},
 	{
 		name: "new_secondary_alias_apply",
-		sql: inputAliasesSQL(45_001, 46_000, "bench.fleetshift.io", "secondary-id", "new-secondary-apply") + `
+		sql: inputAliasesSQL(45_001, 46_000, "bench.open-cluster-management.io", "secondary-id", "new-secondary-apply") + `
 , inserted_claims AS (
 	INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id)
 	SELECT namespace, key, value, collection_name, resource_id
@@ -271,7 +271,7 @@ SELECT count(*) FROM upserted_contributions`,
 	},
 	{
 		name: "self_replace_apply",
-		sql: inputAliasesSQL(67_001, 68_000, "bench.fleetshift.io", "source-id", "ext-changed-apply") + `
+		sql: inputAliasesSQL(67_001, 68_000, "bench.open-cluster-management.io", "source-id", "ext-changed-apply") + `
 , self_claim AS (
 	SELECT ia.*, c.claim_id
 	FROM input_aliases ia
@@ -306,7 +306,7 @@ SELECT count(*) FROM updated_claims`,
 	},
 	{
 		name: "retract_alias_apply",
-		sql: inputSourcesSQL(55_001, 56_000, "bench.fleetshift.io") + `
+		sql: inputSourcesSQL(55_001, 56_000, "bench.open-cluster-management.io") + `
 , deleted_contributions AS (
 	DELETE FROM resource_alias_contributions c
 	USING input_sources s
@@ -344,11 +344,11 @@ SELECT count(*) FROM deleted_orphan_claims`,
 	},
 	{
 		name: "retract_alias_cleanup_orphan_claims_refcount_single_statement",
-		sql:  retractWithRefcountCleanupSQL(56_001, 57_000, "bench.fleetshift.io"),
+		sql:  retractWithRefcountCleanupSQL(56_001, 57_000, "bench.open-cluster-management.io"),
 	},
 	{
 		name: "retract_alias_cleanup_orphan_claims_refcount_direct_delete",
-		sql:  retractWithDirectDeleteRefcountCleanupSQL(59_001, 60_000, "bench.fleetshift.io"),
+		sql:  retractWithDirectDeleteRefcountCleanupSQL(59_001, 60_000, "bench.open-cluster-management.io"),
 	},
 	{
 		name: "crossing_path_refcount_cleanup_keeps_claim",
@@ -360,11 +360,11 @@ SELECT count(*) FROM deleted_orphan_claims`,
 	},
 	{
 		name: "extension_resource_delete_refcount_cleanup_orphan_claims",
-		sql:  extensionResourceDeleteWithRefcountCleanupSQL(58_001, 59_000, "bench.fleetshift.io"),
+		sql:  extensionResourceDeleteWithRefcountCleanupSQL(58_001, 59_000, "bench.open-cluster-management.io"),
 	},
 	{
 		name: "extension_resource_delete_direct_contribution_cleanup",
-		sql:  extensionResourceDeleteWithDirectContributionCleanupSQL(60_001, 61_000, "bench.fleetshift.io"),
+		sql:  extensionResourceDeleteWithDirectContributionCleanupSQL(60_001, 61_000, "bench.open-cluster-management.io"),
 	},
 }
 
@@ -634,7 +634,7 @@ func crossingPathRefcountCleanupSQL(start, end int) string {
 	       'source-id'::text AS key
 	FROM generate_series(%[1]d, %[2]d) AS g
 	JOIN extension_resources er
-	  ON er.service_name = 'bench.fleetshift.io'
+	  ON er.service_name = 'bench.open-cluster-management.io'
 	 AND er.collection_name = 'widgets'
 	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
 ),
@@ -647,7 +647,7 @@ input_additions AS (
 	       ('r-' || lpad(g::text, 8, '0'))::text AS resource_id
 	FROM generate_series(%[1]d, %[2]d) AS g
 	JOIN extension_resources er
-	  ON er.service_name = 'bench-b.fleetshift.io'
+	  ON er.service_name = 'bench-b.open-cluster-management.io'
 	 AND er.collection_name = 'widgets'
 	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
 ),
@@ -748,7 +748,7 @@ func crossingPathDirectDeleteRefcountCleanupSQL(start, end int) string {
 	       'source-id'::text AS key
 	FROM generate_series(%[1]d, %[2]d) AS g
 	JOIN extension_resources er
-	  ON er.service_name = 'bench.fleetshift.io'
+	  ON er.service_name = 'bench.open-cluster-management.io'
 	 AND er.collection_name = 'widgets'
 	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
 ),
@@ -761,7 +761,7 @@ input_additions AS (
 	       ('r-' || lpad(g::text, 8, '0'))::text AS resource_id
 	FROM generate_series(%[1]d, %[2]d) AS g
 	JOIN extension_resources er
-	  ON er.service_name = 'bench-b.fleetshift.io'
+	  ON er.service_name = 'bench-b.open-cluster-management.io'
 	 AND er.collection_name = 'widgets'
 	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
 ),
@@ -1004,11 +1004,11 @@ CREATE INDEX resource_alias_contributions_claim_source_idx
 
 const seedSQL = `
 INSERT INTO extension_resources (uid, service_name, collection_name, resource_id, alias_fingerprint)
-SELECT gen_random_uuid(), 'bench.fleetshift.io', 'widgets', 'r-' || lpad(g::text, 8, '0'), digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256')
+SELECT gen_random_uuid(), 'bench.open-cluster-management.io', 'widgets', 'r-' || lpad(g::text, 8, '0'), digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256')
 FROM generate_series(1, 100000) AS g;
 
 INSERT INTO extension_resources (uid, service_name, collection_name, resource_id, alias_fingerprint)
-SELECT gen_random_uuid(), 'bench-b.fleetshift.io', 'widgets', 'r-' || lpad(g::text, 8, '0'), NULL
+SELECT gen_random_uuid(), 'bench-b.open-cluster-management.io', 'widgets', 'r-' || lpad(g::text, 8, '0'), NULL
 FROM generate_series(75001, 85000) AS g;
 
 INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id)
@@ -1019,7 +1019,7 @@ INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespa
 SELECT er.uid, cl.namespace, cl.key, cl.id
 FROM resource_alias_claims cl
 JOIN extension_resources er
-  ON er.service_name = 'bench.fleetshift.io'
+  ON er.service_name = 'bench.open-cluster-management.io'
  AND er.collection_name = cl.platform_collection_name
  AND er.resource_id = cl.platform_resource_id
 WHERE cl.key = 'source-id';

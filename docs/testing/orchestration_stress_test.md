@@ -231,7 +231,7 @@ uv run --with matplotlib python3 scripts/plot_stress.py /tmp/stress-results-*.js
 - **SELECT ... FOR UPDATE on fulfillment rows**: read-modify-write cycles
   on the fulfillment table are the primary source of contention. Row-level
   locking could eliminate the duplicate-key retries but would introduce
-  lock-wait latency. Needs benchmarking. See [OME-187](https://redhat.atlassian.net/browse/OME-187)
+  lock-wait latency. Needs benchmarking. See OME-187
 - **Service-layer update path**: the direct store mutation is a stress-test
   shortcut. A proper `UpdateDeployment` service method would use a durable
   workflow (like create and resume do), which would change the concurrency
@@ -242,6 +242,6 @@ uv run --with matplotlib python3 scripts/plot_stress.py /tmp/stress-results-*.js
 - **Configurable dispatch preemption**: the current `dispatchAndAwait`
   blocks until the in-flight delivery completes, which dominates
   mutation-to-dispatch latency under generation pressure (see finding 5).
-  A configurable preemption policy—such as aborting stale deliveries to dispatch the latest generation via dedicated request types, or applying configurable timeouts—would give clients necessary control over dispatch behavior. Prior art from projects like OCM, ACM, and KubeFleet should inform this design. Additionally, the policy must gracefully handle non-terminating agent failures, particularly in Kubernetes environments where reconciliation can loop indefinitely until custom resource manifests are patched. _(Note: OME currently differentiates between terminal and non-terminal errors for retry handling.)_
+  A configurable preemption policy—such as aborting stale deliveries to dispatch the latest generation via dedicated request types, or applying configurable timeouts—would give clients necessary control over dispatch behavior. Prior art from projects like OCM, ACM, and KubeFleet should inform this design. Additionally, the policy must gracefully handle non-terminating agent failures, particularly in Kubernetes environments where reconciliation can loop indefinitely until custom resource manifests are patched. _(Note: resource manager currently differentiates between terminal and non-terminal errors for retry handling.)_
 - **Test harness enhancements**: Upgrade the test harness to support heterogeneous deployment workloads (e.g., combinations of quick, slow, heavy, and light tasks) in defined proportions. Deployment manifests can be used to inject behavioral parameters into the DelayedDeliveryAgent, such as ACK delays, completion latencies, and synthetic error conditions.
-- **Integrate with E2E testing**: extend scripted-delivery add-on to support stress/performance testing. See [OME-279](https://redhat.atlassian.net/browse/OME-279)
+- **Integrate with E2E testing**: extend scripted-delivery add-on to support stress/performance testing. See OME-279

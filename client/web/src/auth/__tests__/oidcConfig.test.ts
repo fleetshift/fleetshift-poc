@@ -7,10 +7,10 @@ const _origDocument = globalThis.document;
 
 beforeEach(() => {
   const store: Record<string, string> = {};
-  globalThis.document = { title: "FleetShift" } as unknown as Document;
+  globalThis.document = { title: "OCM Resource Manager" } as unknown as Document;
   globalThis.window = {
     location: {
-      origin: "https://fleetshift-sandbox.localhost:8085",
+      origin: "https://ocm-resource-manager.localhost:8085",
       pathname: "/overview/overview",
     },
     history: {
@@ -51,8 +51,8 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://fleetshift-sandbox.localhost:8085/idp",
-            clientId: "fleetshift-ui",
+            authority: "https://ocm-resource-manager.localhost:8085/idp",
+            clientId: "ocm-resource-manager-ui",
             scope: "openid profile email groups",
           },
         }),
@@ -63,15 +63,15 @@ describe("fetchOidcConfig", () => {
     const props = await fetchOidcConfig(mockNavigate);
 
     expect(props.redirect_uri).toBe(
-      "https://fleetshift-sandbox.localhost:8085/app/auth/callback",
+      "https://ocm-resource-manager.localhost:8085/app/auth/callback",
     );
     expect(props.silent_redirect_uri).toBe(
-      "https://fleetshift-sandbox.localhost:8085/app/silent-renew.html",
+      "https://ocm-resource-manager.localhost:8085/app/silent-renew.html",
     );
     expect(props.response_type).toBe("code");
     expect(props.automaticSilentRenew).toBe(true);
     expect(props.authority).toBe(
-      "https://fleetshift-sandbox.localhost:8085/idp",
+      "https://ocm-resource-manager.localhost:8085/idp",
     );
     expect(props.scope).toBe("openid profile email groups");
 
@@ -93,8 +93,8 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://fleetshift-sandbox.localhost:8085/idp",
-            clientId: "fleetshift-ui",
+            authority: "https://ocm-resource-manager.localhost:8085/idp",
+            clientId: "ocm-resource-manager-ui",
             scope: "openid",
           },
         }),
@@ -114,8 +114,8 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://fleetshift-sandbox.localhost:8085/idp",
-            clientId: "fleetshift-ui",
+            authority: "https://ocm-resource-manager.localhost:8085/idp",
+            clientId: "ocm-resource-manager-ui",
             scope: "",
           },
         }),

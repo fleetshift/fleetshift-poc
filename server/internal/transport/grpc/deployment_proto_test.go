@@ -3,8 +3,8 @@ package grpc
 import (
 	"testing"
 
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestDeploymentToProto_ReconcilingRespectsPause(t *testing.T) {

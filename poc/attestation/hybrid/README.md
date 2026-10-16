@@ -1,6 +1,6 @@
 # Hybrid attestation prototype
 
-This directory is a Python proof of concept for FleetShift's common attestation
+This directory is a Python proof of concept for OCM Resource Manager's common attestation
 graph and target-side verification. The current design is
 `docs/design/architecture/provenance.md`; this POC still uses the older raw-key
 and `trust_anchor_id` representation preserved in

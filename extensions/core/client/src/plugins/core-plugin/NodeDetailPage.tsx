@@ -2,7 +2,7 @@ import {
   createResourceApi,
   PluginLink,
   type ResourceResult,
-} from "@fleetshift/common";
+} from "@ocm-resource-manager/common";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 import {
   Breadcrumb,
@@ -71,10 +71,10 @@ export default function NodeDetailPage() {
     k8sApi
       .search({
         filter: [
-          'resourceType == "kubernetes.fleetshift.io/Object"',
+          'resourceType == "kubernetes.open-cluster-management.io/Object"',
           'resource.observation.kind == "Node"',
           `resource.observation.metadata.uid == "${escapedNodeUid}"`,
-          `name.startsWith("//kubernetes.fleetshift.io/clusters/${escapedCluster}/")`,
+          `name.startsWith("//kubernetes.open-cluster-management.io/clusters/${escapedCluster}/")`,
         ].join(" && "),
         pageSize: 1,
       })

@@ -10,11 +10,11 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
-const resolveContextTestRT = domain.ResourceType("kind.fleetshift.io/Cluster")
+const resolveContextTestRT = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 type resolveContextSchemas map[domain.ResourceType]domain.ResourceQuerySchema
 

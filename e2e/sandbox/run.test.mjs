@@ -39,21 +39,21 @@ describe("buildTestEnvironment", () => {
     );
 
     expect(env.EXISTING).toBe("kept");
-    expect(env.BASE_URL).toBe("https://fleetshift-sandbox.localhost:8085");
-    expect(env.FLEETSHIFT_GRPC_TARGET).toBe("127.0.0.1:50051");
-    expect(env.FLEETSHIFT_CA_FILE).toBe("/tmp/run/ca.crt");
-    expect(env.FLEETSHIFT_E2E_RUN_ID).toBe("abcd");
-    expect(env.FLEETSHIFT_E2E_WORK_DIR).toBe("/tmp/run");
-    expect(env.FLEETSHIFT_KIND_PREFIX).toBe("kind-e2e-abcd-");
+    expect(env.BASE_URL).toBe("https://ocm-resource-manager.localhost:8085");
+    expect(env.OCM_RM_GRPC_TARGET).toBe("127.0.0.1:50051");
+    expect(env.OCM_RM_CA_FILE).toBe("/tmp/run/ca.crt");
+    expect(env.OCM_RM_E2E_RUN_ID).toBe("abcd");
+    expect(env.OCM_RM_E2E_WORK_DIR).toBe("/tmp/run");
+    expect(env.OCM_RM_KIND_PREFIX).toBe("kind-e2e-abcd-");
   });
 });
 
 describe("kindNodeBelongsToRun", () => {
   it("is exact to the current run prefix", () => {
-    expect(kindNodeBelongsToRun("fs--kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
+    expect(kindNodeBelongsToRun("rm--kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
       true,
     );
-    expect(kindNodeBelongsToRun("fs--kind-e2e-other-a", "kind-e2e-abcd-")).toBe(
+    expect(kindNodeBelongsToRun("rm--kind-e2e-other-a", "kind-e2e-abcd-")).toBe(
       false,
     );
     expect(kindNodeBelongsToRun("kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
@@ -64,15 +64,15 @@ describe("kindNodeBelongsToRun", () => {
 
 describe("parseOwnedKindNodes", () => {
   const prefix = "kind-e2e-abcd-";
-  const stdout = "abc123\tfs--kind-e2e-abcd-n1";
+  const stdout = "abc123\trm--kind-e2e-abcd-n1";
 
   it("parses id and cluster rows that belong to this run", () => {
     expect(parseOwnedKindNodes(stdout, prefix)).toEqual([
-      ["abc123", "fs--kind-e2e-abcd-n1"],
+      ["abc123", "rm--kind-e2e-abcd-n1"],
     ]);
     expect(parseOwnedKindNodes("", prefix)).toEqual([]);
     expect(
-      parseOwnedKindNodes("deadbeef\tfs--kind-e2e-other-n1", prefix),
+      parseOwnedKindNodes("deadbeef\trm--kind-e2e-other-n1", prefix),
     ).toEqual([]);
   });
 
@@ -82,25 +82,25 @@ describe("parseOwnedKindNodes", () => {
         `${stdout}\ntime=".." level=warning msg="busy"`,
         prefix,
       ),
-    ).toEqual([["abc123", "fs--kind-e2e-abcd-n1"]]);
+    ).toEqual([["abc123", "rm--kind-e2e-abcd-n1"]]);
   });
 });
 
 describe("usesPrebuiltImage", () => {
   it("only an explicit prebuilt flag skips the local image build", () => {
-    expect(usesPrebuiltImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "1" })).toBe(true);
+    expect(usesPrebuiltImage({ OCM_RM_E2E_AIO_PREBUILT: "1" })).toBe(true);
     expect(usesPrebuiltImage({})).toBe(false);
-    expect(usesPrebuiltImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "0" })).toBe(false);
-    expect(usesPrebuiltImage({ FLEETSHIFT_E2E_AIO_PULL: "1" })).toBe(false);
+    expect(usesPrebuiltImage({ OCM_RM_E2E_AIO_PREBUILT: "0" })).toBe(false);
+    expect(usesPrebuiltImage({ OCM_RM_E2E_AIO_PULL: "1" })).toBe(false);
   });
 });
 
 describe("usesPulledImage", () => {
   it("only an explicit pull flag pulls instead of building", () => {
-    expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PULL: "1" })).toBe(true);
+    expect(usesPulledImage({ OCM_RM_E2E_AIO_PULL: "1" })).toBe(true);
     expect(usesPulledImage({})).toBe(false);
-    expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PULL: "0" })).toBe(false);
-    expect(usesPulledImage({ FLEETSHIFT_E2E_AIO_PREBUILT: "1" })).toBe(false);
+    expect(usesPulledImage({ OCM_RM_E2E_AIO_PULL: "0" })).toBe(false);
+    expect(usesPulledImage({ OCM_RM_E2E_AIO_PREBUILT: "1" })).toBe(false);
   });
 });
 
@@ -121,14 +121,14 @@ describe("sandboxLogLevel", () => {
 describe("sandboxRunArgs", () => {
   it("passes LOG_LEVEL into the AIO container", () => {
     const args = sandboxRunArgs(
-      { containerName: "fleetshift-e2e-abcd", runId: "abcd" },
+      { containerName: "ocm-resource-manager-e2e-abcd", runId: "abcd" },
       "/run/podman.sock",
       { LOG_LEVEL: "debug" },
     );
     const envIdx = args.indexOf("-e");
     expect(envIdx).toBeGreaterThan(-1);
     expect(args[envIdx + 1]).toBe("LOG_LEVEL=debug");
-    expect(args.at(-1)).toBe("quay.io/stolostron/fleetshift:latest");
+    expect(args.at(-1)).toBe("quay.io/stolostron/ocm-resource-manager:latest");
   });
 });
 

@@ -2,19 +2,19 @@
 
 **Status:** Draft
 
-**Related issue:** [OME-313](https://redhat.atlassian.net/browse/OME-313)
+**Related issue:** OME-313
 
 This document defines browser asset delivery, ownership, and trust boundaries. See [Client Source Sharing](client-source-sharing.md) for source sharing and runtime boundaries between CLI and Web clients.
 
 ## Summary
 
-Resource Manager currently serves shell, manifests, and plugin JavaScript from one merged local directory. This makes Resource Manager an authority over client code; a compromise can alter browser code and defeat client trust assumptions.
+The resource manager server currently serves shell, manifests, and plugin JavaScript from one merged local directory. This makes the resource manager an authority over client code; a compromise can alter browser code and defeat client trust assumptions.
 
-This design moves browser asset delivery out of Resource Manager while keeping one public browser origin. An immutable shell origin supplies bootstrap code. Console Gateway proxies dynamic plugin assets from approved origins. Client Asset Operator owns plugin discovery, approval, and integrity metadata. Resource Manager retains plugin metadata needed for RBAC and user settings, but cannot choose an asset origin or serve executable browser assets.
+This design moves browser asset delivery out of the resource manager while keeping one public browser origin. An immutable shell origin supplies bootstrap code. Console Gateway proxies dynamic plugin assets from approved origins. Client Asset Operator owns plugin discovery, approval, and integrity metadata. The resource manager retains plugin metadata needed for RBAC and user settings, but cannot choose an asset origin or serve executable browser assets.
 
 ## Goals
 
-- Keep executable browser assets outside Resource Manager.
+- Keep executable browser assets outside the resource manager.
 - Keep one public browser origin across sandbox and cluster deployments.
 - Support CDN, internal HTTPS hosts, air-gapped static hosts, and scoped local development origins.
 - Discover plugin metadata at runtime and preserve last-known-good state during transient failure.
@@ -34,17 +34,17 @@ This design moves browser asset delivery out of Resource Manager while keeping o
 ```mermaid
 flowchart LR
     Build[Plugin builds] --> Merge[Merged web directory]
-    Merge --> Image["/srv/web in FleetShift image"]
-    Image --> RM["Resource Manager serves /app"]
+    Merge --> Image["/srv/web in the resource manager server image"]
+    Image --> RM["Resource manager server<br/>serves /app"]
     RM --> Registry["plugin-registry.json"]
     Registry --> Config["/api/ui/config"]
     Config --> Browser[Browser]
 ```
 
 - `plugin-registry.json` is build-generated.
-- Resource Manager reads it from `WebDir` and serves API and static assets.
+- The resource manager reads it from `WebDir` and serves API and static assets.
 - Assets effectively use `/app` as their only origin.
-- AIO already provides a public proxy for Dex and Resource Manager.
+- AIO already provides a public proxy for Dex and the resource manager.
 
 ## Architecture
 
@@ -52,15 +52,15 @@ flowchart LR
 flowchart TB
     Policy[PluginClientPolicy<br/>deployment authority] --> Operator[Client Asset Operator<br/>discovery + integrity]
     Operator -->|policy + integrity| Gateway[Console Gateway<br/>dynamic plugin assets]
-    Operator -->|sanitized catalog| RM[Resource Manager<br/>RBAC + user settings]
-    Browser[Browser] --> Edge[OpenShift Route / AIO edge]
+    Operator -->|sanitized catalog| RM[Resource manager server<br/>RBAC + user settings]
+    Browser[Browser] --> Edge[Public edge]
     Edge -->|/client/web/ + /client/shell/*| Shell[Immutable shell origin]
     Edge -->|/client/web/plugins/*| Gateway
     Edge -->|authenticated /api/*| RM
     Gateway -->|approved upstream| Origin[CDN, static host, or developer server]
 ```
 
-The browser uses one public origin and never accesses plugin origins directly. Edge routes immutable shell assets, dynamic plugin assets, and APIs by path. Resource Manager is not on the asset path and cannot create or change trusted plugin routes.
+The browser uses one public origin and never accesses plugin origins directly. Edge routes immutable shell assets, dynamic plugin assets, and APIs by path. The resource manager is not on the asset path and cannot create or change trusted plugin routes.
 
 ### Path ownership
 
@@ -70,27 +70,27 @@ The browser uses one public origin and never accesses plugin origins directly. E
 | `/client/shell/*` | Immutable shell origin | Public | Content-hashed shell assets |
 | `/client/web/config` | Shell/edge | Public | Global plugin and OIDC bootstrap configuration |
 | `/client/web/plugins/*` | Console Gateway | Public | Approved manifests, JavaScript, CSS, chunks |
-| `/api/*` | Resource Manager | Required | Platform APIs, user settings, plugin data |
+| `/api/*` | Resource manager server | Required | Platform APIs, user settings, plugin data |
 | `/idp/*` | IdP proxy or IdP | Public as required by OIDC | OIDC discovery and login exchange |
 
-`/client/*` is reserved for client discovery and bootstrap. `/api/*` remains Resource Manager's authenticated domain API namespace. `/client/cli/config` is reserved for future CLI configuration; it does not imply CLI asset delivery through browser routes.
+`/client/*` is reserved for client discovery and bootstrap. `/api/*` remains the resource manager's authenticated domain API namespace. `/client/cli/config` is reserved for future CLI configuration; it does not imply CLI asset delivery through browser routes.
 
 ### Ownership
 
 | Component | Owns | Must not own |
 | --- | --- | --- |
-| Deployment authority | Plugin policy and shell trust anchor | Resource Manager-managed route policy |
+| Deployment authority | Plugin policy and shell trust anchor | Route policy controlled by the resource manager |
 | Client Asset Operator | Manifest discovery, validation, integrity catalog | Browser asset serving or user authorization |
 | Immutable shell origin | Bootstrap HTML, shell assets, global config assembly | Dynamic upstream route selection |
 | Console Gateway | Plugin route enforcement, fetch, byte validation, optional cache | Initial plugin trust policy or API authorization |
-| Resource Manager | Sanitized catalog persistence, RBAC, user settings | Plugin origins, gateway routes, browser bundle serving |
+| Resource manager server | Sanitized catalog persistence, RBAC, user settings | Plugin origins, gateway routes, browser bundle serving |
 
 ## Policy and Discovery
 
 Deployment defines one `PluginClientPolicy` per plugin identity. YAML is suitable for AIO. A namespace-scoped CRD is preferred for cluster deployment. The resource shares plugin identity across clients while each client declares its own artifact details.
 
 ```yaml
-apiVersion: ui.fleetshift.io/v1alpha1
+apiVersion: ui.open-cluster-management.io/v1alpha1
 kind: PluginClientPolicy
 metadata:
   name: kind
@@ -123,7 +123,7 @@ Required policy fields:
 - Enabled, required, and failure behavior per client artifact.
 - Optional dependencies, compatibility, signature, or provenance constraints.
 
-Operator loads policy, fetches manifests only from approved origins, validates identity/version/path/client type, and verifies integrity metadata generated by Rspack/CI and published in `plugin-manifest.json`. It may compute hashes as a fallback or discovery aid, but build-time hashes provide the preferred provenance chain before CAO fetches the asset. Operator atomically publishes active state, supplies full policy and integrity metadata read-only to Gateway, and supplies a sanitized logical catalog to Resource Manager.
+Operator loads policy, fetches manifests only from approved origins, validates identity/version/path/client type, and verifies integrity metadata generated by Rspack/CI and published in `plugin-manifest.json`. It may compute hashes as a fallback or discovery aid, but build-time hashes provide the preferred provenance chain before CAO fetches the asset. Operator atomically publishes active state, supplies full policy and integrity metadata read-only to Gateway, and supplies a sanitized logical catalog to the resource manager.
 
 The sanitized catalog can include identity, version, availability, capabilities, dependencies, extension types, logical module identifiers, and opaque policy references. It must not include mutable route authority, storage credentials, or browser URLs that bypass Gateway.
 
@@ -133,7 +133,7 @@ Community publishers need not manage signing keys. Deployment admission establis
 
 The shell/edge produces public `/client/web/config` from deployment OIDC configuration plus active operator catalog data. It contains global, approved plugin metadata and same-origin plugin URLs. It must not expose unvalidated upstream origins.
 
-Resource Manager serves authenticated `/api/user/settings`. It holds user preferences, navigation order, workspace-dependent presentation, and authorized plugin visibility as logical plugin identifiers. Browser renders a plugin only when it appears in both global configuration and user settings. This improves UX; Resource Manager still enforces authorization on every API request.
+The resource manager serves authenticated `/api/user/settings`. It holds user preferences, navigation order, workspace-dependent presentation, and authorized plugin visibility as logical plugin identifiers. Browser renders a plugin only when it appears in both global configuration and user settings. This improves UX; the resource manager still enforces authorization on every API request.
 
 Plugin capabilities and dependencies describe availability only. They cannot grant access to organization, tenant, workspace, role, or user data.
 
@@ -154,7 +154,7 @@ Gateway must:
 - Validate fetched bytes against operator-provided digests before serving them.
 - Record route and policy audit events; bound timeout, retry, and cache behavior.
 
-Gateway does not proxy platform APIs. Edge routes authenticated `/api/*` directly to Resource Manager, preserving only required authentication and removing client-spoofable forwarding headers.
+Gateway does not proxy platform APIs. Edge routes authenticated `/api/*` directly to the resource manager, preserving only required authentication and removing client-spoofable forwarding headers.
 
 ### Shell trust and out-of-band proof
 
@@ -165,7 +165,7 @@ Gateway byte validation protects against an altered upstream. It cannot protect 
 | Immutable shell | Gateway replacing bootstrap/verifier | Deployment-owned immutable shell origin or edge-pinned artifact |
 | Direct API proof | Gateway changing dynamic plugin bytes | Operator-signed integrity metadata fetched from authenticated `/api/*` |
 
-Trusted shell code fetches an operator-signed integrity proof directly from Resource Manager, verifies it with a shell-anchored public key, and supplies expected SRI values before Module Federation creates dynamic scripts. Resource Manager distributes this proof but does not own signing keys. Shell and plugin Rspack/Webpack configurations must set `output.crossOriginLoading = "anonymous"` so standard dynamic chunks use the same CORS/SRI contract as remote entries. If plugins must load before login, that integrity flow needs a separate explicitly designed public bootstrap path.
+Trusted shell code fetches an operator-signed integrity proof directly from the resource manager, verifies it with a shell-anchored public key, and supplies expected SRI values before Module Federation creates dynamic scripts. The resource manager distributes this proof but does not own signing keys. Shell and plugin Rspack/Webpack configurations must set `output.crossOriginLoading = "anonymous"` so standard dynamic chunks use the same CORS/SRI contract as remote entries. If plugins must load before login, that integrity flow needs a separate explicitly designed public bootstrap path.
 
 Module Federation remote entries require runtime support because URL and version are discovered dynamically. Shell runtime must attach SRI to remote scripts and plugin chunks, for example through an equivalent runtime hook:
 
@@ -188,16 +188,16 @@ This is runtime integration guidance, not another policy contract. Existing Scal
 
 CSP is defense in depth, not plugin isolation. Deployment should restrict browser sinks to self where plugin behavior permits, including `connect-src 'self'`, `img-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, and `frame-src 'none'`. Proxy OIDC discovery and token exchange through console origin where practical; never use wildcard IdP origins. Prefer short-lived access tokens held in memory or a dedicated Web Worker, not `localStorage` or `sessionStorage`; this reduces exposure but does not isolate malicious same-origin code.
 
-Operator, Gateway, and Resource Manager catalog paths require encrypted, mutually authenticated service transport. Prefer platform/service-mesh mTLS. Otherwise use cert-manager or equivalent deployment PKI with distinct workload identities. Resource Manager must not control the trust bundle. AIO may use equivalent short-lived certificates or protected Unix sockets.
+Operator, Gateway, and the resource manager catalog paths require encrypted, mutually authenticated service transport. Prefer platform/service-mesh mTLS. Otherwise use cert-manager or equivalent deployment PKI with distinct workload identities. The resource manager must not control the trust bundle. AIO may use equivalent short-lived certificates or protected Unix sockets.
 
 ## Reconciliation and Failure Behavior
 
 Discovery is asynchronous reconciliation, not a startup gate.
 
 1. Operator loads deployment policy and validates manifests and integrity.
-2. Operator publishes active policy/integrity state to Gateway and sanitized catalog to Resource Manager.
+2. Operator publishes active policy/integrity state to Gateway and sanitized catalog to the resource manager.
 3. Shell/edge publishes global configuration from active state.
-4. Resource Manager persists catalog and creates authenticated user settings.
+4. The resource manager persists catalog and creates authenticated user settings.
 5. Each component refreshes failed dependencies asynchronously.
 
 | Condition | Result |
@@ -220,7 +220,7 @@ Last-known-good state is a temporary availability fallback, not independent auth
 
 Version directories alone are insufficient: immutable cache headers require content-hashed filenames. Build must validate hashed shell and plugin outputs. Asset hosts retain old entrypoints and lazy chunks through active-session, cache propagation, and rollback windows.
 
-Upgrade sequence: publish assets, validate through Operator, atomically publish route/catalog state, then retain prior content-hashed assets. Rollback changes policy to a previously validated version; it does not rebuild Resource Manager.
+Upgrade sequence: publish assets, validate through Operator, atomically publish route/catalog state, then retain prior content-hashed assets. Rollback changes policy to a previously validated version; it does not rebuild the resource manager.
 
 ## Deployment
 
@@ -232,26 +232,26 @@ flowchart LR
     AIO -->|/idp/*| Dex[Dex]
     AIO -->|/client/web/, /client/shell/*, /client/web/config| Shell[Immutable shell process]
     AIO -->|/client/web/plugins/*| Gateway[Console Gateway process]
-    AIO -->|/api/*| RM[Resource Manager]
+    AIO -->|/api/*| RM[Resource manager server]
     Operator[Client Asset Operator] -->|policy + integrity| Shell
     Operator -->|policy + integrity| Gateway
     Operator -. sanitized catalog .-> RM
 ```
 
-AIO retains public TLS, host validation, WebSocket handling, and supervision. Operator watches configured YAML. Gateway is separate from Resource Manager and accepts only operator-owned policy.
+AIO retains public TLS, host validation, WebSocket handling, and supervision. Operator watches configured YAML. Gateway is separate from the resource manager and accepts only operator-owned policy.
 
-### Cluster
+### OpenShift deployment example
 
 ```mermaid
 flowchart LR
     Browser --> Route[OpenShift Route]
     Route -->|/client/web/, /client/shell/*| Shell[Immutable shell Service]
     Route -->|/client/web/plugins/*| Gateway[Console Gateway Service]
-    Route -->|/api/*| RM[Resource Manager Service]
+    Route -->|/api/*| RM[Resource manager server<br/>Service]
     Gateway --> Origins[Approved HTTPS origins]
 ```
 
-Operator, Gateway, and Resource Manager run with independent identities. Operator watches `PluginClientPolicy` resources and publishes read-only state. OpenShift Route owns public path routing; Gateway owns dynamic plugin origin enforcement.
+Operator, Gateway, and the resource manager run with independent identities. Operator watches `PluginClientPolicy` resources and publishes read-only state. OpenShift Route owns public path routing; Gateway owns dynamic plugin origin enforcement.
 
 Connected deployments use approved external CDNs. Air-gapped deployments mirror artifacts to internal static hosts. Both preserve browser same-origin routing. A developer override may use a scoped `http://host.docker.internal:3001` origin only when explicit sandbox policy enables it.
 
@@ -259,12 +259,12 @@ Connected deployments use approved external CDNs. Air-gapped deployments mirror 
 
 | Alternative | Decision | Reason |
 | --- | --- | --- |
-| Resource Manager serves all assets | Rejected | Resource Manager compromise controls browser code |
+| Resource manager serves all assets | Rejected | Server compromise controls browser code |
 | Browser directly loads third-party origins | Rejected | Bypasses route, integrity, credential, CSP, and audit policy |
-| Arbitrary Resource Manager proxy plugins | Rejected | Makes Resource Manager trusted Gateway code |
-| Asset distribution addon controlled by Resource Manager | Rejected | Recreates privileged asset authority with more lifecycle complexity |
+| Proxy plugins controlled by the resource manager | Rejected | Lets the resource manager supply trusted Gateway code |
+| Asset distribution addon controlled by the resource manager | Rejected | Recreates privileged asset authority with more lifecycle complexity |
 
-An independently provisioned asset distribution component could replace Gateway only if Resource Manager cannot configure, replace, or activate it. That is equivalent to this design's independent Gateway boundary and is not proposed separately.
+An independently provisioned asset distribution component could replace Gateway only if the resource manager cannot configure, replace, or activate it. That is equivalent to this design's independent Gateway boundary and is not proposed separately.
 
 ## Open Questions
 

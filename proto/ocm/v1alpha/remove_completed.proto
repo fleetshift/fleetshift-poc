@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+
+// RemoveCompleted reports the outcome of a [RemoveRequest].
+message RemoveCompleted {
+  string delivery_id = 1;
+
+  // Whether the removal succeeded.
+  bool success = 2;
+
+  // Human-readable detail (especially on failure).
+  string message = 3;
+}

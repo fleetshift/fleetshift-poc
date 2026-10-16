@@ -1,5 +1,5 @@
-import type { FlatNode } from "@fleetshift/common";
-import { INDENTATION, NodeKind } from "@fleetshift/common";
+import type { FlatNode } from "@ocm-resource-manager/common";
+import { INDENTATION, NodeKind } from "@ocm-resource-manager/common";
 import { useMotionValue } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

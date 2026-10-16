@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioinit"
 )
 
 const (
 	testIP       = "127.0.0.1"
-	testHost     = "fleetshift-sandbox.localhost"
-	testMarker   = "fleetshift-aio"
-	wantLine     = "127.0.0.1 fleetshift-sandbox.localhost # fleetshift-aio"
+	testHost     = "ocm-resource-manager.localhost"
+	testMarker   = "ocm-resource-manager-aio"
+	wantLine     = "127.0.0.1 ocm-resource-manager.localhost # ocm-resource-manager-aio"
 	originalBody = "127.0.0.1 localhost\n::1 localhost ip6-localhost\n"
 )
 
@@ -46,7 +46,7 @@ func TestEnsureHostsAlias_IdempotentExactLine(t *testing.T) {
 }
 
 func TestEnsureHostsAlias_IdempotentExistingMapping(t *testing.T) {
-	path := writeHosts(t, "127.0.0.1 localhost fleetshift-sandbox.localhost\n")
+	path := writeHosts(t, "127.0.0.1 localhost ocm-resource-manager.localhost\n")
 	if err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker); err != nil {
 		t.Fatal(err)
 	}
@@ -57,12 +57,12 @@ func TestEnsureHostsAlias_IdempotentExistingMapping(t *testing.T) {
 }
 
 func TestEnsureHostsAlias_ConflictingMapping(t *testing.T) {
-	path := writeHosts(t, "10.0.0.1 fleetshift-sandbox.localhost\n")
+	path := writeHosts(t, "10.0.0.1 ocm-resource-manager.localhost\n")
 	err := aioinit.EnsureHostsAlias(path, testIP, testHost, testMarker)
 	if err == nil || !strings.Contains(err.Error(), "conflicting hosts mapping") {
 		t.Fatalf("EnsureHostsAlias() = %v, want conflicting hosts mapping", err)
 	}
-	if readHosts(t, path) != "10.0.0.1 fleetshift-sandbox.localhost\n" {
+	if readHosts(t, path) != "10.0.0.1 ocm-resource-manager.localhost\n" {
 		t.Fatal("conflicting file was modified")
 	}
 }

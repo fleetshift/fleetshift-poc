@@ -1,4 +1,4 @@
-// Package aioinit holds FleetShift AIO packaging helpers: public origin and
+// Package aioinit holds OCM Resource Manager AIO packaging helpers: public origin and
 // listen addresses, sandbox PKI, peer Dex config, serve argv,
 // and kind networking.
 package aioinit
@@ -11,18 +11,18 @@ import (
 
 const (
 	// PublicHost is the browser-facing DNS name.
-	PublicHost = "fleetshift-sandbox.localhost"
+	PublicHost = "ocm-resource-manager.localhost"
 	// HostsMarker tags (comments) the AIO-container /etc/hosts mapping.
-	HostsMarker = "fleetshift-aio"
+	HostsMarker = "ocm-resource-manager-aio"
 
 	gatewayPort = "8085"
 	httpPort    = "8086"
 	dexPort     = "5556"
 	grpcPort    = "50051"
 
-	// PublicEnvPath is sourced by the fleetshift s6 run script for the public
+	// PublicEnvPath is sourced by the resource-manager s6 run script for the public
 	// origin and Dex discovery URL.
-	PublicEnvPath = "/run/fleetshift/public.env"
+	PublicEnvPath = "/run/ocm-resource-manager/public.env"
 )
 
 // publicOrigin is the browser-facing https URL for PublicHost:gatewayPort.
@@ -36,7 +36,7 @@ var PeerDexIssuer = publicOrigin() + "/idp"
 
 // Endpoints is the AIO public origin plus internal listen addresses.
 // PublicOrigin is the browser-facing URL. HTTPListen and DexListen are the
-// FleetShift and Dex container-loopback binds.
+// The resource manager server and Dex bind to container-loopback addresses.
 type Endpoints struct {
 	PublicOrigin  string
 	UICallback    string
@@ -60,7 +60,7 @@ var FixedEndpoints = Endpoints{
 }
 
 // WritePublicEnv writes PUBLIC_HOST and PUBLIC_ORIGIN to path. On Dex-on it
-// also writes DEX_DISCOVERY_URL for the fleetshift s6 Dex-ready probe.
+// also writes DEX_DISCOVERY_URL for the resource-manager s6 Dex-ready probe.
 func WritePublicEnv(path string, dexOn bool) error {
 	var b strings.Builder
 	b.WriteString("PUBLIC_HOST=" + PublicHost + "\n")

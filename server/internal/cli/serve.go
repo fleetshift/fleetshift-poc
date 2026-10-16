@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
+	"github.com/stolostron/ocm-resource-manager/server/internal/bootstrap"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/slogutil"
 )
 
 // serveFlags holds raw serve CLI flag values before edge resolution into
@@ -46,7 +46,7 @@ func newServeCmd() *cobra.Command {
 	f := &serveFlags{}
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the FleetShift gRPC and HTTP servers",
+		Short: "Start the resource manager server (gRPC and HTTP)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			sel := serveSelections{DBExplicit: cmd.Flags().Changed("db")}
 			return runServe(cmd.Context(), f, sel)
@@ -70,7 +70,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.oidcRegistryID, "oidc-registry-id", os.Getenv("OIDC_REGISTRY_ID"), "external key registry ID (requires --oidc-registry-subject-expression)")
 	cmd.Flags().StringVar(&f.oidcRegistrySubjectExpression, "oidc-registry-subject-expression", os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION"), "CEL expression mapping ID token claims to a registry subject")
 	cmd.Flags().StringVar(&f.oidcPublicKeyClaimExpression, "oidc-public-key-claim-expression", os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION"), "CEL expression extracting signer SPKI from ID token claims (mutually exclusive with registry mapping)")
-	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with FLEETSHIFT_SERVER_ADDONS)")
+	cmd.Flags().StringVar(&f.addons, "addons", defaultAddons(), "comma-separated list of addons to enable (default: kind,kubernetes; override with OCM_RM_SERVER_ADDONS)")
 	return cmd
 }
 
@@ -204,7 +204,7 @@ func envOrDefault(key, fallback string) string {
 }
 
 // defaultAddons returns the serve --addons default. An explicit --addons flag
-// remains authoritative over FLEETSHIFT_SERVER_ADDONS.
+// remains authoritative over OCM_RM_SERVER_ADDONS.
 func defaultAddons() string {
-	return envOrDefault("FLEETSHIFT_SERVER_ADDONS", "kind,kubernetes")
+	return envOrDefault("OCM_RM_SERVER_ADDONS", "kind,kubernetes")
 }

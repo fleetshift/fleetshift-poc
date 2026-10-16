@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // recordingIndexingRuntime records EnsureIndexer and StopIndexer calls for
@@ -271,11 +271,11 @@ func (r *flakyReportResultReporter) ReportResult(
 
 func TestAgent_Remove_StopIndexer(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--stop-me"] = nil
+	provider.clusters["rm--stop-me"] = nil
 	reporter := newChannelReporter()
 	runtime := &recordingIndexingRuntime{stopErr: domain.ErrNotFound} // best-effort: Remove continues
 	agent, store := newTestAgent(reporter, provider, kind.WithIndexingRuntime(runtime))
-	store.SetForTest("fs--stop-me", 1)
+	store.SetForTest("rm--stop-me", 1)
 
 	err := agent.Remove(
 		context.Background(),
@@ -301,18 +301,18 @@ func TestAgent_Remove_StopIndexer(t *testing.T) {
 	if len(stops) != 1 || stops[0] != "k8s-stop-me" {
 		t.Fatalf("StopIndexer calls = %v, want [k8s-stop-me]", stops)
 	}
-	if len(provider.deleted) != 1 || provider.deleted[0] != "fs--stop-me" {
-		t.Fatalf("deleted = %v, want [fs--stop-me]", provider.deleted)
+	if len(provider.deleted) != 1 || provider.deleted[0] != "rm--stop-me" {
+		t.Fatalf("deleted = %v, want [rm--stop-me]", provider.deleted)
 	}
 }
 
 func TestAgent_Remove_StaleGenerationDoesNotStopIndexer(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--demo"] = nil
+	provider.clusters["rm--demo"] = nil
 	reporter := newChannelReporter()
 	runtime := &recordingIndexingRuntime{}
 	agent, store := newTestAgent(reporter, provider, kind.WithIndexingRuntime(runtime))
-	store.SetForTest("fs--demo", 2)
+	store.SetForTest("rm--demo", 2)
 
 	err := agent.Remove(
 		context.Background(),
@@ -337,19 +337,19 @@ func TestAgent_Remove_StaleGenerationDoesNotStopIndexer(t *testing.T) {
 	if len(runtime.stopIDs()) != 0 {
 		t.Fatalf("StopIndexer calls = %v, want none on stale remove", runtime.stopIDs())
 	}
-	if !provider.hasCluster("fs--demo") {
+	if !provider.hasCluster("rm--demo") {
 		t.Fatal("cluster should remain after stale remove")
 	}
 }
 
 func TestAgent_Deliver_Recreate_StopIndexerBeforeDelete(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["fs--recreate-me"] = nil
+	provider.clusters["rm--recreate-me"] = nil
 	reporter := newChannelReporter()
 	runtime := &recordingIndexingRuntime{}
 	agent, store := newTestAgent(reporter, provider, kind.WithIndexingRuntime(runtime))
 	// Lower stored generation forces recreateOwnedCluster on deliver gen 2.
-	store.SetForTest("fs--recreate-me", 1)
+	store.SetForTest("rm--recreate-me", 1)
 
 	err := agent.Deliver(
 		context.Background(),

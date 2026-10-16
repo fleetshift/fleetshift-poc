@@ -22,7 +22,7 @@ func TestNewServiceName(t *testing.T) {
 		input   string
 		wantErr bool
 	}{
-		{name: "valid", input: "kind.fleetshift.io"},
+		{name: "valid", input: "kind.open-cluster-management.io"},
 		{name: "empty rejected", input: "", wantErr: true},
 		{name: "slash rejected", input: "a/b", wantErr: true},
 	}
@@ -432,13 +432,13 @@ func TestParseResourceName(t *testing.T) {
 }
 
 func TestFullResourceName_ConstructsAndParses(t *testing.T) {
-	frn := NewFullResourceName("kind.fleetshift.io", "clusters/prod")
+	frn := NewFullResourceName("kind.open-cluster-management.io", "clusters/prod")
 
-	if string(frn) != "//kind.fleetshift.io/clusters/prod" {
-		t.Errorf("FullResourceName = %q, want //kind.fleetshift.io/clusters/prod", frn)
+	if string(frn) != "//kind.open-cluster-management.io/clusters/prod" {
+		t.Errorf("FullResourceName = %q, want //kind.open-cluster-management.io/clusters/prod", frn)
 	}
-	if frn.ServiceName() != "kind.fleetshift.io" {
-		t.Errorf("ServiceName() = %q, want kind.fleetshift.io", frn.ServiceName())
+	if frn.ServiceName() != "kind.open-cluster-management.io" {
+		t.Errorf("ServiceName() = %q, want kind.open-cluster-management.io", frn.ServiceName())
 	}
 	if frn.ResourceName() != "clusters/prod" {
 		t.Errorf("ResourceName() = %q, want clusters/prod", frn.ResourceName())
@@ -446,9 +446,9 @@ func TestFullResourceName_ConstructsAndParses(t *testing.T) {
 }
 
 func TestServiceName_FullName(t *testing.T) {
-	sn := ServiceName("kind.fleetshift.io")
+	sn := ServiceName("kind.open-cluster-management.io")
 	got := sn.FullName("clusters/prod")
-	want := FullResourceName("//kind.fleetshift.io/clusters/prod")
+	want := FullResourceName("//kind.open-cluster-management.io/clusters/prod")
 
 	if got != want {
 		t.Errorf("ServiceName.FullName() = %q, want %q", got, want)
@@ -457,8 +457,8 @@ func TestServiceName_FullName(t *testing.T) {
 
 func TestResourceName_FullName(t *testing.T) {
 	rn := ResourceName("clusters/prod")
-	got := rn.FullName("kind.fleetshift.io")
-	want := FullResourceName("//kind.fleetshift.io/clusters/prod")
+	got := rn.FullName("kind.open-cluster-management.io")
+	want := FullResourceName("//kind.open-cluster-management.io/clusters/prod")
 
 	if got != want {
 		t.Errorf("ResourceName.FullName() = %q, want %q", got, want)
@@ -582,7 +582,7 @@ func TestPlatformResource_AddRelationship(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("clusters/prod", nil, now)
 
-	err := r.AddRelationship(NewResourceRelationship("clusters/prod", "runs-on", "clusters/host", "kind.fleetshift.io", now))
+	err := r.AddRelationship(NewResourceRelationship("clusters/prod", "runs-on", "clusters/host", "kind.open-cluster-management.io", now))
 	if err != nil {
 		t.Fatalf("AddRelationship: %v", err)
 	}
@@ -600,7 +600,7 @@ func TestPlatformResource_AddRelationship_RejectsEmptyType(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("clusters/prod", nil, now)
 
-	err := r.AddRelationship(NewResourceRelationship("clusters/prod", "", "clusters/host", "kind.fleetshift.io", now))
+	err := r.AddRelationship(NewResourceRelationship("clusters/prod", "", "clusters/host", "kind.open-cluster-management.io", now))
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("empty type: got %v, want ErrInvalidArgument", err)
 	}
@@ -610,7 +610,7 @@ func TestPlatformResource_AddRelationship_RejectsForeignSourceName(t *testing.T)
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("clusters/prod", nil, now)
 
-	err := r.AddRelationship(NewResourceRelationship("clusters/other", "runs-on", "clusters/host", "kind.fleetshift.io", now))
+	err := r.AddRelationship(NewResourceRelationship("clusters/other", "runs-on", "clusters/host", "kind.open-cluster-management.io", now))
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("foreign source name: got %v, want ErrInvalidArgument", err)
 	}

@@ -7,7 +7,7 @@ import (
 
 	"k8s.io/client-go/rest"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // Target property keys used by both delivery and in-process indexing.

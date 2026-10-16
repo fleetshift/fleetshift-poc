@@ -19,7 +19,7 @@ export const listCommand: CommandSpec = {
     const response = await (
       await clientForArgs(args)
     ).request<DeploymentListResponse>(
-      `/v1/deployments${query.size ? `?${query}` : ""}`,
+      `/v1alpha/deployments${query.size ? `?${query}` : ""}`,
       {
         method: "GET",
       },

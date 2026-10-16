@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	transporthttp "github.com/stolostron/ocm-resource-manager/server/internal/transport/http"
 )
 
 // DeriveUIOrigin returns the trusted uiOrigin for a configured HTTP listen

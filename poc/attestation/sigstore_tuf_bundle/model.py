@@ -1,4 +1,4 @@
-"""FleetShift delivery graph carried to an offline delivery agent."""
+"""OCM Resource Manager delivery graph carried to an offline delivery agent."""
 
 from __future__ import annotations
 

@@ -3,9 +3,9 @@
 
 services:
 
-  fleetshift-server:
+  ocm-resource-manager-server:
     volumes: !override
       - ${PODMAN_SOCKET}:/var/run/docker.sock
       - /tmp:/tmp
-      - fleetshift-data:/data
+      - ocm-resource-manager-data:/data
       - ../../web:/srv/web:ro,z

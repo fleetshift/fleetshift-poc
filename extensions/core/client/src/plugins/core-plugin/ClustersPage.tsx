@@ -6,7 +6,7 @@ import {
   createResourceApi,
   extractClusterId,
   PluginLink,
-} from "@fleetshift/common";
+} from "@ocm-resource-manager/common";
 import {
   SkeletonTableBody,
   SkeletonTableHead,
@@ -116,7 +116,7 @@ export default function ClustersPage() {
     if (!silent) setLoading(true);
     try {
       const results = await clusterApi.searchAll({
-        filter: 'resourceType == "kind.fleetshift.io/Cluster"',
+        filter: 'resourceType == "kind.open-cluster-management.io/Cluster"',
       });
       setRows(
         results.map((r) => ({
@@ -329,7 +329,7 @@ export default function ClustersPage() {
         <DataView activeState={activeState}>
           <DataViewToolbar
             clearAllFilters={clearAllFilters}
-            className="ome-core-clusters-toolbar"
+            className="ocm-rm-core-clusters-toolbar"
             actions={
               <Button variant="primary" onClick={openCreateWizard}>
                 Create cluster

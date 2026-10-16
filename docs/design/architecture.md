@@ -2,6 +2,19 @@
 
 This document is the entry point for the architecture. It is intentionally short: it gives the system's core mental model, names the major subsystems, and points to the deeper design documents that describe each area in detail.
 
+OCM Resource Manager is an experimental variant of Open Cluster Management (OCM) using a resource manager architecture. The resource manager server owns domain APIs and database persistence directly. References to OCM controllers, ManifestWork, and klusterlets describe existing OCM components and their Kubernetes API-based architecture.
+
+## Vocabulary
+
+The [architecture glossary](glossary.md) defines the high-level names used here,
+including OCM, OCM Resource Manager, platform instance, management plane, and
+resource manager server. Use it when deciding which scope a passage describes.
+
+The console, `fleetctl`, and addons are distinct components of the platform.
+Addons extend platform contracts and may span API, UI, orchestration, and delivery
+capabilities with their own execution and trust boundaries. Their scope is not
+limited to plugins inside the resource manager server.
+
 ## What this doc covers
 
 - What the management plane is and is not
@@ -12,8 +25,8 @@ This document is the entry point for the architecture. It is intentionally short
 
 ## System model
 
-The management plane (or "platform") is a URL-addressable service, not a cluster.
-Its customer-facing, stateful center is the **resource manager (RM)**, which
+The management plane exposes URL-addressable APIs; it is not a cluster.
+Its customer-facing, stateful center is the **resource manager server (RM)**, which
 authenticates and authorizes requests, retains desired state, and coordinates
 orchestration and delivery. The management plane provides:
 
@@ -63,7 +76,7 @@ A target is any endpoint that can:
 Target types can be things like:
 
 - `kubernetes`: manifests are applied against a Kubernetes API server
-- `platform`: manifests are FleetShift API objects delivered to a child platform
+- `platform`: manifests are platform API objects delivered to a child platform
 - `local`: the platform itself, addressed in-process
 
 Addons can register their own target types and delivery agents while still participating in the same orchestration pipeline.

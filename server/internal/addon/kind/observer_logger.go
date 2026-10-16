@@ -7,7 +7,7 @@ import (
 
 	"sigs.k8s.io/kind/pkg/log"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // observerLogger adapts a [domain.DeliveryReporter] into a kind

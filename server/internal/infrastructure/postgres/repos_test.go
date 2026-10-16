@@ -4,17 +4,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/authmethodrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/extensionresourcerepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/resourceidentityrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/storetest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/targetrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/authmethodrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/deliveryrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/deploymentrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/extensionresourcerepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/fulfillmentrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/inventoryrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/resourceidentityrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/storetest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/targetrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/postgres"
 )
 
 func newStore(t *testing.T) *postgres.Store {

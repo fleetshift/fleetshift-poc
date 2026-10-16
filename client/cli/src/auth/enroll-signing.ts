@@ -28,7 +28,7 @@ export async function runAuthEnrollSigning(
   if (!token.id_token) throw new Error("no id_token in enrollment response");
   const enrollmentID = randomBytes(16).toString("hex");
   const enrollment = await oidcRequest<{ name?: string }>(
-    `${serverForArgs(args).replace(/\/$/, "")}/v1/signerEnrollments`,
+    `${serverForArgs(args).replace(/\/$/, "")}/v1alpha/signerEnrollments`,
     {
       method: "POST",
       headers: {

@@ -82,7 +82,7 @@ if (kinds) {
   w("## Kubernetes Object Kinds");
   w();
   const entries = Object.entries(kinds);
-  w(`**${entries.length} distinct kinds** across ${d.resourceTypes["kubernetes.fleetshift.io/Object"]?.count ?? "?"} objects.`);
+  w(`**${entries.length} distinct kinds** across ${d.resourceTypes["kubernetes.open-cluster-management.io/Object"]?.count ?? "?"} objects.`);
   w();
   w("| Kind | Count |");
   w("|------|------:|");

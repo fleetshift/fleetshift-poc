@@ -17,7 +17,7 @@ an untrusted resource manager:
 2. an earlier alternative embeds a short-lived user JWT beside the content and
    relies on a platform signature for package integrity.
 
-The first model informed FleetShift's independently authenticated evidence,
+The first model informed OCM Resource Manager's independently authenticated evidence,
 attestation graph, and courier threat model. It was partially modeled by
 `poc/attestation/hybrid/`. It is archived because its raw signature,
 `trust_anchor_id`, key-binding, rotation, and history mechanisms became one
@@ -26,7 +26,7 @@ the TSA or append-only logs to properly support historical verification.
 
 ## When to read this
 
-Read this when interpreting the hybrid POC, reviewing why FleetShift moved away
+Read this when interpreting the hybrid POC, reviewing why OCM Resource Manager moved away
 from a universal raw-signature interface, or recovering design rationale about
 OIDC key binding and the earlier JWT-embedded alternative.
 
@@ -54,7 +54,7 @@ confirmation claim was expected to connect that key to the JWT.
 
 The client created one signing key per user agent or device. The private key
 remained with the user, while the RM stored the public key, its identity
-binding, and signatures over FleetShift content. A target independently
+binding, and signatures over OCM Resource Manager content. A target independently
 verified:
 
 - the externally anchored relationship between the signing key and user;
@@ -72,7 +72,7 @@ signature supplied durable provenance.
 
 - A web client could use a WebAuthn credential or passkey-like key operation.
 - A CLI could generate a dedicated key held in the operating-system keychain.
-- GitOps tooling could store a FleetShift content signature beside source
+- GitOps tooling could store an OCM Resource Manager content signature beside source
   content. Git commit signing remained independent defense in depth.
 
 The design assumed these surfaces could all produce the same raw signature
@@ -108,7 +108,7 @@ The target was expected to verify:
 2. issuer, audience, subject, expiry, and applicable tenant claims;
 3. the JWT's key-confirmation relationship to the public key;
 4. the user's signature over the binding document; and
-5. the same key's signature over the FleetShift assertion.
+5. the same key's signature over the OCM Resource Manager assertion.
 
 A compromised RM could courier or omit the bundle but could not substitute a
 different key without obtaining a matching IdP assertion and private-key proof.

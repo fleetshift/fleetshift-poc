@@ -5,24 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
 )
 
 const (
 	// MediaTypeEnrollment is the enrollment representation that directly
 	// shares the public key.
-	MediaTypeEnrollment protocol.MediaType = "application/vnd.fleetshift.direct-key.enrollment.v1+json"
+	MediaTypeEnrollment protocol.MediaType = "application/vnd.ocm-resource-manager.direct-key.enrollment.v1+json"
 
 	// MediaTypeSignature is the delivery representation: a signature and
 	// user reference, not a public key.
-	MediaTypeSignature protocol.MediaType = "application/vnd.fleetshift.direct-key.signature.v1+json"
+	MediaTypeSignature protocol.MediaType = "application/vnd.ocm-resource-manager.direct-key.signature.v1+json"
 
 	// PredicateTypeEnrollmentV1 is the suite-owned enrollment predicate.
 	// It is not a common intent type.
 	PredicateTypeEnrollmentV1 protocol.PredicateType = "direct-key/enrollment/v1"
 
-	purposeEnrollmentProof protocol.Purpose = "fleetshift.dev/provenance/direct-key/v1/enrollment-proof"
-	purposeAssertion       protocol.Purpose = "fleetshift.dev/provenance/direct-key/v1/assertion"
+	purposeEnrollmentProof protocol.Purpose = "resource-manager.open-cluster-management.io/provenance/direct-key/v1/enrollment-proof"
+	purposeAssertion       protocol.Purpose = "resource-manager.open-cluster-management.io/provenance/direct-key/v1/assertion"
 )
 
 // EnrollmentAssertion is the authenticated inner statement for

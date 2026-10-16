@@ -1,4 +1,4 @@
-import { findWorkspaceRoot } from "@fleetshift/build-utils/findWorkspaceRoot";
+import { findWorkspaceRoot } from "@ocm-resource-manager/build-utils/findWorkspaceRoot";
 import { defineConfig, devices } from "@playwright/experimental-ct-react";
 import path from "path";
 
@@ -19,7 +19,7 @@ export default defineConfig({
     ctViteConfig: {
       resolve: {
         alias: {
-          "@fleetshift/common": path.resolve(root, "sdk/common/src"),
+          "@ocm-resource-manager/common": path.resolve(root, "sdk/common/src"),
           "@data-driven-forms/pf4-component-mapper/form-template": path.resolve(
             root,
             "node_modules/@data-driven-forms/pf4-component-mapper/esm/form-template/index.js",

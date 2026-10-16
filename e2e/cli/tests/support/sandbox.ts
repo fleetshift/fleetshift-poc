@@ -20,11 +20,11 @@ function requireEnvironment(name: string): string {
 export function readSandboxEnvironment(): Sandbox {
   const uiOrigin = requireEnvironment("BASE_URL");
   return {
-    caFile: requireEnvironment("FLEETSHIFT_CA_FILE"),
-    grpcTarget: requireEnvironment("FLEETSHIFT_GRPC_TARGET"),
+    caFile: requireEnvironment("OCM_RM_CA_FILE"),
+    grpcTarget: requireEnvironment("OCM_RM_GRPC_TARGET"),
     issuer: `${uiOrigin}/idp`,
-    kindIdPrefix: requireEnvironment("FLEETSHIFT_KIND_PREFIX"),
+    kindIdPrefix: requireEnvironment("OCM_RM_KIND_PREFIX"),
     uiOrigin,
-    workDir: requireEnvironment("FLEETSHIFT_E2E_WORK_DIR"),
+    workDir: requireEnvironment("OCM_RM_E2E_WORK_DIR"),
   };
 }

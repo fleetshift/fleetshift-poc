@@ -129,7 +129,7 @@ await $`oc wait --for=condition=Ready pod/postgres-0 -n ${ns} --timeout=180s`;
 await template("keycloak.yaml", { KEYCLOAK_HOST: host }, ns);
 await $`oc wait --for=condition=Ready keycloak/keycloak -n ${ns} --timeout=300s`;
 const realm = JSON.parse(
-  await readFile(resolve(dir, "fleetshift-realm.json"), "utf8"),
+  await readFile(resolve(dir, "ocm-resource-manager-realm.json"), "utf8"),
 );
 const random = (length) =>
   randomBytes(length).toString("base64url").slice(0, length);
@@ -142,11 +142,11 @@ await $({
   input: JSON.stringify({
     apiVersion: "k8s.keycloak.org/v2alpha1",
     kind: "KeycloakRealmImport",
-    metadata: { name: "fleetshift-realm" },
+    metadata: { name: "ocm-resource-manager-realm" },
     spec: { keycloakCRName: "keycloak", realm },
   }),
 })`oc apply -n ${ns} -f -`;
-await $`oc wait --for=condition=Done keycloakrealmimport/fleetshift-realm -n ${ns} --timeout=120s`.nothrow();
+await $`oc wait --for=condition=Done keycloakrealmimport/ocm-resource-manager-realm -n ${ns} --timeout=120s`.nothrow();
 await $`oc wait --for=condition=Ready keycloak/keycloak -n ${ns} --timeout=300s`;
 const adminUser = (
   await $`oc get secret keycloak-initial-admin -n ${ns} -o jsonpath={.data.username} | base64 -d`
@@ -171,7 +171,7 @@ const access = JSON.parse(
   ).stdout,
 ).access_token;
 if (!access) fail("Failed to obtain admin token");
-const profileUrl = `https://${host}/admin/realms/fleetshift/users/profile`;
+const profileUrl = `https://${host}/admin/realms/ocm-resource-manager/users/profile`;
 const profile = JSON.parse(
   (await $`curl -sk ${profileUrl} -H ${`Authorization: Bearer ${access}`}`)
     .stdout,
@@ -190,7 +190,7 @@ if (!profile.attributes?.some((entry) => entry.name === "github_username")) {
   ];
   await $`curl -sk -X PUT ${profileUrl} -H ${`Authorization: Bearer ${access}`} -H Content-Type:application/json -d ${JSON.stringify(profile)}`;
 }
-const clientsUrl = `https://${host}/admin/realms/fleetshift/clients`;
+const clientsUrl = `https://${host}/admin/realms/ocm-resource-manager/clients`;
 const consoleId = JSON.parse(
   (
     await $`curl -sk ${clientsUrl}?clientId=ocp-console -H ${`Authorization: Bearer ${access}`}`
@@ -208,5 +208,5 @@ if (consoleId) {
 for (const d of domains)
   await $`node ${resolve(import.meta.dirname, "add-base-domain.mjs")} --base-domain ${d} --cluster-name ${process.env.CLUSTER_NAME || arg("--cluster-name")}`;
 console.log(
-  `\n==========================================\n  Keycloak Deployment Complete\n==========================================\n\n  URL: https://${host}\n  FleetShift Realm Users:\n    ops-user / ${passwords.ops}\n    dev-user / ${passwords.dev}\n\n  Run 'npx nx run deploy:openshift:keycloak:add-user' to create personal dev accounts.\n==========================================`,
+  `\n==========================================\n  Keycloak Deployment Complete\n==========================================\n\n  URL: https://${host}\n  OCM Resource Manager Realm Users:\n    ops-user / ${passwords.ops}\n    dev-user / ${passwords.dev}\n\n  Run 'npx nx run deploy:openshift:keycloak:add-user' to create personal dev accounts.\n==========================================`,
 );

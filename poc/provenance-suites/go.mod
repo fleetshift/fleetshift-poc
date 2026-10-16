@@ -1,4 +1,4 @@
-module github.com/fleetshift/fleetshift-poc/poc/provenance-suites
+module github.com/stolostron/ocm-resource-manager/poc/provenance-suites
 
 go 1.25.0
 

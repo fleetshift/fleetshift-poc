@@ -14,8 +14,8 @@ import {
   preflightKeyring,
 } from "./keyring-host.mjs";
 
-const IMAGE = "quay.io/stolostron/fleetshift:latest";
-const UI_ORIGIN = "https://fleetshift-sandbox.localhost:8085";
+const IMAGE = "quay.io/stolostron/ocm-resource-manager:latest";
+const UI_ORIGIN = "https://ocm-resource-manager.localhost:8085";
 const GRPC_TARGET = "127.0.0.1:50051";
 const KIND_CLUSTER_LABEL = "io.x-k8s.kind.cluster";
 const CA_IN_CONTAINER = "/data/sandbox/pki/ca.crt";
@@ -38,16 +38,16 @@ export function buildTestEnvironment(base, sandbox) {
   return {
     ...base,
     BASE_URL: UI_ORIGIN,
-    FLEETSHIFT_GRPC_TARGET: GRPC_TARGET,
-    FLEETSHIFT_CA_FILE: sandbox.caFile,
-    FLEETSHIFT_E2E_RUN_ID: sandbox.runId,
-    FLEETSHIFT_E2E_WORK_DIR: sandbox.workDir,
-    FLEETSHIFT_KIND_PREFIX: sandbox.kindPrefix,
+    OCM_RM_GRPC_TARGET: GRPC_TARGET,
+    OCM_RM_CA_FILE: sandbox.caFile,
+    OCM_RM_E2E_RUN_ID: sandbox.runId,
+    OCM_RM_E2E_WORK_DIR: sandbox.workDir,
+    OCM_RM_KIND_PREFIX: sandbox.kindPrefix,
   };
 }
 
 export function kindNodeBelongsToRun(hostClusterName, kindPrefix) {
-  return hostClusterName.startsWith(`fs--${kindPrefix}`);
+  return hostClusterName.startsWith(`rm--${kindPrefix}`);
 }
 
 // Parse podman ps --format stdout, not the combined `output` diagnostics string.
@@ -61,14 +61,14 @@ export function parseOwnedKindNodes(stdout, kindPrefix) {
 }
 
 export function usesPrebuiltImage(env) {
-  return env.FLEETSHIFT_E2E_AIO_PREBUILT === "1";
+  return env.OCM_RM_E2E_AIO_PREBUILT === "1";
 }
 
 export function usesPulledImage(env) {
-  return env.FLEETSHIFT_E2E_AIO_PULL === "1";
+  return env.OCM_RM_E2E_AIO_PULL === "1";
 }
 
-// E2E defaults to debug so CI logs and dumpDiagnostics include FleetShift,
+// E2E defaults to debug so CI logs and dumpDiagnostics include the resource manager server,
 // Dex, and s6 output. The image ENV is error. An explicit LOG_LEVEL wins.
 export function sandboxLogLevel(env = process.env) {
   const raw = typeof env.LOG_LEVEL === "string" ? env.LOG_LEVEL.trim() : "";
@@ -84,9 +84,9 @@ export function sandboxRunArgs(sandbox, socket, env = process.env) {
     "--name",
     sandbox.containerName,
     "--label",
-    `fleetshift.e2e.run=${sandbox.runId}`,
+    `ocm-resource-manager.e2e.run=${sandbox.runId}`,
     "--network",
-    "kind:alias=fleetshift",
+    "kind:alias=ocm-resource-manager",
     "-p",
     "127.0.0.1:8085:8085",
     "-p",
@@ -133,11 +133,15 @@ function prepareImage() {
   }
   if (usesPrebuiltImage(process.env)) return;
   console.error(`building ${IMAGE}`);
-  const result = spawnSync("npx", ["nx", "run", "fleetshift-poc:image:aio"], {
-    cwd: REPO_ROOT,
-    env: { ...process.env, NX_DAEMON: "false" },
-    stdio: "inherit",
-  });
+  const result = spawnSync(
+    "npx",
+    ["nx", "run", "ocm-resource-manager:image:aio"],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, NX_DAEMON: "false" },
+      stdio: "inherit",
+    },
+  );
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error("AIO image build failed");
 }
@@ -257,12 +261,12 @@ function ownedKindNodes(kindPrefix) {
 async function createSandbox() {
   const runId = randomBytes(6).toString("hex");
   const workDir = await mkdtemp(
-    path.join(os.tmpdir(), `fleetshift-e2e-${runId}-`),
+    path.join(os.tmpdir(), `ocm-resource-manager-e2e-${runId}-`),
   );
   await chmod(workDir, 0o700);
   return {
     caFile: path.join(workDir, "ca.crt"),
-    containerName: `fleetshift-e2e-${runId}`,
+    containerName: `ocm-resource-manager-e2e-${runId}`,
     kindPrefix: `kind-e2e-${runId}-`,
     runId,
     workDir,
@@ -427,7 +431,7 @@ async function main() {
   } finally {
     process.removeListener("SIGINT", cancel);
     process.removeListener("SIGTERM", cancel);
-    if (process.env.FLEETSHIFT_E2E_KEEP === "1") {
+    if (process.env.OCM_RM_E2E_KEEP === "1") {
       console.error(
         `keeping sandbox ${sandbox.containerName}, Kind prefix ${sandbox.kindPrefix}, and ${sandbox.workDir}`,
       );

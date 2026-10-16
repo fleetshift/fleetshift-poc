@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 type authzContextKey struct{}
@@ -29,7 +29,7 @@ type ClientClaims struct {
 // RequestClaims captures protocol-level details for later authorization.
 // Purely between transport and application -- not a domain concept.
 type RequestClaims struct {
-	Method   string // gRPC full method, e.g. "/fleetshift.v1.DeploymentService/CreateDeployment"
+	Method   string // gRPC full method, e.g. "/ocm.v1alpha.DeploymentService/CreateDeployment"
 	PeerAddr string // client address
 }
 

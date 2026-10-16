@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioinit"
 )
 
 func testSandboxPKIPaths(root string) aioinit.SandboxPKIPaths {
@@ -257,7 +257,7 @@ func assertLeafSAN(t *testing.T, pemBytes []byte) {
 	if len(cert.IPAddresses) != 0 {
 		t.Fatalf("unexpected IP SANs: %v", cert.IPAddresses)
 	}
-	if cert.Subject.CommonName != "FleetShift AIO Gateway" {
+	if cert.Subject.CommonName != "OCM Resource Manager AIO gateway" {
 		t.Fatalf("leaf CN = %q", cert.Subject.CommonName)
 	}
 	hasServerAuth := false
@@ -297,7 +297,7 @@ func writeLegacyIPLeaf(t *testing.T, paths aioinit.SandboxPKIPaths) error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(99),
-		Subject:      pkix.Name{CommonName: "FleetShift Sandbox Dex"},
+		Subject:      pkix.Name{CommonName: "OCM Resource Manager sandbox Dex"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -347,7 +347,7 @@ func writeExpiredLeaf(t *testing.T, paths aioinit.SandboxPKIPaths) error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(100),
-		Subject:      pkix.Name{CommonName: "FleetShift AIO Gateway"},
+		Subject:      pkix.Name{CommonName: "OCM Resource Manager AIO gateway"},
 		NotBefore:    time.Now().Add(-2 * time.Hour),
 		NotAfter:     time.Now().Add(-time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

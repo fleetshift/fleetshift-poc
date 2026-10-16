@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestEncodeDecodeKindClusterName(t *testing.T) {
@@ -12,8 +12,8 @@ func TestEncodeDecodeKindClusterName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if name != "fs--demo" {
-		t.Fatalf("encode = %q, want fs--demo", name)
+	if name != "rm--demo" {
+		t.Fatalf("encode = %q, want rm--demo", name)
 	}
 	id, ok := decodeKindClusterName(name)
 	if !ok || id != "demo" {
@@ -52,10 +52,10 @@ func TestEncodeKindClusterName_AcceptsKindCharset(t *testing.T) {
 }
 
 func TestFindOwnedCluster(t *testing.T) {
-	listed := []string{"demo", "fs--other", "fs--demo"}
+	listed := []string{"demo", "rm--other", "rm--demo"}
 	got, found := findOwnedCluster(listed, "demo")
-	if !found || got != "fs--demo" {
-		t.Fatalf("findOwnedCluster = %q %v, want fs--demo true", got, found)
+	if !found || got != "rm--demo" {
+		t.Fatalf("findOwnedCluster = %q %v, want rm--demo true", got, found)
 	}
 	if _, found := findOwnedCluster(listed, "missing"); found {
 		t.Fatal("expected missing id not found")
@@ -66,7 +66,7 @@ func TestForeignClusterConflict(t *testing.T) {
 	if !foreignClusterConflict([]string{"demo"}, "demo") {
 		t.Fatal("bare demo should conflict")
 	}
-	if foreignClusterConflict([]string{"fs--demo"}, "demo") {
+	if foreignClusterConflict([]string{"rm--demo"}, "demo") {
 		t.Fatal("owned encoding should not conflict")
 	}
 }

@@ -1,8 +1,11 @@
-# FleetShift Documentation
+# OCM Resource Manager console documentation
 
-## What is FleetShift
+## Console scope
 
-FleetShift is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
+The console is the browser application for the experimental OCM Resource Manager platform. It is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
+
+See the [architecture glossary](../design/glossary.md) for shared project names
+and component boundaries.
 
 ## Goals
 
@@ -19,13 +22,13 @@ FleetShift is a multi-cluster management UI that dynamically composes its interf
 
 ## Non-Goals
 
-- **Authentication and authorization** — handled elsewhere in the platform, not a concern of this project. Any auth-related code in this repository (mock login, user switching, bearer tokens) exists purely for experimentation purposes and should not be taken as a design choice or requirement.
-- **API aggregation** — also handled elsewhere in the platform. This project focuses exclusively on the UI layer. Any API proxy or data-fetching code in this repository exists purely for experimentation purposes to make the UI functional during development and should not be taken as a design choice or requirement.
+- **Authentication and authorization** — handled elsewhere in the platform, outside the UI design described here. Any auth-related prototypes discussed here (mock login, user switching, bearer tokens) exists purely for experimentation purposes and should not be taken as a design choice or requirement.
+- **API aggregation** — also handled elsewhere in the platform. This documentation focuses on the UI layer. Any API proxy or data-fetching prototypes discussed here exists purely for experimentation purposes to make the UI functional during development and should not be taken as a design choice or requirement.
 
 ## Requirements
 
-- [Plugin Discovery](./plugin-discovery.md) — how FleetShift detects which UI plugins to enable for each cluster
-- [OCP Plugin Re-use](./ocp-plugin-reuse.md) — optional integration for re-using existing OpenShift console plugins in FleetShift
+- [Plugin Discovery](./plugin-discovery.md) — how the platform detects which UI plugins to enable for each cluster
+- [OCP Plugin Re-use](./ocp-plugin-reuse.md) — optional integration for re-using existing OpenShift console plugins in the console
 - [Plugin Versioning](./plugin-versioning.md) — loading multiple versions of the same plugin from different clusters
 - [API Requirements](./api-requirements.md) — aggregate data layer and per-cluster drill-down proxy
 

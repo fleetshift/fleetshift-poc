@@ -1,4 +1,4 @@
-// Package resourcemanager models FleetShift's resource-manager role. It
+// Package resourcemanager models the platform's resource manager role. It
 // authenticates callers, performs primary authorization, stores immutable
 // TypedEvidence, assigns evidence-log positions at acceptance, and couriers
 // evidence to targets. Delivery and outbox records are a separate dispatch
@@ -14,9 +14,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/internal/merklelog"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/internal/merklelog"
+	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
 )
 
 var _ protocol.ResourceManagerAPI = (*directkey.Manager)(nil)

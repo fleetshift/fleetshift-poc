@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/restmapper"
 )
 
-const fieldManager = "fleetshift"
+const fieldManager = "ocm-resource-manager"
 
 // applier wraps a dynamic client and REST mapper for SSA.
 type applier struct {
@@ -79,7 +79,7 @@ func (a *applier) apply(ctx context.Context, raw json.RawMessage) error {
 	}
 
 	gvk := obj.GroupVersionKind()
-	// TODO: consider Force:true so FleetShift reclaims fields owned by other
+	// TODO: consider Force:true so the Kubernetes addon reclaims fields owned by other
 	// managers (kubectl, HPA, etc.). Without Force, SSA 409 conflicts fail delivery.
 	_, err = dr.Patch(ctx, obj.GetName(), "application/apply-patch+yaml", data, metav1.PatchOptions{
 		FieldManager: fieldManager,

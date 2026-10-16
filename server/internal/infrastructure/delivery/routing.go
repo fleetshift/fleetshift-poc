@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // RoutingDeliveryService implements [domain.DeliveryAgent] by routing

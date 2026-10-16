@@ -45,7 +45,7 @@ export const createCommand: CommandSpec = {
     }
     const response = await (
       await deploymentClient(args)
-    ).request(`/v1/deployments?deploymentId=${encodeURIComponent(id)}`, {
+    ).request(`/v1alpha/deployments?deploymentId=${encodeURIComponent(id)}`, {
       method: "POST",
       body: JSON.stringify(body),
     });

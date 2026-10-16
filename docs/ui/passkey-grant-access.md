@@ -6,7 +6,7 @@ This document describes an exploratory passkey-based identity verification flow.
 
 Instead of passwords, users can verify their identity using their device's built-in security (fingerprint, face scan, screen lock) via the Web Authentication API (WebAuthn). The browser handles all the biometric prompts natively — no custom UI is needed for the verification step itself.
 
-This approach could be used to authorize FleetShift to perform actions on a user's behalf, with cryptographic proof that the user actually approved it.
+This approach could be used to authorize the resource manager server to perform actions on a user's behalf, with cryptographic proof that the user actually approved it.
 
 ## How It Works
 

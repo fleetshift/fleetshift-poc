@@ -42,7 +42,7 @@ Short UI cheat sheet: [e2e/web/README.md](../../e2e/web/README.md).
 ## Prerequisites
 
 - `podman`, `npx`, and `npm ci` at the repo root
-- `fleetshift-sandbox.localhost` resolving to loopback (a `.localhost` name;
+- `ocm-resource-manager.localhost` resolving to loopback (a `.localhost` name;
   do not add `/etc/hosts`)
 - Linux: `systemctl --user enable --now podman.socket` so Kind can use the
   host engine. Override with `PODMAN_SOCKET` if needed. On macOS, a live
@@ -75,11 +75,11 @@ applies files in lexicographic order, so a pre-existing `99-keys.conf` is
 applied after an earlier `99-...` file and restores the kernel defaults.
 
 ```bash
-sudo tee /etc/sysctl.d/zz-fleetshift-e2e-keys.conf <<'EOF'
+sudo tee /etc/sysctl.d/zz-ocm-resource-manager-e2e-keys.conf <<'EOF'
 kernel.keys.maxkeys = 2000
 kernel.keys.maxbytes = 200000
 EOF
-sudo sysctl -p /etc/sysctl.d/zz-fleetshift-e2e-keys.conf
+sudo sysctl -p /etc/sysctl.d/zz-ocm-resource-manager-e2e-keys.conf
 sysctl -n kernel.keys.maxkeys
 sysctl -n kernel.keys.maxbytes
 ```
@@ -102,8 +102,8 @@ Use the same late-sorting `zz-` filename:
 
 ```bash
 printf '%s\n' 'kernel.keys.maxkeys = 2000' 'kernel.keys.maxbytes = 200000' \
-  | podman machine ssh -- sudo tee /etc/sysctl.d/zz-fleetshift-e2e-keys.conf >/dev/null
-podman machine ssh -- sudo sysctl -p /etc/sysctl.d/zz-fleetshift-e2e-keys.conf
+  | podman machine ssh -- sudo tee /etc/sysctl.d/zz-ocm-resource-manager-e2e-keys.conf >/dev/null
+podman machine ssh -- sudo sysctl -p /etc/sysctl.d/zz-ocm-resource-manager-e2e-keys.conf
 podman machine ssh -- sysctl -n kernel.keys.maxkeys
 podman machine ssh -- sysctl -n kernel.keys.maxbytes
 ```
@@ -112,7 +112,7 @@ To continue anyway on a local machine (ignored in CI; you may still hit
 `Disk quota exceeded` once Kind nodes fill the quota):
 
 ```bash
-FLEETSHIFT_E2E_ALLOW_LOW_KEYRING=1 npx nx test:e2e e2e-cli
+OCM_RM_E2E_ALLOW_LOW_KEYRING=1 npx nx test:e2e e2e-cli
 ```
 
 The sandbox CA is private. Playwright uses `ignoreHTTPSErrors`; do not
@@ -130,23 +130,23 @@ The UI and CLI Nx targets invoke `e2e/sandbox/run.mjs`. By default it builds
 the AIO image, starts one fixed-port sandbox, waits for its private CA and
 readiness, runs Playwright, prints sanitized diagnostics on failure, and always
 removes the AIO plus Kind nodes carrying that run's unique cluster prefix. CI
-sets `FLEETSHIFT_E2E_AIO_PREBUILT=1` after restoring the image; the runner then
+sets `OCM_RM_E2E_AIO_PREBUILT=1` after restoring the image; the runner then
 requires that image without rebuilding it.
 
-The published-image workflow sets `FLEETSHIFT_E2E_AIO_PULL=1` so the runner
-pulls `quay.io/stolostron/fleetshift:latest` instead of building, then runs a
+The published-image workflow sets `OCM_RM_E2E_AIO_PULL=1` so the runner
+pulls `quay.io/stolostron/ocm-resource-manager:latest` instead of building, then runs a
 **sanity** (start, Dex login, console masthead/Clusters) — not the full UI
 suite. That path tests the **already published** Quay AIO, not
 the image that would be built from the current branch. After pull or restore,
 `podman run` uses `--pull=never` and `-e LOG_LEVEL=debug` (the image default
-is `error`) so FleetShift, Dex, and s6 diagnostics reach CI logs and the
+is `error`) so OCM Resource Manager, Dex, and s6 diagnostics reach CI logs and the
 failure dump. `LOG_LEVEL` in the GitHub job env is forwarded; unset local
-runs still use debug. Set `FLEETSHIFT_E2E_KEEP=1` only for local debugging
+runs still use debug. Set `OCM_RM_E2E_KEEP=1` only for local debugging
 when the sandbox should remain after the command exits.
 
-Tests receive connection facts through `BASE_URL`, `FLEETSHIFT_GRPC_TARGET`,
-`FLEETSHIFT_CA_FILE`, `FLEETSHIFT_E2E_WORK_DIR`, and
-`FLEETSHIFT_KIND_PREFIX`; they do not manage the AIO lifecycle.
+Tests receive connection facts through `BASE_URL`, `OCM_RM_GRPC_TARGET`,
+`OCM_RM_CA_FILE`, `OCM_RM_E2E_WORK_DIR`, and
+`OCM_RM_KIND_PREFIX`; they do not manage the AIO lifecycle.
 
 ---
 
@@ -165,7 +165,7 @@ e2e/cli/
 ```
 
 `npx nx test:e2e e2e-cli` starts the shared sandbox runner, then Playwright.
-Workers share one AIO and one Kind pool under `FLEETSHIFT_E2E_WORK_DIR`. Each
+Workers share one AIO and one Kind pool under `OCM_RM_E2E_WORK_DIR`. Each
 worker still gets a private Fleetctl config directory.
 
 ### Kind cluster declarations
@@ -193,7 +193,7 @@ test data.
 
 Failed tests discard their leased records for the rest of the run. Final
 sandbox teardown still removes every Kind node with the run prefix.
-`FLEETSHIFT_E2E_KEEP=1` retains the sandbox, clusters, and pool state.
+`OCM_RM_E2E_KEEP=1` retains the sandbox, clusters, and pool state.
 
 ### Add a CLI scenario
 
@@ -216,7 +216,7 @@ Import `test` and `expect` from `./fixtures`. Put product waits in
 
 ## Frontend
 
-Playwright against `https://fleetshift-sandbox.localhost:8085` (SPA under
+Playwright against `https://ocm-resource-manager.localhost:8085` (SPA under
 `/app`). Dex is same-origin under `/idp` on that port; do not talk to Dex
 on 5556.
 
@@ -288,7 +288,7 @@ checkout's** AIO image (Nx `image:aio`). A failure there is a problem with
 the current branch.
 
 [`.github/workflows/e2e-published.yml`](../../.github/workflows/e2e-published.yml)
-pulls **`quay.io/stolostron/fleetshift:latest`** from Quay and runs a UI
+pulls **`quay.io/stolostron/ocm-resource-manager:latest`** from Quay and runs a UI
 **sanity** only (`chromium-sanity`: container starts, Dex login, masthead and
 Clusters). It is not a re-run of the full UI suite (no Kind journey, a11y, or
 other specs); `e2e.yml` covers those on this checkout. It does **not**
@@ -297,7 +297,7 @@ build or use the AIO from the current branch, PR, or commit. A failure does
 published** AIO on Quay failed basic function (will not start, or
 login/console fails). That is what users get from the README `podman run`
 command. Treat it as a live product incident and investigate immediately:
-confirm `podman run quay.io/stolostron/fleetshift:latest`, check OpenShift CI
+confirm `podman run quay.io/stolostron/ocm-resource-manager:latest`, check OpenShift CI
 image mirror/republish jobs, and restore a working `:latest`.
 
 Unit/component CI (`.github/workflows/test.yml`) runs
@@ -314,7 +314,7 @@ e2e-published      # role: published — pull quay:latest, UI sanity only
 | Workflow | Image under test | What it runs | A failure means |
 | --- | --- | --- | --- |
 | `e2e.yml` | This checkout, built by Nx | Full UI + CLI e2e (including Kind) | The current branch's AIO is broken |
-| `e2e-published.yml` | `quay.io/stolostron/fleetshift:latest` already on Quay | Sanity only: start, Dex login, console | The live published AIO failed basic function; users are affected now |
+| `e2e-published.yml` | `quay.io/stolostron/ocm-resource-manager:latest` already on Quay | Sanity only: start, Dex login, console | The live published AIO failed basic function; users are affected now |
 
 `e2e-published.yml` runs on pull requests, pushes to `main`, a cron 30 minutes
 after OpenShift CI republishes `:latest` (03:00/09:00/15:00/21:00 UTC), and
@@ -327,10 +327,10 @@ parallel. They do not share a running container.
 
 `setup-e2e` is the only place that should install Node or Playwright,
 load or pull the image, start user `podman.socket`, and ensure the `kind`
-network. The `cache` role never starts FleetShift. The `e2e` role never
-rebuilds the image because every test job sets `FLEETSHIFT_E2E_AIO_PREBUILT=1`.
+network. The `cache` role never starts OCM Resource Manager. The `e2e` role never
+rebuilds the image because every test job sets `OCM_RM_E2E_AIO_PREBUILT=1`.
 The `published` role never restores the checkout tar; it pulls the published
-tag. The test job sets `FLEETSHIFT_E2E_AIO_PULL=1` and runs Playwright
+tag. The test job sets `OCM_RM_E2E_AIO_PULL=1` and runs Playwright
 `chromium-sanity` only (not the full UI project). Both e2e jobs set
 `LOG_LEVEL=debug` so the sandbox runner forwards it into the AIO. The CLI suite
 uses the TypeScript fleetctl build; the `published` job only exercises the

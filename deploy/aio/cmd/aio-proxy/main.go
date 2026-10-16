@@ -1,5 +1,5 @@
 // Command aio-proxy terminates the sandbox gateway certificate and
-// reverse-proxies peer Dex and FleetShift on one origin.
+// reverse-proxies peer Dex and the resource manager server on one origin.
 package main
 
 import (
@@ -10,8 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioproxy"
+	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioproxy"
 )
 
 func main() {
@@ -30,17 +30,17 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("dex upstream: %w", err)
 	}
-	fleetshiftURL, err := url.Parse("http://" + endpoints.HTTPListen)
+	resourceManagerURL, err := url.Parse("http://" + endpoints.HTTPListen)
 	if err != nil {
-		return fmt.Errorf("fleetshift upstream: %w", err)
+		return fmt.Errorf("ocm-resource-manager upstream: %w", err)
 	}
 	proxy, err := aioproxy.New(aioproxy.Config{
-		ListenAddr:    endpoints.GatewayListen,
-		CertFile:      pki.LeafCert,
-		KeyFile:       pki.LeafKey,
-		PublicOrigin:  endpoints.PublicOrigin,
-		DexURL:        dexURL,
-		FleetShiftURL: fleetshiftURL,
+		ListenAddr:         endpoints.GatewayListen,
+		CertFile:           pki.LeafCert,
+		KeyFile:            pki.LeafKey,
+		PublicOrigin:       endpoints.PublicOrigin,
+		DexURL:             dexURL,
+		ResourceManagerURL: resourceManagerURL,
 	})
 	if err != nil {
 		return err

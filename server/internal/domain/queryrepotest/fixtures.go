@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 // fixedTime anchors every fixture's timestamps so equivalence
@@ -22,7 +22,7 @@ type Fixture struct {
 	PlatformOnlyName domain.ResourceName
 
 	// ManagedType/ManagedName/ManagedUID identify a managed extension
-	// resource: kind.fleetshift.io/Cluster, clusters/managed, spec
+	// resource: kind.open-cluster-management.io/Cluster, clusters/managed, spec
 	// {"provider":"aws","region":"us-east-1"}, labels team=platform.
 	// It has no physical platform_resources row, so it also doubles
 	// as the virtual-platform-resource fixture at the same name.
@@ -31,7 +31,7 @@ type Fixture struct {
 	ManagedUID  domain.ExtensionResourceUID
 
 	// InventoryType/InventoryName/InventoryUID identify an
-	// inventory-only extension resource: kubernetes.fleetshift.io/Node,
+	// inventory-only extension resource: kubernetes.open-cluster-management.io/Node,
 	// nodes/node-1, inventory labels node-role=worker, condition
 	// Ready=True, observation {"capacity":{"cpu":8},"allocatable":{"cpu":6}}.
 	// Like ManagedName, it has no physical platform_resources row.
@@ -54,7 +54,7 @@ func SeedCoreFixtures(t *testing.T, tx domain.Tx) Fixture {
 		t.Fatalf("seed platform-only resource: %v", err)
 	}
 
-	managedType := domain.ResourceType("kind.fleetshift.io/Cluster")
+	managedType := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	seedManagedType(t, tx, managedType)
 	fID := domain.FulfillmentID("query-fixture-managed")
 	seedFulfillment(t, tx, fID, fixedTime)
@@ -71,7 +71,7 @@ func SeedCoreFixtures(t *testing.T, tx domain.Tx) Fixture {
 		t.Fatalf("seed managed extension resource: %v", err)
 	}
 
-	invType := domain.ResourceType("kubernetes.fleetshift.io/Node")
+	invType := domain.ResourceType("kubernetes.open-cluster-management.io/Node")
 	seedInventoryType(t, tx, invType)
 	invUID := domain.NewExtensionResourceUID()
 	invName := domain.ResourceName("nodes/node-1")

@@ -37,7 +37,7 @@ Read this when you need the full target-side delivery protocol — how targets a
 
 ## Overview
 
-A fleetshift *Target* is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
+A *Target* in the platform is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
 
 Examples:
 
@@ -93,13 +93,13 @@ work may be acknowledged after authenticating and validating the retry's root
 and scope and recognizing its completed generation; it need not repeat
 supporting evaluation.
 
-This is in contrast to a kube controller, like in OCM, which cannot guarantee reliably deliver of removal events from the hub. When its watch is not connected, it may miss them. Thus OCM must sync both ways: from work it knows it has locally, and from work it knows the hub has. In fleetshift this is unnecessary because the server ensures any changes are delivered reliably. So the targets never miss work add or removal.
+OCM's ManifestWork controller can miss individual watch events while disconnected, but eventual cleanup uses finalizers and `AppliedManifestWork` state to reconcile hub intent with locally applied work. The resource manager delivery contract instead aims to guarantee delivery of every addition and removal through server-side retries and acknowledgments. That is an intended protocol guarantee, not a claim that the prototype has proven it under every failure mode.
 
 #### Base protocol for reliable fulfillment
 
 When an addon starts up, it should:
 
-1. Connect to the fleetshift (in process or through a to-be-built fleetlet)
+1. Connect to the resource manager (in process or through a to-be-built fleetlet)
 2. Wait asynchronously for delivery requests, evaluate authorization, and acknowledge only once enough state is safely retained to guarantee progress (see next steps). Acknowledgement may precede effects after safe acceptance of evaluated work. The quicker the acknowledgement, the more responsive progression will be; it should generally fit within a typical synchronous RPC response time.
 3. Ask for what fulfillments are in progress ("deliveries" not yet terminal)
   - The platform returns `ActiveDelivery` values: the delivery record enriched with full `TargetInfo`, caller `DeliveryAuth`, and (when signed) a re-assembled `Attestation`. This gives the addon everything `Deliver` would have provided.
@@ -152,7 +152,7 @@ older work from overwriting the newer accepted generation. Checking only an
 already-applied object's annotations is insufficient when newer work is still
 queued.
 
-This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. The FleetShift addon can use a smaller level-based loop because platform-side desired changes are durably delivered; an addon claiming continuous drift reconciliation still needs watch-gap recovery and a periodic rescan or equivalent completeness mechanism.
+This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. An addon using this delivery contract can use a smaller level-based loop because platform-side desired changes are durably delivered; an addon claiming continuous drift reconciliation still needs watch-gap recovery and a periodic rescan or equivalent completeness mechanism.
 
 #### Delivery authorization
 
@@ -238,7 +238,7 @@ crash recovery. It is distinct from the cryptographic
 [evidence log](provenance.md#common-append-only-evidence-log)
 used for provenance ordering and rollback detection.
 
-A goal of this delivery protocol is to minimize the amount of state that an addon needs to keep track of to participate as a high quality target. However, fulfillment guarantees MAY still require a journal of some kind (like AppliedMW in OCM) to inventory what is happening in the target in more detail as a result of a delivery. Fleetshift could potentially provide APIs to keep track of such a journal as a service to addon developers.
+A goal of this delivery protocol is to minimize the amount of state that an addon needs to keep track of to participate as a high quality target. However, fulfillment guarantees MAY still require a journal of some kind (like AppliedMW in OCM) to inventory what is happening in the target in more detail as a result of a delivery. The resource manager could potentially provide APIs to keep track of such a journal as a service to addon developers.
 
 There are two cases where this may be needed:
 
@@ -283,7 +283,7 @@ Detecting drift is not required for a delivery-only target. It is required for a
 
 Then, something has to know how to diff the observations it has against the platform intents.
 
-For OCM, drift is simply reprocessing manifests periodically and querying against desired state. For fleetshift, we could consider the same. Give addons a way to query what should be present at their targets (needed for fresh start sync). They may cache that as needed.
+OCM's ManifestWork controller reprocesses manifests periodically against desired state. The resource manager could take the same approach: give addons a way to query what should be present at their targets (needed for fresh start sync). They may cache that as needed.
 
 These should all be achievable, generally, by adding two more steps to the protocol above:
 
@@ -305,7 +305,7 @@ The codebase models deliveries with explicit lifecycle states: `pending`, `accep
 
 ### Should manifests be able to opt out of drift repair?
 
-Drift detection is optional (an addon may skip it entirely). But if an addon does detect drift, should it always repair it? Some resources are intentionally modified after initial delivery (e.g. a resource the target customizes post-apply, or a `CreateOnly` resource that should be applied once and then left alone). OCM models this with per-manifest update strategies (`Update`, `ServerSideApply`, `CreateOnly`, `ReadOnly`). FleetShift may need a similar mechanism — either as a platform-level manifest annotation or as an addon-defined policy.
+Drift detection is optional (an addon may skip it entirely). But if an addon does detect drift, should it always repair it? Some resources are intentionally modified after initial delivery (e.g. a resource the target customizes post-apply, or a `CreateOnly` resource that should be applied once and then left alone). OCM models this with per-manifest update strategies (`Update`, `ServerSideApply`, `CreateOnly`, `ReadOnly`). The platform may need a similar mechanism — either as a platform-level manifest annotation or as an addon-defined policy.
 
 ### Should the platform ever diff? What does that buy us? What does it cost us?
 

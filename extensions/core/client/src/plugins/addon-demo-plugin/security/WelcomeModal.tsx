@@ -14,7 +14,7 @@ import {
 import { ExternalLinkAltIcon, ShieldAltIcon } from "@patternfly/react-icons";
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "ome-addon-security-welcome-dismissed";
+const STORAGE_KEY = "ocm-rm-addon-security-welcome-dismissed";
 
 export default function WelcomeModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -40,17 +40,17 @@ export default function WelcomeModal() {
     <Modal variant="medium" isOpen onClose={handleClose} aria-label="Welcome">
       <ModalHeader title="" />
       <ModalBody>
-        <Split hasGutter className="ome-addon-security__welcome">
+        <Split hasGutter className="ocm-rm-addon-security__welcome">
           <SplitItem>
             <Bullseye>
-              <div className="ome-addon-security__welcome-icon">
-                <ShieldAltIcon className="ome-addon-security__welcome-shield" />
+              <div className="ocm-rm-addon-security__welcome-icon">
+                <ShieldAltIcon className="ocm-rm-addon-security__welcome-shield" />
               </div>
             </Bullseye>
           </SplitItem>
           <SplitItem isFilled>
             <Content component="h2" className="pf-v6-u-mb-sm">
-              Welcome to Security in OME
+              Welcome to Security in OCM Resource Manager
             </Content>
             <Content
               component="p"

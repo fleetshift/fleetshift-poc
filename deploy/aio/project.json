@@ -37,7 +37,7 @@
         "{projectRoot}/**/*.go",
         "{projectRoot}/go.mod",
         "{projectRoot}/go.sum",
-        "{workspaceRoot}/Dockerfile.fleetshift"
+        "{workspaceRoot}/Dockerfile.aio"
       ]
     }
   }

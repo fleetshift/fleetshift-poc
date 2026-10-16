@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/queryrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/queryrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 )
 
 // staticQuerySchemas is a minimal [domain.QuerySchemaProvider] for
@@ -160,7 +160,7 @@ func TestResourceQueryService_PassesFilterThrough(t *testing.T) {
 }
 
 func TestResourceQueryService_PassesInvalidOrderByThrough(t *testing.T) {
-	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.fleetshift.io/Cluster")))
+	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.open-cluster-management.io/Cluster")))
 	svc := application.NewResourceQueryService(store)
 	ctx := context.Background()
 
@@ -174,7 +174,7 @@ func TestResourceQueryService_PassesInvalidOrderByThrough(t *testing.T) {
 }
 
 func TestResourceQueryService_PassesInvalidFilterThrough(t *testing.T) {
-	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.fleetshift.io/Cluster")))
+	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.open-cluster-management.io/Cluster")))
 	svc := application.NewResourceQueryService(store)
 	ctx := context.Background()
 

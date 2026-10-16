@@ -1,13 +1,13 @@
 /**
- * TypeScript types for the FleetShift management API.
+ * TypeScript types for the platform management API.
  *
  * Derived from the finalized OpenAPI spec:
- * `docs/openapi/fleetshift.swagger.yaml` in fleetshift-poc.
+ * `docs/openapi/ocm-resource-manager.swagger.yaml` in ocm-resource-manager.
  *
  * Use with {@link createApiClient}:
  * ```ts
- * import { createApiClient, type Deployment } from "@fleetshift/common";
- * const mgmt = createApiClient("/v1");
+ * import { createApiClient, type Deployment } from "@ocm-resource-manager/common";
+ * const mgmt = createApiClient("/v1alpha");
  * const { deployments } = await mgmt.get<ListDeploymentsResponse>("/deployments");
  * ```
  */

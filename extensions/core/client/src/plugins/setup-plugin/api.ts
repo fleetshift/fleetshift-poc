@@ -23,7 +23,7 @@ export type AuthState =
   | { status: "error"; message: string };
 
 export async function fetchAuthMethod(): Promise<AuthMethod | null> {
-  const res = await fetch("/v1/authMethods/default");
+  const res = await fetch("/v1alpha/authMethods/default");
   if (res.status === 404 || res.status === 500) return null;
   if (!res.ok) throw new Error(`Unexpected status ${res.status}`);
   return res.json();
@@ -35,7 +35,7 @@ async function getOidcClientId(): Promise<string> {
     throw new Error(`Failed to fetch UI config (${res.status})`);
   }
   const config = await res.json();
-  return config.oidc?.clientId ?? "fleetshift-ui";
+  return config.oidc?.clientId ?? "ocm-resource-manager-ui";
 }
 
 export async function triggerAuthSetup(
@@ -59,7 +59,7 @@ export async function triggerAuthSetup(
     oidcConfig.public_key_claim_expression = "claims.signing_public_key";
   }
 
-  const res = await fetch("/v1/authMethods?auth_method_id=default", {
+  const res = await fetch("/v1alpha/authMethods?auth_method_id=default", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "TYPE_OIDC", oidc_config: oidcConfig }),

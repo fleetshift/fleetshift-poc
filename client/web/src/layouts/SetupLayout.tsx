@@ -20,8 +20,11 @@ const SetupMasthead = () => (
   <Masthead>
     <MastheadMain>
       <MastheadBrand>
-        <MastheadLogo component="span">
-          <img src={logo} alt="FleetShift" className="ome-masthead-logo" />
+        <MastheadLogo component="span" className="ocm-rm-masthead-brand">
+          <img src={logo} alt="" className="ocm-rm-masthead-logo" />
+          <span>
+            OCM Resource Manager <small>Experimental</small>
+          </span>
         </MastheadLogo>
       </MastheadBrand>
     </MastheadMain>
@@ -40,10 +43,10 @@ const SetupMasthead = () => (
 );
 
 export const SetupLayout = () => (
-  <div className="ome-app ome-setup-layout">
+  <div className="ocm-rm-app ocm-rm-setup-layout">
     <SetupMasthead />
-    <div className="ome-setup-layout__scroll">
-      <div className="ome-setup-layout__content">
+    <div className="ocm-rm-setup-layout__scroll">
+      <div className="ocm-rm-setup-layout__content">
         <Outlet />
       </div>
     </div>

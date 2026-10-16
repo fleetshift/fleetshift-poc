@@ -1,4 +1,7 @@
-import { ClusterResource, extractClusterId } from "@fleetshift/common";
+import {
+  ClusterResource,
+  extractClusterId,
+} from "@ocm-resource-manager/common";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -145,9 +148,9 @@ describe("extractClusterId", () => {
 
 describe("extractService", () => {
   it("extracts service from canonical name", () => {
-    expect(extractService("//kind.fleetshift.io/clusters/c1")).toBe(
-      "kind.fleetshift.io",
-    );
+    expect(
+      extractService("//kind.open-cluster-management.io/clusters/c1"),
+    ).toBe("kind.open-cluster-management.io");
   });
 
   it("returns empty for malformed name", () => {
@@ -157,8 +160,10 @@ describe("extractService", () => {
 
 describe("serviceLabel", () => {
   it("maps known services", () => {
-    expect(serviceLabel("kubernetes.fleetshift.io")).toBe("Kubernetes");
-    expect(serviceLabel("kind.fleetshift.io")).toBe("Kind");
+    expect(serviceLabel("kubernetes.open-cluster-management.io")).toBe(
+      "Kubernetes",
+    );
+    expect(serviceLabel("kind.open-cluster-management.io")).toBe("Kind");
   });
 
   it("falls back to raw service string", () => {
@@ -169,13 +174,13 @@ describe("serviceLabel", () => {
 describe("buildAddonBasePath", () => {
   it("rejects an unregistered addon service", () => {
     expect(() =>
-      buildAddonBasePath("unregistered-addon.fleetshift.io"),
+      buildAddonBasePath("unregistered-addon.open-cluster-management.io"),
     ).toThrow("Unsupported cluster service");
   });
 
   it("builds path for known services", () => {
-    expect(buildAddonBasePath("kind.fleetshift.io")).toBe(
-      "/apis/kind.fleetshift.io/v1",
+    expect(buildAddonBasePath("kind.open-cluster-management.io")).toBe(
+      "/apis/kind.open-cluster-management.io/v1alpha",
     );
   });
 

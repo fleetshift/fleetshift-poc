@@ -47,7 +47,7 @@ from .sigstore import (
 )
 from .tsa import RFC3161TimestampAuthority
 from .tuf import (
-    FLEETSHIFT_POLICY_TARGET,
+    OCM_RM_POLICY_TARGET,
     SIGSTORE_TRUSTED_ROOT_TARGET,
     TUFClient,
     TUFTrustRepository,
@@ -88,18 +88,18 @@ class PoCEnvironment:
         user_anchor_constraints: list[dict[str, str]] | None = None,
     ) -> None:
         self.tenant_id = tenant_id
-        user_issuer = user_issuer or f"https://idp.fleetshift.local/tenants/{tenant_id}"
+        user_issuer = user_issuer or f"https://idp.ocm-resource-manager.local/tenants/{tenant_id}"
         self.user_anchor_id = user_anchor_id
         self.user_issuer = user_issuer
         self.tenant_idp = OIDCIssuer(user_issuer)
-        self.platform_issuer = "https://idp.fleetshift.local/platform"
+        self.platform_issuer = "https://idp.ocm-resource-manager.local/platform"
         self.platform_idp = OIDCIssuer(self.platform_issuer)
         self.user_fulcio = FulcioCA(f"{tenant_id} Fulcio", self.tenant_idp)
-        self.workload_fulcio = FulcioCA("FleetShift platform Fulcio", self.platform_idp)
-        self.tsa = RFC3161TimestampAuthority("FleetShift external TSA")
-        self.user_ca_uri = f"https://fulcio.fleetshift.local/tenants/{tenant_id}"
-        self.platform_ca_uri = "https://fulcio.fleetshift.local/platform"
-        self.tsa_uri = "https://tsa.fleetshift.local"
+        self.workload_fulcio = FulcioCA("OCM Resource Manager platform Fulcio", self.platform_idp)
+        self.tsa = RFC3161TimestampAuthority("OCM Resource Manager external TSA")
+        self.user_ca_uri = f"https://fulcio.ocm-resource-manager.local/tenants/{tenant_id}"
+        self.platform_ca_uri = "https://fulcio.ocm-resource-manager.local/platform"
+        self.tsa_uri = "https://tsa.ocm-resource-manager.local"
 
         user_subject_regexp = user_subject_regexp or rf".*@{tenant_id}\.example"
         allowed_users = (
@@ -161,7 +161,7 @@ class PoCEnvironment:
                     }
                     for addon_id in addon_ids
                 ],
-                "attributes": {"operator": "fleetshift-platform"},
+                "attributes": {"operator": "ocm-resource-manager-platform"},
                 "constraints": [],
             },
         }
@@ -171,7 +171,7 @@ class PoCEnvironment:
 
     @staticmethod
     def _addon_subject(addon_id: str) -> str:
-        return f"spiffe://fleetshift.io/addons/{addon_id}"
+        return f"spiffe://resource-manager.open-cluster-management.io/addons/{addon_id}"
 
     @staticmethod
     def _certificate_authority(
@@ -207,19 +207,19 @@ class PoCEnvironment:
             certificate_authorities=[
                 self._certificate_authority(
                     self.user_ca_uri,
-                    f"{self.tenant_id}.fleetshift.local",
+                    f"{self.tenant_id}.ocm-resource-manager.local",
                     (self.user_fulcio.intermediate, self.user_fulcio.root),
                 ),
                 self._certificate_authority(
                     self.platform_ca_uri,
-                    "platform.fleetshift.local",
+                    "platform.ocm-resource-manager.local",
                     (self.workload_fulcio.intermediate, self.workload_fulcio.root),
                 ),
             ],
             timestamp_authorities=[
                 self._certificate_authority(
                     self.tsa_uri,
-                    "external-tsa.fleetshift.local",
+                    "external-tsa.ocm-resource-manager.local",
                     (self.tsa.leaf, self.tsa.root),
                 )
             ],
@@ -230,7 +230,7 @@ class PoCEnvironment:
     def _publish(self):
         targets = {
             SIGSTORE_TRUSTED_ROOT_TARGET: self._trusted_sigstore_root().to_json().encode(),
-            FLEETSHIFT_POLICY_TARGET: canonical_json(self.anchors),
+            OCM_RM_POLICY_TARGET: canonical_json(self.anchors),
         }
         return self._repo.publish(targets)
 

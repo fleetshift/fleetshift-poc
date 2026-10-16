@@ -1,13 +1,13 @@
 # Search Result Renderer Contract — Extension-Driven Inventory Display
 
-**Jira:** [OME-194](https://redhat.atlassian.net/browse/OME-194)
-**Epic:** [OME-3 — Addon / Extension Model](https://redhat.atlassian.net/browse/OME-3)
+**Jira:** OME-194
+**Epic:** OME-3 — Addon / Extension Model
 **Status:** Implemented
 **Depends on:** [Feature Contracts](feature-contracts.md), [Search Architecture](diagrams/search/search.c4)
 
 ## Problem
 
-The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.fleetshift.io/Cluster`, `kubernetes.fleetshift.io/Object`) and a `name` in AIP-123 format (e.g., `//kind.fleetshift.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
+The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.open-cluster-management.io/Cluster`, `kubernetes.open-cluster-management.io/Object`) and a `name` in AIP-123 format (e.g., `//kind.open-cluster-management.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
 
 - Where each resource type links to (route)
 - What icon to show
@@ -29,11 +29,11 @@ This doc covers three layers in order:
 
 ### Extension type
 
-All search result renderers share a single static extension type: `fleetshift.render-search`. The `resourceType` string (e.g. `kind.fleetshift.io/Cluster`) is stored as a property, not encoded into the type.
+All search result renderers share a single static extension type: `ocm-resource-manager.render-search`. The `resourceType` string (e.g. `kind.open-cluster-management.io/Cluster`) is stored as a property, not encoded into the type.
 
 **Why static, not encoded?** The SDK's `DynamicRemotePlugin` validates extension types against `/^[a-zA-Z]+(?:-[a-zA-Z]+)*\.[a-zA-Z]+(?:-[a-zA-Z]+)*$/` — only letters and hyphens. Base64url encoding (an earlier approach) produces digits and underscores, which the regex rejects. A static type with `resourceType` as a property is simpler and SDK-compliant.
 
-**Renderer lookup at runtime:** The shell collects all resolved `fleetshift.render-search` extensions into a `Map<resourceType, renderer>`. For each inventory result, it looks up `result.resourceType` directly — no encoding needed.
+**Renderer lookup at runtime:** The shell collects all resolved `ocm-resource-manager.render-search` extensions into a `Map<resourceType, renderer>`. For each inventory result, it looks up `result.resourceType` directly — no encoding needed.
 
 ### Why use `resourceType` as the renderer key?
 
@@ -41,8 +41,8 @@ The inventory API returns each resource with a `resourceType` (type-level) and a
 
 ```json
 {
-  "name": "//kind.fleetshift.io/clusters/martin-kind01471218",
-  "resourceType": "kind.fleetshift.io/Cluster",
+  "name": "//kind.open-cluster-management.io/clusters/martin-kind01471218",
+  "resourceType": "kind.open-cluster-management.io/Cluster",
   "resource": {
     "name": "clusters/martin-kind01471218",
     "uid": "2b1ec087-72f7-484e-817a-9ce0d02945b5",
@@ -59,7 +59,7 @@ Using `resourceType` as the key in `properties.resourceType` means:
 1. **Direct mapping** — no encoding, no intermediary. `result.resourceType` → map lookup → resolved renderer.
 2. **Addon-defined** — the addon chooses its resource type when it registers with the backend. The same string becomes the UI renderer key.
 3. **1:1 with backend types** — `ExtensionResourceTypeService.ListTypes()` returns the same `resourceType` values.
-4. **All resources of the same type render the same way** — every `kind.fleetshift.io/Cluster` uses the same renderer. Instance-specific data (name, state, conditions) is passed to the `resolve` function.
+4. **All resources of the same type render the same way** — every `kind.open-cluster-management.io/Cluster` uses the same renderer. Instance-specific data (name, state, conditions) is passed to the `resolve` function.
 
 ### Builder function
 
@@ -68,7 +68,7 @@ Follows the existing `createClusterProvider` pattern — CodeRefs are passed alr
 ```typescript
 // build-utils/src/extensions/searchResultRenderer.ts
 
-export const RENDER_SEARCH_TYPE = "fleetshift.render-search" as const;
+export const RENDER_SEARCH_TYPE = "ocm-resource-manager.render-search" as const;
 
 export type SearchResultRendererExtras = {
   resourceType: string;
@@ -81,7 +81,7 @@ export type SearchResultRendererProperties = BaseExtensionProperties & SearchRes
 
 export function createSearchResultRenderer(
   properties: SearchResultRendererProperties,
-): FleetshiftExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
+): ResourceManagerExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
   const ctx = `${RENDER_SEARCH_TYPE} "${properties.id || "(no id)"}"`;
   throwOnErrors(validateSearchResultRendererProperties(properties, ctx), RENDER_SEARCH_TYPE);
   return { type: RENDER_SEARCH_TYPE, properties };
@@ -124,7 +124,7 @@ The shell renders the link as `<PluginLink scope={r.scope} module={r.module} to=
 createSearchResultRenderer({
   id: "kind-cluster-renderer",
   label: "Kind Cluster",
-  resourceType: "kind.fleetshift.io/Cluster",
+  resourceType: "kind.open-cluster-management.io/Cluster",
   resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
   icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
 }),
@@ -156,7 +156,7 @@ The Kind addon routes to `ClustersModule` in `core-plugin`. An addon with its ow
 
 ### What we build on top
 
-The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `fleetshift.render-search` exactly:
+The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `ocm-resource-manager.render-search` exactly:
 
 ```typescript
 // web/src/extensions/isSearchResultRendererExtension.ts
@@ -164,7 +164,7 @@ The SDK's `useResolvedExtensions` hook already handles the discovery flow — it
 export function isSearchResultRendererExtension(
   e: Extension,
 ): e is SearchResultRendererExtension {
-  return e.type === "fleetshift.render-search";
+  return e.type === "ocm-resource-manager.render-search";
 }
 ```
 
@@ -173,7 +173,7 @@ export function isSearchResultRendererExtension(
 ```
 Shell startup
   └─ useResolvedExtensions(isSearchResultRendererExtension)
-       └─ Scans all loaded manifests for fleetshift.render-search extensions
+       └─ Scans all loaded manifests for ocm-resource-manager.render-search extensions
        └─ Resolves CodeRefs → live resolve/icon functions
        └─ Returns [extensions, loaded]
 
@@ -399,7 +399,7 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `build-utils/src/extensions/searchResultRenderer.ts` | Build | `RENDER_SEARCH_TYPE`, `createSearchResultRenderer`, types |
 | `build-utils/src/extensions/__tests__/searchResultRenderer.test.ts` | Build | Builder output, validation, `validateExtensionSet` integration |
 | `common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
-| `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `fleetshift.render-search` extensions |
+| `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `ocm-resource-manager.render-search` extensions |
 | `web/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
 | `extensions/kind/client/src/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
 
@@ -430,7 +430,7 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 
 - [x] **~~Expose `ListTypes` via HTTP?~~** — Not needed for v1. The search results carry the `resourceType` — sufficient for on-demand discovery.
 
-- [x] **~~Extension type encoding~~** — Resolved. Static type `fleetshift.render-search` with `resourceType` as a property. No encoding needed — SDK regex rejects digits/underscores from base64url.
+- [x] **~~Extension type encoding~~** — Resolved. Static type `ocm-resource-manager.render-search` with `resourceType` as a property. No encoding needed — SDK regex rejects digits/underscores from base64url.
 
 - [x] **~~Extension ID from resource name?~~** — Resolved. `resourceType` is the type-level key. `name` is instance-level, passed to `resolve()`.
 

@@ -1,24 +1,24 @@
 # Feature Contracts — Plugin Extension Points and Automated Search
 
-**Jira:** [OME-102](https://redhat.atlassian.net/browse/OME-102)
-**Epic:** [OME-3 — Addon / Extension Model](https://redhat.atlassian.net/browse/OME-3)
+**Jira:** OME-102
+**Epic:** OME-3 — Addon / Extension Model
 **Status:** Draft
 
 ## Context
 
-FleetShift's UI is a plugin shell — plugins contribute pages, wizards, and actions via extension types like `fleetshift.module`. We are building a global search capability from scratch that lets users discover available UI features (pages, actions, sub-features) without navigating the menu tree.
+OCM Resource Manager's UI is a plugin shell — plugins contribute pages, wizards, and actions via extension types like `ocm-resource-manager.module`. We are building a global search capability from scratch that lets users discover available UI features (pages, actions, sub-features) without navigating the menu tree.
 
 ## Search Wireframe
 
-![Search proposal](images/search-proposal.png)
+![Search across pages and actions](images/search-proposal.png)
 
-Features and their extensions are grouped in a tree: the parent feature ("Create Cluster") with child extensions ("Create Kind cluster", "Create Example provider cluster") indented beneath it. The search index is built from plugin extension metadata — each `fleetshift.module` declares `id`, `description`, `keywords`, and `extensionPoints` which the shell indexes automatically.
+Features and their extensions are grouped in a tree: the parent feature ("Create Cluster") with child extensions ("Create Kind cluster", "Create Example provider cluster") indented beneath it. The search index is built from plugin extension metadata — each `ocm-resource-manager.module` declares `id`, `description`, `keywords`, and `extensionPoints` which the shell indexes automatically.
 
 ## Goal
 
 New plugin features should be automatically discoverable via search based on the plugin registry alone — no separate search metadata required.
 
-Each `fleetshift.module` should declare enough metadata (stable ID, description, keywords, extension points) that the shell can:
+Each `ocm-resource-manager.module` should declare enough metadata (stable ID, description, keywords, extension points) that the shell can:
 1. Automatically index it for search
 2. Allow other plugins to extend it with a formal contract
 3. Compose routes from the feature graph
@@ -56,11 +56,11 @@ interface PluginNavigateTo {
 
 ### Feature Declaration
 
-A `fleetshift.module` becomes a **feature declaration**. It gets an explicit, stable `id` and can advertise extension points by naming a custom extension type.
+A `ocm-resource-manager.module` becomes a **feature declaration**. It gets an explicit, stable `id` and can advertise extension points by naming a custom extension type.
 
 ```typescript
 /**
- * A feature declaration — a `fleetshift.module` with enough metadata
+ * A feature declaration — a `ocm-resource-manager.module` with enough metadata
  * for automatic search indexing and cross-plugin extension.
  */
 /**
@@ -105,7 +105,7 @@ interface ExtensionPointDeclaration {
 
 ### Extension Types
 
-Each extension point defines its own extension type (e.g., `fleetshift.cluster-provider`). The type determines domain-specific properties — a cluster provider has a `card`, `wizard`, and `icon`; a different extension point would have different properties.
+Each extension point defines its own extension type (e.g., `ocm-resource-manager.cluster-provider`). The type determines domain-specific properties — a cluster provider has a `card`, `wizard`, and `icon`; a different extension point would have different properties.
 
 Search is a **cross-cutting concern**. Any extension type can include a reserved `searchResult` property to customize how it appears in search. The shell indexes all extensions automatically from their `label`, `description`, and `keywords`.
 
@@ -134,22 +134,22 @@ The example provider below is illustrative; it does not represent an implemented
 
 ## Feature Graph
 
-The plugin registry forms a directed graph: plugins declare features (`fleetshift.module`), features declare extension points, and other plugins contribute extensions against those points.
+The plugin registry forms a directed graph: plugins declare features (`ocm-resource-manager.module`), features declare extension points, and other plugins contribute extensions against those points.
 
 ```mermaid
 graph TD
     subgraph "day-one-plugin (key: day-one)"
-        F["fleetshift.module<br/>id: create-cluster<br/>label: Create Cluster"]
-        EP["extensionPoint: providers<br/>type: fleetshift.cluster-provider"]
+        F["ocm-resource-manager.module<br/>id: create-cluster<br/>label: Create Cluster"]
+        EP["extensionPoint: providers<br/>type: ocm-resource-manager.cluster-provider"]
         F --> EP
     end
 
     subgraph "example-plugin (key: example)"
-        E1["fleetshift.cluster-provider<br/>id: example<br/>label: Example provider"]
+        E1["ocm-resource-manager.cluster-provider<br/>id: example<br/>label: Example provider"]
     end
 
     subgraph "kind-plugin (key: kind)"
-        E2["fleetshift.cluster-provider<br/>id: kind<br/>label: Kind"]
+        E2["ocm-resource-manager.cluster-provider<br/>id: kind<br/>label: Kind"]
     end
 
     EP -.->|"registers against"| E1
@@ -162,7 +162,7 @@ The shell reads the plugin registry and builds a flat search index with parent�
 
 ```mermaid
 flowchart LR
-    R["Plugin Registry"] --> M["Scan fleetshift.module<br/>extensions"]
+    R["Plugin Registry"] --> M["Scan ocm-resource-manager.module<br/>extensions"]
     M --> IDX["Search Index"]
     R --> X["Scan all other<br/>extension types"]
     X --> MATCH{"Match type to<br/>extensionPoints?"}
@@ -187,7 +187,7 @@ flowchart LR
 
 ## Example: Cluster Creation
 
-The "Create Cluster" page lives at `/create-cluster` (slug derived from label). It shows a list of available cluster providers. Selecting a provider navigates to a sub-path like `/create-cluster/example`. Provider plugins extend this feature by registering a `fleetshift.cluster-provider` extension.
+The "Create Cluster" page lives at `/create-cluster` (slug derived from label). It shows a list of available cluster providers. Selecting a provider navigates to a sub-path like `/create-cluster/example`. Provider plugins extend this feature by registering a `ocm-resource-manager.cluster-provider` extension.
 
 ### Feature: Create Cluster page (day-one-plugin)
 
@@ -195,7 +195,7 @@ Plugin key: `"day-one"`, extension id: `"create-cluster"` → global feature ID:
 
 ```json
 {
-  "type": "fleetshift.module",
+  "type": "ocm-resource-manager.module",
   "properties": {
     "id": "create-cluster",
     "label": "Create Cluster",
@@ -205,7 +205,7 @@ Plugin key: `"day-one"`, extension id: `"create-cluster"` → global feature ID:
     "extensionPoints": {
       "providers": {
         "description": "Cluster providers available in the creation wizard",
-        "type": "fleetshift.cluster-provider"
+        "type": "ocm-resource-manager.cluster-provider"
       }
     }
   }
@@ -216,11 +216,11 @@ The Go backend resolves the route: `"Create Cluster"` → slug `create-cluster` 
 
 ### Extension: Example provider provider (example-plugin)
 
-The extension type is `fleetshift.cluster-provider` — matching the extension point declaration. Domain-specific properties (`card`, `wizard`) are defined by the extension point contract. Search properties (`searchResult`, `searchIcon`) are reserved and handled by the shell.
+The extension type is `ocm-resource-manager.cluster-provider` — matching the extension point declaration. Domain-specific properties (`card`, `wizard`) are defined by the extension point contract. Search properties (`searchResult`, `searchIcon`) are reserved and handled by the shell.
 
 ```json
 {
-  "type": "fleetshift.cluster-provider",
+  "type": "ocm-resource-manager.cluster-provider",
   "properties": {
     "id": "example",
     "label": "Example provider",
@@ -254,7 +254,7 @@ No custom search component — the shell renders the default search result using
 
 ```json
 {
-  "type": "fleetshift.cluster-provider",
+  "type": "ocm-resource-manager.cluster-provider",
   "properties": {
     "id": "kind",
     "label": "Kind",
@@ -273,10 +273,10 @@ Resolves to `/create-cluster/kind`.
 
 ### How the shell builds the search index
 
-1. Reads `fleetshift.module` extensions from the plugin registry
+1. Reads `ocm-resource-manager.module` extensions from the plugin registry
 2. For plugin key `"day-one"`, extension id `"create-cluster"` → registers feature `"day-one.create-cluster"` with title "Create Cluster", description, keywords, route `/create-cluster`
 3. Reads all other extension types and matches them to features via extension point declarations
-4. For Example provider `fleetshift.cluster-provider`: the shell knows `fleetshift.cluster-provider` belongs to `"day-one.create-cluster"` (from its `extensionPoints`). Resolves base path `/create-cluster` + `to.pathname` → `/create-cluster/example`. Inserts child search entry grouped under the parent. Uses `searchResult` and `searchIcon` if provided, otherwise renders default.
+4. For Example provider `ocm-resource-manager.cluster-provider`: the shell knows `ocm-resource-manager.cluster-provider` belongs to `"day-one.create-cluster"` (from its `extensionPoints`). Resolves base path `/create-cluster` + `to.pathname` → `/create-cluster/example`. Inserts child search entry grouped under the parent. Uses `searchResult` and `searchIcon` if provided, otherwise renders default.
 5. Same for Kind → `/create-cluster/kind`
 
 Search result for "cluster":
@@ -309,11 +309,11 @@ This matches the routing plugin's resolution: `PluginLink` and `usePluginNavigat
 
 ### Routing Convention
 
-Extensions should prefer defining their own `fleetshift.module` (own top-level route) over using relative `to` paths under a parent feature. Relative child routing only makes sense when the parent page renders an `<Outlet>` — i.e., the parent explicitly supports nested content.
+Extensions should prefer defining their own `ocm-resource-manager.module` (own top-level route) over using relative `to` paths under a parent feature. Relative child routing only makes sense when the parent page renders an `<Outlet>` — i.e., the parent explicitly supports nested content.
 
 | Pattern | When to use | Example |
 |---------|-------------|---------|
-| Own `fleetshift.module` | Extension is a standalone page (no `<Outlet>` in parent) | Signing Keys page at `/signing-keys` |
+| Own `ocm-resource-manager.module` | Extension is a standalone page (no `<Outlet>` in parent) | Signing Keys page at `/signing-keys` |
 | Relative `to` under parent | Parent page renders child content via `<Outlet>` | Example provider wizard at `/create-cluster/example` |
 
 If an extension declares a relative `to` but the target feature's page has no `<Outlet>`, the child route will never render. Developers should check the parent feature's contract before using relative paths.
@@ -332,7 +332,7 @@ Affected code: `generatePluginPages` in `server/internal/transport/http/uiconfig
 - [ ] **Developer tooling for the feature graph (post-POC):** The feature graph is internal — end users see pages and actions, not extensions. A developer-facing tool (MCP server, CLI skill, or Claude Code agent) that queries the graph ("show all extensions registered against `day-one.create-cluster`") would improve the plugin developer experience. Could also power the `/debug` console. Not POC scope.
 - [ ] **Non-page features (settings, toolbar actions):** Most non-page features are core platform concerns. If the feature has a page (e.g., Settings), search navigates there via normal routing. Hash fragments (`#section-id`) can deep-link to a specific section — the contract is that a `to` with a hash (e.g., `{ pathname: "settings", hash: "notifications" }`) requires a matching heading ID in the target page. Note: `hash` support is not yet implemented in the routing runtime. Toolbar actions (e.g., "Toggle glass theme") are trickier — selecting them in search would need to trigger a callback rather than a navigation. Needs design for action-type results.
 - [ ] **Inline actions from search:** Should some search results trigger actions directly (e.g., toggling a theme, opening a modal) rather than navigating? This is a UX question — command palette patterns (VS Code, Spotlight) do this, but it adds complexity and may confuse users who expect search to mean "find and go to". Needs UX input.
-- [ ] **Build-time validation of extension `to` params (post-POC):** A future FleetShift plugin SDK (wrapping the dynamic plugin SDK) could validate at build time that an extension's `to` params match the target feature's contract — e.g., that the parent feature declares an `<Outlet>` if a relative path is used. Runtime validation in the shell is also possible but less useful (the plugin is already built and shipped). SDK-level validation is the right layer for this.
+- [ ] **Build-time validation of extension `to` params (post-POC):** A future OCM Resource Manager plugin SDK (wrapping the dynamic plugin SDK) could validate at build time that an extension's `to` params match the target feature's contract — e.g., that the parent feature declares an `<Outlet>` if a relative path is used. Runtime validation in the shell is also possible but less useful (the plugin is already built and shipped). SDK-level validation is the right layer for this.
 - [ ] **Feature visibility and permissions (post-POC):** Features and extensions should respect the platform's RBAC model — a feature can declare a required permission (e.g., `"requires": "clusters.create"`) and the shell only shows it in search and navigation if the current user has that permission. This follows the same pattern as the rest of the platform's access control and will be designed alongside it. Not in POC scope.
 - [ ] **Reserved property enforcement:** `searchResult` and `searchIcon` are reserved across all extension types. The future SDK should enforce this at build time — error if a domain extension type redefines them with an incompatible signature. At runtime, the server should discard extensions that reference features which don't exist or aren't enabled for the current user.
 

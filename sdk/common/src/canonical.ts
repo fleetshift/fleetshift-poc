@@ -1,7 +1,7 @@
 /**
  * Canonical signed envelope construction for attestation signing.
  *
- * Port of fleetshift-poc/fleetshift-server/pkg/canonical/envelope.go.
+ * Port of ocm-resource-manager/server/pkg/canonical/envelope.go.
  * Both the Go server (verifier) and the browser (signer) must produce
  * byte-identical JSON from identical inputs.
  */

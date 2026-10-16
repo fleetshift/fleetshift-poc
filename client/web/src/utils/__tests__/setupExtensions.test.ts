@@ -19,7 +19,7 @@ function makeExt(
       requiresAuth: true,
       ...(priority !== undefined ? { priority } : {}),
     },
-    type: "fleetshift.setup",
+    type: "ocm-resource-manager.setup",
     pluginName: "test-plugin",
     uid: `test[${id}]`,
   } as ResolvedSetup;

@@ -1,4 +1,7 @@
-import type { InventoryResource, SearchResultRender } from "@fleetshift/common";
+import type {
+  InventoryResource,
+  SearchResultRender,
+} from "@ocm-resource-manager/common";
 
 export function resolveKindCluster(
   resource: InventoryResource,

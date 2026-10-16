@@ -6,21 +6,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioinit"
 )
 
 func TestInstallDexConfig(t *testing.T) {
 	t.Parallel()
 	body := installTestDexConfig(t, "error")
 	for _, want := range []string{
-		"issuer: https://fleetshift-sandbox.localhost:8085/idp",
+		"issuer: https://ocm-resource-manager.localhost:8085/idp",
 		"http: 127.0.0.1:5556",
 		"preferredUsername: \"dev-user\"",
-		"id: fleetshift-ui",
-		"id: fleetshift-cli",
-		"id: fleetshift-signing",
-		"https://fleetshift-sandbox.localhost:8085/app/auth/callback",
-		"https://fleetshift-sandbox.localhost:8085/app/silent-renew.html",
+		"id: ocm-resource-manager-ui",
+		"id: ocm-resource-manager-cli",
+		"id: ocm-resource-manager-signing",
+		"name: OCM Resource Manager API",
+		"name: OCM Resource Manager console",
+		"name: fleetctl",
+		"name: OCM Resource Manager signing enrollment",
+		"https://ocm-resource-manager.localhost:8085/app/auth/callback",
+		"https://ocm-resource-manager.localhost:8085/app/silent-renew.html",
 		"level: \"error\"",
 		"format: \"text\"",
 	} {
@@ -32,8 +36,8 @@ func TestInstallDexConfig(t *testing.T) {
 		"tlsCert:",
 		"tlsKey:",
 		"allowedOrigins:",
-		"fleetshift-ops",
-		"fleetshift-dev",
+		"ocm-resource-manager-ops",
+		"ocm-resource-manager-dev",
 	} {
 		if strings.Contains(body, bad) {
 			t.Fatalf("config unexpectedly contains %q\n%s", bad, body)

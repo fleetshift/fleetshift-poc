@@ -3,7 +3,7 @@ package bootstrap_test
 import (
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
+	"github.com/stolostron/ocm-resource-manager/server/internal/bootstrap"
 )
 
 func TestDeriveUIOrigin(t *testing.T) {

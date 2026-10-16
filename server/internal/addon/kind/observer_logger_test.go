@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func fixedNow() time.Time {

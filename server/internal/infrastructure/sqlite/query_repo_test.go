@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/queryrepotest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain/queryrepotest"
 )
 
 // TestQueryRepo exercises the full QueryRepository contract against
@@ -40,7 +40,7 @@ func TestQueryRepo_StringLabelFilterReusesNumberedBinds(t *testing.T) {
 	defer tx.Rollback()
 
 	at := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
+	rt := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	if err := tx.ExtensionResources().CreateType(context.Background(), domain.NewExtensionResourceType(
 		rt, "v1", "clusters", at, domain.WithInventory(),
 	)); err != nil {

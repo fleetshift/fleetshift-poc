@@ -1,6 +1,6 @@
 # Extension Validation — Runtime Trust Boundary for Cross-Plugin Extensions
 
-**Epic:** [OME-3 — Addon / Extension Model](https://redhat.atlassian.net/browse/OME-3)
+**Epic:** OME-3 — Addon / Extension Model
 **Depends on:** [Feature Contracts](./feature-contracts.md)
 **Status:** Draft
 
@@ -88,7 +88,7 @@ export type ExtensionPointDeclaration = {
 };
 ```
 
-The `validate` function is provided by the module that declares the extension point — the "provider" side of the trust boundary. For example, a core plugin that declares `fleetshift.cluster-provider` as an extension point can validate that incoming cluster-provider extensions actually resolve their `card`, `wizard`, and `icon` CodeRefs to renderable components.
+The `validate` function is provided by the module that declares the extension point — the "provider" side of the trust boundary. For example, a core plugin that declares `ocm-resource-manager.cluster-provider` as an extension point can validate that incoming cluster-provider extensions actually resolve their `card`, `wizard`, and `icon` CodeRefs to renderable components.
 
 ### Generic `ExtensionProperties<TExtras>`
 
@@ -116,10 +116,10 @@ export type ClusterProviderProperties = ExtensionProperties<ClusterProviderExtra
 export type OnboardingActionProperties = ExtensionProperties<OnboardingActionExtras>;
 ```
 
-The `FleetshiftExtension` generic also uses it:
+The `ResourceManagerExtension` generic also uses it:
 
 ```typescript
-export type FleetshiftExtension<
+export type ResourceManagerExtension<
   TType extends string = string,
   TExtra extends Record<string, unknown> = Record<string, unknown>,
 > = {
@@ -132,7 +132,7 @@ This gives full control: `BaseExtensionProperties` is the mandatory, non-overrid
 
 ### Runtime types
 
-New file `common/src/validation.ts` (re-exported from `@fleetshift/common`). These types live in common because any plugin can be an extension point owner — not just the shell:
+New file `common/src/validation.ts` (re-exported from `@ocm-resource-manager/common`). These types live in common because any plugin can be an extension point owner — not just the shell:
 
 ```typescript
 export type ExtensionValidationResult = {
@@ -198,7 +198,7 @@ For `createModule()`, `extensionPoints` entries now require a `validate` CodeRef
 
 ### New hook: `useValidatedExtensions`
 
-New file `common/src/useValidatedExtensions.ts` (re-exported from `@fleetshift/common`). Any plugin that owns an extension point needs this hook:
+New file `common/src/useValidatedExtensions.ts` (re-exported from `@ocm-resource-manager/common`). Any plugin that owns an extension point needs this hook:
 
 ```typescript
 function useValidatedExtensions<T extends Extension>(
@@ -266,7 +266,7 @@ The hook must find and load the provider's `validate` function automatically —
 
 **Discovery flow:**
 
-1. Given the extension type being queried (e.g., `fleetshift.cluster-provider`), the hook walks all resolved module extensions to find the one whose `extensionPoints` declares a matching `type`.
+1. Given the extension type being queried (e.g., `ocm-resource-manager.cluster-provider`), the hook walks all resolved module extensions to find the one whose `extensionPoints` declares a matching `type`.
 2. From the matching module extension, the hook reads the `validate` CodeRef string (e.g., `"ClusterProviderValidator.validate"`).
 3. It parses the CodeRef into `moduleName` (`ClusterProviderValidator`) and `exportName` (`validate`).
 4. It determines the owning plugin's scope from the module extension's plugin metadata — the `pluginName` (e.g., `core-plugin`).
@@ -314,25 +314,25 @@ The `exposedModules` map is already present in the build-time `plugin-manifest.j
 
 **`_validators` hoisting at build time:**
 
-Scalprum's CodeRef resolution only processes top-level extension properties — it does not walk into nested objects like `extensionPoints.providers.validate`. The `FleetshiftPlugin` build step hoists the `validate` CodeRef into a top-level `_validators` property so Scalprum auto-resolves it:
+Scalprum's CodeRef resolution only processes top-level extension properties — it does not walk into nested objects like `extensionPoints.providers.validate`. The `ResourceManagerPlugin` build step hoists the `validate` CodeRef into a top-level `_validators` property so Scalprum auto-resolves it:
 
 ```typescript
-// Build-time generated — FleetshiftPlugin hoists extensionPoint validators
+// Build-time generated — ResourceManagerPlugin hoists extensionPoint validators
 // into a top-level _validators property that Scalprum will auto-resolve
 {
-  "type": "fleetshift.module",
+  "type": "ocm-resource-manager.module",
   "properties": {
     "id": "clusters",
     "component": { "$codeRef": "ClustersModule.default" },
     "extensionPoints": { ... },
     "_validators": {
-      "fleetshift.cluster-provider": { "$codeRef": "ClusterProviderValidator.validate" }
+      "ocm-resource-manager.cluster-provider": { "$codeRef": "ClusterProviderValidator.validate" }
     }
   }
 }
 ```
 
-By the time `useResolvedExtensions` returns the module extension, `_validators["fleetshift.cluster-provider"]` is already a resolved function — no manual module loading needed. The `_` prefix signals this is an internal build-generated property. The hook reads it from the resolved module extension and calls it directly. The `FleetshiftPlugin` build step already walks extension properties — adding the hoist is mechanical.
+By the time `useResolvedExtensions` returns the module extension, `_validators["ocm-resource-manager.cluster-provider"]` is already a resolved function — no manual module loading needed. The `_` prefix signals this is an internal build-generated property. The hook reads it from the resolved module extension and calls it directly. The `ResourceManagerPlugin` build step already walks extension properties — adding the hoist is mechanical.
 
 **Edge case access:** The validate function is also accessible via `pluginStore.getExposedModule` for edge cases — debugging, manual re-validation, or extension point owners who want to call their own validator explicitly in component code. The `exposedModules` entry guarantees the function is loadable by any consumer.
 
@@ -371,9 +371,9 @@ createModule({
   component: { $codeRef: "ClustersPage.default" },
   icon: { $codeRef: "ClustersPage.ClustersIcon" },
   extensionPoints: {
-    "fleetshift.cluster-provider": {
+    "ocm-resource-manager.cluster-provider": {
       description: "Cluster creation providers",
-      type: "fleetshift.cluster-provider",
+      type: "ocm-resource-manager.cluster-provider",
       // No validate — build fails
     },
   },
@@ -401,9 +401,9 @@ createModule({
   component: { $codeRef: "ClustersPage.default" },
   icon: { $codeRef: "ClustersPage.ClustersIcon" },
   extensionPoints: {
-    "fleetshift.cluster-provider": {
+    "ocm-resource-manager.cluster-provider": {
       description: "Cluster creation providers",
-      type: "fleetshift.cluster-provider",
+      type: "ocm-resource-manager.cluster-provider",
       validate: { $codeRef: "ClusterProviderValidator.validate" },
     },
   },
@@ -415,7 +415,7 @@ createModule({
 New file exposed via `exposedModules: { ExampleValidation: "./src/validate.ts" }` (in the example plugin's `rspack.config.ts`):
 
 ```typescript
-import type { ExtensionValidationResult } from "@fleetshift/build-utils";
+import type { ExtensionValidationResult } from "@ocm-resource-manager/build-utils";
 
 // What this function checks depends on the extension's contract with the
 // backend. The base check (endpoint reachability) may change as the
@@ -436,7 +436,7 @@ export async function isValid(): Promise<ExtensionValidationResult> {
 
 ### Provider-side validation function
 
-The module that declares `fleetshift.cluster-provider` as an extension point provides a `validate` function. This function receives each incoming extension's resolved properties and checks structural conformance.
+The module that declares `ocm-resource-manager.cluster-provider` as an extension point provides a `validate` function. This function receives each incoming extension's resolved properties and checks structural conformance.
 
 In the module's extension point declaration (in the plugin's `extensions` array via `createModule`):
 
@@ -447,9 +447,9 @@ createModule({
   component: { $codeRef: "ClustersPage.default" },
   icon: { $codeRef: "ClustersPage.ClustersIcon" },
   extensionPoints: {
-    "fleetshift.cluster-provider": {
+    "ocm-resource-manager.cluster-provider": {
       description: "Cluster creation providers shown in the Create Cluster wizard",
-      type: "fleetshift.cluster-provider",
+      type: "ocm-resource-manager.cluster-provider",
       validate: { $codeRef: "ClusterProviderValidator.validate" },
     },
   },
@@ -466,7 +466,7 @@ The validation function exposed via `exposedModules: { ClusterProviderValidator:
 export function validate(
   extension: { type: string; properties: Record<string, unknown> },
 ): boolean {
-  if (extension.type !== "fleetshift.cluster-provider") {
+  if (extension.type !== "ocm-resource-manager.cluster-provider") {
     console.warn(`[ClusterProviderValidator] Unexpected type: ${extension.type}`);
     return false;
   }
@@ -495,7 +495,7 @@ Extension manifest (cluster-provider with `isValidExtension`):
 
 ```json
 {
-  "type": "fleetshift.cluster-provider",
+  "type": "ocm-resource-manager.cluster-provider",
   "properties": {
     "id": "example",
     "label": "Example Kubernetes Provider",
@@ -512,7 +512,7 @@ Module manifest (extension point owner with `_validators` hoisted at build time)
 
 ```json
 {
-  "type": "fleetshift.module",
+  "type": "ocm-resource-manager.module",
   "properties": {
     "id": "clusters",
     "label": "Clusters",
@@ -521,18 +521,18 @@ Module manifest (extension point owner with `_validators` hoisted at build time)
     "extensionPoints": {
       "providers": {
         "description": "Cluster providers available in the creation wizard",
-        "type": "fleetshift.cluster-provider",
+        "type": "ocm-resource-manager.cluster-provider",
         "validate": { "$codeRef": "ClusterProviderValidator.validate" }
       }
     },
     "_validators": {
-      "fleetshift.cluster-provider": { "$codeRef": "ClusterProviderValidator.validate" }
+      "ocm-resource-manager.cluster-provider": { "$codeRef": "ClusterProviderValidator.validate" }
     }
   }
 }
 ```
 
-The `_validators` property is generated by the `FleetshiftPlugin` build step — the developer only writes `extensionPoints.*.validate`. The build hoists the CodeRef into `_validators` keyed by extension point type so Scalprum auto-resolves it alongside other top-level CodeRefs.
+The `_validators` property is generated by the `ResourceManagerPlugin` build step — the developer only writes `extensionPoints.*.validate`. The build hoists the CodeRef into `_validators` keyed by extension point type so Scalprum auto-resolves it alongside other top-level CodeRefs.
 
 ### Runtime flow
 
@@ -546,12 +546,12 @@ sequenceDiagram
     EPOwner->>Scalprum: useValidatedExtensions(isClusterProviderExtension)
     Scalprum->>EPOwner: [example, kind] (resolved CodeRefs)
 
-    Note over EPOwner: Discovery — find owner module for fleetshift.cluster-provider
+    Note over EPOwner: Discovery — find owner module for ocm-resource-manager.cluster-provider
     EPOwner->>Scalprum: useResolvedExtensions(isModuleExtension)
     Scalprum->>EPOwner: [clusters, ...] (modules with resolved _validators)
 
     Note over EPOwner: Pass 1 — Provider validation (synchronous)
-    Note over EPOwner: clusters._validators["fleetshift.cluster-provider"]<br/>already resolved by Scalprum
+    Note over EPOwner: clusters._validators["ocm-resource-manager.cluster-provider"]<br/>already resolved by Scalprum
     EPOwner->>EPOwner: validate(example) → true
     EPOwner->>EPOwner: validate(kind) → true
 
@@ -577,7 +577,7 @@ sequenceDiagram
     Note over Core: properties.wizard is undefined (CodeRef failed to resolve)
     Core->>Core: console.warn("missing resolved 'wizard' component")
     Core-->>EPOwner: false
-    EPOwner->>EPOwner: console.warn("[FleetShift] Extension 'example' rejected (provider)")
+    EPOwner->>EPOwner: console.warn("[OCM Resource Manager] Extension 'example' rejected (provider)")
     Note over EPOwner: Example provider excluded — self-validation skipped
 ```
 
@@ -598,7 +598,7 @@ sequenceDiagram
     ExampleProvider->>Backend: GET /api/v1/integrations/example/status
     Backend-->>ExampleProvider: 503 Service Unavailable
     ExampleProvider-->>EPOwner: { valid: false, reason: "Example backend unreachable" }
-    EPOwner->>EPOwner: console.warn("[FleetShift] Extension 'example' rejected (self): Example backend unreachable")
+    EPOwner->>EPOwner: console.warn("[OCM Resource Manager] Extension 'example' rejected (self): Example backend unreachable")
     Note over EPOwner: Example provider excluded — not cached, retried next call
 ```
 
@@ -615,7 +615,7 @@ The `/debug` page (`web/src/pages/DebugPage.tsx`) gains a new accordion panel:
   - Count: N validated, M rejected
   - Per rejection: extension ID, type, plugin name, reason, source (`self` or `provider`)
   - Per validated: extension ID, type, plugin name, checkmark
-- A Scalprum shared store is exposed by the shell and populated by `useValidatedExtensions`. Consumed cross-MF via a `useValidationResults` hook (re-exported from `@fleetshift/common`) — no React context provider or additional singletons needed.
+- A Scalprum shared store is exposed by the shell and populated by `useValidatedExtensions`. Consumed cross-MF via a `useValidationResults` hook (re-exported from `@ocm-resource-manager/common`) — no React context provider or additional singletons needed.
 - Rejections are grouped by source so developers can quickly distinguish "my backend is down" (self) from "my CodeRefs didn't resolve" (provider).
 
 ## Migration
@@ -627,21 +627,21 @@ The `/debug` page (`web/src/pages/DebugPage.tsx`) gains a new accordion panel:
 3. Add required `validate: EncodedCodeRef` to `ExtensionPointDeclaration`.
 4. Add `isValidExtension` CodeRef validation to the shared base property validator (applies to all types).
 5. Add `validate` CodeRef validation to extension point declaration checks in `validateModuleProperties()`.
-6. Add `_validators` hoisting to `FleetshiftPlugin` — during manifest generation, walk each module extension's `extensionPoints`, and emit a top-level `_validators` property mapping each extension point `type` to its `validate` CodeRef. This ensures Scalprum auto-resolves the validator alongside other top-level CodeRefs.
+6. Add `_validators` hoisting to `ResourceManagerPlugin` — during manifest generation, walk each module extension's `extensionPoints`, and emit a top-level `_validators` property mapping each extension point `type` to its `validate` CodeRef. This ensures Scalprum auto-resolves the validator alongside other top-level CodeRefs.
 7. Update all test fixtures in `validate.test.ts` and `builders.test.ts` to include `isValidExtension`, `validate`, and `_validators`.
 8. Export `ExtensionValidationResult` from `index.ts`.
 
-### Phase 1.5: Backend Registry (fleetshift-poc)
+### Phase 1.5: Backend Registry (ocm-resource-manager)
 
 1. Add `ExposedModules map[string]string` field to the Go `pluginManifest` struct in `uiconfig.go`. This field already exists in the build-time `plugin-manifest.json` — the backend currently strips it because the struct does not define it.
 2. The `exposedModules` field enables edge-case direct access via `pluginStore.getExposedModule()` for debugging and manual re-validation. The primary resolution path (`_validators` hoisting) does not depend on it.
 
 ### Phase 2: Runtime Types and Hook
 
-1. Add `validation.ts` with runtime types (including `ValidationRejectionSource`, `SelfValidationCache`) to `common/src/` and re-export from `@fleetshift/common`. Plugins that own extension points need these types.
+1. Add `validation.ts` with runtime types (including `ValidationRejectionSource`, `SelfValidationCache`) to `common/src/` and re-export from `@ocm-resource-manager/common`. Plugins that own extension points need these types.
 2. Add `useValidatedExtensions.ts` hook in `common/src/` — implements both self-validation and provider-validation passes with caching. Available to any plugin, not just the shell.
 3. Add extension point `validate` CodeRef resolution logic (lookup extension point declaration from parent module, resolve `validate` CodeRef).
-4. Create a Scalprum shared store for validation results in `web/` (shell exposes it). Add `useValidationResults` hook in `common/` — wraps the Scalprum store accessor, re-exported from `@fleetshift/common` so any plugin can read validation state without depending on React context or singletons.
+4. Create a Scalprum shared store for validation results in `web/` (shell exposes it). Add `useValidationResults` hook in `common/` — wraps the Scalprum store accessor, re-exported from `@ocm-resource-manager/common` so any plugin can read validation state without depending on React context or singletons.
 
 ### Phase 3: Consumption Site Migration
 
@@ -674,7 +674,7 @@ The `/debug` page (`web/src/pages/DebugPage.tsx`) gains a new accordion panel:
 - **Cache successes, retry failures.** Successful self-validation results are cached in a shared `SelfValidationCache` (keyed by extension ID). Subsequent `useValidatedExtensions` calls from any consumer skip self-validation for cached extensions. Failed results are **not** cached — each call retries, giving the extension a chance to recover (e.g., backend restarts). The cache is invalidated when the backend signals an orchestration change (new plugin installed/removed), ensuring newly available or removed extensions are re-evaluated. Provider validation is not cached — it runs every time because the provider's contract may evolve independently.
 - **Not cached across page loads.** Each browser session re-validates. This is intentional — extension validity can change (backend goes down, credentials expire). Re-validation on refresh is cheap since the check is a single lightweight API call per extension.
 - **Hook wires validation internally.** The `useValidatedExtensions` hook discovers and calls the provider's validate function automatically — the consumer does not pass a validator, and the extension point owner cannot skip it. This prevents the case where a developer registers a validate CodeRef but never calls it. The hook is the enforcement point; the developer only implements the function.
-- **`_validators` hoisting at build time.** The `FleetshiftPlugin` build step hoists `validate` CodeRefs from `extensionPoints` declarations into a top-level `_validators` property on the module extension. This lets Scalprum auto-resolve them alongside other CodeRefs. Without hoisting, Scalprum would not resolve nested `extensionPoints` objects, and the hook would need to manually parse CodeRef strings and call `getExposedModule`. Hoisting avoids that complexity — the hook just reads the already-resolved function. The `_` prefix signals this is an internal build-generated property.
+- **`_validators` hoisting at build time.** The `ResourceManagerPlugin` build step hoists `validate` CodeRefs from `extensionPoints` declarations into a top-level `_validators` property on the module extension. This lets Scalprum auto-resolve them alongside other CodeRefs. Without hoisting, Scalprum would not resolve nested `extensionPoints` objects, and the hook would need to manually parse CodeRef strings and call `getExposedModule`. Hoisting avoids that complexity — the hook just reads the already-resolved function. The `_` prefix signals this is an internal build-generated property.
 - **`exposedModules` in backend registry.** The Go `pluginManifest` struct must include `ExposedModules map[string]string` so the registry serves it. The build already writes these entries; the backend currently strips them. Adding the field enables edge-case direct access via `getExposedModule` for debugging and manual re-validation.
 - **`reason` is developer-facing.** Rejection reasons appear in the console and `/debug` page, not in the main UI. End users simply do not see invalid extensions. The `source` field on rejections helps developers locate the problem: their own plugin (`self`) or the consumer's expectations (`provider`).
 

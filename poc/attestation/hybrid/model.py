@@ -396,7 +396,7 @@ class AddonPlacementStrategy:
 class ManifestEnvelope:
     """A single typed manifest/resource item within a delivery.
 
-    Analogous to fleetshift-server's domain.Manifest: each item carries
+    Analogous to the server's domain.Manifest: each item carries
     an explicit resource_type so receivers know how to parse the opaque
     content.  Order within a manifests list may be significant.
     """

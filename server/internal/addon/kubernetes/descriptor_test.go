@@ -3,8 +3,8 @@ package kubernetes_test
 import (
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestDescriptor_DeclaresDeliveryAndInventoryCapabilities(t *testing.T) {
@@ -49,11 +49,11 @@ func TestInventorySchema_ObjectInventoryShape(t *testing.T) {
 	if s.ResourceType != kubernetes.ObjectResourceType {
 		t.Errorf("ResourceType = %q, want %q", s.ResourceType, kubernetes.ObjectResourceType)
 	}
-	if s.ProtoPackage != "kubernetes.fleetshift.v1" {
-		t.Errorf("ProtoPackage = %q, want %q", s.ProtoPackage, "kubernetes.fleetshift.v1")
+	if s.ProtoPackage != "ocm.kubernetes.v1alpha" {
+		t.Errorf("ProtoPackage = %q, want %q", s.ProtoPackage, "ocm.kubernetes.v1alpha")
 	}
-	if s.Version != "v1" {
-		t.Errorf("Version = %q, want %q", s.Version, "v1")
+	if s.Version != "v1alpha" {
+		t.Errorf("Version = %q, want %q", s.Version, "v1alpha")
 	}
 	if s.CollectionID != string(kubernetes.ObjectCollectionID) {
 		t.Errorf("CollectionID = %q, want %q", s.CollectionID, kubernetes.ObjectCollectionID)

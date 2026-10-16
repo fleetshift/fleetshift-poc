@@ -22,14 +22,14 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
 )
 
 // buildClusterService creates a RegisteredService backed only by the
@@ -219,7 +219,7 @@ func TestDynamicMux_ReplaceSwapsService(t *testing.T) {
 	mux.ReplaceDesc(svc2.Desc)
 
 	info := mux.ServiceInfo()
-	if _, ok := info["kind.fleetshift.v1.ClusterService"]; !ok {
+	if _, ok := info["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Fatal("expected service present after Replace")
 	}
 }
@@ -231,7 +231,7 @@ func TestDynamicMux_ReplaceAddsIfAbsent(t *testing.T) {
 	mux.ReplaceDesc(svc.Desc)
 
 	info := mux.ServiceInfo()
-	if _, ok := info["kind.fleetshift.v1.ClusterService"]; !ok {
+	if _, ok := info["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Fatal("expected service added by Replace")
 	}
 }
@@ -247,7 +247,7 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 
 	req1 := createClusterRequest(svc1, "before-replace")
 	resp1 := dynamicpb.NewMessage(svc1.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/CreateCluster", req1, resp1); err != nil {
+	if err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/CreateCluster", req1, resp1); err != nil {
 		t.Fatalf("CreateCluster before replace: %v", err)
 	}
 
@@ -259,7 +259,7 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 	getReq.Set(svc2.Descriptors.GetRequest.Fields().ByName("name"),
 		protoreflect.ValueOfString("clusters/before-replace"))
 	getResp := dynamicpb.NewMessage(svc2.Descriptors.Resource)
-	err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp)
+	err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/GetCluster", getReq, getResp)
 	if err == nil {
 		t.Fatal("expected NotFound from replaced handler, got nil")
 	}
@@ -274,7 +274,7 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 	// But a new create through the replaced handler should succeed.
 	req2 := createClusterRequest(svc2, "after-replace")
 	resp2 := dynamicpb.NewMessage(svc2.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/CreateCluster", req2, resp2); err != nil {
+	if err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/CreateCluster", req2, resp2); err != nil {
 		t.Fatalf("CreateCluster after replace: %v", err)
 	}
 	nameField := svc2.Descriptors.Resource.Fields().ByName("name")
@@ -292,9 +292,9 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	}
 
 	info := mux.ServiceInfo()
-	si, ok := info["kind.fleetshift.v1.ClusterService"]
+	si, ok := info["ocm.kind.v1alpha.ClusterService"]
 	if !ok {
-		t.Fatal("ServiceInfo missing kind.fleetshift.v1.ClusterService")
+		t.Fatal("ServiceInfo missing ocm.kind.v1alpha.ClusterService")
 	}
 	if len(si.Methods) != 5 {
 		t.Errorf("method count = %d, want 5", len(si.Methods))
@@ -325,8 +325,8 @@ func TestDynamicMux_CompositeServiceInfoProvider(t *testing.T) {
 	}
 
 	info := composite.GetServiceInfo()
-	if _, ok := info["kind.fleetshift.v1.ClusterService"]; !ok {
-		t.Error("composite info missing dynamic service kind.fleetshift.v1.ClusterService")
+	if _, ok := info["ocm.kind.v1alpha.ClusterService"]; !ok {
+		t.Error("composite info missing dynamic service ocm.kind.v1alpha.ClusterService")
 	}
 }
 
@@ -341,7 +341,7 @@ func TestDynamicMux_UnregisteredServiceReturnsUnimplemented(t *testing.T) {
 
 	req := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/CreateCluster", req, resp)
+	err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/CreateCluster", req, resp)
 	if err == nil {
 		t.Fatal("expected error for unregistered service, got nil")
 	}
@@ -364,11 +364,11 @@ func TestDynamicMux_DeregisterMakesServiceUnreachable(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	mux.Deregister("kind.fleetshift.v1.ClusterService")
+	mux.Deregister("ocm.kind.v1alpha.ClusterService")
 
 	req := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/CreateCluster", req, resp)
+	err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/CreateCluster", req, resp)
 	if err == nil {
 		t.Fatal("expected error after deregister, got nil")
 	}
@@ -396,7 +396,7 @@ func TestDynamicMux_RegisterAndDispatch(t *testing.T) {
 
 	req := createClusterRequest(svc, "dyn-cluster-1")
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/CreateCluster", req, resp); err != nil {
+	if err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/CreateCluster", req, resp); err != nil {
 		t.Fatalf("CreateCluster via dynamic mux: %v", err)
 	}
 
@@ -424,7 +424,7 @@ func TestDynamicMux_StreamInterceptorFires(t *testing.T) {
 
 	req := createClusterRequest(svc, "interceptor-test")
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/kind.fleetshift.v1.ClusterService/CreateCluster", req, resp); err != nil {
+	if err := conn.Invoke(context.Background(), "/ocm.kind.v1alpha.ClusterService/CreateCluster", req, resp); err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
@@ -493,7 +493,7 @@ func replaceHTTPService(httpMux *dynamicapi.DynamicHTTPMux, svc *extensionresour
 	httpMux.ReplacePrefixHandler(prefix, handler)
 }
 
-const kindHTTPPrefix = "/apis/kind.fleetshift.io/v1/clusters"
+const kindHTTPPrefix = "/apis/kind.open-cluster-management.io/v1alpha/clusters"
 
 func httpCreateCluster(t *testing.T, baseURL, id string) *http.Response {
 	t.Helper()
@@ -599,8 +599,8 @@ func TestDynamicHTTPMux_ReregisterAfterDeregister(t *testing.T) {
 func TestDynamicHTTPMux_KeyedByFullPrefix(t *testing.T) {
 	kindCfg := clusterConfig(t)
 	secondaryCfg := clusterConfig(t)
-	secondaryCfg.ResourceType = "secondary.kind.fleetshift.io/Cluster"
-	secondaryCfg.ProtoPackage = "secondary.kind.fleetshift.v1"
+	secondaryCfg.ResourceType = "secondary.kind.open-cluster-management.io/Cluster"
+	secondaryCfg.ProtoPackage = "secondary.kind.ocm.v1alpha"
 
 	validator, err := protovalidate.New()
 	if err != nil {

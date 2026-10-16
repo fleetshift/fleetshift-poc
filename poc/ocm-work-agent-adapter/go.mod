@@ -1,13 +1,14 @@
-module github.com/fleetshift/fleetshift-poc/poc/ocm-work-agent-adapter
+module github.com/stolostron/ocm-resource-manager/poc/ocm-work-agent-adapter
 
 go 1.26.3
+
 toolchain go1.26.6
 
 require (
 	k8s.io/apimachinery v0.35.4
 	k8s.io/client-go v0.35.4
 	open-cluster-management.io/api v1.3.0
-	open-cluster-management.io/ocm v0.0.0
+	open-cluster-management.io/ocm v1.3.1-0.20260512031451-0e7867f85eb5
 )
 
 require (
@@ -60,7 +61,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
@@ -68,8 +69,8 @@ require (
 	golang.org/x/exp v0.0.0-20241217172543-b2144cdd0a67 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171 // indirect
@@ -91,5 +92,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace open-cluster-management.io/ocm => ../../reference/ocm

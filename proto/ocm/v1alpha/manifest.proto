@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/field_behavior.proto";
+
+// Manifest is an opaque declarative payload delivered to a target.
+message Manifest {
+  // Opaque dispatch label identifying the manifest kind (e.g. "api.kind.cluster").
+  string manifest_type = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Opaque content of the manifest.
+  bytes raw = 2 [(google.api.field_behavior) = REQUIRED];
+}

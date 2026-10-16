@@ -10,22 +10,22 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
+	"github.com/stolostron/ocm-resource-manager/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-resource-manager/server/internal/application"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
 	"google.golang.org/grpc"
 )
 
 // expectedGRPCServiceFamilies is the independent inventory of required gRPC
 // service registrations. Introspection alone cannot detect a missing expectation.
 var expectedGRPCServiceFamilies = []string{
-	"fleetshift.v1.DeploymentService",
-	"fleetshift.v1.AuthMethodService",
-	"fleetshift.v1.SignerEnrollmentService",
-	"fleetshift.v1.ResourceQueryService",
+	"ocm.v1alpha.DeploymentService",
+	"ocm.v1alpha.AuthMethodService",
+	"ocm.v1alpha.SignerEnrollmentService",
+	"ocm.v1alpha.ResourceQueryService",
 	"grpc.reflection.v1.ServerReflection",
 }
 
@@ -35,8 +35,8 @@ var expectedHTTPRouteFamilies = []string{
 	"/livez",
 	"/readyz",
 	"/api/ui/config",
-	"/v1/",
-	"/apis/fleetshift.io/",
+	"/v1alpha/",
+	"/apis/open-cluster-management.io/",
 	"/api/ui/setup/ws",
 	"/api/ui/events/ws",
 	"/api/ui/github-signing-keys/",
@@ -65,8 +65,8 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 		{http.MethodGet, "/livez"},
 		{http.MethodGet, "/readyz"},
 		{http.MethodGet, "/api/ui/config"},
-		{http.MethodGet, "/v1/deployments"},
-		{http.MethodGet, "/apis/fleetshift.io/v1/-:queryResources"},
+		{http.MethodGet, "/v1alpha/deployments"},
+		{http.MethodGet, "/apis/open-cluster-management.io/v1alpha/-:queryResources"},
 		{http.MethodGet, "/api/ui/setup/ws"},
 		{http.MethodGet, "/api/ui/events/ws"},
 		{http.MethodGet, "/api/ui/github-signing-keys/octocat"},
@@ -136,8 +136,8 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
 	// With an auth method present, exempt WS routes stay reachable while
 	// wrapped UI routes require a bearer token.
-	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
-	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	idp := oidctest.Start(t, oidctest.WithAudience("ocm-resource-manager"))
+	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
 	seedOIDCAuthMethod(t, dbPath, idp.OIDCConfig())
 
 	srv := startTestServerWithConfig(t, ConfigInput{
@@ -173,7 +173,7 @@ func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
 }
 
 func TestExpectedSurface_KindScriptedTargetsAndSchemasLive(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
 	srv := startTestServerWithConfig(t, ConfigInput{DBPath: dbPath}, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
 		kindDesc := kindaddon.Descriptor()
 		kindDesc.Capabilities = []domain.Capability{

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
 func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
@@ -40,8 +40,8 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 			Type: domain.AuthMethodTypeOIDC,
 			OIDC: &domain.OIDCConfig{
 				IssuerURL:             "https://issuer.example.com",
-				Audience:              "fleetshift",
-				KeyEnrollmentAudience: "fleetshift-enroll",
+				Audience:              "ocm-resource-manager",
+				KeyEnrollmentAudience: "ocm-resource-manager-enroll",
 				RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 					RegistryID: "github.com",
 					Expression: "claims.preferred_username",
@@ -88,7 +88,7 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 	if entry.JWKSURI != "https://issuer.example.com/jwks" {
 		t.Errorf("trust bundle JWKSURI = %q", entry.JWKSURI)
 	}
-	if entry.EnrollmentAudience != "fleetshift-enroll" {
+	if entry.EnrollmentAudience != "ocm-resource-manager-enroll" {
 		t.Errorf("trust bundle enrollment audience = %q", entry.EnrollmentAudience)
 	}
 	if entry.RegistrySubjectMapping == nil || entry.RegistrySubjectMapping.Expression != "claims.preferred_username" {
@@ -157,8 +157,8 @@ func TestProvisionIdPWorkflowSpec_Run_SkipsTrustBundleDeploymentWhenPlacementUns
 			Type: domain.AuthMethodTypeOIDC,
 			OIDC: &domain.OIDCConfig{
 				IssuerURL:             "https://issuer.example.com",
-				Audience:              "fleetshift",
-				KeyEnrollmentAudience: "fleetshift-enroll",
+				Audience:              "ocm-resource-manager",
+				KeyEnrollmentAudience: "ocm-resource-manager-enroll",
 			},
 		}),
 	}

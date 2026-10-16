@@ -1,4 +1,4 @@
-// Package resourcemanager models FleetShift's central resource-manager role.
+// Package resourcemanager models the platform's central resource manager role.
 // It performs ordinary authorization, stores ordered records, and couriers
 // evidence, but it is not a signing authority for user provenance.
 package resourcemanager
@@ -10,9 +10,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/merklelog"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/sparsemap"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/protocol"
+	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/internal/merklelog"
+	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/internal/sparsemap"
+	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/protocol"
 )
 
 const (

@@ -1,12 +1,12 @@
-# Verifiable Infrastructure Delivery with a Minimally Trusted Resource Manager
+# Verifiable Infrastructure Delivery with a Minimally Trusted Resource Manager Server
 
 ## 1. Purpose
 
 The system adds cryptographic protection for existing tenant infrastructure against compromise of the central resource manager.
 
-The resource manager remains the normal client-facing service. It accepts requests, performs the platform's primary authorization checks, stores state, routes deliveries, and returns ordinary responses. However, it does not possess user or workload signing credentials with which it can forge end-to-end provenance.
+The resource manager server remains the normal client-facing service. It accepts requests, performs the platform's primary authorization checks, stores state, routes deliveries, and returns ordinary responses. However, it does not possess user or workload signing credentials with which it can forge end-to-end provenance.
 
-Infrastructure changes on the attested delivery path are accepted only when a delivery agent independently verifies authentic provenance produced by an end user or trusted workload and validates the delivery using the existing FleetShift attestation model.
+Infrastructure changes on the attested delivery path are accepted only when a delivery agent independently verifies authentic provenance produced by an end user or trusted workload and validates the delivery using the existing OCM Resource Manager attestation model.
 
 The intended additional security guarantee is:
 
@@ -91,7 +91,7 @@ It:
 - validates tenant configuration;
 - validates user identity continuity;
 - verifies delivery signatures;
-- validates the inherited FleetShift attestation and constraint model;
+- validates the inherited OCM Resource Manager attestation and constraint model;
 - checks ordered-log inclusion;
 - applies only deliveries that pass its configured provenance-verification profile.
 
@@ -692,7 +692,7 @@ Ordinary queries may be signed for live verification but do not require durable 
 
 Deliveries use the ordered delivery log.
 
-The existing FleetShift attestation package remains the authoritative description of what was signed and why a concrete delivery is allowed. The user may sign an input while addons sign derived updates, placement, or opaque output; output-signing profiles may instead bind the exact delivered artifacts. Put and removal actions, expected generation, constraints, and evidence-kind separation retain the semantics and validation rules already exercised by the hybrid and Sigstore/TUF POCs.
+The existing OCM Resource Manager attestation package remains the authoritative description of what was signed and why a concrete delivery is allowed. The user may sign an input while addons sign derived updates, placement, or opaque output; output-signing profiles may instead bind the exact delivered artifacts. Put and removal actions, expected generation, constraints, and evidence-kind separation retain the semantics and validation rules already exercised by the hybrid and Sigstore/TUF POCs.
 
 This proposal adds continuity evidence for the user-signing portion of that package. Where the existing verifier expects a key binding, certificate, or trust-anchor lookup, it may instead validate:
 

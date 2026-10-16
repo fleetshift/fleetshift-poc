@@ -4,11 +4,11 @@ import os from "node:os";
 
 export const REQUIRED_MAXKEYS = 2000;
 export const REQUIRED_MAXBYTES = 200000;
-export const ALLOW_LOW_KEYRING_ENV = "FLEETSHIFT_E2E_ALLOW_LOW_KEYRING";
+export const ALLOW_LOW_KEYRING_ENV = "OCM_RM_E2E_ALLOW_LOW_KEYRING";
 export const KEYRING_DOCS_PATH = "docs/testing/end-to-end.md";
-export const SYSCTL_D_BASENAME = "zz-fleetshift-e2e-keys.conf";
+export const SYSCTL_D_BASENAME = "zz-ocm-resource-manager-e2e-keys.conf";
 export const SYSCTL_D_FILE = `/etc/sysctl.d/${SYSCTL_D_BASENAME}`;
-export const MACHINE_KEYRING_SEPARATOR = "FLEETSHIFT-E2E-KEYRING";
+export const MACHINE_KEYRING_SEPARATOR = "OCM_RM-E2E-KEYRING";
 
 const MAXKEYS_SYSCTL = "kernel.keys.maxkeys";
 const MAXBYTES_SYSCTL = "kernel.keys.maxbytes";

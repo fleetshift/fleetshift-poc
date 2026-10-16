@@ -1,6 +1,6 @@
 # MCOA Migration Guide
 
-This document covers migrating the existing MCOA (Multicluster Observability Addon) codebase to the new platform. For the platform's architecture, start with [architecture.md](architecture.md), then see [architecture/orchestration.md](architecture/orchestration.md) and [architecture/addon_integration.md](architecture/addon_integration.md) for the execution and addon-contract details this migration leans on most heavily.
+This document explores adapting the existing MCOA (Multicluster Observability Addon) codebase to the resource manager architecture. OCM references below name the addon-framework, ManifestWork, and related Kubernetes API-based components used by MCOA. For the platform's architecture, start with [architecture.md](architecture.md), then see [architecture/orchestration.md](architecture/orchestration.md) and [architecture/addon_integration.md](architecture/addon_integration.md) for the execution and addon-contract details this migration leans on most heavily.
 
 ## 1. OCM Adapter Mapping
 

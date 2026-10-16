@@ -80,7 +80,7 @@ Global flags:
 | `--server-tls` | disabled | Enable TLS for gRPC |
 | `--server-ca-file` | empty | Add PEM CA bundle for server certificate |
 | `--server-insecure` | disabled | Skip TLS certificate verification; debugging only |
-| `--config-dir` | `~/.config/fleetshift` | Directory containing `auth.json` |
+| `--config-dir` | `~/.config/ocm-resource-manager` | Directory containing `auth.json` |
 | `--insecure-storage` | disabled | Use plaintext files instead of OS keyring |
 
 `--server-ca-file` and `--server-insecure` require `--server-tls`.
@@ -172,7 +172,7 @@ The current default transport is plaintext gRPC unless `--server-tls` is set.
 ## Deployment Features
 
 Deployment commands use the static
-`fleetshift.v1.DeploymentService` protobuf service.
+`ocm.v1alpha.DeploymentService` protobuf service.
 
 ### Create deployment
 
@@ -256,14 +256,14 @@ Canonical qualified type form:
 Example:
 
 ```text
-kind.fleetshift.v1/clusters
+ocm.kind.v1alpha/clusters
 ```
 
 ### Resolve resource type
 
 Resource commands accept:
 
-- Qualified type: `kind.fleetshift.v1/clusters`
+- Qualified type: `ocm.kind.v1alpha/clusters`
 - Collection ID: `clusters`
 - Plural name: `Clusters`
 
@@ -305,7 +305,7 @@ supports `--page-size`.
 
 `fleetctl resource query`, also available as `resource search`, queries managed
 resources across the platform using the static
-`fleetshift.v1.ResourceQueryService`.
+`ocm.v1alpha.ResourceQueryService`.
 
 Flags:
 
@@ -425,7 +425,7 @@ through one unified model.
 
 Runtime differences should be hidden behind Scalprum/SDK adapters, while
 extension contracts, API clients, capabilities, context, and validation remain
-shared. If Scalprum lacks required Node features, FleetShift can extend or own
+shared. If Scalprum lacks required Node features, OCM Resource Manager can extend or own
 those additions rather than replacing the shared runtime with a separate CLI
 implementation.
 
@@ -654,9 +654,9 @@ Static services:
 
 | Feature | Service |
 | --- | --- |
-| Deployment lifecycle | `fleetshift.v1.DeploymentService` |
-| Cross-resource query | `fleetshift.v1.ResourceQueryService` |
-| Signing enrollment | `fleetshift.v1.SignerEnrollmentService` |
+| Deployment lifecycle | `ocm.v1alpha.DeploymentService` |
+| Cross-resource query | `ocm.v1alpha.ResourceQueryService` |
+| Signing enrollment | `ocm.v1alpha.SignerEnrollmentService` |
 | Resource discovery and descriptors | `grpc.reflection.v1.ServerReflection` |
 
 Addon-provided resources are currently invoked by the CLI through dynamically
@@ -694,7 +694,7 @@ state are Web UI representations.
 ## Current Gaps and Planned Coverage
 
 These gaps describe the current Go CLI surface. Some already have planned
-coverage in OME Jira; planned coverage does not mean implementation is done.
+coverage in the client architecture proposals; planned coverage does not mean implementation is done.
 
 ### Covered by planned architecture or existing tickets
 

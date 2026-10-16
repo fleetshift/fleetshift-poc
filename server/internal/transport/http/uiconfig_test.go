@@ -22,14 +22,14 @@ func TestGeneratePluginPages_GroupedModulePath(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "fleetshift.module-group",
+							Type: "ocm-resource-manager.module-group",
 							Properties: map[string]interface{}{
 								"id":    "settings",
 								"label": "Settings",
 							},
 						},
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "navigation",
 								"label":     "Navigation",
@@ -38,7 +38,7 @@ func TestGeneratePluginPages_GroupedModulePath(t *testing.T) {
 							},
 						},
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "auth",
 								"label":     "Authentication",
@@ -89,7 +89,7 @@ func TestGeneratePluginPages_UngroupedModulePath(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "clusters",
 								"label":     "Clusters",
@@ -129,14 +129,14 @@ func TestGenerateNavLayout_NestedGroups(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "fleetshift.module-group",
+							Type: "ocm-resource-manager.module-group",
 							Properties: map[string]interface{}{
 								"id":    "settings",
 								"label": "Settings",
 							},
 						},
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "navigation",
 								"label":     "Navigation",
@@ -145,7 +145,7 @@ func TestGenerateNavLayout_NestedGroups(t *testing.T) {
 							},
 						},
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "auth",
 								"label":     "Authentication",
@@ -163,7 +163,7 @@ func TestGenerateNavLayout_NestedGroups(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "clusters",
 								"label":     "Clusters",
@@ -232,7 +232,7 @@ func TestGenerateNavLayout_NoGroups(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "fleetshift.module",
+							Type: "ocm-resource-manager.module",
 							Properties: map[string]interface{}{
 								"id":        "clusters",
 								"label":     "Clusters",
@@ -258,8 +258,8 @@ func TestGenerateNavLayout_NoGroups(t *testing.T) {
 func TestHandleConfig_Unconfigured(t *testing.T) {
 	opts := UIConfigOptions{
 		UIOrigin:       "http://127.0.0.1:8085",
-		OIDCUIClientID: "fleetshift-ui",
-		OIDCUIScope:    "openid profile email groups audience:server:client_id:fleetshift",
+		OIDCUIClientID: "ocm-resource-manager-ui",
+		OIDCUIScope:    "openid profile email groups audience:server:client_id:ocm-resource-manager",
 		Logger:         slog.Default(),
 		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
 			return "", "", false, nil
@@ -293,8 +293,8 @@ func TestHandleConfig_Unconfigured(t *testing.T) {
 		t.Fatalf("oidc type = %T", resp["oidc"])
 	}
 	if oidc["authority"] != "" ||
-		oidc["clientId"] != "fleetshift-ui" ||
-		oidc["scope"] != "openid profile email groups audience:server:client_id:fleetshift" {
+		oidc["clientId"] != "ocm-resource-manager-ui" ||
+		oidc["scope"] != "openid profile email groups audience:server:client_id:ocm-resource-manager" {
 		t.Fatalf("oidc = %#v", oidc)
 	}
 	if _, present := oidc["authorizationEndpoint"]; present {
@@ -309,10 +309,10 @@ func TestHandleConfig_Unconfigured(t *testing.T) {
 }
 
 func TestHandleConfig_ConfiguredOIDC(t *testing.T) {
-	const uiScope = "openid profile email groups audience:server:client_id:fleetshift"
+	const uiScope = "openid profile email groups audience:server:client_id:ocm-resource-manager"
 	opts := UIConfigOptions{
 		UIOrigin:       "http://127.0.0.1:8085",
-		OIDCUIClientID: "fleetshift-ui",
+		OIDCUIClientID: "ocm-resource-manager-ui",
 		OIDCUIScope:    uiScope,
 		Logger:         slog.Default(),
 		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
@@ -339,7 +339,7 @@ func TestHandleConfig_ConfiguredOIDC(t *testing.T) {
 	oidc := resp["oidc"].(map[string]any)
 	if oidc["authority"] != "https://127.0.0.1:5556/dex" ||
 		oidc["authorizationEndpoint"] != "https://127.0.0.1:5556/dex/auth" ||
-		oidc["clientId"] != "fleetshift-ui" ||
+		oidc["clientId"] != "ocm-resource-manager-ui" ||
 		oidc["scope"] != uiScope {
 		t.Fatalf("oidc = %#v", oidc)
 	}
@@ -347,7 +347,7 @@ func TestHandleConfig_ConfiguredOIDC(t *testing.T) {
 
 func TestHandleConfig_AuthNil_OmitsAuthConfigured(t *testing.T) {
 	opts := UIConfigOptions{
-		OIDCUIClientID: "fleetshift-ui",
+		OIDCUIClientID: "ocm-resource-manager-ui",
 		Logger:         slog.Default(),
 		// AuthSnapshot intentionally nil.
 	}
@@ -450,7 +450,7 @@ func TestHandleConfig_IncludesPluginFields(t *testing.T) {
 					"version": "1.0.0",
 					"extensions": [
 						{
-							"type": "fleetshift.module",
+							"type": "ocm-resource-manager.module",
 							"properties": {
 								"id": "home",
 								"label": "Home",
@@ -472,7 +472,7 @@ func TestHandleConfig_IncludesPluginFields(t *testing.T) {
 	opts := UIConfigOptions{
 		WebDir:         dir,
 		UIOrigin:       "http://127.0.0.1:8085",
-		OIDCUIClientID: "fleetshift-ui",
+		OIDCUIClientID: "ocm-resource-manager-ui",
 		Logger:         slog.Default(),
 		AuthSnapshot: func(_ context.Context) (string, string, bool, error) {
 			return "", "", false, nil

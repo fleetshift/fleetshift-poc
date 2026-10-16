@@ -1,6 +1,6 @@
-// FleetShift global theme — inspired by OpenShift console design patterns
+// OCM Resource Manager global theme — inspired by OpenShift console design patterns
 
-.ome-app {
+.ocm-rm-app {
   .pf-v6-c-card {
     border-radius: var(--pf-t--global--border--radius--medium);
     box-shadow: none;
@@ -14,7 +14,7 @@
 }
 
 // Masthead logo — invert for dark mode visibility
-.ome-masthead-logo {
+.ocm-rm-masthead-logo {
   height: 36px;
   transition: filter 0.3s ease;
 
@@ -23,8 +23,24 @@
   }
 }
 
+.ocm-rm-masthead-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--sm);
+  width: max-content;
+  max-height: none;
+  color: var(--pf-t--global--text--color--regular);
+  font-size: var(--pf-t--global--font--size--sm);
+  white-space: nowrap;
+
+  small {
+    display: block;
+    font-size: var(--pf-t--global--font--size--sm);
+  }
+}
+
 // OIDC config error banner
-.ome-oidc-error {
+.ocm-rm-oidc-error {
   padding: 2rem;
   color: var(--pf-t--global--color--status--danger--default);
 }

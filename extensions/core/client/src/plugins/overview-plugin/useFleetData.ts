@@ -3,7 +3,7 @@ import {
   createResourceApi,
   extractClusterId,
   ResourceResult,
-} from "@fleetshift/common";
+} from "@ocm-resource-manager/common";
 import { createContext, useContext, useEffect, useState } from "react";
 
 export interface DashboardCluster {
@@ -28,7 +28,7 @@ export interface FleetData {
   error: string | null;
 }
 
-const STORAGE_KEY = "fleetshift:cluster-enrichment";
+const STORAGE_KEY = "ocm-resource-manager:cluster-enrichment";
 
 interface EnrichmentData {
   region: string;
@@ -196,7 +196,7 @@ export function useFleetData(): FleetData {
     async function load() {
       try {
         const raw = await clusterApi.searchAll({
-          filter: 'resourceType == "kind.fleetshift.io/Cluster"',
+          filter: 'resourceType == "kind.open-cluster-management.io/Cluster"',
         });
         if (!cancelled) {
           setClusters(mapClusters(raw));

@@ -3,7 +3,7 @@ import { $ } from "zx";
 import { resolve } from "node:path";
 import { importKeyValueArgs, requireOcCluster } from "../../scripts/common.mjs";
 const [command, ...rest] = importKeyValueArgs(process.argv.slice(2));
-await requireOcCluster("OME_CLUSTER_API");
+await requireOcCluster("OCM_RM_CLUSTER_API");
 const script = (name) => resolve(import.meta.dirname, `${name}.mjs`);
 
 // Keep target dispatch in one place while deployment steps stay independently runnable.
@@ -12,11 +12,11 @@ if (["deploy", "teardown"].includes(command)) {
   process.exit(0);
 }
 if (command === "status") {
-  await $`oc get all -n ${process.env.NAMESPACE || "fleetshift"}`;
+  await $`oc get all -n ${process.env.NAMESPACE || "ocm-resource-manager"}`;
   process.exit(0);
 }
 if (command === "logs") {
-  await $`oc logs -f deployment/fleetshift-server -n ${process.env.NAMESPACE || "fleetshift"} --all-containers`;
+  await $`oc logs -f deployment/ocm-resource-manager-server -n ${process.env.NAMESPACE || "ocm-resource-manager"} --all-containers`;
   process.exit(0);
 }
 if (command === "set-image") {
@@ -24,16 +24,16 @@ if (command === "set-image") {
     throw new Error(
       "TAG is required. Usage: npx nx run deploy:openshift:set-image -- TAG=<image-tag>",
     );
-  await $`oc tag quay.io/stolostron/fleetshift:${process.env.TAG} fleetshift-server:latest -n ${process.env.NAMESPACE || "fleetshift"}`;
+  await $`oc tag quay.io/stolostron/ocm-resource-manager:${process.env.TAG} ocm-resource-manager-server:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"}`;
   process.exit(0);
 }
 if (command === "reset-image") {
-  await $`oc tag --scheduled quay.io/stolostron/fleetshift-server:latest fleetshift-server:latest -n ${process.env.NAMESPACE || "fleetshift"}`;
+  await $`oc tag --scheduled quay.io/stolostron/ocm-resource-manager-server:latest ocm-resource-manager-server:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"}`;
   process.exit(0);
 }
 if (command === "import-images") {
-  await $`oc import-image fleetshift-server:latest -n ${process.env.NAMESPACE || "fleetshift"} --confirm`;
-  await $`oc import-image fleetshift-web:latest -n ${process.env.NAMESPACE || "fleetshift"} --confirm`;
+  await $`oc import-image ocm-resource-manager-server:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"} --confirm`;
+  await $`oc import-image ocm-resource-manager-web:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"} --confirm`;
   process.exit(0);
 }
 if (command === "register-redirect") {

@@ -19,7 +19,7 @@ export const resumeCommand: CommandSpec = {
     const body: Record<string, unknown> = {};
     if (args.flags.get("sign") === true) {
       const deployment = await client.request<Record<string, unknown>>(
-        `/v1/${deploymentName(name)}`,
+        `/v1alpha/${deploymentName(name)}`,
       );
       const manifestStrategy = deployment.manifestStrategy as {
         manifests?: { manifestType?: string; raw?: string }[];
@@ -59,7 +59,7 @@ export const resumeCommand: CommandSpec = {
       body.expectedGeneration = Number(deployment.generation ?? 0) + 1;
     }
     const response = await client.request(
-      `/v1/${deploymentName(name)}:resume`,
+      `/v1alpha/${deploymentName(name)}:resume`,
       {
         method: "POST",
         body: JSON.stringify(body),

@@ -2,11 +2,11 @@
 
 **Jira**: FM-TBD (pending approval to create)
 **Epic**: SPIKE - User Interface (Web UI)
-**Status**: Done
+**Status**: Historical exploration; distribution-specific discovery is optional under the current capability model.
 
 ## Problem
 
-When a user adds a cluster to FleetShift, the UI needs to figure out two things: how to connect to it, and what plugins are relevant for it. Different clusters have different things installed — one might have Prometheus, another might have cert-manager, a third might be a plain Kubernetes cluster with nothing extra. The UI needs to discover what is available and load the right plugins automatically, without the user having to manually configure what features to show.
+When a user adds a cluster to OCM Resource Manager, the UI needs to figure out two things: how to connect to it, and what plugins are relevant for it. Different clusters have different things installed — one might have Prometheus, another might have cert-manager, a third might be a plain Kubernetes cluster with nothing extra. The UI needs to discover what is available and load the right plugins automatically, without the user having to manually configure what features to show.
 
 On top of that, different Kubernetes distributions come with different built-in capabilities. OpenShift has Routes and ConsolePlugins. Vanilla Kubernetes does not. Some things like pods, nodes, and storage are always there regardless of distribution. The discovery system needs to handle all of this.
 
@@ -61,7 +61,7 @@ Different distributions have different built-in capabilities beyond core K8s:
 
 The base plugin set needs to vary by detected platform. Platform detection is done by checking for known API groups — if `route.openshift.io` or `apps.openshift.io` is present, it is OpenShift. Similar checks could be added for other distributions.
 
-**Open question**: Which platforms do we target? OpenShift is a given. Raw Kubernetes makes sense too since we need it as the baseline even for OpenShift. But do we want to invest in platform-specific support for Rancher, EKS, GKE, AKS, or others? At least not initially — but this needs a decision.
+**Open question**: Which distribution-specific discovery adapters should be supported beyond the generic Kubernetes baseline? Each adapter should contribute optional capability signals under the same model.
 
 ### How it all comes together
 
@@ -87,7 +87,7 @@ The config file is watched for changes and hot-reloaded — if someone edits it,
 - Cloud provider addon APIs (EKS, GKE, AKS) are not integrated — discovery only uses the K8s API.
 - Support for Rancher and other non-OpenShift distributions has not been explored beyond basic CRD detection.
 
-## Key files
+## Historical prototype files
 
 - Cluster connection flow: `packages/mock-servers/src/k8s/client/connect.ts`
 - Plugin discovery: `packages/mock-servers/src/k8s/client/discovery.ts`

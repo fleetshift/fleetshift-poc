@@ -15,10 +15,10 @@ if (argv.includes("--help") || argv.includes("-h")) {
   console.log(`Usage: teardown.mjs [options]
 
 Options:
-  --namespace <namespace>         FleetShift namespace (default: fleetshift)
+  --namespace <namespace>         OCM Resource Manager namespace (default: ocm-resource-manager)
   --route-name <name>             gRPC Route name (default: grpc)
-  --issuer-name <name>            ClusterIssuer name (default: fleetshift-grpc-letsencrypt-prod)
-  --tls-secret-name <name>        TLS Secret name (default: fleetshift-grpc-route-tls)
+  --issuer-name <name>            ClusterIssuer name (default: ocm-resource-manager-grpc-letsencrypt-prod)
+  --tls-secret-name <name>        TLS Secret name (default: ocm-resource-manager-grpc-route-tls)
   --backup-namespace <name>       Backup Secret namespace (default: cert-manager-operator)
   -h, --help                      Show this help`);
   process.exit(0);
@@ -38,10 +38,10 @@ for (let index = 0; index < argv.length; index++) {
   index++;
 }
 
-const namespace = value("--namespace", "fleetshift");
+const namespace = value("--namespace", "ocm-resource-manager");
 const routeName = value("--route-name", "grpc");
-const issuerName = value("--issuer-name", "fleetshift-grpc-letsencrypt-prod");
-const tlsSecretName = value("--tls-secret-name", "fleetshift-grpc-route-tls");
+const issuerName = value("--issuer-name", "ocm-resource-manager-grpc-letsencrypt-prod");
+const tlsSecretName = value("--tls-secret-name", "ocm-resource-manager-grpc-route-tls");
 const backupNamespace = value("--backup-namespace", "cert-manager-operator");
 
 await requireOcLogin();
@@ -91,13 +91,13 @@ if (tlsSecret.ok && backupNamespaceExists.ok) {
   );
 }
 
-// Delete namespace-scoped certificate resources, then FleetShift issuer.
+// Delete namespace-scoped certificate resources, then OCM Resource Manager issuer.
 console.log("==> Deleting certificate resources...");
 for (const [kind, name] of [
-  ["certificate", "fleetshift-grpc-route"],
+  ["certificate", "ocm-resource-manager-grpc-route"],
   ["secret", tlsSecretName],
-  ["role", "fleetshift-grpc-route-cert-reader"],
-  ["rolebinding", "fleetshift-grpc-route-cert-reader"],
+  ["role", "ocm-resource-manager-grpc-route-cert-reader"],
+  ["rolebinding", "ocm-resource-manager-grpc-route-cert-reader"],
 ])
   await $`oc delete ${kind} ${name} -n ${namespace} --ignore-not-found=true`;
 const issuer = await $`oc get clusterissuer ${issuerName} -o json`.nothrow();
@@ -105,12 +105,12 @@ if (issuer.ok) {
   const owned =
     JSON.parse(issuer.stdout).metadata?.labels?.[
       "app.kubernetes.io/managed-by"
-    ] === "fleetshift-grpc-route-cert";
+    ] === "ocm-resource-manager-grpc-route-cert";
   if (
     owned ||
     /^y$/i.test(
       await question(
-        `ClusterIssuer ${issuerName} is not marked as FleetShift-owned. Delete it? (y/N): `,
+        `ClusterIssuer ${issuerName} is not marked as OCM Resource Manager-owned. Delete it? (y/N): `,
       ),
     )
   ) {

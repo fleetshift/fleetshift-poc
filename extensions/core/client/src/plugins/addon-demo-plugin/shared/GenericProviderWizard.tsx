@@ -1,4 +1,4 @@
-import type { ClusterProviderWizardProps } from "@fleetshift/common";
+import type { ClusterProviderWizardProps } from "@ocm-resource-manager/common";
 import {
   Button,
   EmptyState,

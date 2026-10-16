@@ -1,4 +1,7 @@
-import type { ClusterResource, ResourceResult } from "@fleetshift/common";
+import type {
+  ClusterResource,
+  ResourceResult,
+} from "@ocm-resource-manager/common";
 
 export interface ClusterRow {
   result: ResourceResult<ClusterResource>;
@@ -61,8 +64,8 @@ export function extractService(canonicalName: string): string {
 }
 
 const SERVICE_LABELS: Record<string, string> = {
-  "kind.fleetshift.io": "Kind",
-  "kubernetes.fleetshift.io": "Kubernetes",
+  "kind.open-cluster-management.io": "Kind",
+  "kubernetes.open-cluster-management.io": "Kubernetes",
 };
 
 export function serviceLabel(service: string): string {
@@ -77,7 +80,7 @@ export function buildAddonBasePath(service: string): string {
   if (!Object.prototype.hasOwnProperty.call(SERVICE_LABELS, service)) {
     throw new Error(`Unsupported cluster service: ${service}`);
   }
-  return `/apis/${service}/v1`;
+  return `/apis/${service}/v1alpha`;
 }
 
 export function deriveClusterState(

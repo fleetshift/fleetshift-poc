@@ -31,13 +31,13 @@ import { useAdvancedSearch } from "./useAdvancedSearch";
 import { useTypingPlaceholder } from "./useTypingPlaceholder";
 
 const TOKEN_CLASSES: Record<string, string> = {
-  field: "ome-search__cel-token--field",
-  operator: "ome-search__cel-token--operator",
-  value: "ome-search__cel-token--value",
-  combinator: "ome-search__cel-token--combinator",
-  "dot-call": "ome-search__cel-token--operator",
-  macro: "ome-search__cel-token--macro",
-  paren: "ome-search__cel-token--paren",
+  field: "ocm-rm-search__cel-token--field",
+  operator: "ocm-rm-search__cel-token--operator",
+  value: "ocm-rm-search__cel-token--value",
+  combinator: "ocm-rm-search__cel-token--combinator",
+  "dot-call": "ocm-rm-search__cel-token--operator",
+  macro: "ocm-rm-search__cel-token--macro",
+  paren: "ocm-rm-search__cel-token--paren",
 };
 
 const PLACEHOLDER_HINTS = [
@@ -354,8 +354,8 @@ export default function AdvancedSearchBar({
       isLoading);
 
   return (
-    <div ref={wrapperRef} className="ome-search__advanced-bar">
-      <div className="ome-search__input-wrapper">
+    <div ref={wrapperRef} className="ocm-rm-search__advanced-bar">
+      <div className="ocm-rm-search__input-wrapper">
         <TextInput
           ref={inputRef}
           value={expression}
@@ -364,14 +364,14 @@ export default function AdvancedSearchBar({
           onClick={handleClick}
           placeholder={placeholder}
           aria-label="Advanced CEL search"
-          className="ome-search__input--colored"
+          className="ocm-rm-search__input--colored"
         />
         {expression && (
-          <div className="ome-search__input-mirror" aria-hidden="true">
+          <div className="ocm-rm-search__input-mirror" aria-hidden="true">
             {/* eslint-disable no-restricted-syntax -- dynamic scroll sync + font sync with input */}
             <div
               ref={mirrorRef}
-              className="ome-search__input-mirror-scroll"
+              className="ocm-rm-search__input-mirror-scroll"
               style={{ transform: `translateX(-${inputScrollLeft}px)` }}
             >
               {/* eslint-enable no-restricted-syntax */}
@@ -385,9 +385,9 @@ export default function AdvancedSearchBar({
         )}
       </div>
       {showDropdown && (
-        <Menu ref={menuRef} className="ome-search__autocomplete">
+        <Menu ref={menuRef} className="ocm-rm-search__autocomplete">
           {showPreview && (
-            <div className="ome-search__cel-preview-header">
+            <div className="ocm-rm-search__cel-preview-header">
               <CelPreview expression={expression} validation={validation} />
             </div>
           )}
@@ -446,7 +446,7 @@ export default function AdvancedSearchBar({
             </MenuList>
           </MenuContent>
           {(showSuggestions || showHistory) && (
-            <div className="ome-search__keyboard-hints">
+            <div className="ocm-rm-search__keyboard-hints">
               <span>
                 <kbd>&uarr;</kbd>
                 <kbd>&darr;</kbd> navigate

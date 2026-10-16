@@ -23,20 +23,21 @@ func TestAIOWelcomeScript(t *testing.T) {
 	for _, want := range []string{
 		"#!/command/with-contenv sh",
 		"set -eu",
-		". /run/fleetshift/public.env",
+		". /run/ocm-resource-manager/public.env",
 		"${PUBLIC_ORIGIN}/readyz",
 		"--max-time",
 		"--cacert /data/sandbox/pki/ca.crt",
 		`--noproxy "${PUBLIC_HOST}"`,
 		">/dev/null 2>&1",
 		"public readiness timed out",
-		"/run/fleetshift/dex.enabled",
-		"ops@fleetshift.local",
-		"fleetshift-ops",
-		"dev@fleetshift.local",
-		"fleetshift-dev",
+		"/run/ocm-resource-manager/dex.enabled",
+		"ops@ocm-resource-manager.local",
+		"ocm-resource-manager-ops",
+		"dev@ocm-resource-manager.local",
+		"ocm-resource-manager-dev",
 		"configured external identity provider",
-		"Press Ctrl+C to stop FleetShift.",
+		"OCM Resource Manager is ready.",
+		"Press Ctrl+C to stop.",
 		"exit 1",
 	} {
 		if !strings.Contains(body, want) {
@@ -154,14 +155,14 @@ func TestAIOEntrypointAndDockerfile(t *testing.T) {
 		}
 	}
 
-	dockerfile := readDockerfileFleetshift(t)
+	dockerfile := readDockerfileResourceManager(t)
 	if !strings.Contains(dockerfile, "LOG_LEVEL=error") {
-		t.Fatal("Dockerfile.fleetshift must default LOG_LEVEL=error")
+		t.Fatal("Dockerfile.aio must default LOG_LEVEL=error")
 	}
 	if !strings.Contains(dockerfile, `ENTRYPOINT ["/etc/s6-overlay/scripts/aio-entrypoint"]`) {
-		t.Fatal("Dockerfile.fleetshift must use the AIO entrypoint")
+		t.Fatal("Dockerfile.aio must use the AIO entrypoint")
 	}
 	if strings.Contains(dockerfile, `ENTRYPOINT ["/init"]`) {
-		t.Fatal("Dockerfile.fleetshift must not use /init as ENTRYPOINT")
+		t.Fatal("Dockerfile.aio must not use /init as ENTRYPOINT")
 	}
 }

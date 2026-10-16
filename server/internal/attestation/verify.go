@@ -15,8 +15,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
+	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	fscrypto "github.com/stolostron/ocm-resource-manager/server/pkg/crypto"
 )
 
 // TrustedIssuer describes an OIDC issuer the delivery agent trusts.

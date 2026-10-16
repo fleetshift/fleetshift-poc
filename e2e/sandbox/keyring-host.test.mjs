@@ -430,12 +430,12 @@ describe("formatKeyringGuidance", () => {
 });
 
 describe("sysctl.d lexicographic ordering", () => {
-  it("treats 99-keys.conf as later than 99-fleetshift-e2e-keys.conf", () => {
+  it("treats 99-keys.conf as later than 99-engine-e2e-keys.conf", () => {
     expect(
-      sysctlDBasenameSortsLater("99-keys.conf", "99-fleetshift-e2e-keys.conf"),
+      sysctlDBasenameSortsLater("99-keys.conf", "99-engine-e2e-keys.conf"),
     ).toBe(true);
     expect(
-      sysctlDBasenameSortsLater("99-fleetshift-e2e-keys.conf", "99-keys.conf"),
+      sysctlDBasenameSortsLater("99-engine-e2e-keys.conf", "99-keys.conf"),
     ).toBe(false);
   });
 
@@ -450,7 +450,7 @@ describe("sysctl.d lexicographic ordering", () => {
 
   it("selects the lexicographically later file as the winner", () => {
     const files = {
-      "/etc/sysctl.d/99-fleetshift-e2e-keys.conf":
+      "/etc/sysctl.d/99-engine-e2e-keys.conf":
         "kernel.keys.maxkeys = 2000\nkernel.keys.maxbytes = 200000\n",
       "/etc/sysctl.d/99-keys.conf":
         "kernel.keys.maxkeys = 200\nkernel.keys.maxbytes = 20000\n",

@@ -15,7 +15,7 @@ async function temporaryCertificate(): Promise<{
   dir: string;
   key: Buffer;
 }> {
-  const dir = await mkdtemp(path.join(tmpdir(), "fleetshift-https-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "ocm-resource-manager-https-"));
   const keyFile = path.join(dir, "key.pem");
   const certFile = path.join(dir, "cert.pem");
   execFileSync("openssl", [
