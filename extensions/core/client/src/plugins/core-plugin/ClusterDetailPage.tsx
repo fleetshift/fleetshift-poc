@@ -66,7 +66,7 @@ import {
 const clusterApi = createResourceApi<ClusterResource>("-");
 
 const CLUSTER_TYPE_FILTER =
-  'resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"';
+  'resourceType == "kind.open-cluster-management.io/Cluster"';
 
 interface ResolvedTab {
   id: string;
@@ -95,7 +95,7 @@ function OverviewTab({
   const cluster = result.resource;
   const state = deriveClusterState(cluster);
   const sl = stateLabel(state, cluster.state);
-  const isKind = service === "kind.resource-manager.open-cluster-management.io";
+  const isKind = service === "kind.open-cluster-management.io";
 
   return (
     <div className="ocm-rm-core-overview-layout">

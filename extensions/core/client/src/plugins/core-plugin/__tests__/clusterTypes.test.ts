@@ -149,10 +149,8 @@ describe("extractClusterId", () => {
 describe("extractService", () => {
   it("extracts service from canonical name", () => {
     expect(
-      extractService(
-        "//kind.resource-manager.open-cluster-management.io/clusters/c1",
-      ),
-    ).toBe("kind.resource-manager.open-cluster-management.io");
+      extractService("//kind.open-cluster-management.io/clusters/c1"),
+    ).toBe("kind.open-cluster-management.io");
   });
 
   it("returns empty for malformed name", () => {
@@ -162,12 +160,10 @@ describe("extractService", () => {
 
 describe("serviceLabel", () => {
   it("maps known services", () => {
-    expect(
-      serviceLabel("kubernetes.resource-manager.open-cluster-management.io"),
-    ).toBe("Kubernetes");
-    expect(
-      serviceLabel("kind.resource-manager.open-cluster-management.io"),
-    ).toBe("Kind");
+    expect(serviceLabel("kubernetes.open-cluster-management.io")).toBe(
+      "Kubernetes",
+    );
+    expect(serviceLabel("kind.open-cluster-management.io")).toBe("Kind");
   });
 
   it("falls back to raw service string", () => {
@@ -178,16 +174,14 @@ describe("serviceLabel", () => {
 describe("buildAddonBasePath", () => {
   it("rejects an unregistered addon service", () => {
     expect(() =>
-      buildAddonBasePath(
-        "unregistered-addon.resource-manager.open-cluster-management.io",
-      ),
+      buildAddonBasePath("unregistered-addon.open-cluster-management.io"),
     ).toThrow("Unsupported cluster service");
   });
 
   it("builds path for known services", () => {
-    expect(
-      buildAddonBasePath("kind.resource-manager.open-cluster-management.io"),
-    ).toBe("/apis/kind.resource-manager.open-cluster-management.io/v1alpha");
+    expect(buildAddonBasePath("kind.open-cluster-management.io")).toBe(
+      "/apis/kind.open-cluster-management.io/v1alpha",
+    );
   });
 
   it("throws for unknown service", () => {

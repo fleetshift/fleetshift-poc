@@ -5,7 +5,7 @@ import "github.com/stolostron/ocm-resource-manager/server/internal/domain"
 // AddonID is the [domain.AddonID] for the Kubernetes addon. It also
 // doubles as the service-name prefix every resource type the addon
 // owns must start with, per the platform's addon-ownership rule.
-const AddonID domain.AddonID = "kubernetes.resource-manager.open-cluster-management.io"
+const AddonID domain.AddonID = "kubernetes.open-cluster-management.io"
 
 // Descriptor returns the addon descriptor for the generic Kubernetes
 // agent. It declares a delivery capability for Kubernetes
@@ -32,7 +32,7 @@ func Descriptor() domain.AddonDescriptor {
 func InventorySchema() domain.ExtensionResourceSchema {
 	return domain.ExtensionResourceSchema{
 		ResourceType: ObjectResourceType,
-		ProtoPackage: "ocm.resource_manager.kubernetes.v1alpha",
+		ProtoPackage: "ocm.kubernetes.v1alpha",
 		Version:      "v1alpha",
 		CollectionID: string(ObjectCollectionID),
 		Singular:     "Object",

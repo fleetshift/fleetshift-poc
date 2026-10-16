@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-var testGV = schema.GroupVersion{Group: "test.resource-manager.open-cluster-management.io", Version: "v1"}
+var testGV = schema.GroupVersion{Group: "test.open-cluster-management.io", Version: "v1"}
 
 type Widget struct {
 	metav1.TypeMeta   `json:",inline"`

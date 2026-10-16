@@ -64,8 +64,8 @@ export function extractService(canonicalName: string): string {
 }
 
 const SERVICE_LABELS: Record<string, string> = {
-  "kind.resource-manager.open-cluster-management.io": "Kind",
-  "kubernetes.resource-manager.open-cluster-management.io": "Kubernetes",
+  "kind.open-cluster-management.io": "Kind",
+  "kubernetes.open-cluster-management.io": "Kubernetes",
 };
 
 export function serviceLabel(service: string): string {

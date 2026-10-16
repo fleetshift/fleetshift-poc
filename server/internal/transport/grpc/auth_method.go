@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	"github.com/stolostron/ocm-resource-manager/server/internal/application"
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )

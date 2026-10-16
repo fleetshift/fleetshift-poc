@@ -34,7 +34,7 @@ Read this when you are working on the kubernetes addon, extending its delivery o
 
 ## Overview
 
-The kubernetes addon is a delivery agent and indexer for Kubernetes clusters. It implements the delivery contract via server-side apply and the indexing contract via LIST+WATCH against the cluster's API server, reporting observed objects into the platform inventory model under one generic extension resource type: `kubernetes.resource-manager.open-cluster-management.io/Object`.
+The kubernetes addon is a delivery agent and indexer for Kubernetes clusters. It implements the delivery contract via server-side apply and the indexing contract via LIST+WATCH against the cluster's API server, reporting observed objects into the platform inventory model under one generic extension resource type: `kubernetes.open-cluster-management.io/Object`.
 
 Delivery and indexing are independent. A stateless delivery agent handles apply/remove. Per-target indexing runs as a long-lived indexer hosted by an in-process indexing runtime. The two do not share a long-lived per-target "Agent" process: delivery is request-scoped, indexing is long-lived per target when started.
 
@@ -48,22 +48,22 @@ The addon declares two capabilities: delivery for the `kubernetes` target type, 
 
 ```go
 AddonDescriptor{
-    ID:   "kubernetes.resource-manager.open-cluster-management.io",
+    ID:   "kubernetes.open-cluster-management.io",
     Name: "Kubernetes Agent",
     Capabilities: []Capability{
         DeliveryCapability{TargetType: "kubernetes"},
-        InventoryResourceCapability{ResourceType: "kubernetes.resource-manager.open-cluster-management.io/Object"},
+        InventoryResourceCapability{ResourceType: "kubernetes.open-cluster-management.io/Object"},
     },
 }
 ```
 
-Delivery capability means the addon can apply and remove manifests via server-side apply. Inventory resource capability means the addon is authorized to report inventory for `kubernetes.resource-manager.open-cluster-management.io/Object`. These are independent: an addon could declare one without the other.
+Delivery capability means the addon can apply and remove manifests via server-side apply. Inventory resource capability means the addon is authorized to report inventory for `kubernetes.open-cluster-management.io/Object`. These are independent: an addon could declare one without the other.
 
 At Connect time, the addon provides its delivery agent and the inventory-only schema for `Object`. The platform validates delivery and registers the schema for reporting authorization. Indexing runtime lifecycle is **not** part of Connect: the addon manager does not start or stop indexers.
 
 In the current POC, the descriptor is compiled into the server binary. Enable and Connect happen at startup. The in-process indexing runtime is composed in server wiring and injected into producers (Kind) that start and stop indexers. In a future external agent model, the same inventory report contract would be used over a transport, and an agent pod on the target cluster would own its own lifecycle rather than being hosted in-process.
 
-The addon does not declare a managed resource capability for watched cluster objects. Kubernetes delivery targets are registered through the platform's target management / delivery-output path. Watched objects are inventory-only extension resources under `kubernetes.resource-manager.open-cluster-management.io/Object`.
+The addon does not declare a managed resource capability for watched cluster objects. Kubernetes delivery targets are registered through the platform's target management / delivery-output path. Watched objects are inventory-only extension resources under `kubernetes.open-cluster-management.io/Object`.
 
 ## Agent
 
@@ -349,12 +349,12 @@ The inventory reporter is the addon-to-platform direction of the indexing protoc
 
 There are no separate platform resync/collection-delete/subtree-delete methods on this boundary. Same-process LIST omission reconciliation is expressed as ordinary deletes computed from the in-memory acknowledged-UID set. Target-wide subtree cleanup is deferred and not exposed here.
 
-In-process, a direct adapter always reports under `kubernetes.resource-manager.open-cluster-management.io/Object` and maps both upserts and deletes into one platform replacement batch. In the external model, a transport adapter would implement the same report shape.
+In-process, a direct adapter always reports under `kubernetes.open-cluster-management.io/Object` and maps both upserts and deletes into one platform replacement batch. In the external model, a transport adapter would implement the same report shape.
 
 Object identity uses one generic type and scope-dependent resource-name patterns:
 
 ```text
-ResourceType: kubernetes.resource-manager.open-cluster-management.io/Object
+ResourceType: kubernetes.open-cluster-management.io/Object
 
 # Namespaced (discovery APIResource.Namespaced=true)
 ResourceName: clusters/{clusterResourceID}/namespaces/{namespace}/apiResources/{groupResourceKey}/objects/{uid}
@@ -412,7 +412,7 @@ Resources with a schema entry get additional extraction into `observation.extrac
 
 ### Schema model
 
-The indexing schema defines how to enrich extraction beyond the base tier. It does not control which resources are watched — that is determined by resource discovery and filtering. It is also distinct from the platform extension resource schema registered at Connect (the inventory-only marker for `kubernetes.resource-manager.open-cluster-management.io/Object`).
+The indexing schema defines how to enrich extraction beyond the base tier. It does not control which resources are watched — that is determined by resource discovery and filtering. It is also distinct from the platform extension resource schema registered at Connect (the inventory-only marker for `kubernetes.open-cluster-management.io/Object`).
 
 - **Schema entry**: enrichment rules for one watched GVR — field extractions, annotation extraction flags, and optional hooks for computed properties and edge building.
 - **Field extraction**: a named field with a JSONPath expression and a data type for coercion.

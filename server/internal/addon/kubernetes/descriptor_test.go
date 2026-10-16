@@ -49,8 +49,8 @@ func TestInventorySchema_ObjectInventoryShape(t *testing.T) {
 	if s.ResourceType != kubernetes.ObjectResourceType {
 		t.Errorf("ResourceType = %q, want %q", s.ResourceType, kubernetes.ObjectResourceType)
 	}
-	if s.ProtoPackage != "ocm.resource_manager.kubernetes.v1alpha" {
-		t.Errorf("ProtoPackage = %q, want %q", s.ProtoPackage, "ocm.resource_manager.kubernetes.v1alpha")
+	if s.ProtoPackage != "ocm.kubernetes.v1alpha" {
+		t.Errorf("ProtoPackage = %q, want %q", s.ProtoPackage, "ocm.kubernetes.v1alpha")
 	}
 	if s.Version != "v1alpha" {
 		t.Errorf("Version = %q, want %q", s.Version, "v1alpha")

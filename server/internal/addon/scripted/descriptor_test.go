@@ -17,8 +17,8 @@ import (
 
 func TestDescriptor_FixedIdentifiers(t *testing.T) {
 	desc := scripted.Descriptor()
-	if desc.ID != "scripted.resource-manager.open-cluster-management.io" {
-		t.Errorf("ID = %q, want scripted.resource-manager.open-cluster-management.io", desc.ID)
+	if desc.ID != "scripted.open-cluster-management.io" {
+		t.Errorf("ID = %q, want scripted.open-cluster-management.io", desc.ID)
 	}
 	if desc.Name != "Scripted Delivery Provider" {
 		t.Errorf("Name = %q, want Scripted Delivery Provider", desc.Name)
@@ -37,12 +37,12 @@ func TestDescriptor_FixedIdentifiers(t *testing.T) {
 			}
 			hasDelivery = true
 		case domain.ManagedResourceCapability:
-			if c.ResourceType != "scripted.resource-manager.open-cluster-management.io/ScriptedResource" {
+			if c.ResourceType != "scripted.open-cluster-management.io/ScriptedResource" {
 				t.Errorf("ManagedResourceCapability.ResourceType = %q", c.ResourceType)
 			}
 			hasManaged = true
 		case domain.InventoryResourceCapability:
-			if c.ResourceType != "scripted.resource-manager.open-cluster-management.io/ScriptedResource" {
+			if c.ResourceType != "scripted.open-cluster-management.io/ScriptedResource" {
 				t.Errorf("InventoryResourceCapability.ResourceType = %q", c.ResourceType)
 			}
 			hasInventory = true
@@ -55,10 +55,10 @@ func TestDescriptor_FixedIdentifiers(t *testing.T) {
 
 func TestSchema_FixedIdentifiers(t *testing.T) {
 	schema := scripted.Schema()
-	if schema.ResourceType != "scripted.resource-manager.open-cluster-management.io/ScriptedResource" {
+	if schema.ResourceType != "scripted.open-cluster-management.io/ScriptedResource" {
 		t.Errorf("ResourceType = %q", schema.ResourceType)
 	}
-	if schema.ProtoPackage != "ocm.resource_manager.scripted.v1alpha" {
+	if schema.ProtoPackage != "ocm.scripted.v1alpha" {
 		t.Errorf("ProtoPackage = %q", schema.ProtoPackage)
 	}
 	if schema.CollectionID != "scriptedResources" {
@@ -67,7 +67,7 @@ func TestSchema_FixedIdentifiers(t *testing.T) {
 	if schema.Management == nil {
 		t.Fatal("Management is nil")
 	}
-	if schema.Management.SpecMessage != "ocm.resource_manager.scripted.v1alpha.ScriptedResourceSpec" {
+	if schema.Management.SpecMessage != "ocm.scripted.v1alpha.ScriptedResourceSpec" {
 		t.Errorf("SpecMessage = %q", schema.Management.SpecMessage)
 	}
 	if schema.Inventory == nil {
@@ -89,7 +89,7 @@ func TestSchema_CompileInline(t *testing.T) {
 	if desc.Message == nil {
 		t.Fatal("message descriptor is nil")
 	}
-	if got := string(desc.Message.FullName()); got != "ocm.resource_manager.scripted.v1alpha.ScriptedResourceSpec" {
+	if got := string(desc.Message.FullName()); got != "ocm.scripted.v1alpha.ScriptedResourceSpec" {
 		t.Errorf("message full name = %q", got)
 	}
 

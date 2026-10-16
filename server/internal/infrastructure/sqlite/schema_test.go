@@ -80,7 +80,7 @@ func TestExtensionResourcesReportedAliases_StoredAsObjectPayload(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	repo := sqlite.ExtensionResourceRepo{DB: db}
 
-	rt := domain.ResourceType("shape.resource-manager.open-cluster-management.io/Node")
+	rt := domain.ResourceType("shape.open-cluster-management.io/Node")
 	if err := repo.CreateType(ctx, domain.NewExtensionResourceType(
 		rt, "v1", "nodes", time.Unix(0, 0).UTC(), domain.WithInventory(),
 	)); err != nil {

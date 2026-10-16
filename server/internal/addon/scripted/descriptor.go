@@ -20,7 +20,7 @@ import (
 // must not change without a reviewed schema version bump.
 const (
 	// AddonID is the add-on identifier registered with the platform.
-	AddonID domain.AddonID = "scripted.resource-manager.open-cluster-management.io"
+	AddonID domain.AddonID = "scripted.open-cluster-management.io"
 
 	// TargetType is the delivery target type for scripted delivery.
 	TargetType domain.TargetType = "scripted"
@@ -29,7 +29,7 @@ const (
 	TargetID domain.TargetID = "scripted-local"
 
 	// ResourceType is the managed resource type for scripted resources.
-	ResourceType domain.ResourceType = "scripted.resource-manager.open-cluster-management.io/ScriptedResource"
+	ResourceType domain.ResourceType = "scripted.open-cluster-management.io/ScriptedResource"
 
 	// CollectionID is the REST collection name for scripted resources.
 	CollectionID = "scriptedResources"
@@ -43,14 +43,14 @@ const (
 	CapabilityLabel = "scripted-delivery"
 
 	// ProtoPackage is the protobuf package name for the spec schema.
-	ProtoPackage = "ocm.resource_manager.scripted.v1alpha"
+	ProtoPackage = "ocm.scripted.v1alpha"
 
 	// SpecMessage is the fully qualified protobuf message name for the
 	// resource spec.
-	SpecMessage = "ocm.resource_manager.scripted.v1alpha.ScriptedResourceSpec"
+	SpecMessage = "ocm.scripted.v1alpha.ScriptedResourceSpec"
 )
 
-const specProtoPath = "ocm/resource_manager/scripted/v1alpha/scripted_resource_spec.proto"
+const specProtoPath = "ocm/scripted/v1alpha/scripted_resource_spec.proto"
 
 //go:embed scripted_resource_spec.proto
 var scriptedResourceSpecProto string

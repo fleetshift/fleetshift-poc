@@ -22,10 +22,10 @@ import (
 // expectedGRPCServiceFamilies is the independent inventory of required gRPC
 // service registrations. Introspection alone cannot detect a missing expectation.
 var expectedGRPCServiceFamilies = []string{
-	"ocm.resource_manager.v1alpha.DeploymentService",
-	"ocm.resource_manager.v1alpha.AuthMethodService",
-	"ocm.resource_manager.v1alpha.SignerEnrollmentService",
-	"ocm.resource_manager.v1alpha.ResourceQueryService",
+	"ocm.v1alpha.DeploymentService",
+	"ocm.v1alpha.AuthMethodService",
+	"ocm.v1alpha.SignerEnrollmentService",
+	"ocm.v1alpha.ResourceQueryService",
 	"grpc.reflection.v1.ServerReflection",
 }
 
@@ -36,7 +36,7 @@ var expectedHTTPRouteFamilies = []string{
 	"/readyz",
 	"/api/ui/config",
 	"/v1alpha/",
-	"/apis/resource-manager.open-cluster-management.io/",
+	"/apis/open-cluster-management.io/",
 	"/api/ui/setup/ws",
 	"/api/ui/events/ws",
 	"/api/ui/github-signing-keys/",
@@ -66,7 +66,7 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 		{http.MethodGet, "/readyz"},
 		{http.MethodGet, "/api/ui/config"},
 		{http.MethodGet, "/v1alpha/deployments"},
-		{http.MethodGet, "/apis/resource-manager.open-cluster-management.io/v1alpha/-:queryResources"},
+		{http.MethodGet, "/apis/open-cluster-management.io/v1alpha/-:queryResources"},
 		{http.MethodGet, "/api/ui/setup/ws"},
 		{http.MethodGet, "/api/ui/events/ws"},
 		{http.MethodGet, "/api/ui/github-signing-keys/octocat"},

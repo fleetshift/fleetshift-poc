@@ -160,7 +160,7 @@ func TestResourceQueryService_PassesFilterThrough(t *testing.T) {
 }
 
 func TestResourceQueryService_PassesInvalidOrderByThrough(t *testing.T) {
-	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")))
+	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.open-cluster-management.io/Cluster")))
 	svc := application.NewResourceQueryService(store)
 	ctx := context.Background()
 
@@ -174,7 +174,7 @@ func TestResourceQueryService_PassesInvalidOrderByThrough(t *testing.T) {
 }
 
 func TestResourceQueryService_PassesInvalidFilterThrough(t *testing.T) {
-	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")))
+	store := newQueryStore(t, schemasFor(domain.ResourceType("kind.open-cluster-management.io/Cluster")))
 	svc := application.NewResourceQueryService(store)
 	ctx := context.Background()
 

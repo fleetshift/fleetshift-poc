@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	"github.com/stolostron/ocm-resource-manager/server/internal/application"
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"

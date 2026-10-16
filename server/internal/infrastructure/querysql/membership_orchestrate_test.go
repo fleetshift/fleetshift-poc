@@ -51,7 +51,7 @@ func TestCompileFilter_MembershipOrchestration(t *testing.T) {
 			InventoryObservationDescriptor: desc,
 		},
 	}
-	guard := `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" && `
+	guard := `resourceType == "kind.open-cluster-management.io/Cluster" && `
 
 	t.Run("resource root delegates to presence with key", func(t *testing.T) {
 		rec := &membershipRecorder{}

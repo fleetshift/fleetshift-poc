@@ -70,7 +70,7 @@ func BuildService(cfg *Config, deps Deps) (*RegisteredService, error) {
 			},
 		},
 		Streams:  []grpc.StreamDesc{},
-		Metadata: "dynamic/ocm/resource_manager/v1alpha/platform_" + strings.ToLower(singular[:1]) + singular[1:] + "_service.proto",
+		Metadata: "dynamic/ocm/v1alpha/platform_" + strings.ToLower(singular[:1]) + singular[1:] + "_service.proto",
 	}
 
 	return &RegisteredService{

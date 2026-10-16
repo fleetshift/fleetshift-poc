@@ -160,7 +160,7 @@ export async function listResourceTypes(
   return (response.listServicesResponse?.service ?? [])
     .map((service) => service.name ?? "")
     .filter((name) => name.endsWith("Service"))
-    .filter((name) => !name.startsWith("ocm.resource_manager.v1alpha."))
+    .filter((name) => !name.startsWith("ocm.v1alpha."))
     .map(resourceTypeFromService)
     .filter((type): type is ReflectedResourceType => type !== undefined);
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
-const specMessageName = "ocm.resource_manager.kind.v1alpha.KindClusterSpec"
+const specMessageName = "ocm.kind.v1alpha.KindClusterSpec"
 
 func TestCompileInline(t *testing.T) {
 	schema := kindaddon.Schema()

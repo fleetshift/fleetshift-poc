@@ -83,7 +83,7 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 		t.Fatalf("begin tx: %v", err)
 	}
 	now := time.Now().UTC()
-	rt := domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
+	rt := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	typeDef := domain.NewExtensionResourceType(rt, "v1alpha1", "clusters", now)
 	if err := tx.ExtensionResources().CreateType(ctx, typeDef); err != nil {
 		tx.Rollback()
@@ -107,8 +107,8 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 	if len(reps) != 1 {
 		t.Fatalf("Representations len = %d, want 1", len(reps))
 	}
-	if reps[0].ServiceName() != "kind.resource-manager.open-cluster-management.io" {
-		t.Errorf("ServiceName = %q, want %q", reps[0].ServiceName(), "kind.resource-manager.open-cluster-management.io")
+	if reps[0].ServiceName() != "kind.open-cluster-management.io" {
+		t.Errorf("ServiceName = %q, want %q", reps[0].ServiceName(), "kind.open-cluster-management.io")
 	}
 	if reps[0].Version() != "v1alpha1" {
 		t.Errorf("Version = %q, want %q", reps[0].Version(), "v1alpha1")

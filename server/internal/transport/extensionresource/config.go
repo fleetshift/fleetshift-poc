@@ -34,7 +34,7 @@ type ResourceTypeConfig struct {
 	dynamicapi.CollectionConfig
 
 	// ResourceType is the addon-scoped domain identifier used for
-	// internal dispatch (e.g. "kind.resource-manager.open-cluster-management.io/Cluster"). Per
+	// internal dispatch (e.g. "kind.open-cluster-management.io/Cluster"). Per
 	// AIP-123, this follows the {ServiceName}/{Type} pattern. It
 	// identifies the addon's specific implementation of the resource
 	// type — it is NOT the platform identity. Two addons modeling
@@ -45,7 +45,7 @@ type ResourceTypeConfig struct {
 	ResourceType domain.ResourceType
 
 	// ProtoPackage is the versioned proto package for the generated
-	// service (e.g. "ocm.resource_manager.kind.v1alpha"). Combined with Singular to
+	// service (e.g. "ocm.kind.v1alpha"). Combined with Singular to
 	// form the gRPC service name ({ProtoPackage}.{Singular}Service).
 	// Each extension has its own package, avoiding service name
 	// collisions even when multiple extensions model the same
@@ -70,7 +70,7 @@ type ResourceCapabilities struct {
 // Resume, intent/fulfillment lifecycle fields).
 type ManagementCapabilityConfig struct {
 	// SpecMessage is the fully-qualified name of the addon spec message
-	// (e.g. "ocm.resource_manager.kind.v1alpha.KindClusterSpec").
+	// (e.g. "ocm.kind.v1alpha.KindClusterSpec").
 	SpecMessage protoreflect.FullName
 
 	// SpecDescriptor is the pre-resolved spec message descriptor.
@@ -89,7 +89,7 @@ type InventoryCapabilityConfig struct {
 }
 
 // GRPCServiceName returns the fully-qualified gRPC service name
-// (e.g. "ocm.resource_manager.kind.v1alpha.ClusterService"). This is extension-specific —
+// (e.g. "ocm.kind.v1alpha.ClusterService"). This is extension-specific —
 // multiple extensions modeling the same platform resource type each have
 // distinct gRPC service names because they use different ProtoPackages.
 func (c *ResourceTypeConfig) GRPCServiceName() string {
@@ -102,10 +102,10 @@ func (c *ResourceTypeConfig) ResourceMessageName() string {
 }
 
 // CanonicalHTTPPrefix returns the extension-specific HTTP route prefix
-// (e.g. "/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters"). The service name
+// (e.g. "/apis/kind.open-cluster-management.io/v1alpha/clusters"). The service name
 // segment (derived from [ResourceType]) differentiates this extension's
 // routes from both other extensions and the platform's own canonical
-// routes (which would be at "/apis/resource-manager.open-cluster-management.io/v1alpha/clusters" for the
+// routes (which would be at "/apis/open-cluster-management.io/v1alpha/clusters" for the
 // same identity domain).
 func (c *ResourceTypeConfig) CanonicalHTTPPrefix() string {
 	return "/apis/" + string(c.ResourceType.ServiceName()) + "/" + c.Version + "/" + c.CollectionID

@@ -82,7 +82,7 @@ func BuildServiceDescriptors(cfg *Config) (*ServiceDescriptors, error) {
 	resourceMsg := buildResourceMessage(resourceName, pkg, repMsg, aliasMsg, relMsg)
 
 	fdp := &descriptorpb.FileDescriptorProto{
-		Name:       proto.String(fmt.Sprintf("dynamic/ocm/resource_manager/v1alpha/platform_%s_service.proto", lower)),
+		Name:       proto.String(fmt.Sprintf("dynamic/ocm/v1alpha/platform_%s_service.proto", lower)),
 		Package:    proto.String(pkg),
 		Syntax:     proto.String("proto3"),
 		Dependency: []string{"google/protobuf/timestamp.proto"},

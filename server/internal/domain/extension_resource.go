@@ -393,7 +393,7 @@ func NewExtensionResourceType(
 func (t ExtensionResourceType) ResourceType() ResourceType { return t.resourceType }
 
 // APIServiceName returns the API service name derived from the
-// [ResourceType]'s service component (e.g. "kind.resource-manager.open-cluster-management.io").
+// [ResourceType]'s service component (e.g. "kind.open-cluster-management.io").
 func (t ExtensionResourceType) APIServiceName() ServiceName { return t.resourceType.ServiceName() }
 
 // APIVersion returns the API version (e.g. "v1").
@@ -498,7 +498,7 @@ func (s ManagedState) FulfillmentID() FulfillmentID { return s.fulfillmentID }
 
 // ExtensionResource is the primary extension-owned resource instance.
 // It is the single extension-side aggregate for a fully qualified
-// extension resource name such as //kind.resource-manager.open-cluster-management.io/clusters/dev.
+// extension resource name such as //kind.open-cluster-management.io/clusters/dev.
 //
 // A resource may have managed state (fulfillment lifecycle),
 // inventory state (observed conditions and observations), or both.

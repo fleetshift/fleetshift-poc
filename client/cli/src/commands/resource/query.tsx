@@ -20,7 +20,7 @@ export const queryCommand: CommandSpec = {
     const response = await (
       await clientForArgs(args)
     ).request(
-      `/apis/resource-manager.open-cluster-management.io/v1alpha/${encodeURIComponent(scope)}:queryResources?${params}`,
+      `/apis/open-cluster-management.io/v1alpha/${encodeURIComponent(scope)}:queryResources?${params}`,
     );
     return <JsonOutput value={response} />;
   },

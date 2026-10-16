@@ -19,7 +19,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
 	"github.com/stolostron/ocm-resource-manager/server/internal/application"
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
@@ -189,7 +189,7 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 	env := setupResourceQuery(t)
 	resp, err := env.client.QueryResources(context.Background(), &pb.QueryResourcesRequest{
 		Scope:    "-",
-		Filter:   `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`,
+		Filter:   `resourceType == "kind.open-cluster-management.io/Cluster"`,
 		PageSize: 10,
 	})
 	if err != nil {
@@ -199,7 +199,7 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 		t.Fatalf("len(resources) = %d, want 1", len(resp.Resources))
 	}
 	r := resp.Resources[0]
-	if r.ResourceType != "kind.resource-manager.open-cluster-management.io/Cluster" {
+	if r.ResourceType != "kind.open-cluster-management.io/Cluster" {
 		t.Errorf("resourceType = %q", r.ResourceType)
 	}
 	if r.Resource == nil {
@@ -221,7 +221,7 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 func TestResourceQuery_HappyPathHTTP(t *testing.T) {
 	env := setupResourceQuery(t)
 	req := httptest.NewRequest(http.MethodGet,
-		"/apis/resource-manager.open-cluster-management.io/v1alpha/-:queryResources?filter=resourceType%20%3D%3D%20%22kind.resource-manager.open-cluster-management.io%2FCluster%22&page_size=10",
+		"/apis/open-cluster-management.io/v1alpha/-:queryResources?filter=resourceType%20%3D%3D%20%22kind.open-cluster-management.io%2FCluster%22&page_size=10",
 		nil)
 	rr := httptest.NewRecorder()
 	env.httpMux.ServeHTTP(rr, req)
@@ -249,7 +249,7 @@ func TestResourceQuery_InactiveTypeReturnsEmptyPage(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
-	rt := domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
+	rt := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	if err := tx.ExtensionResources().CreateType(ctx, domain.NewExtensionResourceType(
 		rt, "v1", "clusters", now, domain.WithInventory(),
 	)); err != nil {

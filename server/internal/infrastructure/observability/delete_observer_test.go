@@ -138,7 +138,7 @@ func TestDeleteObserver_ManagedResourceCleanupStarted_FullLifecycle(t *testing.T
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
 	ctx, probe := obs.ManagedResourceCleanupStarted(context.Background(), domain.DeleteManagedResourceCleanupInput{
-		ResourceType:  "test.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType:  "test.open-cluster-management.io/Cluster",
 		Name:          "my-cluster",
 		FulfillmentID: "ful-2",
 	})

@@ -92,7 +92,7 @@ func TestCompileFilter_ParamBinderControlsPlaceholders(t *testing.T) {
 	t.Run("nil Params required", func(t *testing.T) {
 		c := querysql.Compiler{Fields: stubResolver{}}
 		_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-			Filter: `resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"`,
+			Filter: `resourceType == "kind.open-cluster-management.io/Cluster"`,
 		})
 		if err == nil {
 			t.Fatal("CompileFilter: got nil error, want Params required")

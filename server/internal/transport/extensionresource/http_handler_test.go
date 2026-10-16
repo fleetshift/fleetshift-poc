@@ -24,8 +24,8 @@ func TestBuildHTTPHandler_UsesRegisteredPrefix(t *testing.T) {
 	_ = addr
 
 	const (
-		oldPrefix = "/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters"
-		newPrefix = "/apis/kindv2.resource-manager.open-cluster-management.io/v1alpha/clusters"
+		oldPrefix = "/apis/kind.open-cluster-management.io/v1alpha/clusters"
+		newPrefix = "/apis/kindv2.open-cluster-management.io/v1alpha/clusters"
 		id        = "prefix-parse-id"
 	)
 
@@ -77,8 +77,8 @@ func buildInventoryOnlyNodeService(t *testing.T) *extensionresource.RegisteredSe
 			Singular:     "Node",
 			Plural:       "Nodes",
 		},
-		ResourceType: "test.resource-manager.open-cluster-management.io/Node",
-		ProtoPackage: "ocm.resource_manager.test.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Node",
+		ProtoPackage: "ocm.test.v1alpha",
 		Capabilities: extensionresource.ResourceCapabilities{
 			Inventory: &extensionresource.InventoryCapabilityConfig{},
 		},

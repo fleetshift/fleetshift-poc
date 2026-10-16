@@ -7,7 +7,7 @@
 
 ## Problem
 
-The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.resource-manager.open-cluster-management.io/Cluster`, `kubernetes.resource-manager.open-cluster-management.io/Object`) and a `name` in AIP-123 format (e.g., `//kind.resource-manager.open-cluster-management.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
+The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.open-cluster-management.io/Cluster`, `kubernetes.open-cluster-management.io/Object`) and a `name` in AIP-123 format (e.g., `//kind.open-cluster-management.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
 
 - Where each resource type links to (route)
 - What icon to show
@@ -29,7 +29,7 @@ This doc covers three layers in order:
 
 ### Extension type
 
-All search result renderers share a single static extension type: `ocm-resource-manager.render-search`. The `resourceType` string (e.g. `kind.resource-manager.open-cluster-management.io/Cluster`) is stored as a property, not encoded into the type.
+All search result renderers share a single static extension type: `ocm-resource-manager.render-search`. The `resourceType` string (e.g. `kind.open-cluster-management.io/Cluster`) is stored as a property, not encoded into the type.
 
 **Why static, not encoded?** The SDK's `DynamicRemotePlugin` validates extension types against `/^[a-zA-Z]+(?:-[a-zA-Z]+)*\.[a-zA-Z]+(?:-[a-zA-Z]+)*$/` — only letters and hyphens. Base64url encoding (an earlier approach) produces digits and underscores, which the regex rejects. A static type with `resourceType` as a property is simpler and SDK-compliant.
 
@@ -41,8 +41,8 @@ The inventory API returns each resource with a `resourceType` (type-level) and a
 
 ```json
 {
-  "name": "//kind.resource-manager.open-cluster-management.io/clusters/martin-kind01471218",
-  "resourceType": "kind.resource-manager.open-cluster-management.io/Cluster",
+  "name": "//kind.open-cluster-management.io/clusters/martin-kind01471218",
+  "resourceType": "kind.open-cluster-management.io/Cluster",
   "resource": {
     "name": "clusters/martin-kind01471218",
     "uid": "2b1ec087-72f7-484e-817a-9ce0d02945b5",
@@ -59,7 +59,7 @@ Using `resourceType` as the key in `properties.resourceType` means:
 1. **Direct mapping** — no encoding, no intermediary. `result.resourceType` → map lookup → resolved renderer.
 2. **Addon-defined** — the addon chooses its resource type when it registers with the backend. The same string becomes the UI renderer key.
 3. **1:1 with backend types** — `ExtensionResourceTypeService.ListTypes()` returns the same `resourceType` values.
-4. **All resources of the same type render the same way** — every `kind.resource-manager.open-cluster-management.io/Cluster` uses the same renderer. Instance-specific data (name, state, conditions) is passed to the `resolve` function.
+4. **All resources of the same type render the same way** — every `kind.open-cluster-management.io/Cluster` uses the same renderer. Instance-specific data (name, state, conditions) is passed to the `resolve` function.
 
 ### Builder function
 
@@ -124,7 +124,7 @@ The shell renders the link as `<PluginLink scope={r.scope} module={r.module} to=
 createSearchResultRenderer({
   id: "kind-cluster-renderer",
   label: "Kind Cluster",
-  resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+  resourceType: "kind.open-cluster-management.io/Cluster",
   resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
   icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
 }),

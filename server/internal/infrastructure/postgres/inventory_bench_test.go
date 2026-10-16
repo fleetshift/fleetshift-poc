@@ -72,7 +72,7 @@ func aliasSet(aliases ...domain.Alias) domain.AliasSet {
 // ---------------------------------------------------------------------------
 
 const (
-	ipbServiceName    = "bench.resource-manager.open-cluster-management.io"
+	ipbServiceName    = "bench.open-cluster-management.io"
 	ipbTypeName       = "Widget"
 	ipbCollectionName = "widgets"
 

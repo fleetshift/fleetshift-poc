@@ -172,7 +172,7 @@ The current default transport is plaintext gRPC unless `--server-tls` is set.
 ## Deployment Features
 
 Deployment commands use the static
-`ocm.resource_manager.v1alpha.DeploymentService` protobuf service.
+`ocm.v1alpha.DeploymentService` protobuf service.
 
 ### Create deployment
 
@@ -256,14 +256,14 @@ Canonical qualified type form:
 Example:
 
 ```text
-ocm.resource_manager.kind.v1alpha/clusters
+ocm.kind.v1alpha/clusters
 ```
 
 ### Resolve resource type
 
 Resource commands accept:
 
-- Qualified type: `ocm.resource_manager.kind.v1alpha/clusters`
+- Qualified type: `ocm.kind.v1alpha/clusters`
 - Collection ID: `clusters`
 - Plural name: `Clusters`
 
@@ -305,7 +305,7 @@ supports `--page-size`.
 
 `fleetctl resource query`, also available as `resource search`, queries managed
 resources across the platform using the static
-`ocm.resource_manager.v1alpha.ResourceQueryService`.
+`ocm.v1alpha.ResourceQueryService`.
 
 Flags:
 
@@ -654,9 +654,9 @@ Static services:
 
 | Feature | Service |
 | --- | --- |
-| Deployment lifecycle | `ocm.resource_manager.v1alpha.DeploymentService` |
-| Cross-resource query | `ocm.resource_manager.v1alpha.ResourceQueryService` |
-| Signing enrollment | `ocm.resource_manager.v1alpha.SignerEnrollmentService` |
+| Deployment lifecycle | `ocm.v1alpha.DeploymentService` |
+| Cross-resource query | `ocm.v1alpha.ResourceQueryService` |
+| Signing enrollment | `ocm.v1alpha.SignerEnrollmentService` |
 | Resource discovery and descriptors | `grpc.reflection.v1.ServerReflection` |
 
 Addon-provided resources are currently invoked by the CLI through dynamically

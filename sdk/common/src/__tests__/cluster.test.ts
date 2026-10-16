@@ -8,7 +8,7 @@ describe("extractClusterId", () => {
   it.each([
     ["clusters/kind123", "kind123"],
     [
-      "//kubernetes.resource-manager.open-cluster-management.io/clusters/kind123/apiResources/namespaces/objects/namespace-uid",
+      "//kubernetes.open-cluster-management.io/clusters/kind123/apiResources/namespaces/objects/namespace-uid",
       "kind123",
     ],
     ["kind123", "kind123"],

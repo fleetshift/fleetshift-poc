@@ -16,7 +16,7 @@ func TestSignedScopeUsesExternalTenantIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence, err := user.SignDeployment(context.Background(), protocol.DeploymentAuthorization{
-		DeliveryScope: protocol.DeliveryScope{TargetID: "target-east", FullResourceName: "//resource-manager.open-cluster-management.io/deployments/web", Generation: 1, Action: protocol.ActionPut},
+		DeliveryScope: protocol.DeliveryScope{TargetID: "target-east", FullResourceName: "//open-cluster-management.io/deployments/web", Generation: 1, Action: protocol.ActionPut},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestProducerRejectsAnotherTenantInDeliveryScope(t *testing.T) {
 		{PrincipalAuthority: protocol.PrincipalAuthority{Scheme: principal.Scheme, Authority: "https://another.example"}, Partition: "acme"},
 	} {
 		_, err := user.SignDeployment(context.Background(), protocol.DeploymentAuthorization{DeliveryScope: protocol.DeliveryScope{
-			Tenant: tenant, TargetID: "target-east", FullResourceName: "//resource-manager.open-cluster-management.io/deployments/web", Generation: 1, Action: protocol.ActionPut,
+			Tenant: tenant, TargetID: "target-east", FullResourceName: "//open-cluster-management.io/deployments/web", Generation: 1, Action: protocol.ActionPut,
 		}})
 		if err == nil {
 			t.Fatalf("accepted another tenant %+v", tenant)

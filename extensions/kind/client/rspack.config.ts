@@ -85,7 +85,7 @@ const KindPlugin = new ResourceManagerPlugin({
     createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
       icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
     }),

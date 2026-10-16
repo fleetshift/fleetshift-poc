@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+import "ocm/v1alpha/manifest.proto";
+import "ocm/v1alpha/manifest_strategy.proto";
+import "ocm/v1alpha/placement_strategy.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+
+// FederatedIdentity unambiguously identifies a subject by pairing
+// the issuer-scoped subject ID with the issuer URL that vouches for it.
+message FederatedIdentity {
+  string subject = 1;
+  string issuer = 2;
+}
+
+// Signature is a detached signature over a canonical content hash.
+message Signature {
+  FederatedIdentity signer = 1;
+  bytes content_hash = 2;
+  bytes signature_bytes = 3;
+}
+
+// SignerAssertion carries the minimal data a delivery agent needs
+// to independently resolve a signer's public keys from an external
+// registry.
+message SignerAssertion {
+  string identity_token = 1;
+  string registry_id = 2;
+  string registry_subject = 3;
+}
+
+// OutputConstraint is a CEL predicate the delivery output must satisfy.
+// Matches the hybrid PoC's OutputConstraint. Empty for Cap 7.
+message OutputConstraint {
+  string name = 1;
+  string expression = 2;
+}
+
+// Provenance carries the cryptographic proof that a user authorized
+// a deployment. Does NOT carry deployment content or the full key
+// binding bundle — the issuer needed for delivery-time key binding
+// lookup is carried inside Signature.signer.
+message Provenance {
+  Signature signature = 1;
+  google.protobuf.Timestamp valid_until = 2;
+  int64 expected_generation = 3;
+  repeated OutputConstraint output_constraints = 4;
+}
+
+// DeploymentContent groups the identity and strategy fields that the
+// signer authorizes. Matches the hybrid PoC's DeploymentContent.
+message DeploymentContent {
+  string deployment_name = 1;
+  ManifestStrategy manifest_strategy = 2;
+  PlacementStrategy placement_strategy = 3;
+}
+
+// SignedInput composes deployment content with its cryptographic proof.
+// Assembled at delivery time from stored Provenance + signer assertion
+// derived from the enrollment record.
+message SignedInput {
+  DeploymentContent content = 1;
+  Signature signature = 2;
+  SignerAssertion signer = 3;
+  google.protobuf.Timestamp valid_until = 4;
+  repeated OutputConstraint output_constraints = 5;
+  int64 expected_generation = 6;
+}
+
+// Attestation is a self-contained verification bundle for delivery.
+// Composes a SignedInput with a typed delivery action.
+// Matches the hybrid PoC's Attestation (input + output).
+message Attestation {
+  SignedInput input = 1;
+
+  oneof output {
+    PutManifests put_manifests = 2;
+    RemoveByDeploymentName remove = 3;
+  }
+}
+
+// PutManifests delivers manifests to a target.
+message PutManifests {
+  repeated Manifest manifests = 1;
+
+  // TODO: addon-signed manifests.
+  OutputSignature manifest_signature = 2;
+
+  // TODO: signed placement decision.
+  PlacementEvidence placement = 3;
+}
+
+// RemoveByDeploymentName removes a deployment from a target.
+message RemoveByDeploymentName {
+  string deployment_name = 1;
+
+  // TODO: signed placement decision.
+  PlacementEvidence placement = 2;
+}
+
+// OutputSignature is verification material for a signed output.
+// Matches the hybrid PoC's OutputSignature.
+message OutputSignature {
+  Signature signature = 1;
+  string trust_anchor_id = 2;
+}
+
+// PlacementEvidence is a signed placement decision from an addon.
+// Matches the hybrid PoC's PlacementEvidence.
+message PlacementEvidence {
+  string deployment_name = 1;
+  repeated string targets = 2;
+  OutputSignature signature = 3;
+}

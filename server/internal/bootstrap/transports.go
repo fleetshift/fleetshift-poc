@@ -7,7 +7,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	"github.com/stolostron/ocm-resource-manager/server/internal/application"
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"

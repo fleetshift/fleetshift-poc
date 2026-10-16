@@ -37,8 +37,8 @@ func (p Principal) Tenant() Tenant {
 
 // FullResourceName is an AIP-122 full resource name of the form
 // "//{service}/{collection}/{id}", for example
-// "//resource-manager.open-cluster-management.io/deployments/web" or
-// "//kind.resource-manager.open-cluster-management.io/clusters/prod". It is the producer-defined unique
+// "//open-cluster-management.io/deployments/web" or
+// "//kind.open-cluster-management.io/clusters/prod". It is the producer-defined unique
 // identity of a Deployment or ManagedResource. That resource is 1-1 with
 // its underlying fulfillment; producers do not know an RM-assigned
 // fulfillment ID.

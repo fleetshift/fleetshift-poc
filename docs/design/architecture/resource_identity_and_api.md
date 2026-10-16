@@ -39,7 +39,7 @@ Read this when you need to understand how multiple extensions can model the same
 
 ### Problem
 
-Today, a managed resource extends a common gRPC service under a single proto package (`ocm.resource_manager.v1alpha`). There is no separation between a canonical resource identity and the extension that manages it. Once inventory reporting introduces multiple extensions that model some aspect of the same resource — read or write — this breaks down. Either resource paths collide, or the resource is named something else despite logically sharing a common identity.
+Today, a managed resource extends a common gRPC service under a single proto package (`ocm.v1alpha`). There is no separation between a canonical resource identity and the extension that manages it. Once inventory reporting introduces multiple extensions that model some aspect of the same resource — read or write — this breaks down. Either resource paths collide, or the resource is named something else despite logically sharing a common identity.
 
 For example: a cluster may be provisioned by Kind, scanned by a vulnerability scanner, targeted for delivery by a Kubernetes agent, and monitored by an observability addon. These all refer to the same logical cluster. They each need typed, separately lifecycled, non-conflicting APIs — yet they must unite under a single canonical resource identity.
 
@@ -50,7 +50,7 @@ The platform introduces API separation at both the transport (HTTP and gRPC) and
 1. **Platform API layer** — defines the canonical resource hierarchy and identity. Resource types have a place in this hierarchy regardless of which extension defines them. At this layer, the representation is generic: it tracks relationships, aggregates metadata, and correlates aliases. It is mostly read-only (labels are user-writable).
 2. **Extension API layer** — implements resource functionality through typed, extension-specific schemas. Extensions can observe, manage (mapping to a fulfillment), or provide delivery connectivity. Each extension registers services in its own proto package, differentiated at the transport level.
 
-The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource. `//kind.resource-manager.open-cluster-management.io/clusters/foo` and `//resource-manager.open-cluster-management.io/clusters/foo` refer to the same logical resource through different APIs.
+The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource. `//kind.open-cluster-management.io/clusters/foo` and `//open-cluster-management.io/clusters/foo` refer to the same logical resource through different APIs.
 
 ```mermaid
 graph TB
@@ -60,10 +60,10 @@ graph TB
     end
 
     subgraph extLayer ["Extension Representations"]
-        kind["//kind.resource-manager.open-cluster-management.io/clusters/foo"]
-        k8s["//kubernetes.resource-manager.open-cluster-management.io/clusters/foo"]
-        security["//security.resource-manager.open-cluster-management.io/clusters/foo"]
-        virtualization["//virtualization.resource-manager.open-cluster-management.io/vms/bar"]
+        kind["//kind.open-cluster-management.io/clusters/foo"]
+        k8s["//kubernetes.open-cluster-management.io/clusters/foo"]
+        security["//security.open-cluster-management.io/clusters/foo"]
+        virtualization["//virtualization.open-cluster-management.io/vms/bar"]
     end
 
     subgraph rolesLegend ["Representation Roles"]
@@ -141,28 +141,28 @@ The **service name** is the identifier used in full resource names. It is versio
 
 Examples:
 
-- `kind.resource-manager.open-cluster-management.io` — first-party Kind addon
-- `kubernetes.resource-manager.open-cluster-management.io` — first-party Kubernetes addon
+- `kind.open-cluster-management.io` — first-party Kind addon
+- `kubernetes.open-cluster-management.io` — first-party Kubernetes addon
 - `clusters.acme.com` — third-party addon
 
 ### Proto package (versioned)
 
 The **proto package** follows standard proto conventions and includes the version:
 
-- `ocm.resource_manager.kind.v1alpha`
-- `ocm.resource_manager.kubernetes.v1alpha`
+- `ocm.kind.v1alpha`
+- `ocm.kubernetes.v1alpha`
 - `acme.clusters.v1`
 
-gRPC service names follow proto conventions: `{proto_package}.{Singular}Service` (e.g., `ocm.resource_manager.kind.v1alpha.ClusterService`).
+gRPC service names follow proto conventions: `{proto_package}.{Singular}Service` (e.g., `ocm.kind.v1alpha.ClusterService`).
 
 ### Full resource names (AIP-122)
 
 Full resource names use the versionless service name:
 
 ```
-//kind.resource-manager.open-cluster-management.io/clusters/foo
-//kubernetes.resource-manager.open-cluster-management.io/clusters/foo
-//resource-manager.open-cluster-management.io/clusters/foo
+//kind.open-cluster-management.io/clusters/foo
+//kubernetes.open-cluster-management.io/clusters/foo
+//open-cluster-management.io/clusters/foo
 ```
 
 The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource.
@@ -172,9 +172,9 @@ The resource name (`clusters/foo`) is identity-equivalent across services when r
 URLs include the version per AIP-127 transcoding:
 
 ```
-/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/foo
-/apis/kubernetes.resource-manager.open-cluster-management.io/v1alpha/clusters/foo
-/apis/resource-manager.open-cluster-management.io/v1alpha/clusters/foo
+/apis/kind.open-cluster-management.io/v1alpha/clusters/foo
+/apis/kubernetes.open-cluster-management.io/v1alpha/clusters/foo
+/apis/open-cluster-management.io/v1alpha/clusters/foo
 ```
 
 ### Versioning
@@ -193,7 +193,7 @@ The implementation's naming types mirror AIP-122 terminology:
 | ------------------ | ---------------------------------- | --------------------------------------------------------------------- |
 | `ResourceID`       | `foo`                              | Leaf segment identifier (rarely used in isolation)                    |
 | `ResourceName`     | `clusters/foo`                     | Collection-qualified resource name; the primary identity type         |
-| `FullResourceName` | `//kind.resource-manager.open-cluster-management.io/clusters/foo` | Globally unique including service; used in attestation and cross-service references |
+| `FullResourceName` | `//kind.open-cluster-management.io/clusters/foo` | Globally unique including service; used in attestation and cross-service references |
 | `CollectionID`     | `clusters`                         | Single collection segment (rarely used in isolation)                  |
 | `CollectionName`   | `clusters`                         | Full path to a collection; generalizes to hierarchical names          |
 
@@ -263,13 +263,13 @@ The platform resource tracks its representations. Each representation's roles co
 | `target`    | The extension resource provides delivery connectivity configuration | Composes with `managed` and/or `inventory`               |
 
 
-For example, `//kubernetes.resource-manager.open-cluster-management.io/clusters/foo` might declare roles: `target`, `inventory`. A provisioning addon might declare `managed` and `inventory` on the same type so one extension resource carries both intent and observed state.
+For example, `//kubernetes.open-cluster-management.io/clusters/foo` might declare roles: `target`, `inventory`. A provisioning addon might declare `managed` and `inventory` on the same type so one extension resource carries both intent and observed state.
 
 Example: platform resource `clusters/foo` has representations:
 
-- `//kind.resource-manager.open-cluster-management.io/clusters/foo` — roles: `managed`, `inventory`
-- `//kubernetes.resource-manager.open-cluster-management.io/clusters/foo` — roles: `target`, `inventory`
-- `//security.resource-manager.open-cluster-management.io/clusters/foo` — roles: `inventory`
+- `//kind.open-cluster-management.io/clusters/foo` — roles: `managed`, `inventory`
+- `//kubernetes.open-cluster-management.io/clusters/foo` — roles: `target`, `inventory`
+- `//security.open-cluster-management.io/clusters/foo` — roles: `inventory`
 
 ### Semantic relationships
 
@@ -312,7 +312,7 @@ Capability fields are additive on that envelope:
 - **Management** (when declared): `spec`, intent version, fulfillment lifecycle fields, provenance, generation, and writable extension `labels`.
 - **Inventory** (when declared): inlined observed-state fields — `local_labels`, `conditions`, `observation`, `local_update_time`, `index_update_time`. These use real-world wire names (not inventory-prefixed) and are the same whether or not management is also declared. They are distinct from fulfillment lifecycle fields and from user-writable extension `labels`.
 
-A single extension resource can combine axes. For example, `//kubernetes.resource-manager.open-cluster-management.io/clusters/foo` can be both a target and an inventory reporter; a provisioning type can be managed and inventory-capable on one message.
+A single extension resource can combine axes. For example, `//kubernetes.open-cluster-management.io/clusters/foo` can be both a target and an inventory reporter; a provisioning type can be managed and inventory-capable on one message.
 
 Stable generated values that should appear in the indexed projection are modeled as `properties`; see [resource_indexing.md](resource_indexing.md#inventory-item-shape).
 
@@ -330,9 +330,9 @@ Multiple extension services coexist on one HTTP server. Since different proto pa
 
 Examples:
 
-- `/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/foo`
-- `/apis/kubernetes.resource-manager.open-cluster-management.io/v1alpha/clusters/foo`
-- `/apis/resource-manager.open-cluster-management.io/v1alpha/clusters/foo`
+- `/apis/kind.open-cluster-management.io/v1alpha/clusters/foo`
+- `/apis/kubernetes.open-cluster-management.io/v1alpha/clusters/foo`
+- `/apis/open-cluster-management.io/v1alpha/clusters/foo`
 
 The platform API may also be accessible at a short alias (e.g. `/v1alpha/clusters/foo`).
 
@@ -342,7 +342,7 @@ gRPC is already differentiated by fully-qualified service name in the proto pack
 
 ### Open question
 
-Whether to support a short-form path for a "default" service context (the platform API), allowing `/v1alpha/clusters/foo` as a shortcut for `/apis/resource-manager.open-cluster-management.io/v1alpha/clusters/foo`.
+Whether to support a short-form path for a "default" service context (the platform API), allowing `/v1alpha/clusters/foo` as a shortcut for `/apis/open-cluster-management.io/v1alpha/clusters/foo`.
 
 ---
 
@@ -357,7 +357,7 @@ The inventory search API provides cross-cutting fleet-wide discovery and aggrega
 A custom GET method on the platform API surface over an arbitrary scope:
 
 ```
-GET /apis/resource-manager.open-cluster-management.io/v1alpha/{scope}:queryResources?filter={cel_expression}
+GET /apis/open-cluster-management.io/v1alpha/{scope}:queryResources?filter={cel_expression}
 ```
 
 - **Scope**: a cluster, a workspace, the whole platform, or any other level of the resource hierarchy.
@@ -396,7 +396,7 @@ No implicit synthetic rollup condition is generated. Source conditions remain au
 1. **Semantic relationship extensibility**: whether semantic relationships dynamically extend the platform resource message or remain generic (repeated field / map).
 2. **Observed-state model rework**: the current `properties` vs `observations` split may collapse into a unified observation model. Current documents use `properties` for the stable-value bucket; whether that remains distinct from `observations` is deferred to a separate design effort.
 3. **Extension API versioning mechanics**: service name is stable; proto package and URL version evolve independently. The exact mechanics of multi-version coexistence need specification.
-4. **Short-form HTTP path aliases**: whether `/v1alpha/clusters/foo` serves as an alias for `/apis/resource-manager.open-cluster-management.io/v1alpha/clusters/foo`.
+4. **Short-form HTTP path aliases**: whether `/v1alpha/clusters/foo` serves as an alias for `/apis/open-cluster-management.io/v1alpha/clusters/foo`.
 5. **Pre-created identity persistence**: whether platform resources that were pre-created (before any extension resource existed) have stronger persistence guarantees against extension-initiated deletion.
 
 

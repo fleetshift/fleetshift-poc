@@ -1,11 +1,11 @@
 /**
  * Base URL for the resource query API.
- * Matches the proto: `/apis/resource-manager.open-cluster-management.io/v1alpha/{scope}:queryResources`
+ * Matches the proto: `/apis/open-cluster-management.io/v1alpha/{scope}:queryResources`
  */
-const QUERY_BASE = "/apis/resource-manager.open-cluster-management.io/v1alpha";
+const QUERY_BASE = "/apis/open-cluster-management.io/v1alpha";
 
 // ---------------------------------------------------------------------------
-// Response / result types (from proto: ocm/resource_manager/v1alpha/resource_result.proto)
+// Response / result types (from proto: ocm/v1alpha/resource_result.proto)
 // ---------------------------------------------------------------------------
 
 /**
@@ -30,9 +30,9 @@ export interface ResourceCommon {
  * defines.
  */
 export interface ResourceResult<Props = Record<string, unknown>> {
-  /** Canonical full resource name, e.g. `"//kind.resource-manager.open-cluster-management.io/clusters/prod"`. */
+  /** Canonical full resource name, e.g. `"//kind.open-cluster-management.io/clusters/prod"`. */
   name: string;
-  /** Stable type identity, e.g. `"kind.resource-manager.open-cluster-management.io/Cluster"`. */
+  /** Stable type identity, e.g. `"kind.open-cluster-management.io/Cluster"`. */
   resourceType: string;
   /** Dynamic resource body (protojson-encoded Struct). */
   resource: ResourceCommon & Props;
@@ -164,7 +164,7 @@ export interface ResourceApi<Props = Record<string, unknown>> {
  *
  * // query with a CEL filter
  * const { resources } = await clusterApi.search({
- *   filter: 'resource_type == "kind.resource-manager.open-cluster-management.io/Cluster"',
+ *   filter: 'resource_type == "kind.open-cluster-management.io/Cluster"',
  *   pageSize: 20,
  * });
  *
@@ -272,7 +272,7 @@ function jsonInit(method: string, body?: unknown): RequestInit {
  * const mgmt = createApiClient("/v1alpha");
  * const deployments = await mgmt.get<ListDeploymentsResponse>("/deployments");
  *
- * const kind = createApiClient("/apis/kind.resource-manager.open-cluster-management.io/v1alpha");
+ * const kind = createApiClient("/apis/kind.open-cluster-management.io/v1alpha");
  * const cluster = await kind.post<KindCluster>(
  *   "/clusters?cluster_id=my-cluster",
  *   { spec },

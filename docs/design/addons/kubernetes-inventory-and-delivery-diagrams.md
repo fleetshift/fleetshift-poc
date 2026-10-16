@@ -57,7 +57,7 @@ How the writer batches events, extracts inventory, optionally computes edges, an
 - **No heartbeat**: idle empty reports are a no-op and are not used as a keepalive
 - **Resync path**: mixed report of LIST upserts plus deletes for acknowledged UIDs absent from the LIST, scoped to the **current process/GVR generation**. First LIST after process start has an empty acknowledged set (upsert-only). Writer acks only after a successful write so WATCH does not start from an uncommitted cursor
 - **Error recovery**: up to 3 attempts with exponential backoff (1s, 2s, 4s). On failure, pending work is retained and acknowledgement/dedup state is NOT advanced — failed items are never silently lost
-- **Platform writes**: mixed replacement batch of complete-object upserts and exact-name deletes under `kubernetes.resource-manager.open-cluster-management.io/Object` (`clusters/{clusterResourceID}/apiResources/{gvrKey}/objects/{uid}`). Topology edges do not flow through the inventory reporter
+- **Platform writes**: mixed replacement batch of complete-object upserts and exact-name deletes under `kubernetes.open-cluster-management.io/Object` (`clusters/{clusterResourceID}/apiResources/{gvrKey}/objects/{uid}`). Topology edges do not flow through the inventory reporter
 - **Edge sink**: disabled by default (short-circuits edge diff/delivery); inventory flush still proceeds
 
 ```mermaid
@@ -131,7 +131,7 @@ flowchart TD
 
 How indexing integrates with addon registration, producers, and server composition.
 
-- **Connect** registers the delivery agent and the inventory-only schema for `kubernetes.resource-manager.open-cluster-management.io/Object`. Indexing lifecycle is not part of Connect
+- **Connect** registers the delivery agent and the inventory-only schema for `kubernetes.open-cluster-management.io/Object`. Indexing lifecycle is not part of Connect
 - **Indexing runtime** is composed in server wiring, not the addon manager. It builds Kubernetes clients, runs discovery readiness, then hosts one indexer per target
 - **Ensure / stop** are the lifecycle operations. Ensure is generation-fenced and fingerprint-aware (API server, CA, credential identity, index-config digest). Stop is idempotent and does **not** delete inventory
 - **Producers** (Kind) ensure an indexer before reporting delivery success (with a local retry envelope) and stop it at cluster teardown. Kubernetes delivery itself does not require a running indexer

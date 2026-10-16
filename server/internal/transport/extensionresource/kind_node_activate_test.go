@@ -58,25 +58,25 @@ func TestActivate_KindClusterAndNode(t *testing.T) {
 	}
 	t.Logf("services: %v", names)
 
-	if _, ok := info["ocm.resource_manager.kind.v1alpha.ClusterService"]; !ok {
+	if _, ok := info["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Fatalf("missing ClusterService; got %v", names)
 	}
-	if _, ok := info["ocm.resource_manager.kind.v1alpha.NodeService"]; !ok {
+	if _, ok := info["ocm.kind.v1alpha.NodeService"]; !ok {
 		t.Fatalf("missing NodeService; got %v", names)
 	}
-	if _, err := files.FindDescriptorByName("ocm.resource_manager.kind.v1alpha.NodeService"); err != nil {
+	if _, err := files.FindDescriptorByName("ocm.kind.v1alpha.NodeService"); err != nil {
 		t.Fatalf("FileRegistry NodeService: %v", err)
 	}
-	if _, err := files.FindDescriptorByName("ocm.resource_manager.kind.v1alpha.Node"); err != nil {
+	if _, err := files.FindDescriptorByName("ocm.kind.v1alpha.Node"); err != nil {
 		t.Fatalf("FileRegistry Node message: %v", err)
 	}
-	if _, err := files.FindDescriptorByName("ocm.resource_manager.kind.v1alpha.ClusterService"); err != nil {
+	if _, err := files.FindDescriptorByName("ocm.kind.v1alpha.ClusterService"); err != nil {
 		t.Fatalf("FileRegistry ClusterService: %v", err)
 	}
-	if _, err := files.FindFileByPath("ocm/resource_manager/kind/v1alpha/kind_cluster_spec.proto"); err != nil {
+	if _, err := files.FindFileByPath("ocm/kind/v1alpha/kind_cluster_spec.proto"); err != nil {
 		t.Fatalf("FileRegistry kind_cluster_spec.proto: %v", err)
 	}
-	if _, err := files.FindFileByPath("dynamic/ocm/resource_manager/kind/v1alpha/cluster_service.proto"); err != nil {
+	if _, err := files.FindFileByPath("dynamic/ocm/kind/v1alpha/cluster_service.proto"); err != nil {
 		t.Fatalf("FileRegistry cluster_service.proto: %v", err)
 	}
 }

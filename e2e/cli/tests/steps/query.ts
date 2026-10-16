@@ -5,12 +5,10 @@ import { parseJSON } from "../support/json";
 import { CONFIG_MAP_NAME } from "./deployments";
 import { clusterResourceName, KIND_CLUSTER_TYPE, parseCluster } from "./kind";
 
-const KIND_CLUSTER_QUERY_TYPE =
-  "kind.resource-manager.open-cluster-management.io/Cluster";
-const KIND_NODE_QUERY_TYPE =
-  "kind.resource-manager.open-cluster-management.io/Node";
+const KIND_CLUSTER_QUERY_TYPE = "kind.open-cluster-management.io/Cluster";
+const KIND_NODE_QUERY_TYPE = "kind.open-cluster-management.io/Node";
 const KUBERNETES_OBJECT_QUERY_TYPE =
-  "kubernetes.resource-manager.open-cluster-management.io/Object";
+  "kubernetes.open-cluster-management.io/Object";
 const INSPECT_PAGE_SIZE = 50;
 const PAGINATION_PAGE_SIZE = 10;
 const PAGINATION_ORDER = "resource_type,name";
@@ -18,8 +16,7 @@ const MAX_PAGES = 100;
 const WAIT_TIMEOUT_MS = 2 * 60_000;
 const INDEXED_KIND_CLUSTER_GONE_TIMEOUT_MS = 1 * 60_000;
 const POLL_INTERVAL_MS = 2_000;
-const KIND_NODE_PREFIX =
-  "//kind.resource-manager.open-cluster-management.io/nodes/";
+const KIND_NODE_PREFIX = "//kind.open-cluster-management.io/nodes/";
 
 export interface QueryHit {
   name: string;
@@ -103,7 +100,7 @@ function queryArgs(request: QueryRequest): string[] {
 }
 
 function kubernetesObjectNamePrefix(clusterId: string): string {
-  return `//kubernetes.resource-manager.open-cluster-management.io/clusters/${encodeURIComponent(clusterId)}/`;
+  return `//kubernetes.open-cluster-management.io/clusters/${encodeURIComponent(clusterId)}/`;
 }
 
 export function kubernetesObjectsInClusterFilter(clusterId: string): string {
@@ -315,7 +312,7 @@ export class QuerySteps {
   }
 
   async kindClusterQueryMatchesGet(clusterId: string): Promise<void> {
-    const envelopeName = `//kind.resource-manager.open-cluster-management.io/${clusterResourceName(clusterId)}`;
+    const envelopeName = `//kind.open-cluster-management.io/${clusterResourceName(clusterId)}`;
     const hits = await this.#waitForSummary(
       {
         filter: kindClusterReadyFilter(clusterId),

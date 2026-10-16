@@ -44,7 +44,7 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 	ctx := context.Background()
 	db := postgres.OpenTestDB(t)
 
-	rt := domain.ResourceType("inv.resource-manager.open-cluster-management.io/Node")
+	rt := domain.ResourceType("inv.open-cluster-management.io/Node")
 	name := domain.ResourceName("nodes/concurrent-delta")
 	seedRepo := postgres.ExtensionResourceRepo{DB: db}
 	if err := seedRepo.CreateType(ctx, domain.NewExtensionResourceType(
@@ -150,7 +150,7 @@ func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.
 	ctx := context.Background()
 	db := postgres.OpenTestDB(t)
 
-	rt := domain.ResourceType("inv.resource-manager.open-cluster-management.io/Node")
+	rt := domain.ResourceType("inv.open-cluster-management.io/Node")
 	name := domain.ResourceName("nodes/concurrent-alias")
 	seedRepo := postgres.ExtensionResourceRepo{DB: db}
 	if err := seedRepo.CreateType(ctx, domain.NewExtensionResourceType(

@@ -10,7 +10,7 @@ import (
 )
 
 // ServiceName identifies the extension service that owns a representation
-// (e.g. "kind.resource-manager.open-cluster-management.io").
+// (e.g. "kind.open-cluster-management.io").
 type ServiceName string
 
 // NewServiceName validates and returns a [ServiceName]. It rejects empty
@@ -160,7 +160,7 @@ func (s ServiceName) FullName(name ResourceName) FullResourceName {
 }
 
 // FullResourceName is the globally unique name of the form
-// "//{service}/{relative_name}" (e.g. "//kind.resource-manager.open-cluster-management.io/clusters/prod").
+// "//{service}/{relative_name}" (e.g. "//kind.open-cluster-management.io/clusters/prod").
 type FullResourceName string
 
 // AliasNamespace scopes an alias key-space (e.g. "gcp", "aws").

@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-  title: ocm/resource_manager/v1alpha/manifest.proto
+  title: ocm/v1alpha/manifest.proto
   version: version not set
 tags:
   - name: AuthMethodService
@@ -23,7 +23,7 @@ consumes:
 produces:
   - application/json
 paths:
-  /apis/resource-manager.open-cluster-management.io/v1alpha/{scope}:queryResources:
+  /apis/open-cluster-management.io/v1alpha/{scope}:queryResources:
     get:
       summary: |-
         QueryResources returns managed extension resources matching a CEL
@@ -66,7 +66,7 @@ paths:
             Copy field names from the JSON response; use brackets when an exact
             map key is not a legal CEL selector.
 
-            Example: resourceType == "kind.resource-manager.open-cluster-management.io/Cluster" &&
+            Example: resourceType == "kind.open-cluster-management.io/Cluster" &&
             resource.spec.apiServerPort == "6443" &&
             resource.labels["node-role.kubernetes.io/worker"] == ""
 
@@ -231,7 +231,7 @@ paths:
         - name: body
           description: |-
             Request message for
-            [SignerEnrollmentService.CreateSignerEnrollment][ocm.resource_manager.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
+            [SignerEnrollmentService.CreateSignerEnrollment][ocm.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
 
             The caller provides a purpose-scoped ID token. The server verifies
             the token, evaluates the configured CEL claim mapping to derive the
@@ -377,7 +377,7 @@ definitions:
           unsigned, the server infers next-generation server-side.
     description: |-
       Request message for
-      [DeploymentService.ResumeDeployment][ocm.resource_manager.v1alpha.DeploymentService.ResumeDeployment].
+      [DeploymentService.ResumeDeployment][ocm.v1alpha.DeploymentService.ResumeDeployment].
   protobufAny:
     type: object
     properties:
@@ -453,7 +453,7 @@ definitions:
           dedicated OIDC client for signer enrollment.
     description: |-
       Request message for
-      [SignerEnrollmentService.CreateSignerEnrollment][ocm.resource_manager.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
+      [SignerEnrollmentService.CreateSignerEnrollment][ocm.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
 
       The caller provides a purpose-scoped ID token. The server verifies
       the token, evaluates the configured CEL claim mapping to derive the
@@ -586,7 +586,7 @@ definitions:
         description: A token for the next page. If empty, there are no more results.
     description: |-
       Response message for
-      [DeploymentService.ListDeployments][ocm.resource_manager.v1alpha.DeploymentService.ListDeployments].
+      [DeploymentService.ListDeployments][ocm.v1alpha.DeploymentService.ListDeployments].
   v1alphaManifest:
     type: object
     properties:
@@ -745,7 +745,7 @@ definitions:
         description: A token for the next page. If empty, there are no more results.
     description: |-
       Response message for
-      [ResourceQueryService.QueryResources][ocm.resource_manager.v1alpha.ResourceQueryService.QueryResources].
+      [ResourceQueryService.QueryResources][ocm.v1alpha.ResourceQueryService.QueryResources].
   v1alphaRegistrySubjectMapping:
     type: object
     properties:
@@ -775,7 +775,7 @@ definitions:
         type: string
         description: |-
           Stable type identity.
-          Format: `{service}/{type}` (e.g. `kind.resource-manager.open-cluster-management.io/Cluster`).
+          Format: `{service}/{type}` (e.g. `kind.open-cluster-management.io/Cluster`).
         readOnly: true
       resource:
         type: object
@@ -786,7 +786,7 @@ definitions:
         readOnly: true
     description: |-
       ResourceResult is one row returned by
-      [ResourceQueryService.QueryResources][ocm.resource_manager.v1alpha.ResourceQueryService.QueryResources].
+      [ResourceQueryService.QueryResources][ocm.v1alpha.ResourceQueryService.QueryResources].
   v1alphaRolloutStrategy:
     type: object
     properties:

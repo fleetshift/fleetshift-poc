@@ -19,8 +19,8 @@ function makeResult(
   overrides: Partial<ResourceResult<TestProps>> = {},
 ): ResourceResult<TestProps> {
   return {
-    name: "//kind.resource-manager.open-cluster-management.io/clusters/prod",
-    resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+    name: "//kind.open-cluster-management.io/clusters/prod",
+    resourceType: "kind.open-cluster-management.io/Cluster",
     resource: {
       name: "clusters/prod",
       uid: "550e8400-e29b-41d4-a716-446655440000",
@@ -75,7 +75,7 @@ describe("createResourceApi", () => {
 
       const calledUrl = spy.mock.calls[0][0] as string;
       expect(calledUrl).toBe(
-        "/apis/resource-manager.open-cluster-management.io/v1alpha/-:queryResources",
+        "/apis/open-cluster-management.io/v1alpha/-:queryResources",
       );
     });
 
@@ -84,18 +84,17 @@ describe("createResourceApi", () => {
       const api = createResourceApi("-");
 
       await api.search({
-        filter:
-          'resource_type == "kind.resource-manager.open-cluster-management.io/Cluster"',
+        filter: 'resource_type == "kind.open-cluster-management.io/Cluster"',
         pageSize: 25,
         pageToken: "tok123",
       });
 
       const { path, params } = parseRelativeUrl(spy.mock.calls[0][0] as string);
       expect(path).toBe(
-        "/apis/resource-manager.open-cluster-management.io/v1alpha/-:queryResources",
+        "/apis/open-cluster-management.io/v1alpha/-:queryResources",
       );
       expect(params.get("filter")).toBe(
-        'resource_type == "kind.resource-manager.open-cluster-management.io/Cluster"',
+        'resource_type == "kind.open-cluster-management.io/Cluster"',
       );
       expect(params.get("pageSize")).toBe("25");
       expect(params.get("pageToken")).toBe("tok123");
@@ -119,7 +118,7 @@ describe("createResourceApi", () => {
 
       const calledUrl = spy.mock.calls[0][0] as string;
       expect(calledUrl).toBe(
-        "/apis/resource-manager.open-cluster-management.io/v1alpha/workspace%2Ffoo:queryResources",
+        "/apis/open-cluster-management.io/v1alpha/workspace%2Ffoo:queryResources",
       );
     });
 
@@ -175,7 +174,7 @@ describe("createResourceApi", () => {
       const api = createResourceApi<TestProps>("-");
 
       const found = await api.get(
-        "//kind.resource-manager.open-cluster-management.io/clusters/prod",
+        "//kind.open-cluster-management.io/clusters/prod",
       );
 
       expect(found).toEqual(result);
@@ -242,8 +241,7 @@ describe("createResourceApi", () => {
 
       const api = createResourceApi<TestProps>("-");
       const results = await api.searchAll({
-        filter:
-          'resource_type == "kind.resource-manager.open-cluster-management.io/Cluster"',
+        filter: 'resource_type == "kind.open-cluster-management.io/Cluster"',
       });
 
       expect(results).toHaveLength(2);

@@ -116,8 +116,7 @@ export default function ClustersPage() {
     if (!silent) setLoading(true);
     try {
       const results = await clusterApi.searchAll({
-        filter:
-          'resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"',
+        filter: 'resourceType == "kind.open-cluster-management.io/Cluster"',
       });
       setRows(
         results.map((r) => ({

@@ -71,10 +71,10 @@ export default function NodeDetailPage() {
     k8sApi
       .search({
         filter: [
-          'resourceType == "kubernetes.resource-manager.open-cluster-management.io/Object"',
+          'resourceType == "kubernetes.open-cluster-management.io/Object"',
           'resource.observation.kind == "Node"',
           `resource.observation.metadata.uid == "${escapedNodeUid}"`,
-          `name.startsWith("//kubernetes.resource-manager.open-cluster-management.io/clusters/${escapedCluster}/")`,
+          `name.startsWith("//kubernetes.open-cluster-management.io/clusters/${escapedCluster}/")`,
         ].join(" && "),
         pageSize: 1,
       })

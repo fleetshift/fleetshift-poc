@@ -89,7 +89,7 @@ When a schema changes, the platform re-delivers the affected indexer-agent confi
 
 The inventory shape is designed to balance well-structured data the platform and addons can depend on, with free-form data open to extension. It also balances history-keeping, but only where it matters, to keep the data from getting bloated.
 
-- **Identity**: resource type and name, following AIP resource names. The full resource name includes the extension's service name (e.g. `//kubernetes.resource-manager.open-cluster-management.io/clusters/foo/namespaces/bar/objects/apps.v1.Deployment.nginx`). The relative resource name links to the platform resource identity.
+- **Identity**: resource type and name, following AIP resource names. The full resource name includes the extension's service name (e.g. `//kubernetes.open-cluster-management.io/clusters/foo/namespaces/bar/objects/apps.v1.Deployment.nginx`). The relative resource name links to the platform resource identity.
   - This necessarily includes the **Parent** resource, if any.
 - **Aliases**: namespaced key:value pairs for alternate identifiers. These solve the problem of relating to a resource where you do not know the canonical platform-defined resource name. Inventory reporting may contribute aliases, but the linked platform resource remains the canonical owner of the aggregated, *accepted* alias set used for cross-extension identity correlation (see [resource_identity_and_api.md](resource_identity_and_api.md#aliases)).
 - **Relationships**: semantic links between different platform resource identities (e.g. Pod → Service, Node → Cluster). These are modeled on the platform resource and follow the relationship model described in [resource_identity_and_api.md](resource_identity_and_api.md#semantic-relationships). Inventory reporting may contribute relationship facts, but the platform resource remains the canonical owner of the aggregated relationship graph.
@@ -122,7 +122,7 @@ Condition transitions are to be modeled as historical condition events, but that
 
 Resource identity for inventoried resources follows the two-layer API model defined in [resource_identity_and_api.md](resource_identity_and_api.md).
 
-Inventoried resources are extension resources in their addon's own package, with a corresponding platform resource for canonical identity. For example, when a security addon reports cluster status, it creates an extension resource at `//security.resource-manager.open-cluster-management.io/clusters/foo` which links to the same platform identity as `//kind.resource-manager.open-cluster-management.io/clusters/foo` or `//kubernetes.resource-manager.open-cluster-management.io/clusters/foo`.
+Inventoried resources are extension resources in their addon's own package, with a corresponding platform resource for canonical identity. For example, when a security addon reports cluster status, it creates an extension resource at `//security.open-cluster-management.io/clusters/foo` which links to the same platform identity as `//kind.open-cluster-management.io/clusters/foo` or `//kubernetes.open-cluster-management.io/clusters/foo`.
 
 Identity correlation across extensions works through:
 
@@ -212,7 +212,7 @@ This is one of the reasons indexing belongs in the core architecture rather than
 Fleet-wide discovery needs a filterable search surface over inventory. That surface is `queryResources`: a custom GET on the platform API over a hierarchy scope, with a CEL filter over the result envelope. Coverage starts with activated extension resources — the same types already addressable via typed Get/List — and expands as more platform-held shapes are included.
 
 ```
-GET /apis/resource-manager.open-cluster-management.io/v1alpha/{scope}:queryResources?filter={cel_expression}
+GET /apis/open-cluster-management.io/v1alpha/{scope}:queryResources?filter={cel_expression}
 ```
 
 - **Scope**: a collection path in the resource hierarchy, or `-` for the whole platform. Narrower scopes (cluster, workspace, and other levels) are part of the same method as coverage grows; the URI keeps `{scope=**}` for that.
@@ -237,8 +237,8 @@ Inventoried resources have extension-defined observation schema (the extension c
 
 **Resolved: yes.** Inventoried resources are extension API resources in their addon's package, with a corresponding platform resource for canonical identity. For example:
 
-- Platform identity: `clusters/foo` (at `//resource-manager.open-cluster-management.io/clusters/foo`)
-- Extension resource: `//kubernetes.resource-manager.open-cluster-management.io/clusters/foo/namespaces/bar/objects/apps.v1.Deployment.nginx`
+- Platform identity: `clusters/foo` (at `//open-cluster-management.io/clusters/foo`)
+- Extension resource: `//kubernetes.open-cluster-management.io/clusters/foo/namespaces/bar/objects/apps.v1.Deployment.nginx`
 
 This means inventoried resources get AIP-compliant names, are addressable via typed extension APIs, and are also discoverable through the search API. The dynamic gRPC surface area grows with inventoried object types, but this is handled by the existing `DynamicServiceMux` / `DynamicHTTPMux` infrastructure.
 

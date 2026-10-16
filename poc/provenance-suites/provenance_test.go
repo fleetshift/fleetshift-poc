@@ -22,15 +22,15 @@ const (
 	testIssuer               = protocol.Authority("https://issuer.example.test")
 	testReplicasMediaType    = protocol.MediaType("application/vnd.example.replicas+json")
 	testClusterSpecMediaType = protocol.MediaType("application/vnd.example.cluster-spec+json")
-	testResourceType         = "kind.resource-manager.open-cluster-management.io/Cluster"
+	testResourceType         = "kind.open-cluster-management.io/Cluster"
 )
 
 func deploymentName(id string) protocol.FullResourceName {
-	return protocol.FullResourceName("//resource-manager.open-cluster-management.io/deployments/" + id)
+	return protocol.FullResourceName("//open-cluster-management.io/deployments/" + id)
 }
 
 func clusterName(id string) protocol.FullResourceName {
-	return protocol.FullResourceName("//kind.resource-manager.open-cluster-management.io/clusters/" + id)
+	return protocol.FullResourceName("//kind.open-cluster-management.io/clusters/" + id)
 }
 
 func TestEnrollmentAndSignedDelivery(t *testing.T) {

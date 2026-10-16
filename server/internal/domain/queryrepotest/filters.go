@@ -85,7 +85,7 @@ func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
 		for _, filter := range []string{
 			`kind == "extension"`,
 			`platform_name == "clusters/managed"`,
-			`service_name == "kind.resource-manager.open-cluster-management.io"`,
+			`service_name == "kind.open-cluster-management.io"`,
 			`api_version == "v1"`,
 			`collection_name == "clusters"`,
 			fmt.Sprintf(`resource_id == %q`, string(fx.ManagedName.ID())),
@@ -196,7 +196,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		ctx := context.Background()
 
-		conflictType := domain.ResourceType("kubernetes.resource-manager.open-cluster-management.io/BrokenNode")
+		conflictType := domain.ResourceType("kubernetes.open-cluster-management.io/BrokenNode")
 		seedInventoryType(t, tx, conflictType)
 		conflictUID := domain.NewExtensionResourceUID()
 		conflictName := domain.ResourceName("nodes/broken-node")
@@ -231,7 +231,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		ctx := context.Background()
 
-		rt := domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
+		rt := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 		obs := `{"healthy":true}`
 		if err := tx.ExtensionResources().ReplaceInventory(ctx, []domain.InventoryReplacement{{
 			ResourceType: rt,
@@ -447,7 +447,7 @@ func runInvalidFilterTests(t *testing.T, factory Factory) {
 		for _, filter := range []string{
 			`resource.inventory.labels["node-role"] == "worker"`,
 			`resource.inventory.conditions["Ready"].status == "True"`,
-			`resourceType == "kubernetes.resource-manager.open-cluster-management.io/Node" && resource.inventory.observation.capacity.cpu > 4`,
+			`resourceType == "kubernetes.open-cluster-management.io/Node" && resource.inventory.observation.capacity.cpu > 4`,
 		} {
 			err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: filter})
 			if !errors.Is(err, domain.ErrInvalidArgument) {

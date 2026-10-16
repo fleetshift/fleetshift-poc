@@ -56,9 +56,9 @@ function conditionNode(name: string): FieldNode {
 }
 
 const RESOURCE_TYPE_VALUES = [
-  "kind.resource-manager.open-cluster-management.io/Cluster",
-  "kind.resource-manager.open-cluster-management.io/Node",
-  "kubernetes.resource-manager.open-cluster-management.io/Object",
+  "kind.open-cluster-management.io/Cluster",
+  "kind.open-cluster-management.io/Node",
+  "kubernetes.open-cluster-management.io/Object",
 ];
 
 const KIND_VALUES = [

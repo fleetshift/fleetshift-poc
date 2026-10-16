@@ -196,8 +196,7 @@ export function useFleetData(): FleetData {
     async function load() {
       try {
         const raw = await clusterApi.searchAll({
-          filter:
-            'resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"',
+          filter: 'resourceType == "kind.open-cluster-management.io/Cluster"',
         });
         if (!cancelled) {
           setClusters(mapClusters(raw));

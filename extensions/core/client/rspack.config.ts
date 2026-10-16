@@ -148,7 +148,7 @@ const CorePlugin = new ResourceManagerPlugin({
     createSearchResultRenderer({
       id: "k8s-object-renderer",
       label: "K8s Object",
-      resourceType: "kubernetes.resource-manager.open-cluster-management.io/Object",
+      resourceType: "kubernetes.open-cluster-management.io/Object",
       resolve: { $codeRef: "K8sObjectSearchResult.resolveK8sObject" },
       icon: { $codeRef: "K8sObjectSearchResult.K8sObjectIcon" },
     }),

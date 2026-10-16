@@ -9,7 +9,7 @@ import (
 
 // AddonID uniquely identifies an addon within the platform. The value
 // must equal the [ServiceName] under which the addon's extension
-// resource types are registered (e.g. "kind.resource-manager.open-cluster-management.io"). This
+// resource types are registered (e.g. "kind.open-cluster-management.io"). This
 // makes resource type ownership structural: a ResourceType's service
 // name prefix implicitly identifies the owning addon. Delivery-only
 // addons (no extension resources) follow the same naming convention
@@ -120,7 +120,7 @@ type ExtensionResourceSchema struct {
 	ResourceType ResourceType
 
 	// ProtoPackage is the versioned proto package used by gRPC
-	// (e.g. "ocm.resource_manager.kind.v1alpha").
+	// (e.g. "ocm.kind.v1alpha").
 	ProtoPackage string
 
 	// Version is the extension HTTP API version segment (e.g. "v1").

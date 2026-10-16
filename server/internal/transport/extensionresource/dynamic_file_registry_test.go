@@ -104,7 +104,7 @@ func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
 	}
 
 	// FindDescriptorByName should find the service.
-	svcName := protoreflect.FullName("ocm.resource_manager.kind.v1alpha.ClusterService")
+	svcName := protoreflect.FullName("ocm.kind.v1alpha.ClusterService")
 	desc, err := reg.FindDescriptorByName(svcName)
 	if err != nil {
 		t.Fatalf("FindDescriptorByName(%s): %v", svcName, err)
@@ -127,8 +127,8 @@ func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.
 	}
 
 	for _, svcName := range []protoreflect.FullName{
-		"ocm.resource_manager.kind.v1alpha.ClusterService",
-		"ocm.resource_manager.scripted.v1alpha.ScriptedResourceService",
+		"ocm.kind.v1alpha.ClusterService",
+		"ocm.scripted.v1alpha.ScriptedResourceService",
 	} {
 		desc, err := reg.FindDescriptorByName(svcName)
 		if err != nil {
@@ -187,7 +187,7 @@ func TestDynamicFileRegistry_DeregisterRemovesDescriptor(t *testing.T) {
 		t.Fatal("expected error after Deregister, got nil")
 	}
 
-	svcName := protoreflect.FullName("ocm.resource_manager.kind.v1alpha.ClusterService")
+	svcName := protoreflect.FullName("ocm.kind.v1alpha.ClusterService")
 	_, err = reg.FindDescriptorByName(svcName)
 	if err == nil {
 		t.Fatal("expected error for FindDescriptorByName after Deregister, got nil")

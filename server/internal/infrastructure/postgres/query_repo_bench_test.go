@@ -53,11 +53,11 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	qrbClusterService    = "kind.resource-manager.open-cluster-management.io"
+	qrbClusterService    = "kind.open-cluster-management.io"
 	qrbClusterType       = "Cluster"
 	qrbClusterCollection = "clusters"
 
-	qrbNodeService    = "kubernetes.resource-manager.open-cluster-management.io"
+	qrbNodeService    = "kubernetes.open-cluster-management.io"
 	qrbNodeType       = "Node"
 	qrbNodeCollection = "nodes"
 
@@ -173,7 +173,7 @@ func seedQRBPlatformOnly(t *testing.T, db *sql.DB) {
 }
 
 // seedQRBClusters bulk-inserts qrbClusterCount managed extension
-// resources (kind.resource-manager.open-cluster-management.io/Cluster): extension_resources plus
+// resources (kind.open-cluster-management.io/Cluster): extension_resources plus
 // the extension_resource_managed/resource_intents/fulfillments rows
 // query_sql.go's filtered_page CTE joins against, so
 // resource.spec.*/resource.state-shaped filters have real rows to
@@ -236,7 +236,7 @@ func seedQRBClusters(t *testing.T, db *sql.DB) {
 }
 
 // seedQRBNodes bulk-inserts qrbNodeCount inventory-only extension
-// resources (kubernetes.resource-manager.open-cluster-management.io/Node): extension_resources plus
+// resources (kubernetes.open-cluster-management.io/Node): extension_resources plus
 // extension_resource_inventory, with a numeric capacity.cpu
 // observation spread evenly across [1,64] so a `> 32` filter is
 // roughly 50% selective -- a realistic mid-selectivity numeric JSON
@@ -341,7 +341,7 @@ func seedQRBAliasesAndRelationships(t *testing.T, db *sql.DB) {
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO resource_relationships (source_collection_name, source_resource_id, type, target_collection_name, target_resource_id, source_service, created_at)
-		SELECT $1, r, 'depends-on', $1, tgt, 'bench.resource-manager.open-cluster-management.io', c
+		SELECT $1, r, 'depends-on', $1, tgt, 'bench.open-cluster-management.io', c
 		FROM UNNEST($2::text[], $3::text[], $4::timestamptz[]) AS t(r, tgt, c)
 	`, qrbPlatformOnlyCollection, resourceIDs, targets, createdAts); err != nil {
 		t.Fatalf("seed resource_relationships: %v", err)

@@ -17,13 +17,11 @@ export function resourceRoute(type: string): ResourceRoute {
   }
   const protoPackage = type.slice(0, separator);
   const collection = type.slice(separator + 1);
-  const match = /^ocm\.resource_manager\.([a-z][a-z0-9]*)\.v1alpha$/.exec(
-    protoPackage,
-  );
+  const match = /^ocm\.([a-z][a-z0-9]*)\.v1alpha$/.exec(protoPackage);
   if (!match) {
     throw new Error(`unsupported resource package ${protoPackage}`);
   }
-  const service = `${match[1]}.resource-manager.open-cluster-management.io`;
+  const service = `${match[1]}.open-cluster-management.io`;
   return {
     collection,
     path: `/apis/${service}/v1alpha/${collection}`,

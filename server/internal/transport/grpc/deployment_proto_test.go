@@ -3,7 +3,7 @@ package grpc
 import (
 	"testing"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 

@@ -7,19 +7,19 @@ describe("parseResourceTypeRows", () => {
   it("reads type, singular, and service from table rows", () => {
     expect(
       parseResourceTypeRows(`TYPE  SINGULAR  SERVICE
-ocm.resource_manager.kind.v1alpha/clusters  Cluster  ocm.resource_manager.kind.v1alpha.ClusterService
-ocm.resource_manager.kind.v1alpha/nodes\tNode\tocm.resource_manager.kind.v1alpha.NodeService
+ocm.kind.v1alpha/clusters  Cluster  ocm.kind.v1alpha.ClusterService
+ocm.kind.v1alpha/nodes\tNode\tocm.kind.v1alpha.NodeService
 `),
     ).toEqual([
       {
-        service: "ocm.resource_manager.kind.v1alpha.ClusterService",
+        service: "ocm.kind.v1alpha.ClusterService",
         singular: "Cluster",
-        type: "ocm.resource_manager.kind.v1alpha/clusters",
+        type: "ocm.kind.v1alpha/clusters",
       },
       {
-        service: "ocm.resource_manager.kind.v1alpha.NodeService",
+        service: "ocm.kind.v1alpha.NodeService",
         singular: "Node",
-        type: "ocm.resource_manager.kind.v1alpha/nodes",
+        type: "ocm.kind.v1alpha/nodes",
       },
     ]);
   });
@@ -33,10 +33,9 @@ ocm.resource_manager.kind.v1alpha/nodes\tNode\tocm.resource_manager.kind.v1alpha
 
 describe("parseResourceDescribe", () => {
   it("extracts methods, spec type, and nested field names from sections", () => {
-    const described =
-      parseResourceDescribe(`Type:     ocm.resource_manager.kind.v1alpha/clusters
+    const described = parseResourceDescribe(`Type:     ocm.kind.v1alpha/clusters
 Singular: Cluster
-Service:  ocm.resource_manager.kind.v1alpha.ClusterService
+Service:  ocm.kind.v1alpha.ClusterService
 
 Methods:
   CreateCluster
@@ -44,7 +43,7 @@ Methods:
   ListClusters
   DeleteCluster
 
-Spec (ocm.resource_manager.kind.v1alpha.KindClusterSpec):
+Spec (ocm.kind.v1alpha.KindClusterSpec):
   string name = 1
   repeated Node nodes = 2 {
     string role = 1
@@ -57,10 +56,8 @@ Spec (ocm.resource_manager.kind.v1alpha.KindClusterSpec):
     string username_claim = 1
   }
 `);
-    expect(described.type).toBe("ocm.resource_manager.kind.v1alpha/clusters");
-    expect(described.specType).toBe(
-      "ocm.resource_manager.kind.v1alpha.KindClusterSpec",
-    );
+    expect(described.type).toBe("ocm.kind.v1alpha/clusters");
+    expect(described.specType).toBe("ocm.kind.v1alpha.KindClusterSpec");
     expect(described.methods).toEqual([
       "CreateCluster",
       "GetCluster",

@@ -136,11 +136,11 @@ export function useInventorySearch(): {
       try {
         const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         const clusterFilter = [
-          `(resourceType == "kind.resource-manager.open-cluster-management.io/Cluster")`,
+          `(resourceType == "kind.open-cluster-management.io/Cluster")`,
           `&& (resource.name.startsWith("${escaped}") || resource.name.startsWith("clusters/${escaped}"))`,
         ].join(" ");
         const k8sFilter = [
-          `resourceType == "kubernetes.resource-manager.open-cluster-management.io/Object"`,
+          `resourceType == "kubernetes.open-cluster-management.io/Object"`,
           `&& (resource.observation.kind == "Pod" || resource.observation.kind == "Namespace" || resource.observation.kind == "Node")`,
           `&& resource.observation.metadata.name.startsWith("${escaped}")`,
         ].join(" ");

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "ocm/v1alpha/deployment.proto";
+
+// Request message for
+// [DeploymentService.CreateDeployment][ocm.v1alpha.DeploymentService.CreateDeployment].
+message CreateDeploymentRequest {
+  // The ID to use for the deployment, which becomes the final component
+  // of the deployment's resource name.
+  //
+  // This value should be 4-63 characters, and valid characters
+  // are /[a-z][0-9]-/.
+  string deployment_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The deployment to create.
+  Deployment deployment = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+  // When set, the server reconstructs the envelope from the deployment
+  // fields, verifies the signature, and attaches Provenance.
+  bytes user_signature = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Client-supplied attestation expiry. The server uses this timestamp
+  // to reconstruct the identical signed envelope (avoiding clock skew).
+  google.protobuf.Timestamp valid_until = 4 [(google.api.field_behavior) = OPTIONAL];
+}

@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	AnnotationAttestationRef = "resource-manager.open-cluster-management.io/attestation-ref"
-	labelDeliveryID          = "resource-manager.open-cluster-management.io/delivery-id"
-	labelTargetID            = "resource-manager.open-cluster-management.io/target-id"
+	AnnotationAttestationRef = "open-cluster-management.io/attestation-ref"
+	labelDeliveryID          = "open-cluster-management.io/delivery-id"
+	labelTargetID            = "open-cluster-management.io/target-id"
 	defaultHubHash           = "ocm-resource-manager-demo-hub"
 	defaultAgentID           = "ocm-resource-manager-demo-agent"
 )

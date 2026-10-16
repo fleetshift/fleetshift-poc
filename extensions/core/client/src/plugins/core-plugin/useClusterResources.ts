@@ -64,12 +64,12 @@ export function useClusterResources(
     try {
       const kind = GVR_TO_KIND[gvrKey];
       const parts = [
-        `resourceType == "kubernetes.resource-manager.open-cluster-management.io/Object"`,
+        `resourceType == "kubernetes.open-cluster-management.io/Object"`,
       ];
       if (clusterId) {
         const escaped = clusterId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         parts.push(
-          `name.startsWith("//kubernetes.resource-manager.open-cluster-management.io/clusters/${escaped}/")`,
+          `name.startsWith("//kubernetes.open-cluster-management.io/clusters/${escaped}/")`,
         );
         if (kind) parts.push(`resource.observation.kind == "${kind}"`);
       } else if (kind) {

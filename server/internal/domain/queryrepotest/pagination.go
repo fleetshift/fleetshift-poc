@@ -160,8 +160,8 @@ func runPaginationTests(t *testing.T, factory Factory) {
 		if len(page.Resources) != 2 {
 			t.Fatalf("len(Resources) = %d, want 2", len(page.Resources))
 		}
-		// kind.resource-manager.open-cluster-management.io/Cluster sorts before
-		// kubernetes.resource-manager.open-cluster-management.io/Node under (service_name, type_name, ...).
+		// kind.open-cluster-management.io/Cluster sorts before
+		// kubernetes.open-cluster-management.io/Node under (service_name, type_name, ...).
 		wantFirst := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
 		wantSecond := extensionEnvelopeName(fx.InventoryType, fx.InventoryName)
 		if page.Resources[0].Name != wantFirst {
@@ -193,7 +193,7 @@ func runPaginationTests(t *testing.T, factory Factory) {
 			"filter_hash":     "unused",
 			"order_by":        "",
 			"kind":            "extension",
-			"service_name":    "kind.resource-manager.open-cluster-management.io",
+			"service_name":    "kind.open-cluster-management.io",
 			"collection_name": "clusters",
 			"resource_id":     "managed",
 			"type_name":       "Cluster",

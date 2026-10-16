@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	kubernetesaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
 	"github.com/stolostron/ocm-resource-manager/server/internal/application"
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
@@ -297,13 +297,13 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger, opts ...Option)
 	// /apis/{service}/{version}/{collection} prefixes. Go 1.22+ ServeMux
 	// uses longest-prefix matching, so these always take precedence over
 	// the gateway's /v1alpha/ catch-all and the platform-owned
-	// /apis/resource-manager.open-cluster-management.io/ prefix used by QueryResources.
+	// /apis/open-cluster-management.io/ prefix used by QueryResources.
 	topMux := http.NewServeMux()
 	// Minimal health probes are unauthenticated and registered before auth
 	// middleware / SPA fallback.
 	transporthttp.RegisterHealthRoutes(topMux, srv.readiness)
 	topMux.Handle("/v1alpha/", gwMux)
-	topMux.Handle("/apis/resource-manager.open-cluster-management.io/", gwMux)
+	topMux.Handle("/apis/open-cluster-management.io/", gwMux)
 
 	if err := registerUIHTTP(topMux, uiHTTPDeps{
 		cfg:           cfg,

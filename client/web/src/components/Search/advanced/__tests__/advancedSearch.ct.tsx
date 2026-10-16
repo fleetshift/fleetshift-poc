@@ -646,7 +646,7 @@ test.describe("Advanced CEL search", () => {
       const input = component.getByLabel("Advanced CEL search");
       // Type a complete expression that won't produce suggestions or history
       await input.fill(
-        'name == "test" && resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"',
+        'name == "test" && resourceType == "kind.open-cluster-management.io/Cluster"',
       );
       // Wait for suggestions to settle to combinator only
       const menu = component.locator(".ocm-rm-search__autocomplete");

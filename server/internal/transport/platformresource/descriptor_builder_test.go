@@ -26,7 +26,7 @@ func TestBuildServiceDescriptors_Success(t *testing.T) {
 	}
 
 	// Service name.
-	if got, want := string(desc.Service.FullName()), "ocm.resource_manager.v1alpha.PlatformClusterService"; got != want {
+	if got, want := string(desc.Service.FullName()), "ocm.v1alpha.PlatformClusterService"; got != want {
 		t.Errorf("service full name = %q, want %q", got, want)
 	}
 

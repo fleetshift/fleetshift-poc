@@ -6,14 +6,14 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
-const specProtoPath = "ocm/resource_manager/kind/v1alpha/kind_cluster_spec.proto"
+const specProtoPath = "ocm/kind/v1alpha/kind_cluster_spec.proto"
 
 //go:embed kind_cluster_spec.proto
 var kindClusterSpecProto string
 
 // NodeResourceType is the inventory-only [domain.ResourceType] for
 // Kubernetes Nodes discovered inside a kind cluster.
-const NodeResourceType domain.ResourceType = "kind.resource-manager.open-cluster-management.io/Node"
+const NodeResourceType domain.ResourceType = "kind.open-cluster-management.io/Node"
 
 // Descriptor returns the addon descriptor for the kind cluster
 // provider. It declares a delivery capability for kind-managed targets,
@@ -21,7 +21,7 @@ const NodeResourceType domain.ResourceType = "kind.resource-manager.open-cluster
 // inventory-only capability for Nodes.
 func Descriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
-		ID:   "kind.resource-manager.open-cluster-management.io",
+		ID:   "kind.open-cluster-management.io",
 		Name: "Kind Cluster Provider",
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},
@@ -40,7 +40,7 @@ func Descriptor() domain.AddonDescriptor {
 func Schema() domain.ExtensionResourceSchema {
 	return domain.ExtensionResourceSchema{
 		ResourceType: ClusterResourceType,
-		ProtoPackage: "ocm.resource_manager.kind.v1alpha",
+		ProtoPackage: "ocm.kind.v1alpha",
 		Version:      "v1alpha",
 		CollectionID: "clusters",
 		Singular:     "Cluster",
@@ -50,7 +50,7 @@ func Schema() domain.ExtensionResourceSchema {
 		},
 		EntryFile: specProtoPath,
 		Management: &domain.ManagementSchema{
-			SpecMessage: "ocm.resource_manager.kind.v1alpha.KindClusterSpec",
+			SpecMessage: "ocm.kind.v1alpha.KindClusterSpec",
 			Relation:    domain.NewRegisteredSelfTarget("kind-local", ManagedClusterManifestType),
 		},
 		Inventory: &domain.InventorySchema{},
@@ -63,7 +63,7 @@ func Schema() domain.ExtensionResourceSchema {
 func NodeSchema() domain.ExtensionResourceSchema {
 	return domain.ExtensionResourceSchema{
 		ResourceType: NodeResourceType,
-		ProtoPackage: "ocm.resource_manager.kind.v1alpha",
+		ProtoPackage: "ocm.kind.v1alpha",
 		Version:      "v1alpha",
 		CollectionID: "nodes",
 		Singular:     "Node",

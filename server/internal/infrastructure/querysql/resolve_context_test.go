@@ -14,7 +14,7 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
 )
 
-const resolveContextTestRT = domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
+const resolveContextTestRT = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 
 type resolveContextSchemas map[domain.ResourceType]domain.ResourceQuerySchema
 

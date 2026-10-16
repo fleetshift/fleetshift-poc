@@ -11,7 +11,7 @@ describe("createSearchResultRenderer", () => {
     const ext = createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
     });
 
@@ -19,7 +19,7 @@ describe("createSearchResultRenderer", () => {
     expect(ext.properties.id).toBe("kind-cluster-renderer");
     expect(ext.properties.label).toBe("Kind Cluster");
     expect(ext.properties.resourceType).toBe(
-      "kind.resource-manager.open-cluster-management.io/Cluster",
+      "kind.open-cluster-management.io/Cluster",
     );
     expect(ext.properties.resolve).toEqual({
       $codeRef: "KindSearchResult.resolveKindCluster",
@@ -30,7 +30,7 @@ describe("createSearchResultRenderer", () => {
     const ext = createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
       component: { $codeRef: "KindSearchResult.KindResultComponent" },
       icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
@@ -47,7 +47,7 @@ describe("createSearchResultRenderer", () => {
     const ext = createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
     });
     expect(ext.properties.component).toBeUndefined();
@@ -59,8 +59,7 @@ describe("createSearchResultRenderer", () => {
       createSearchResultRenderer({
         id: "BadId",
         label: "Bad",
-        resourceType:
-          "kind.resource-manager.open-cluster-management.io/Cluster",
+        resourceType: "kind.open-cluster-management.io/Cluster",
         resolve: { $codeRef: "Mod.fn" },
       }),
     ).toThrow(/id/);
@@ -71,8 +70,7 @@ describe("createSearchResultRenderer", () => {
       createSearchResultRenderer({
         id: "good-id",
         label: "",
-        resourceType:
-          "kind.resource-manager.open-cluster-management.io/Cluster",
+        resourceType: "kind.open-cluster-management.io/Cluster",
         resolve: { $codeRef: "Mod.fn" },
       }),
     ).toThrow(/label/);
@@ -83,8 +81,7 @@ describe("createSearchResultRenderer", () => {
       createSearchResultRenderer({
         id: "good-id",
         label: "Good",
-        resourceType:
-          "kind.resource-manager.open-cluster-management.io/Cluster",
+        resourceType: "kind.open-cluster-management.io/Cluster",
         resolve: { $codeRef: "bad-coderef" },
       }),
     ).toThrow(/resolve/);
@@ -107,7 +104,7 @@ describe("validateExtensionSet with search result renderer", () => {
     const ext = createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
       icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
     });
@@ -123,7 +120,7 @@ describe("validateExtensionSet with search result renderer", () => {
     const ext = createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
     });
 

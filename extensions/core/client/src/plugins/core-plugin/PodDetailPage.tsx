@@ -69,10 +69,10 @@ export default function PodDetailPage() {
     k8sApi
       .search({
         filter: [
-          'resourceType == "kubernetes.resource-manager.open-cluster-management.io/Object"',
+          'resourceType == "kubernetes.open-cluster-management.io/Object"',
           'resource.observation.kind == "Pod"',
           `resource.observation.metadata.uid == "${escapedPodUid}"`,
-          `name.startsWith("//kubernetes.resource-manager.open-cluster-management.io/clusters/${escapedCluster}/")`,
+          `name.startsWith("//kubernetes.open-cluster-management.io/clusters/${escapedCluster}/")`,
         ].join(" && "),
         pageSize: 1,
       })

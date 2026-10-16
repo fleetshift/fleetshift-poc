@@ -90,7 +90,7 @@ The browser uses one public origin and never accesses plugin origins directly. E
 Deployment defines one `PluginClientPolicy` per plugin identity. YAML is suitable for AIO. A namespace-scoped CRD is preferred for cluster deployment. The resource shares plugin identity across clients while each client declares its own artifact details.
 
 ```yaml
-apiVersion: ui.resource-manager.open-cluster-management.io/v1alpha1
+apiVersion: ui.open-cluster-management.io/v1alpha1
 kind: PluginClientPolicy
 metadata:
   name: kind

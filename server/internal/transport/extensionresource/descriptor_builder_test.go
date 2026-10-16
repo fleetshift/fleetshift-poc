@@ -22,8 +22,8 @@ func managedOnlyConfig() *ResourceTypeConfig {
 			CollectionID: "clusters",
 			Version:      "v1",
 		},
-		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
-		ProtoPackage: "ocm.resource_manager.test.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Cluster",
+		ProtoPackage: "ocm.test.v1alpha",
 		Capabilities: ResourceCapabilities{
 			Management: &ManagementCapabilityConfig{
 				SpecMessage:    "google.protobuf.Timestamp",
@@ -41,8 +41,8 @@ func inventoryOnlyConfig() *ResourceTypeConfig {
 			CollectionID: "clusters",
 			Version:      "v1",
 		},
-		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
-		ProtoPackage: "ocm.resource_manager.test.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Cluster",
+		ProtoPackage: "ocm.test.v1alpha",
 		Capabilities: ResourceCapabilities{
 			Inventory: &InventoryCapabilityConfig{},
 		},
@@ -182,10 +182,10 @@ func TestBuildExtensionServiceDescriptors_CommonLabelsOnAllShapes(t *testing.T) 
 
 func TestSchemaContentHash_InventoryPresence(t *testing.T) {
 	base := domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType: "test.open-cluster-management.io/Cluster",
 		Singular:     "Cluster",
 		Plural:       "Clusters",
-		ProtoPackage: "ocm.resource_manager.test.v1alpha",
+		ProtoPackage: "ocm.test.v1alpha",
 		Version:      "v1",
 		CollectionID: "clusters",
 		Management:   &domain.ManagementSchema{SpecMessage: "ClusterSpec"},

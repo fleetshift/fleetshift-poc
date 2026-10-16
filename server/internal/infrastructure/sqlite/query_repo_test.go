@@ -40,7 +40,7 @@ func TestQueryRepo_StringLabelFilterReusesNumberedBinds(t *testing.T) {
 	defer tx.Rollback()
 
 	at := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := domain.ResourceType("kind.resource-manager.open-cluster-management.io/Cluster")
+	rt := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	if err := tx.ExtensionResources().CreateType(context.Background(), domain.NewExtensionResourceType(
 		rt, "v1", "clusters", at, domain.WithInventory(),
 	)); err != nil {

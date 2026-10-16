@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package ocm.resource_manager.kind.v1alpha;
+package ocm.kind.v1alpha;
 
 import "buf/validate/validate.proto";
 import "google/api/field_behavior.proto";

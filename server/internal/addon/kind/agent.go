@@ -47,7 +47,7 @@ const TargetType domain.TargetType = "kind"
 
 // ClusterResourceType is the [domain.ResourceType] for kind cluster
 // specifications (used in the managed resource system).
-const ClusterResourceType domain.ResourceType = "kind.resource-manager.open-cluster-management.io/Cluster"
+const ClusterResourceType domain.ResourceType = "kind.open-cluster-management.io/Cluster"
 
 // ClusterManifestType is the [domain.ManifestType] for a bare kind
 // [ClusterSpec] delivered directly to the kind agent (non-managed

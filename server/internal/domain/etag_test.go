@@ -171,7 +171,7 @@ func TestFulfillment_Etag_ResolvedTargetCountMatters(t *testing.T) {
 func extensionView() ExtensionResourceView {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
-	er := NewExtensionResource(uid, "kind.resource-manager.open-cluster-management.io/Cluster", "clusters/dev", now,
+	er := NewExtensionResource(uid, "kind.open-cluster-management.io/Cluster", "clusters/dev", now,
 		WithManagedState("f-1"))
 	er.RecordIntent(json.RawMessage(`{"replicas":3}`), now)
 
@@ -355,7 +355,7 @@ func TestExtensionResourceView_Etag_ChangesOnInventoryState(t *testing.T) {
 
 	baseSnap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType: "kind.open-cluster-management.io/Cluster",
 		Name:         "clusters/dev",
 		Inventory: &InventoryResourceSnapshot{
 			Observation: json.RawMessage(`{"v":1}`),
@@ -406,7 +406,7 @@ func TestExtensionResourceView_Etag_NilInventoryDiffers(t *testing.T) {
 
 	withInvSnap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType: "kind.open-cluster-management.io/Cluster",
 		Name:         "clusters/dev",
 		Inventory: &InventoryResourceSnapshot{
 			Observation: json.RawMessage(`{}`),
@@ -418,7 +418,7 @@ func TestExtensionResourceView_Etag_NilInventoryDiffers(t *testing.T) {
 	}
 	withoutInvSnap := ExtensionResourceSnapshot{
 		UID:          uid,
-		ResourceType: "kind.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType: "kind.open-cluster-management.io/Cluster",
 		Name:         "clusters/dev",
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -445,7 +445,7 @@ func TestExtensionResourceView_Etag_ChangesOnReportedAliases(t *testing.T) {
 
 	baseSnap := ExtensionResourceSnapshot{
 		UID:             uid,
-		ResourceType:    "kind.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType:    "kind.open-cluster-management.io/Cluster",
 		Name:            "clusters/dev",
 		ReportedAliases: NewAliasSet([]Alias{instanceID, zone}).Snapshot(),
 		CreatedAt:       now,

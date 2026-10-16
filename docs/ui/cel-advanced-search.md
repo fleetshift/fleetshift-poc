@@ -48,8 +48,8 @@ The Go backend already has a `QueryResources` gRPC/REST endpoint that accepts a 
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `name` | `string` | Full resource name, e.g. `//kind.resource-manager.open-cluster-management.io/clusters/my-cluster` |
-| `resourceType` | `string` | Resource type, e.g. `kind.resource-manager.open-cluster-management.io/Cluster` |
+| `name` | `string` | Full resource name, e.g. `//kind.open-cluster-management.io/clusters/my-cluster` |
+| `resourceType` | `string` | Resource type, e.g. `kind.open-cluster-management.io/Cluster` |
 | `resource` | `dyn` | Dynamic — access `.labels`, `.state`, `.spec.*`, `.conditions`, etc. |
 
 **Supported CEL operators** (built-in only, no custom functions):
@@ -86,7 +86,7 @@ The Go backend already has a `QueryResources` gRPC/REST endpoint that accepts a 
 The UI sends CEL expressions as the `filter` query parameter to the existing `QueryResources` endpoint; `-` selects the whole platform. The example shows a decoded filter for readability; clients URL-encode query parameters:
 
 ```
-GET /apis/resource-manager.open-cluster-management.io/v1alpha/-:queryResources?filter=resource.state == "ACTIVE" && resource.name.startsWith("clusters/prod")&pageSize=50
+GET /apis/open-cluster-management.io/v1alpha/-:queryResources?filter=resource.state == "ACTIVE" && resource.name.startsWith("clusters/prod")&pageSize=50
 ```
 
 No new endpoints needed for basic filtering. The backend compiles the CEL to SQL and returns paginated results.
@@ -100,14 +100,14 @@ Proposed endpoints (not yet implemented), using Kind addon resource types as exa
 ```
 GET /v1alpha/resourceTypes
 → [
-    { "type": "kind.resource-manager.open-cluster-management.io/Cluster", "apiVersion": "v1alpha" },
-    { "type": "kind.resource-manager.open-cluster-management.io/Node",    "apiVersion": "v1alpha" },
+    { "type": "kind.open-cluster-management.io/Cluster", "apiVersion": "v1alpha" },
+    { "type": "kind.open-cluster-management.io/Node",    "apiVersion": "v1alpha" },
     ...
   ]
 
 GET /v1alpha/resourceTypes/{type}/schema
 → {
-    "type": "kind.resource-manager.open-cluster-management.io/Cluster",
+    "type": "kind.open-cluster-management.io/Cluster",
     "fields": [
       { "path": "spec.name",                "type": "string" },
       { "path": "spec.nodes",               "type": "repeated", "itemType": "message" },
@@ -133,7 +133,7 @@ This is a **type-level** event, not per-instance. It fires on structural changes
 WS /api/ui/events/ws
 
 ← { "eventKind": "schema.registry.changed",
-    "resourceType": "kind.resource-manager.open-cluster-management.io/Cluster",
+    "resourceType": "kind.open-cluster-management.io/Cluster",
     "action": "activated",
     "timestamp": 1721474400 }
 ```

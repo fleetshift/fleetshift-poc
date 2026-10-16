@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	rmv1alpha "github.com/stolostron/ocm-resource-manager/server/gen/ocm/resource_manager/v1alpha"
+	ocmv1alpha "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
 	"github.com/stolostron/ocm-resource-manager/server/internal/application"
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
@@ -496,9 +496,9 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 // marshalProvenance converts a domain Provenance to a protoreflect.Value
 // suitable for setting on the dynamic resource message's provenance field.
 func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance) (protoreflect.Value, error) {
-	pb := &rmv1alpha.Provenance{
-		Signature: &rmv1alpha.Signature{
-			Signer: &rmv1alpha.FederatedIdentity{
+	pb := &ocmv1alpha.Provenance{
+		Signature: &ocmv1alpha.Signature{
+			Signer: &ocmv1alpha.FederatedIdentity{
 				Subject: string(p.Sig.Signer.Subject),
 				Issuer:  string(p.Sig.Signer.Issuer),
 			},
@@ -511,7 +511,7 @@ func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance)
 		pb.ValidUntil = timestamppb.New(p.ValidUntil)
 	}
 	for _, oc := range p.OutputConstraints {
-		pb.OutputConstraints = append(pb.OutputConstraints, &rmv1alpha.OutputConstraint{
+		pb.OutputConstraints = append(pb.OutputConstraints, &ocmv1alpha.OutputConstraint{
 			Name:       oc.Name,
 			Expression: oc.Expression,
 		})

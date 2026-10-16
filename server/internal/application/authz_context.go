@@ -29,7 +29,7 @@ type ClientClaims struct {
 // RequestClaims captures protocol-level details for later authorization.
 // Purely between transport and application -- not a domain concept.
 type RequestClaims struct {
-	Method   string // gRPC full method, e.g. "/ocm.resource_manager.v1alpha.DeploymentService/CreateDeployment"
+	Method   string // gRPC full method, e.g. "/ocm.v1alpha.DeploymentService/CreateDeployment"
 	PeerAddr string // client address
 }
 

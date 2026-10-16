@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	deletePreflightResourceType domain.ResourceType = "test.resource-manager.open-cluster-management.io/Widget"
+	deletePreflightResourceType domain.ResourceType = "test.open-cluster-management.io/Widget"
 	deletePreflightManifestType domain.ManifestType = "api.test.widget"
 	deletePreflightTargetType   domain.TargetType   = "test"
 	deletePreflightTargetID     domain.TargetID     = "addon-local"

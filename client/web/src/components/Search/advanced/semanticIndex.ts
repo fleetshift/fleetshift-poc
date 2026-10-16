@@ -24,26 +24,23 @@ const ENTRIES: SemanticEntry[] = [
   {
     term: "cluster kind",
     label: "Kind clusters",
-    expression:
-      'resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"',
-    valueOnly: '"kind.resource-manager.open-cluster-management.io/Cluster"',
+    expression: 'resourceType == "kind.open-cluster-management.io/Cluster"',
+    valueOnly: '"kind.open-cluster-management.io/Cluster"',
     category: "Resource Type",
   },
   {
     term: "node",
     label: "Kind nodes",
-    expression:
-      'resourceType == "kind.resource-manager.open-cluster-management.io/Node"',
-    valueOnly: '"kind.resource-manager.open-cluster-management.io/Node"',
+    expression: 'resourceType == "kind.open-cluster-management.io/Node"',
+    valueOnly: '"kind.open-cluster-management.io/Node"',
     category: "Resource Type",
   },
   {
     term: "kubernetes object k8s",
     label: "Kubernetes objects",
     expression:
-      'resourceType == "kubernetes.resource-manager.open-cluster-management.io/Object"',
-    valueOnly:
-      '"kubernetes.resource-manager.open-cluster-management.io/Object"',
+      'resourceType == "kubernetes.open-cluster-management.io/Object"',
+    valueOnly: '"kubernetes.open-cluster-management.io/Object"',
     category: "Resource Type",
   },
 

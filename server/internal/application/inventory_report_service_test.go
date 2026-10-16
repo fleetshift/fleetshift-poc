@@ -13,7 +13,7 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
 )
 
-const inventoryReportTestType domain.ResourceType = "kind.resource-manager.open-cluster-management.io/Cluster"
+const inventoryReportTestType domain.ResourceType = "kind.open-cluster-management.io/Cluster"
 
 func collectAliases(set domain.AliasSet) []domain.Alias {
 	return set.Slice()
@@ -160,8 +160,8 @@ func TestInventoryReportService_ReplaceBatch_ByName_CreatesIdentityAndInventory(
 	if len(pr.Representations()) != 1 {
 		t.Fatalf("Representations len = %d, want 1", len(pr.Representations()))
 	}
-	if pr.Representations()[0].ServiceName() != "kind.resource-manager.open-cluster-management.io" {
-		t.Errorf("representation service = %q, want kind.resource-manager.open-cluster-management.io", pr.Representations()[0].ServiceName())
+	if pr.Representations()[0].ServiceName() != "kind.open-cluster-management.io" {
+		t.Errorf("representation service = %q, want kind.open-cluster-management.io", pr.Representations()[0].ServiceName())
 	}
 	tx.Rollback()
 
@@ -671,7 +671,7 @@ func TestInventoryReportService_ReplaceBatch_DuplicateAcrossChunkBoundaryFails(t
 
 func TestInventoryReportService_ReplaceBatch_RejectsTypeWithoutInventoryMetadata(t *testing.T) {
 	store := newStore(t)
-	const managedOnlyType domain.ResourceType = "kind.resource-manager.open-cluster-management.io/Widget"
+	const managedOnlyType domain.ResourceType = "kind.open-cluster-management.io/Widget"
 	seedManagedOnlyType(t, store, managedOnlyType)
 	svc := application.NewInventoryReportService(store)
 	ctx := context.Background()
@@ -1426,7 +1426,7 @@ func TestInventoryReportService_ReplaceBatch_IsDelete_RejectsContradictoryUpsert
 
 func TestInventoryReportService_ReplaceBatch_IsDelete_RejectsTypeWithoutInventoryMetadata(t *testing.T) {
 	store := newStore(t)
-	const managedOnlyType domain.ResourceType = "kind.resource-manager.open-cluster-management.io/Widget"
+	const managedOnlyType domain.ResourceType = "kind.open-cluster-management.io/Widget"
 	seedManagedOnlyType(t, store, managedOnlyType)
 	svc := application.NewInventoryReportService(store)
 	ctx := context.Background()
@@ -1444,7 +1444,7 @@ func TestInventoryReportService_ReplaceBatch_IsDelete_RejectsTypeWithoutInventor
 
 func TestInventoryReportService_ReplaceBatch_IsDelete_RejectsManagedPlusInventoryType(t *testing.T) {
 	store := newStore(t)
-	const shared domain.ResourceType = "kind.resource-manager.open-cluster-management.io/Shared"
+	const shared domain.ResourceType = "kind.open-cluster-management.io/Shared"
 	seedManagedPlusInventoryType(t, store, shared)
 	svc := application.NewInventoryReportService(store)
 	ctx := context.Background()

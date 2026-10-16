@@ -36,11 +36,11 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	qrbClusterService    = "kind.resource-manager.open-cluster-management.io"
+	qrbClusterService    = "kind.open-cluster-management.io"
 	qrbClusterType       = "Cluster"
 	qrbClusterCollection = "clusters"
 
-	qrbNodeService    = "kubernetes.resource-manager.open-cluster-management.io"
+	qrbNodeService    = "kubernetes.open-cluster-management.io"
 	qrbNodeType       = "Node"
 	qrbNodeCollection = "nodes"
 
@@ -335,7 +335,7 @@ func seedQRBAliasesAndRelationships(t *testing.T, db *sql.DB) {
 			args := make([]any, 0, n*4)
 			for i := 0; i < n; i++ {
 				idx := start + i
-				placeholders[i] = "(?, ?, 'depends-on', ?, ?, 'bench.resource-manager.open-cluster-management.io', ?)"
+				placeholders[i] = "(?, ?, 'depends-on', ?, ?, 'bench.open-cluster-management.io', ?)"
 				args = append(args, qrbPlatformOnlyCollection, fmt.Sprintf("asset-%08d", idx),
 					qrbPlatformOnlyCollection, fmt.Sprintf("asset-%08d", (idx+1)%qrbPlatformOnlyCount), createdAt)
 			}

@@ -75,7 +75,7 @@ func TestViewToStruct_RequiresDescriptorsAndConfig(t *testing.T) {
 	view := domain.ExtensionResourceView{
 		Resource: *domain.NewExtensionResource(
 			domain.NewExtensionResourceUID(),
-			"kind.resource-manager.open-cluster-management.io/Cluster",
+			"kind.open-cluster-management.io/Cluster",
 			"clusters/x",
 			time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
 		),

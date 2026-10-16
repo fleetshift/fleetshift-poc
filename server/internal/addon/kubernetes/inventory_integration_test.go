@@ -333,9 +333,9 @@ func Test_CRDLifecycle(t *testing.T) {
 	crd := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "apiextensions.k8s.io/v1",
 		"kind":       "CustomResourceDefinition",
-		"metadata":   map[string]any{"name": "widgets.test.resource-manager.open-cluster-management.io"},
+		"metadata":   map[string]any{"name": "widgets.test.open-cluster-management.io"},
 		"spec": map[string]any{
-			"group": "test.resource-manager.open-cluster-management.io",
+			"group": "test.open-cluster-management.io",
 			"names": map[string]any{
 				"kind": "Widget", "plural": "widgets", "singular": "widget",
 			},
@@ -364,16 +364,16 @@ func Test_CRDLifecycle(t *testing.T) {
 		t.Fatalf("create CRD: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = f.dynClient.Resource(crdGVR).Delete(context.Background(), "widgets.test.resource-manager.open-cluster-management.io", metav1.DeleteOptions{})
+		_ = f.dynClient.Resource(crdGVR).Delete(context.Background(), "widgets.test.open-cluster-management.io", metav1.DeleteOptions{})
 	})
 
 	time.Sleep(5 * time.Second)
 
 	widgetGVR := schema.GroupVersionResource{
-		Group: "test.resource-manager.open-cluster-management.io", Version: "v1", Resource: "widgets",
+		Group: "test.open-cluster-management.io", Version: "v1", Resource: "widgets",
 	}
 	widget := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "test.resource-manager.open-cluster-management.io/v1",
+		"apiVersion": "test.open-cluster-management.io/v1",
 		"kind":       "Widget",
 		"metadata":   map[string]any{"name": "test-widget", "namespace": f.namespace},
 		"spec":       map[string]any{"color": "blue"},
@@ -473,9 +473,9 @@ func Test_CRDDeletion(t *testing.T) {
 	crd := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "apiextensions.k8s.io/v1",
 		"kind":       "CustomResourceDefinition",
-		"metadata":   map[string]any{"name": "gadgets.test.resource-manager.open-cluster-management.io"},
+		"metadata":   map[string]any{"name": "gadgets.test.open-cluster-management.io"},
 		"spec": map[string]any{
-			"group": "test.resource-manager.open-cluster-management.io",
+			"group": "test.open-cluster-management.io",
 			"names": map[string]any{
 				"kind": "Gadget", "plural": "gadgets", "singular": "gadget",
 			},
@@ -507,10 +507,10 @@ func Test_CRDDeletion(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	gadgetGVR := schema.GroupVersionResource{
-		Group: "test.resource-manager.open-cluster-management.io", Version: "v1", Resource: "gadgets",
+		Group: "test.open-cluster-management.io", Version: "v1", Resource: "gadgets",
 	}
 	gadget := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "test.resource-manager.open-cluster-management.io/v1",
+		"apiVersion": "test.open-cluster-management.io/v1",
 		"kind":       "Gadget",
 		"metadata":   map[string]any{"name": "test-gadget", "namespace": f.namespace},
 		"spec":       map[string]any{"size": "large"},
@@ -531,7 +531,7 @@ func Test_CRDDeletion(t *testing.T) {
 
 	// GVR disappearance is non-destructive: stop the informer, leave
 	// other collections alone (no DeleteCollection / collection wipe).
-	err = f.dynClient.Resource(crdGVR).Delete(ctx, "gadgets.test.resource-manager.open-cluster-management.io", metav1.DeleteOptions{})
+	err = f.dynClient.Resource(crdGVR).Delete(ctx, "gadgets.test.open-cluster-management.io", metav1.DeleteOptions{})
 	if err != nil {
 		t.Fatalf("delete CRD: %v", err)
 	}

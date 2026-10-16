@@ -3,9 +3,9 @@ import { expect } from "@playwright/test";
 import { type FleetctlClient } from "../support/fleetctl";
 import { KIND_CLUSTER_TYPE } from "./kind";
 
-const KIND_NODE_TYPE = "ocm.resource_manager.kind.v1alpha/nodes";
-const KIND_CLUSTER_SERVICE = "ocm.resource_manager.kind.v1alpha.ClusterService";
-const KIND_NODE_SERVICE = "ocm.resource_manager.kind.v1alpha.NodeService";
+const KIND_NODE_TYPE = "ocm.kind.v1alpha/nodes";
+const KIND_CLUSTER_SERVICE = "ocm.kind.v1alpha.ClusterService";
+const KIND_NODE_SERVICE = "ocm.kind.v1alpha.NodeService";
 const KIND_CLUSTER_SPEC_TYPE = "KindClusterSpec";
 const REQUIRED_METHODS = ["Create", "Get", "List", "Delete"] as const;
 const REQUIRED_SPEC_FIELDS = ["nodes", "networking", "oidc", "role", "image"];

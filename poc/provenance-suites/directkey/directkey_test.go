@@ -417,7 +417,7 @@ func TestDecodeAssertionThenDecodeDeliveryScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeDeliveryScope: %v", err)
 	}
-	if scope.Tenant != (protocol.Tenant{PrincipalAuthority: testAuthority().PrincipalAuthority}) || scope.TargetID != "target-east" || scope.FullResourceName != "//resource-manager.open-cluster-management.io/deployments/web" {
+	if scope.Tenant != (protocol.Tenant{PrincipalAuthority: testAuthority().PrincipalAuthority}) || scope.TargetID != "target-east" || scope.FullResourceName != "//open-cluster-management.io/deployments/web" {
 		t.Fatalf("scope = %+v", scope)
 	}
 }
@@ -626,7 +626,7 @@ func testAssertion(t *testing.T) protocol.TypedAssertion {
 		DeliveryScope: protocol.DeliveryScope{
 			Tenant:           protocol.Tenant{PrincipalAuthority: testAuthority().PrincipalAuthority},
 			TargetID:         "target-east",
-			FullResourceName: "//resource-manager.open-cluster-management.io/deployments/web",
+			FullResourceName: "//open-cluster-management.io/deployments/web",
 			Generation:       1,
 			Action:           protocol.ActionPut,
 		},

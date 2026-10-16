@@ -15,7 +15,7 @@ import (
 
 var (
 	// GroupVersion is the API group/version for Delivery resources.
-	GroupVersion = schema.GroupVersion{Group: "delivery.resource-manager.open-cluster-management.io", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "delivery.open-cluster-management.io", Version: "v1alpha1"}
 
 	// SchemeBuilder registers Delivery types.
 	SchemeBuilder = &runtimescheme.Builder{GroupVersion: GroupVersion}

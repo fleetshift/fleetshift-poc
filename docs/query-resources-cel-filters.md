@@ -195,10 +195,10 @@ Always copy keys from the response JSON for the type you are querying.
 Examples:
 
 ```text
-name == "//kind.resource-manager.open-cluster-management.io/clusters/managed"
-name.startsWith("//kind.resource-manager.open-cluster-management.io/")
-resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"
-resourceType in ["kind.resource-manager.open-cluster-management.io/Cluster", "kubernetes.resource-manager.open-cluster-management.io/Node"]
+name == "//kind.open-cluster-management.io/clusters/managed"
+name.startsWith("//kind.open-cluster-management.io/")
+resourceType == "kind.open-cluster-management.io/Cluster"
+resourceType in ["kind.open-cluster-management.io/Cluster", "kubernetes.open-cluster-management.io/Node"]
 ```
 
 Top-level identity fragments such as `service_name`, `collection_name`,
@@ -298,7 +298,7 @@ has(resource.observation.absent)       # true only if that key exists
 !has(resource.observation)             # managed-only / not-yet-reported rows
 true || resource.observation.absent != 5   # still matches (short-circuit)
 false && resource.observation.absent != 5  # does not match
-has(resource.observation) || resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"
+has(resource.observation) || resourceType == "kind.open-cluster-management.io/Cluster"
 ```
 
 Invalid `timestamp()` inputs (non-string JSON, non-RFC 3339 text) are
@@ -354,22 +354,22 @@ filter and `order_by` used when they were issued.
 
 ```text
 # Kind clusters in a region that are active
-resourceType == "kind.resource-manager.open-cluster-management.io/Cluster"
+resourceType == "kind.open-cluster-management.io/Cluster"
   && resource.spec.region == "us-east-1"
   && resource.state == "ACTIVE"
 
 # Worker nodes by inventory label
-resourceType == "kubernetes.resource-manager.open-cluster-management.io/Node"
+resourceType == "kubernetes.open-cluster-management.io/Node"
   && resource.localLabels["node-role"] == "worker"
 
 # Ready condition
 resource.conditions["Ready"].status == "True"
 
 # Names under a service prefix
-name.startsWith("//kind.resource-manager.open-cluster-management.io/")
+name.startsWith("//kind.open-cluster-management.io/")
 
 # Observation numeric threshold (JSON number)
-resourceType == "kubernetes.resource-manager.open-cluster-management.io/Node"
+resourceType == "kubernetes.open-cluster-management.io/Node"
   && resource.observation.capacity.cpu > 4
 
 # Ready condition present (any status)

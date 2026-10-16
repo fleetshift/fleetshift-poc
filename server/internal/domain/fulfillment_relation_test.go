@@ -128,7 +128,7 @@ func TestFulfillmentRelation_UnmarshalRejectsEmptyFields(t *testing.T) {
 func TestSignedRelation_JSONRoundTrip(t *testing.T) {
 	rel := domain.NewRegisteredSelfTarget("addon-cluster-mgmt", "api.kind.cluster")
 	original := domain.SignedRelation{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType: "test.open-cluster-management.io/Cluster",
 		Relation:     rel,
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.example"},
@@ -147,8 +147,8 @@ func TestSignedRelation_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if got.ResourceType != "test.resource-manager.open-cluster-management.io/Cluster" {
-		t.Errorf("ResourceType = %q, want %q", got.ResourceType, "test.resource-manager.open-cluster-management.io/Cluster")
+	if got.ResourceType != "test.open-cluster-management.io/Cluster" {
+		t.Errorf("ResourceType = %q, want %q", got.ResourceType, "test.open-cluster-management.io/Cluster")
 	}
 	rst, ok := got.Relation.(domain.RegisteredSelfTarget)
 	if !ok {

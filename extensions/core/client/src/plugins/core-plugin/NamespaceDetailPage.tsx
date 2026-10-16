@@ -52,7 +52,7 @@ export default function NamespaceDetailPage() {
     setError(null);
     k8sApi
       .get(
-        `//kubernetes.resource-manager.open-cluster-management.io/clusters/${clusterId}/apiResources/namespaces/objects/${nsUid}`,
+        `//kubernetes.open-cluster-management.io/clusters/${clusterId}/apiResources/namespaces/objects/${nsUid}`,
       )
       .then((result) => {
         if (stale) return;

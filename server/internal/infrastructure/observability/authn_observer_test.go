@@ -17,7 +17,7 @@ func TestAuthnObserver_FullLifecycle_Authenticated(t *testing.T) {
 
 	obs := observability.NewAuthnObserver(logger)
 	ctx, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
-		Method:   "/ocm.resource_manager.v1alpha.DeploymentService/ListDeployments",
+		Method:   "/ocm.v1alpha.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
 	if ctx == nil {
@@ -67,7 +67,7 @@ func TestAuthnObserver_FullLifecycle_Anonymous(t *testing.T) {
 
 	obs := observability.NewAuthnObserver(logger)
 	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
-		Method:   "/ocm.resource_manager.v1alpha.DeploymentService/ListDeployments",
+		Method:   "/ocm.v1alpha.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
 
@@ -104,7 +104,7 @@ func TestAuthnObserver_FullLifecycle_VerificationError(t *testing.T) {
 
 	obs := observability.NewAuthnObserver(logger)
 	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
-		Method:   "/ocm.resource_manager.v1alpha.DeploymentService/CreateDeployment",
+		Method:   "/ocm.v1alpha.DeploymentService/CreateDeployment",
 		PeerAddr: "10.0.0.1:12345",
 	})
 
@@ -146,7 +146,7 @@ func TestAuthnObserver_MethodsLoaded_LogsAtDebug(t *testing.T) {
 
 	obs := observability.NewAuthnObserver(logger)
 	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
-		Method:   "/ocm.resource_manager.v1alpha.DeploymentService/ListDeployments",
+		Method:   "/ocm.v1alpha.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
 
@@ -169,7 +169,7 @@ func TestAuthnObserver_CredentialMissing_LogsAtDebug(t *testing.T) {
 
 	obs := observability.NewAuthnObserver(logger)
 	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
-		Method:   "/ocm.resource_manager.v1alpha.DeploymentService/ListDeployments",
+		Method:   "/ocm.v1alpha.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
 
@@ -193,7 +193,7 @@ func TestAuthnObserver_ErrorTakesPrecedence(t *testing.T) {
 
 	obs := observability.NewAuthnObserver(logger)
 	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
-		Method:   "/ocm.resource_manager.v1alpha.DeploymentService/CreateDeployment",
+		Method:   "/ocm.v1alpha.DeploymentService/CreateDeployment",
 		PeerAddr: "10.0.0.1:12345",
 	})
 

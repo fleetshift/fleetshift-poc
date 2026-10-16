@@ -17,7 +17,7 @@ import (
 	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
 )
 
-const kindClusterServiceName = "ocm.resource_manager.kind.v1alpha.ClusterService"
+const kindClusterServiceName = "ocm.kind.v1alpha.ClusterService"
 
 func startReflectionServer(t *testing.T, activator *extensionresource.DynamicSchemaActivator, mux *dynamicapi.DynamicServiceMux, fileReg *dynamicapi.DynamicFileRegistry) *grpc.ClientConn {
 	t.Helper()
@@ -169,7 +169,7 @@ func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 	conn := startReflectionServer(t, activator, mux, fileReg)
 
 	// The resource message should also be resolvable.
-	resp := fileContainingSymbol(t, conn, "ocm.resource_manager.kind.v1alpha.Cluster")
+	resp := fileContainingSymbol(t, conn, "ocm.kind.v1alpha.Cluster")
 	fdResp := resp.GetFileDescriptorResponse()
 	if fdResp == nil {
 		errResp := resp.GetErrorResponse()

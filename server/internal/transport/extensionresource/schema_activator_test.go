@@ -135,12 +135,12 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	if id != "ocm.resource_manager.kind.v1alpha.ClusterService" {
-		t.Errorf("registration ID = %q, want ocm.resource_manager.kind.v1alpha.ClusterService", id)
+	if id != "ocm.kind.v1alpha.ClusterService" {
+		t.Errorf("registration ID = %q, want ocm.kind.v1alpha.ClusterService", id)
 	}
 
 	info := mux.ServiceInfo()
-	si, ok := info["ocm.resource_manager.kind.v1alpha.ClusterService"]
+	si, ok := info["ocm.kind.v1alpha.ClusterService"]
 	if !ok {
 		t.Fatal("expected ClusterService in mux ServiceInfo after Activate")
 	}
@@ -160,11 +160,11 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 
 	activator.Deactivate(id)
 
-	if _, ok := mux.ServiceInfo()["ocm.resource_manager.kind.v1alpha.ClusterService"]; ok {
+	if _, ok := mux.ServiceInfo()["ocm.kind.v1alpha.ClusterService"]; ok {
 		t.Error("expected ClusterService removed from mux after Deactivate")
 	}
 
-	if _, ok := activator.ContentHash("ocm.resource_manager.kind.v1alpha.ClusterService"); ok {
+	if _, ok := activator.ContentHash("ocm.kind.v1alpha.ClusterService"); ok {
 		t.Error("expected content hash cleared after Deactivate")
 	}
 }
@@ -290,7 +290,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 		t.Error("expected content hash to change after schema update")
 	}
 
-	if _, ok := mux.ServiceInfo()["ocm.resource_manager.kind.v1alpha.ClusterService"]; !ok {
+	if _, ok := mux.ServiceInfo()["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Error("expected ClusterService still in mux after atomic swap")
 	}
 }
@@ -312,7 +312,7 @@ func TestDynamicSchemaActivator_ReactivateAfterDeactivate(t *testing.T) {
 	if id2 != id {
 		t.Errorf("registration ID changed: %q vs %q", id, id2)
 	}
-	if _, ok := mux.ServiceInfo()["ocm.resource_manager.kind.v1alpha.ClusterService"]; !ok {
+	if _, ok := mux.ServiceInfo()["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Error("expected ClusterService in mux after re-activation")
 	}
 }
@@ -346,8 +346,8 @@ func TestDynamicSchemaActivator_EmptySingularReturnsError(t *testing.T) {
 
 func inventoryOnlyNodeSchema() domain.ExtensionResourceSchema {
 	return domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Node",
-		ProtoPackage: "ocm.resource_manager.test.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Node",
+		ProtoPackage: "ocm.test.v1alpha",
 		Version:      "v1",
 		CollectionID: "nodes",
 		Singular:     "Node",
@@ -364,12 +364,12 @@ func TestDynamicSchemaActivator_InventoryOnlyActivatesReadOnlyService(t *testing
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
-	if id != "ocm.resource_manager.test.v1alpha.NodeService" {
-		t.Errorf("id = %q, want ocm.resource_manager.test.v1alpha.NodeService", id)
+	if id != "ocm.test.v1alpha.NodeService" {
+		t.Errorf("id = %q, want ocm.test.v1alpha.NodeService", id)
 	}
 
 	info := mux.ServiceInfo()
-	svc, ok := info["ocm.resource_manager.test.v1alpha.NodeService"]
+	svc, ok := info["ocm.test.v1alpha.NodeService"]
 	if !ok {
 		t.Fatal("expected NodeService in mux after inventory-only Activate")
 	}
@@ -416,20 +416,20 @@ func TestDynamicSchemaActivator_InventoryOnlyActivatesPlatform(t *testing.T) {
 	}
 
 	info := mux.ServiceInfo()
-	if _, ok := info["ocm.resource_manager.test.v1alpha.NodeService"]; !ok {
+	if _, ok := info["ocm.test.v1alpha.NodeService"]; !ok {
 		t.Error("expected extension NodeService")
 	}
-	if _, ok := info["ocm.resource_manager.v1alpha.PlatformNodeService"]; !ok {
+	if _, ok := info["ocm.v1alpha.PlatformNodeService"]; !ok {
 		t.Error("expected PlatformNodeService after inventory-only Activate")
 	}
 
 	activator.Deactivate(id)
 
 	info = mux.ServiceInfo()
-	if _, ok := info["ocm.resource_manager.test.v1alpha.NodeService"]; ok {
+	if _, ok := info["ocm.test.v1alpha.NodeService"]; ok {
 		t.Error("extension service should be gone after Deactivate")
 	}
-	if _, ok := info["ocm.resource_manager.v1alpha.PlatformNodeService"]; ok {
+	if _, ok := info["ocm.v1alpha.PlatformNodeService"]; ok {
 		t.Error("platform service should be gone after last owner Deactivate")
 	}
 }
@@ -445,10 +445,10 @@ func TestDynamicSchemaActivator_ManagedAndInventoryActivatesBoth(t *testing.T) {
 	}
 
 	info := mux.ServiceInfo()
-	if _, ok := info["ocm.resource_manager.kind.v1alpha.ClusterService"]; !ok {
+	if _, ok := info["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Error("expected extension ClusterService")
 	}
-	if _, ok := info["ocm.resource_manager.v1alpha.PlatformClusterService"]; !ok {
+	if _, ok := info["ocm.v1alpha.PlatformClusterService"]; !ok {
 		t.Error("expected PlatformClusterService")
 	}
 
@@ -471,8 +471,8 @@ func TestDynamicSchemaActivator_ManagedAndInventoryActivatesBoth(t *testing.T) {
 func TestDynamicSchemaActivator_NeitherCapabilityReturnsError(t *testing.T) {
 	activator, _ := newActivator(t)
 	schema := domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Orphan",
-		ProtoPackage: "ocm.resource_manager.test.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Orphan",
+		ProtoPackage: "ocm.test.v1alpha",
 		Version:      "v1",
 		CollectionID: "orphans",
 		Singular:     "Orphan",
@@ -486,7 +486,7 @@ func TestDynamicSchemaActivator_NeitherCapabilityReturnsError(t *testing.T) {
 
 func TestSchemaContentHash_Deterministic(t *testing.T) {
 	s := domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Cluster",
+		ResourceType: "test.open-cluster-management.io/Cluster",
 		Singular:     "Cluster",
 		Plural:       "Clusters",
 		Management: &domain.ManagementSchema{
@@ -532,7 +532,7 @@ func TestDynamicSchemaActivator_ActivateRegistersHTTPRoutes(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	code := httpStatus(t, env.httpURL+"/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/test-id")
+	code := httpStatus(t, env.httpURL+"/apis/kind.open-cluster-management.io/v1alpha/clusters/test-id")
 	if code == http.StatusNotFound {
 		t.Fatal("expected canonical route to exist after Activate, got 404")
 	}
@@ -547,9 +547,9 @@ func TestDynamicSchemaActivator_RegistersCanonicalHTTPRoute(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	code := httpStatus(t, env.httpURL+"/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/test-id")
+	code := httpStatus(t, env.httpURL+"/apis/kind.open-cluster-management.io/v1alpha/clusters/test-id")
 	if code == http.StatusNotFound {
-		t.Fatal("expected /apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/test-id to route, got 404")
+		t.Fatal("expected /apis/kind.open-cluster-management.io/v1alpha/clusters/test-id to route, got 404")
 	}
 }
 
@@ -564,7 +564,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 
 	env.activator.Deactivate(id)
 
-	code := httpStatus(t, env.httpURL+"/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/test-id")
+	code := httpStatus(t, env.httpURL+"/apis/kind.open-cluster-management.io/v1alpha/clusters/test-id")
 	if code != http.StatusNotFound {
 		t.Errorf("expected 404 on canonical route after Deactivate, got %d", code)
 	}
@@ -579,7 +579,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("first Activate: %v", err)
 	}
 
-	code1 := httpStatus(t, env.httpURL+"/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/test-id")
+	code1 := httpStatus(t, env.httpURL+"/apis/kind.open-cluster-management.io/v1alpha/clusters/test-id")
 	if code1 == http.StatusNotFound {
 		t.Fatal("expected canonical route to exist after first Activate")
 	}
@@ -595,7 +595,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("second Activate (changed): %v", err)
 	}
 
-	code2 := httpStatus(t, env.httpURL+"/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters/test-id")
+	code2 := httpStatus(t, env.httpURL+"/apis/kind.open-cluster-management.io/v1alpha/clusters/test-id")
 	if code2 == http.StatusNotFound {
 		t.Fatal("expected canonical route to survive atomic swap, got 404")
 	}
@@ -615,7 +615,7 @@ func TestDynamicSchemaActivator_HTTPPrefixAfterTypeSwap(t *testing.T) {
 		t.Fatalf("Activate old: %v", err)
 	}
 
-	oldPrefix := "/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters"
+	oldPrefix := "/apis/kind.open-cluster-management.io/v1alpha/clusters"
 	if code := httpStatus(t, env.httpURL+oldPrefix+"/test-id"); code == http.StatusNotFound {
 		t.Fatal("expected old canonical route after Activate, got 404")
 	}
@@ -627,7 +627,7 @@ func TestDynamicSchemaActivator_HTTPPrefixAfterTypeSwap(t *testing.T) {
 	}
 
 	newSchema := kindaddon.Schema()
-	newSchema.ResourceType = "kindv2.resource-manager.open-cluster-management.io/Cluster"
+	newSchema.ResourceType = "kindv2.open-cluster-management.io/Cluster"
 	newSchema.ProtoFiles = map[string]string{
 		"cluster_spec.proto": `syntax = "proto3"; message KindClusterSpecV2 { string name = 1; }`,
 	}
@@ -638,7 +638,7 @@ func TestDynamicSchemaActivator_HTTPPrefixAfterTypeSwap(t *testing.T) {
 		t.Fatalf("Activate new: %v", err)
 	}
 
-	newPrefix := "/apis/kindv2.resource-manager.open-cluster-management.io/v1alpha/clusters"
+	newPrefix := "/apis/kindv2.open-cluster-management.io/v1alpha/clusters"
 	newURL := env.httpURL + newPrefix + "/test-id"
 	resp, err := http.Get(newURL)
 	if err != nil {
@@ -655,7 +655,7 @@ func TestDynamicSchemaActivator_HTTPPrefixAfterTypeSwap(t *testing.T) {
 	if resp.StatusCode == http.StatusBadRequest {
 		t.Fatalf("GET after type swap returned 400 (likely trimmed wrong prefix); body=%s", body)
 	}
-	if strings.Contains(string(body), "apis/kindv2.resource-manager.open-cluster-management.io") {
+	if strings.Contains(string(body), "apis/kindv2.open-cluster-management.io") {
 		t.Fatalf("error body still contains untrimmed HTTP path: %s", body)
 	}
 
@@ -679,12 +679,12 @@ func TestDynamicSchemaActivator_PackageRenameKeepsOldOnFailure(t *testing.T) {
 
 	// Occupy the destination gRPC name so RegisterDesc for the renamed
 	// package fails after Activate has decided to move.
-	newService := "ocm.resource_manager.kind.v2alpha.ClusterService"
+	newService := "ocm.kind.v2alpha.ClusterService"
 	if err := mux.RegisterDesc(&grpc.ServiceDesc{ServiceName: newService}); err != nil {
 		t.Fatalf("pre-register conflicting service: %v", err)
 	}
 
-	schema.ProtoPackage = "ocm.resource_manager.kind.v2alpha"
+	schema.ProtoPackage = "ocm.kind.v2alpha"
 	_, err = activator.Activate(context.Background(), schema)
 	if err == nil {
 		t.Fatal("Activate with conflicting new gRPC name: want error")
@@ -721,20 +721,20 @@ func TestDynamicSchemaActivator_PackageRenameSameHTTPPrefix(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 	oldService := string(oldID)
-	const prefix = "/apis/kind.resource-manager.open-cluster-management.io/v1alpha/clusters"
+	const prefix = "/apis/kind.open-cluster-management.io/v1alpha/clusters"
 
 	if code := httpStatus(t, env.httpURL+prefix+"/test-id"); code == http.StatusNotFound {
 		t.Fatal("expected canonical route after first Activate, got 404")
 	}
 
-	schema.ProtoPackage = "ocm.resource_manager.kind.v2alpha"
+	schema.ProtoPackage = "ocm.kind.v2alpha"
 	newID, err := env.activator.Activate(ctx, schema)
 	if err != nil {
 		t.Fatalf("Activate after package rename: %v", err)
 	}
 	newService := string(newID)
-	if newService != "ocm.resource_manager.kind.v2alpha.ClusterService" {
-		t.Fatalf("new registration ID = %q, want ocm.resource_manager.kind.v2alpha.ClusterService", newService)
+	if newService != "ocm.kind.v2alpha.ClusterService" {
+		t.Fatalf("new registration ID = %q, want ocm.kind.v2alpha.ClusterService", newService)
 	}
 	if newService == oldService {
 		t.Fatal("expected gRPC service name to change after ProtoPackage rename")
@@ -914,8 +914,8 @@ func TestDynamicSchemaActivator_SwapChangesRequestHandling(t *testing.T) {
 
 	// v1: name is required.
 	v1 := domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Widget",
-		ProtoPackage: "ocm.resource_manager.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Widget",
+		ProtoPackage: "ocm.v1alpha",
 		Version:      "v1",
 		CollectionID: "widgets",
 		Singular:     "Widget",
@@ -935,8 +935,8 @@ message WidgetSpec {
 
 	// v2: name is optional.
 	v2 := domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Widget",
-		ProtoPackage: "ocm.resource_manager.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Widget",
+		ProtoPackage: "ocm.v1alpha",
 		Version:      "v1",
 		CollectionID: "widgets",
 		Singular:     "Widget",
@@ -955,7 +955,7 @@ message WidgetSpec {
 
 	// Register the widget type in the store so Create can look it up.
 	if _, err := env.typeSvc.Create(ctx, application.CreateExtensionTypeInput{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Widget",
+		ResourceType: "test.open-cluster-management.io/Widget",
 		APIVersion:   "v1",
 		CollectionID: "widgets",
 		Management: &application.CreateExtensionTypeManagementInput{
@@ -988,7 +988,7 @@ message WidgetSpec {
 
 	resp := dynamicpb.NewMessage(v1Descs.Resource)
 	err := env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.WidgetService/CreateWidget", emptyReq, resp)
+		"/ocm.v1alpha.WidgetService/CreateWidget", emptyReq, resp)
 	if err == nil {
 		t.Fatal("expected InvalidArgument from v1 (required name), got nil")
 	}
@@ -1017,7 +1017,7 @@ message WidgetSpec {
 
 	resp2 := dynamicpb.NewMessage(v2Descs.Resource)
 	err = env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.WidgetService/CreateWidget", emptyReq2, resp2)
+		"/ocm.v1alpha.WidgetService/CreateWidget", emptyReq2, resp2)
 	if err != nil {
 		st2, _ := status.FromError(err)
 		t.Fatalf("v2 CreateWidget failed: code=%v msg=%q (should pass with optional name)",
@@ -1066,24 +1066,24 @@ func TestDualRegistration(t *testing.T) {
 	info := mux.ServiceInfo()
 
 	// Extension gRPC service must be routable.
-	if _, ok := info["ocm.resource_manager.kind.v1alpha.ClusterService"]; !ok {
+	if _, ok := info["ocm.kind.v1alpha.ClusterService"]; !ok {
 		t.Error("expected extension ClusterService in mux after Activate")
 	}
 
 	// Platform gRPC service must also be routable.
-	if _, ok := info["ocm.resource_manager.v1alpha.PlatformClusterService"]; !ok {
+	if _, ok := info["ocm.v1alpha.PlatformClusterService"]; !ok {
 		t.Error("expected PlatformClusterService in mux after Activate")
 	}
 
-	if id != "ocm.resource_manager.kind.v1alpha.ClusterService" {
-		t.Errorf("registration ID = %q, want ocm.resource_manager.kind.v1alpha.ClusterService", id)
+	if id != "ocm.kind.v1alpha.ClusterService" {
+		t.Errorf("registration ID = %q, want ocm.kind.v1alpha.ClusterService", id)
 	}
 }
 
 func TestPlatformRefCounting(t *testing.T) {
 	activator, mux := newActivatorWithPlatform(t)
 	ctx := context.Background()
-	const platformSvc = "ocm.resource_manager.v1alpha.PlatformClusterService"
+	const platformSvc = "ocm.v1alpha.PlatformClusterService"
 
 	// Step 1: activate Kind (collection: "clusters")
 	kindID, err := activator.Activate(ctx, kindaddon.Schema())
@@ -1098,8 +1098,8 @@ func TestPlatformRefCounting(t *testing.T) {
 	// a different extension API version. This should still share the same
 	// platform service.
 	secondarySchema := kindaddon.Schema()
-	secondarySchema.ResourceType = "secondary.kind.resource-manager.open-cluster-management.io/Cluster"
-	secondarySchema.ProtoPackage = "ocm.resource_manager.secondary.kind.v2alpha"
+	secondarySchema.ResourceType = "secondary.kind.open-cluster-management.io/Cluster"
+	secondarySchema.ProtoPackage = "ocm.secondary.kind.v2alpha"
 	secondarySchema.Version = "v2"
 
 	secondaryID, err := activator.Activate(ctx, secondarySchema)
@@ -1130,7 +1130,7 @@ func TestPlatformRefCounting(t *testing.T) {
 func TestReplaceDoesNotDropPlatform(t *testing.T) {
 	activator, mux := newActivatorWithPlatform(t)
 	ctx := context.Background()
-	const platformSvc = "ocm.resource_manager.v1alpha.PlatformClusterService"
+	const platformSvc = "ocm.v1alpha.PlatformClusterService"
 
 	// Activate Kind.
 	_, err := activator.Activate(ctx, kindaddon.Schema())
@@ -1165,7 +1165,7 @@ func TestReplaceDoesNotDropPlatform(t *testing.T) {
 func TestReplaceInPlaceKeepsExtensionOnPlatformAcquireFailure(t *testing.T) {
 	env := newActivatorWithHTTPAndPlatform(t)
 	ctx := context.Background()
-	const extSvc = "ocm.resource_manager.kind.v1alpha.ClusterService"
+	const extSvc = "ocm.kind.v1alpha.ClusterService"
 
 	schema := kindaddon.Schema()
 	if _, err := env.activator.Activate(ctx, schema); err != nil {
@@ -1177,7 +1177,7 @@ func TestReplaceInPlaceKeepsExtensionOnPlatformAcquireFailure(t *testing.T) {
 
 	// Occupy the destination platform HTTP prefix so acquirePlatform
 	// fails after releasing the old collection's platform ownership.
-	const newPlatformPrefix = "/apis/resource-manager.open-cluster-management.io/v1alpha/widgets"
+	const newPlatformPrefix = "/apis/open-cluster-management.io/v1alpha/widgets"
 	if err := env.httpMux.RegisterPrefixHandler(newPlatformPrefix, func(http.ResponseWriter, *http.Request) {}); err != nil {
 		t.Fatalf("pre-register conflicting platform prefix: %v", err)
 	}
@@ -1227,7 +1227,7 @@ func TestPlatformReflection(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	const platDescPath = "dynamic/ocm/resource_manager/v1alpha/platform_cluster_service.proto"
+	const platDescPath = "dynamic/ocm/v1alpha/platform_cluster_service.proto"
 	fd, err := fileReg.FindFileByPath(platDescPath)
 	if err != nil {
 		t.Fatalf("platform file descriptor not resolvable after Activate: %v", err)
@@ -1261,12 +1261,12 @@ func TestPlatformHTTPVersionIsFixed(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	platformV1 := env.httpURL + "/apis/resource-manager.open-cluster-management.io/" + platformresource.APIVersion + "/clusters"
+	platformV1 := env.httpURL + "/apis/open-cluster-management.io/" + platformresource.APIVersion + "/clusters"
 	if code := httpStatus(t, platformV1); code != http.StatusOK {
 		t.Fatalf("expected platform route %q to return 200, got %d", platformV1, code)
 	}
 
-	platformV2 := env.httpURL + "/apis/resource-manager.open-cluster-management.io/v2/clusters"
+	platformV2 := env.httpURL + "/apis/open-cluster-management.io/v2/clusters"
 	if code := httpStatus(t, platformV2); code != http.StatusNotFound {
 		t.Fatalf("expected platform route %q to be absent, got status %d", platformV2, code)
 	}
@@ -1385,8 +1385,8 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 
 func platformTestWidgetSchema() domain.ExtensionResourceSchema {
 	return domain.ExtensionResourceSchema{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Widget",
-		ProtoPackage: "ocm.resource_manager.v1alpha",
+		ResourceType: "test.open-cluster-management.io/Widget",
+		ProtoPackage: "ocm.v1alpha",
 		Version:      "v1",
 		CollectionID: "widgets",
 		Singular:     "Widget",
@@ -1442,7 +1442,7 @@ func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.Clie
 
 	resp := dynamicpb.NewMessage(descs.Resource)
 	if err := conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.WidgetService/CreateWidget", req, resp); err != nil {
+		"/ocm.v1alpha.WidgetService/CreateWidget", req, resp); err != nil {
 		t.Fatalf("CreateWidget(%s): %v", id, err)
 	}
 	return descs
@@ -1513,7 +1513,7 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 	// Register the widget type with API identity metadata so the
 	// create workflow claims a platform resource identity.
 	if _, err := env.typeSvc.Create(ctx, application.CreateExtensionTypeInput{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Widget",
+		ResourceType: "test.open-cluster-management.io/Widget",
 		APIVersion:   "v1",
 		CollectionID: "widgets",
 		Management: &application.CreateExtensionTypeManagementInput{
@@ -1538,7 +1538,7 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 		protoreflect.ValueOfString("widgets/widget-1"))
 	getResp := dynamicpb.NewMessage(platDescs.Resource)
 	if err := env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp); err != nil {
+		"/ocm.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp); err != nil {
 		t.Fatalf("GetPlatformWidget: %v", err)
 	}
 
@@ -1550,21 +1550,21 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 
 	rep := repList.Get(0).Message()
 	repDesc := repsField.Message()
-	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "test.resource-manager.open-cluster-management.io" {
-		t.Errorf("representation service_name = %q, want %q", got, "test.resource-manager.open-cluster-management.io")
+	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "test.open-cluster-management.io" {
+		t.Errorf("representation service_name = %q, want %q", got, "test.open-cluster-management.io")
 	}
 	if got := rep.Get(repDesc.Fields().ByName("version")).String(); got != "v1" {
 		t.Errorf("representation version = %q, want %q", got, "v1")
 	}
-	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "test.resource-manager.open-cluster-management.io" {
-		t.Errorf("representation service_name (re-check) = %q, want %q", got, "test.resource-manager.open-cluster-management.io")
+	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "test.open-cluster-management.io" {
+		t.Errorf("representation service_name (re-check) = %q, want %q", got, "test.open-cluster-management.io")
 	}
 
 	// Also verify the resource appears in the platform List.
 	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
 	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
 	if err := env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
+		"/ocm.v1alpha.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
 		t.Fatalf("ListPlatformWidgets: %v", err)
 	}
 
@@ -1605,7 +1605,7 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 	schema := platformTestWidgetSchema()
 
 	if _, err := env.typeSvc.Create(ctx, application.CreateExtensionTypeInput{
-		ResourceType: "test.resource-manager.open-cluster-management.io/Widget",
+		ResourceType: "test.open-cluster-management.io/Widget",
 		APIVersion:   "v1",
 		CollectionID: "widgets",
 		Management: &application.CreateExtensionTypeManagementInput{
@@ -1622,7 +1622,7 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 
 	extDescs := createWidgetViaExtension(t, ctx, env.conn, schema, "widget-1")
 
-	awaitFulfillmentActive(ctx, t, env.store, "test.resource-manager.open-cluster-management.io/Widget", "widgets/widget-1")
+	awaitFulfillmentActive(ctx, t, env.store, "test.open-cluster-management.io/Widget", "widgets/widget-1")
 
 	// Delete via extension gRPC.
 	deleteReq := dynamicpb.NewMessage(extDescs.DeleteRequest)
@@ -1630,14 +1630,14 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 		protoreflect.ValueOfString("widgets/widget-1"))
 	deleteResp := dynamicpb.NewMessage(extDescs.Resource)
 	if err := env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.WidgetService/DeleteWidget", deleteReq, deleteResp); err != nil {
+		"/ocm.v1alpha.WidgetService/DeleteWidget", deleteReq, deleteResp); err != nil {
 		t.Fatalf("DeleteWidget: %v", err)
 	}
 
 	// Wait for the async cleanup workflow to actually remove the
 	// extension_resources row -- the representation is derived from
 	// that row's existence, so it can't disappear any earlier.
-	awaitExtensionResourceGone(ctx, t, env.store, "test.resource-manager.open-cluster-management.io/Widget", "widgets/widget-1")
+	awaitExtensionResourceGone(ctx, t, env.store, "test.open-cluster-management.io/Widget", "widgets/widget-1")
 
 	// Platform Get: no explicit Create and no alias ever backed this
 	// resource, so once its only representation is gone, GetByName's
@@ -1650,7 +1650,7 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 		protoreflect.ValueOfString("widgets/widget-1"))
 	getResp := dynamicpb.NewMessage(platDescs.Resource)
 	err := env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
+		"/ocm.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
 	if err == nil {
 		t.Fatal("GetPlatformWidget after delete: expected NotFound, got nil error")
 	}
@@ -1663,7 +1663,7 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
 	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
 	if err := env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
+		"/ocm.v1alpha.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
 		t.Fatalf("ListPlatformWidgets after delete: %v", err)
 	}
 
@@ -1697,7 +1697,7 @@ func TestSchemaDeactivate_PlatformAPIUnroutable(t *testing.T) {
 		protoreflect.ValueOfString("widgets/nonexistent"))
 	getResp := dynamicpb.NewMessage(platDescs.Resource)
 	err = env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
+		"/ocm.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
 	if err == nil {
 		t.Fatal("expected error for nonexistent resource, got nil")
 	}
@@ -1711,7 +1711,7 @@ func TestSchemaDeactivate_PlatformAPIUnroutable(t *testing.T) {
 	// After deactivation: the platform service is gone.
 	getResp2 := dynamicpb.NewMessage(platDescs.Resource)
 	err = env.conn.Invoke(ctx,
-		"/ocm.resource_manager.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp2)
+		"/ocm.v1alpha.PlatformWidgetService/GetPlatformWidget", getReq, getResp2)
 	if err == nil {
 		t.Fatal("expected Unimplemented after deactivation, got nil")
 	}

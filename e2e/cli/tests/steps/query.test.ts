@@ -15,7 +15,7 @@ import {
 describe("resource query scoping", () => {
   it("builds an exact cluster-scoped Kubernetes filter", () => {
     expect(kubernetesObjectsInClusterFilter("kind/e2e")).toContain(
-      "//kubernetes.resource-manager.open-cluster-management.io/clusters/kind%2Fe2e/",
+      "//kubernetes.open-cluster-management.io/clusters/kind%2Fe2e/",
     );
     expect(kubernetesObjectKindFilter("a", "Node")).toContain(
       'resource.observation.kind == "Node"',
@@ -40,10 +40,9 @@ describe("resource query scoping", () => {
 
   it("rejects envelope names that are not in-cluster Kubernetes objects", () => {
     const hit = {
-      name: "//kubernetes.resource-manager.open-cluster-management.io/clusters/a/apiResources/v1/nodes/objects/node-a",
+      name: "//kubernetes.open-cluster-management.io/clusters/a/apiResources/v1/nodes/objects/node-a",
       resource: {},
-      resourceType:
-        "kubernetes.resource-manager.open-cluster-management.io/Object",
+      resourceType: "kubernetes.open-cluster-management.io/Object",
     };
     expect(kubernetesObjectInCluster(hit, "a")).toBe(true);
     expect(kubernetesObjectInCluster(hit, "b")).toBe(false);
@@ -54,7 +53,7 @@ describe("resource query scoping", () => {
       kubernetesObjectInCluster(
         {
           ...hit,
-          name: "//kubernetes.resource-manager.open-cluster-management.io/clusters/a/nodes/objects/node-a",
+          name: "//kubernetes.open-cluster-management.io/clusters/a/nodes/objects/node-a",
         },
         "a",
       ),
@@ -63,7 +62,7 @@ describe("resource query scoping", () => {
       kubernetesObjectInCluster(
         {
           ...hit,
-          name: "//kubernetes.resource-manager.open-cluster-management.io/clusters/a/apiResources/v1/nodes/objects/",
+          name: "//kubernetes.open-cluster-management.io/clusters/a/apiResources/v1/nodes/objects/",
         },
         "a",
       ),
@@ -75,8 +74,8 @@ describe("query JSON parsing", () => {
   it("decodes pagination and observation fields used by matching", () => {
     const page = parseQueryPage(`{
       "resources": [{
-        "name": "//kubernetes.resource-manager.open-cluster-management.io/clusters/kind-e2e-abcd/apiResources/nodes/objects/node-uid",
-        "resourceType": "kubernetes.resource-manager.open-cluster-management.io/Object",
+        "name": "//kubernetes.open-cluster-management.io/clusters/kind-e2e-abcd/apiResources/nodes/objects/node-uid",
+        "resourceType": "kubernetes.open-cluster-management.io/Object",
         "resource": {
           "name": "unused-envelope-name",
           "observation": {
@@ -94,7 +93,7 @@ describe("query JSON parsing", () => {
     expect(page.resources).toHaveLength(1);
     const hit = page.resources[0];
     expect(hit.resourceType).toBe(
-      "kubernetes.resource-manager.open-cluster-management.io/Object",
+      "kubernetes.open-cluster-management.io/Object",
     );
     expect(kubernetesObjectInCluster(hit, "kind-e2e-abcd")).toBe(true);
     expect(observation(hit)).toEqual({

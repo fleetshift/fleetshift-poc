@@ -21,7 +21,7 @@ describe("Ink output", () => {
     });
     const value = [
       "TYPE\tSINGULAR\tSERVICE",
-      "ocm.resource_manager.kind.v1alpha/clusters\tCluster\tocm.resource_manager.kind.v1alpha.ClusterService",
+      "ocm.kind.v1alpha/clusters\tCluster\tocm.kind.v1alpha.ClusterService",
     ].join("\n");
     const instance = renderInk(<PlainOutput value={value} />, {
       stdout,
