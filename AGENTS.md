@@ -31,7 +31,7 @@ This is the monorepo for OCM Resource Manager, an experimental Open Cluster Mana
 
 The architecture documentation lives in docs/design/ and is the primary source of truth for domain concepts, system design, and open questions.
 
-Use **OCM Resource Manager** for the whole project or platform, **resource manager architecture** for the architectural approach, and **resource manager server** (or **resource manager** once scoped) for the API, authorization, persistence, and orchestration component. The console, CLI, and addons are separate platform components. Use **management plane** for services that manage targets, rather than as a universal synonym for the platform. See the vocabulary in docs/design/architecture.md.
+Use **OCM Resource Manager** for the whole project or platform, **resource manager architecture** for the architectural approach, and **resource manager server** (or **resource manager** once scoped) for the API, authorization, persistence, and orchestration component. The console, CLI, and addons are separate platform components. Use **management plane** for services that manage targets, rather than as a universal synonym for the platform. See docs/design/glossary.md for the architecture terminology guide.
 
 - Start with docs/design/architecture.md -- it gives the system's core mental model, names the major subsystems, and contains a reading guide that routes to the detailed sub-documents in docs/design/architecture/:
  - core_model.md -- core vocabulary, strategy axes, fulfillment kernel primitive, target model, delivery contract, single-pod invariant

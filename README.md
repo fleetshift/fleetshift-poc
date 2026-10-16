@@ -4,7 +4,7 @@ OCM Resource Manager is an experimental variant of Open Cluster Management (OCM)
 
 The resource manager server owns domain APIs and persistence directly in SQLite or PostgreSQL, providing the foundation for consolidated management and inventory. Native multitenancy and role-based access control are architectural goals. This differs from OCM's Kubernetes API-based management plane; standalone operation itself is already supported by OCM. This experiment is preparation for OCM upstream discussions, without a claim of formal acceptance or complete component compatibility.
 
-See the [architecture](docs/design/architecture.md) and [contributor acknowledgment](docs/contributors.md).
+See the [architecture](docs/design/architecture.md), [architecture glossary](docs/design/glossary.md), and [contributor acknowledgment](docs/contributors.md).
 
 ## Start here
 

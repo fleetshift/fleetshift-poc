@@ -4,6 +4,9 @@
 
 The console is the browser application for the experimental OCM Resource Manager platform. It is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
 
+See the [architecture glossary](../design/glossary.md) for shared project names
+and component boundaries.
+
 ## Goals
 
 - **Dynamic UI composition** — the UI discovers what each cluster supports and loads only the relevant plugin UIs. Adding a new cluster with new capabilities should automatically surface new UI sections without code changes to the shell.

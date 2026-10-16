@@ -6,13 +6,9 @@ OCM Resource Manager is an experimental variant of Open Cluster Management (OCM)
 
 ## Vocabulary
 
-| Term | Scope |
-| --- | --- |
-| **OCM Resource Manager** | The project and platform as a whole, including the server, console, CLI, and extension framework |
-| **resource manager architecture** | The architectural approach explored by this experiment |
-| **platform** or **platform instance** | The complete system or a particular installation, including its clients and enabled addons |
-| **management plane** | The services responsible for managing targets, including the resource manager and participating addon services |
-| **resource manager server**, or **resource manager (RM)** once scoped | The component that owns domain APIs, authorization, persistence, and orchestration |
+The [architecture glossary](glossary.md) defines the high-level names used here,
+including OCM, OCM Resource Manager, platform instance, management plane, and
+resource manager server. Use it when deciding which scope a passage describes.
 
 The console, `fleetctl`, and addons are distinct components of the platform.
 Addons extend platform contracts and may span API, UI, orchestration, and delivery
