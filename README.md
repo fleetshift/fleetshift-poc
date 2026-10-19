@@ -122,6 +122,18 @@ Builds are cached — unchanged sources skip recompilation entirely.
 
 CLI guide: [client/cli/README.md](client/cli/README.md).
 
+### Server debugging in VS Code
+
+Select `resource-manager serve` (debug logging) or `resource-manager serve (info)`
+in Run and Debug. Both launch the API server with a fresh temporary SQLite
+database, HTTP on `127.0.0.1:8090`, and gRPC on `127.0.0.1:50052`.
+
+The fresh database requires a running OIDC issuer. The launch prompts for its URL
+and CA file; defaults use the [local Podman stack](deploy/podman/README.md), which
+must be started first. CA paths are relative to `server/` or absolute; leave the
+CA input empty for an issuer trusted by the system. These profiles serve the API
+only; the Podman stack continues to serve its own API and console.
+
 ### UI development
 
 `web:dev` is **not** a standalone TLS origin — it rebuilds the SPA shell and
