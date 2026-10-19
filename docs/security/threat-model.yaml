@@ -1,0 +1,176 @@
+schema: threat-model-sidecar/v2
+project: FleetShift
+prose_version: "threat-model.md@sha256:a511318e2bc0c6aa39ed6548d9bdefcf408c4ed1712dc10c37f00c15a7da5c78"
+model_status: unratified-draft
+triage_policy: strict
+confidence: {documented: 31, maintainer: 9, inferred: 8, assumption: 0}
+generation:
+  model: "GPT-5.6 Luna"
+  effort: high
+  plugins: [threat-model, OpenSSF self-assessment, CNSC/Gemara references]
+
+components:
+  - {name: resource-manager, scope: in, reachability_precondition: "request reaches the management API", provenance: {kind: documented, source: "docs/design/architecture.md, System model"}}
+  - {name: persistence, scope: in, reachability_precondition: "state is stored or read by the platform", provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Resource manager"}}
+  - {name: addon-and-ui, scope: in, reachability_precondition: "addon is enabled or UI asset is loaded", provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Addons as trust boundaries"}}
+  - {name: fleetlet-transport, scope: in, reachability_precondition: "traffic uses a fleetlet channel or proxy", provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Channel abstraction"}}
+  - {name: delivery-verifier, scope: in, reachability_precondition: "delivery reaches a verifying delivery agent", provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Delivery authorization"}}
+  - {name: target-and-index, scope: in, reachability_precondition: "target apply or observation reporting is used", provenance: {kind: documented, source: "docs/design/architecture/core_model.md, Delivery contract"}}
+  - {name: provider-factory, scope: in, reachability_precondition: "provider/factory topology is deployed", provenance: {kind: documented, source: "docs/design/provider_consumer_model.md, topology"}}
+  - {name: archived-and-example-code, scope: out, reason: "not part of the intended product surface", provenance: {kind: maintainer, date: "2026-10"}}
+
+host_side_effects:
+  - {effect: network-sockets, stance: present, components: [resource-manager, fleetlet-transport, delivery-verifier], conditions: "networked deployment", provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Platform-facing transport"}}
+  - {effect: filesystem, stance: conditional, components: [resource-manager, persistence, target-and-index], conditions: "database, journal, cache, or target storage is configured", provenance: {kind: documented, source: "docs/design/architecture.md, Kernel constraints"}}
+  - {effect: child-processes, stance: conditional, components: [addon-and-ui, provider-factory], conditions: "deployment and addon implementations may run separate workloads", provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Addons as trust boundaries"}}
+
+entry_points:
+  - id: management-api
+    component: resource-manager
+    parameters:
+      - {name: credential, attacker_controllable: true, control_kinds: [serialized-state], obligation_id: authenticate-request, caller_must_enforce: "none — P-CRED", provenance: {kind: documented, source: "docs/design/authentication.md, Credential Verification"}}
+      - {name: tenant-workspace-resource-scope, attacker_controllable: true, control_kinds: [resource-name, data], obligation_id: authorize-scope, caller_must_enforce: "none — P-AUTHZ", provenance: {kind: documented, source: "docs/design/architecture/tenancy_and_permissions.md, Resource hierarchy"}}
+      - {name: request-body-and-rate, attacker_controllable: true, control_kinds: [data, size, rate], obligation_id: bound-request-load, caller_must_enforce: "apply configured size, rate, and quota limits", provenance: {kind: inferred, question_id: Q1}}
+  - id: delivery-request
+    component: delivery-verifier
+    parameters:
+      - {name: typed-evidence, attacker_controllable: true, control_kinds: [serialized-state, data], obligation_id: verify-evidence, caller_must_enforce: "none — P-PROV", provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Selection algorithm"}}
+      - {name: target-and-generation, attacker_controllable: true, control_kinds: [resource-name, data], obligation_id: bind-target-generation, caller_must_enforce: "none — P-SCOPE and P-GEN", provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Generation ordering"}}
+  - id: addon-connect
+    component: addon-and-ui
+    parameters:
+      - {name: descriptor-schema-and-assets, attacker_controllable: true, control_kinds: [serialized-state, type-class, collaborator-implementation], obligation_id: authorize-addon, caller_must_enforce: "enable only reviewed and authenticated addon content", provenance: {kind: maintainer, date: "2026-10"}}
+  - id: inventory-query
+    component: target-and-index
+    parameters:
+      - {name: hierarchy-scope-and-filter, attacker_controllable: true, control_kinds: [resource-name, data, size], obligation_id: authorize-query, caller_must_enforce: "none — P-AUTHZ; apply rate and result limits", provenance: {kind: documented, source: "docs/design/architecture/resource_indexing.md, Search API shape"}}
+  - id: trust-update
+    component: delivery-verifier
+    parameters:
+      - {name: trust-update-evidence, attacker_controllable: true, control_kinds: [serialized-state, data], obligation_id: authenticate-trust-update, caller_must_enforce: "none — P-TRUST", provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Trust updates"}}
+
+contract_dimensions:
+  - {component: resource-manager, dimension: numeric-domain, status: unresolved, conditions: "limits and quotas are not fully specified", provenance: {kind: inferred, question_id: Q1}}
+  - {component: resource-manager, dimension: failure-atomicity, status: claimed, conditions: "durable workflows and transaction/outbox boundaries", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Resource manager"}}
+  - {component: resource-manager, dimension: recursive-cyclic-topology, status: unresolved, conditions: "recursive platform cycle policy remains open", provenance: {kind: inferred, question_id: Q3}}
+  - {component: resource-manager, dimension: callback-execution, status: claimed, conditions: "addon callbacks run under addon trust and capability policy", property_id: P-CAP, provenance: {kind: maintainer, date: "2026-10"}}
+  - {component: resource-manager, dimension: serialization-reconstruction, status: claimed, conditions: "typed API and immutable evidence", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, TypedEvidence"}}
+  - {component: resource-manager, dimension: reference-lifecycle, status: unresolved, conditions: "alias and identity retention rules remain open", provenance: {kind: inferred, question_id: Q3}}
+  - {component: resource-manager, dimension: concurrency-reentrancy, status: claimed, conditions: "generation and durable workflow fencing", property_id: P-GEN, provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Generation ordering"}}
+  - {component: resource-manager, dimension: resource-complexity, status: unresolved, conditions: "tenant and fleet-wide budgets are not defined", provenance: {kind: inferred, question_id: Q1}}
+  - {component: persistence, dimension: numeric-domain, status: unresolved, conditions: "retention and storage budgets vary by deployment", provenance: {kind: inferred, question_id: Q1}}
+  - {component: persistence, dimension: failure-atomicity, status: claimed, conditions: "checkpoint and accepted work survive crash", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Delivery-agent state"}}
+  - {component: persistence, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "storage has no topology semantics", provenance: {kind: documented, source: "docs/design/architecture.md, Kernel constraints"}}
+  - {component: persistence, dimension: callback-execution, status: not-applicable, conditions: "storage is not a callback boundary", provenance: {kind: documented, source: "docs/design/architecture.md, Resource manager"}}
+  - {component: persistence, dimension: serialization-reconstruction, status: claimed, conditions: "evidence and checkpoints are reconstructed by digest", property_id: P-TRUST, provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Authenticated structures"}}
+  - {component: persistence, dimension: reference-lifecycle, status: unresolved, conditions: "evidence garbage collection and tombstones are open", provenance: {kind: inferred, question_id: Q4}}
+  - {component: persistence, dimension: concurrency-reentrancy, status: claimed, conditions: "crash-consistent advancement", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Delivery-agent state"}}
+  - {component: persistence, dimension: resource-complexity, status: unresolved, conditions: "retention limits are not normative", provenance: {kind: inferred, question_id: Q1}}
+  - {component: addon-and-ui, dimension: numeric-domain, status: unresolved, conditions: "schema and asset size limits are open", provenance: {kind: inferred, question_id: Q6}}
+  - {component: addon-and-ui, dimension: failure-atomicity, status: claimed, conditions: "schema replacement is atomic", property_id: P-CAP, provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Schema reconciliation"}}
+  - {component: addon-and-ui, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "addon registration is not a platform graph", provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Addon lifecycle"}}
+  - {component: addon-and-ui, dimension: callback-execution, status: claimed, conditions: "callbacks are addon-owned and separately trusted", property_id: P-CAP, provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Addons as trust boundaries"}}
+  - {component: addon-and-ui, dimension: serialization-reconstruction, status: claimed, conditions: "schemas are content-hashed and compiled", property_id: P-CAP, provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Schema reconciliation"}}
+  - {component: addon-and-ui, dimension: reference-lifecycle, status: unresolved, conditions: "UI asset lifecycle and rollback policy are open", provenance: {kind: inferred, question_id: Q6}}
+  - {component: addon-and-ui, dimension: concurrency-reentrancy, status: claimed, conditions: "atomic service replacement", property_id: P-CAP, provenance: {kind: documented, source: "docs/design/architecture/addon_integration.md, Dynamic mux"}}
+  - {component: addon-and-ui, dimension: resource-complexity, status: unresolved, conditions: "plugin and schema resource budgets are open", provenance: {kind: inferred, question_id: Q6}}
+  - {component: fleetlet-transport, dimension: numeric-domain, status: unresolved, conditions: "message and channel limits are transport-specific", provenance: {kind: inferred, question_id: Q1}}
+  - {component: fleetlet-transport, dimension: failure-atomicity, status: claimed, conditions: "delivery relies on durable retry and idempotency", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Reconnection isolation"}}
+  - {component: fleetlet-transport, dimension: recursive-cyclic-topology, status: unresolved, conditions: "peer and platform routing cycle rules are open", provenance: {kind: inferred, question_id: Q3}}
+  - {component: fleetlet-transport, dimension: callback-execution, status: not-applicable, conditions: "transport routes channels rather than callbacks", provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Fleetlet role"}}
+  - {component: fleetlet-transport, dimension: serialization-reconstruction, status: claimed, conditions: "typed channel envelopes and authenticated evidence", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Channel abstraction"}}
+  - {component: fleetlet-transport, dimension: reference-lifecycle, status: claimed, conditions: "channel close and reconnection are explicit", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Reconnection isolation"}}
+  - {component: fleetlet-transport, dimension: concurrency-reentrancy, status: claimed, conditions: "per-channel streams and flow control", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/architecture/fleetlet_and_transport.md, Channel isolation"}}
+  - {component: fleetlet-transport, dimension: resource-complexity, status: unresolved, conditions: "backpressure and quotas are not complete", provenance: {kind: inferred, question_id: Q1}}
+  - {component: delivery-verifier, dimension: numeric-domain, status: claimed, conditions: "bounded package, graph, and proof work", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Common attestation graph"}}
+  - {component: delivery-verifier, dimension: failure-atomicity, status: claimed, conditions: "invalid packages are never acknowledged", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Delivery authorization"}}
+  - {component: delivery-verifier, dimension: recursive-cyclic-topology, status: claimed, conditions: "graph depth and transformations are bounded", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Common attestation graph"}}
+  - {component: delivery-verifier, dimension: callback-execution, status: not-applicable, conditions: "verification does not execute producer callbacks", provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Profile-owned proof"}}
+  - {component: delivery-verifier, dimension: serialization-reconstruction, status: claimed, conditions: "immutable TypedEvidence and proof verification", property_id: P-PROV, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, TypedEvidence"}}
+  - {component: delivery-verifier, dimension: reference-lifecycle, status: claimed, conditions: "retained roots and tombstones prevent rollback/replay where configured", property_id: P-TRUST, provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Delivery-agent state"}}
+  - {component: delivery-verifier, dimension: concurrency-reentrancy, status: claimed, conditions: "generation and checkpoint fencing", property_id: P-GEN, provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Generation ordering"}}
+  - {component: delivery-verifier, dimension: resource-complexity, status: claimed, conditions: "package and proof work are bounded", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Common attestation graph"}}
+  - {component: target-and-index, dimension: numeric-domain, status: unresolved, conditions: "target and index budgets vary by addon", provenance: {kind: inferred, question_id: Q1}}
+  - {component: target-and-index, dimension: failure-atomicity, status: claimed, conditions: "agent durably accepts work before acknowledgement", property_id: P-RETRY, provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Guarantees"}}
+  - {component: target-and-index, dimension: recursive-cyclic-topology, status: unresolved, conditions: "platform target cycle detection is open", provenance: {kind: inferred, question_id: Q3}}
+  - {component: target-and-index, dimension: callback-execution, status: claimed, conditions: "addon-defined target code is separately trusted", property_id: P-CAP, provenance: {kind: documented, source: "docs/design/architecture/core_model.md, Addon-registered target types"}}
+  - {component: target-and-index, dimension: serialization-reconstruction, status: claimed, conditions: "typed observations and delivery envelopes", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/resource_indexing.md, Inventory item shape"}}
+  - {component: target-and-index, dimension: reference-lifecycle, status: unresolved, conditions: "deletion tombstone retention and alias reconciliation are open", provenance: {kind: inferred, question_id: Q3}}
+  - {component: target-and-index, dimension: concurrency-reentrancy, status: claimed, conditions: "generation fences and native target concurrency", property_id: P-GEN, provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Generation ordering"}}
+  - {component: target-and-index, dimension: resource-complexity, status: unresolved, conditions: "query and inventory quotas are open", provenance: {kind: inferred, question_id: Q1}}
+  - {component: provider-factory, dimension: numeric-domain, status: unresolved, conditions: "factory capacity and tenant quotas are proposed", provenance: {kind: inferred, question_id: Q1}}
+  - {component: provider-factory, dimension: failure-atomicity, status: unresolved, conditions: "standing intent and vault flows are proposals", provenance: {kind: inferred, question_id: Q4}}
+  - {component: provider-factory, dimension: recursive-cyclic-topology, status: unresolved, conditions: "recursive platform cycle controls are open", provenance: {kind: inferred, question_id: Q3}}
+  - {component: provider-factory, dimension: callback-execution, status: claimed, conditions: "provider strategies are addon capabilities", property_id: P-CAP, provenance: {kind: documented, source: "docs/design/provider_consumer_model.md, managed resource type"}}
+  - {component: provider-factory, dimension: serialization-reconstruction, status: claimed, conditions: "consumer intent is carried as signed evidence", property_id: P-PROV, provenance: {kind: documented, source: "docs/design/provider_consumer_model.md, Signed intent verification"}}
+  - {component: provider-factory, dimension: reference-lifecycle, status: unresolved, conditions: "credential and standing-intent lifecycle is open", provenance: {kind: inferred, question_id: Q2}}
+  - {component: provider-factory, dimension: concurrency-reentrancy, status: claimed, conditions: "signed intent and target generation apply", property_id: P-GEN, provenance: {kind: documented, source: "docs/design/provider_consumer_model.md, Standing intents"}}
+  - {component: provider-factory, dimension: resource-complexity, status: unresolved, conditions: "pool capacity and density limits are proposals", provenance: {kind: inferred, question_id: Q1}}
+
+outputs:
+  - {component: resource-manager, channel: API responses, taint: same-as-input, taint_provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Threat model"}, downstream_must_not_assume: [{id: rm-read-integrity, statement: "ordinary reads are complete or untampered after RM compromise", provenance: {kind: documented, source: "docs/design/trust_model_v3.md, §1"}}]}
+  - {component: target-and-index, channel: inventory observations, taint: same-as-input, taint_provenance: {kind: documented, source: "docs/design/architecture/resource_indexing.md, Overview"}, downstream_must_not_assume: [{id: observation-authenticity, statement: "observations are independently authenticated unless the target profile says so", provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Security Objective"}}]}
+  - {component: delivery-verifier, channel: applied target action, taint: constrained, taint_provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Common attestation graph"}, invariants: [{id: verified-delivery-scope, statement: "verified delivery is bound to authenticated scope and generation", property_id: P-SCOPE, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Evidence and Attestation Semantics"}}]}
+
+adversaries:
+  - {name: network-attacker, scope: in, capabilities: [intercept, replay, delay, reorder], excluded_capabilities: [break-cryptography, compromise-both-endpoints], goals: [spoofing, tampering, denial-of-service], provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Threat model"}}
+  - {name: malicious-tenant-user, scope: in, capabilities: [submit-authorized-requests, choose-inputs], excluded_capabilities: [provider-trust-root,-other-tenant-credentials], goals: [tenant-escape, disclosure, unauthorized-delivery], provenance: {kind: maintainer, date: "2026-10"}}
+  - {name: compromised-resource-manager, scope: in, capabilities: [alter-database, bypass-rm-checks, omit-delivery, route-evidence], excluded_capabilities: [forge-retained-provenance, rewrite-established-checkpoint], goals: [tampering, denial-of-service, unauthorized-delivery], provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Threat model"}}
+  - {name: compromised-addon-or-ui, scope: in, capabilities: [execute-declared-code, produce-addon-traffic], excluded_capabilities: [undeclared-trust-root, arbitrary-signing-key], goals: [malicious-output, disclosure, lateral-movement], provenance: {kind: maintainer, date: "2026-10"}}
+  - {name: compromised-target, scope: in, capabilities: [control-one-target-or-host], excluded_capabilities: [other-target-credentials, resource-manager-root], goals: [local-persistence, lateral-movement], provenance: {kind: maintainer, date: "2026-10"}}
+  - {name: compromised-authority, scope: in, capabilities: [issue-valid-authority-material-within-policy], excluded_capabilities: [authority-outside-configured-scope], goals: [identity-takeover, trust-substitution], provenance: {kind: maintainer, date: "2026-10"}}
+  - {name: root-on-modeled-host, scope: out, reason: "host self-integrity is outside this model", provenance: {kind: maintainer, date: "2026-10"}}
+
+dependency_policy: {zero_runtime_dependencies: false, provenance: {kind: documented, source: "fleetshift-server/go.mod and fleetshift-ui/package.json"}}
+dependencies:
+  - {name: identity-provider, relied_on_for: "credential and identity verification", relied_on_properties: [issuer-signature-and-claims], caller_obligations_acknowledged: [], adversary_capabilities_forwarded: [issue-credentials], outputs_consumed: [], covered_here: false, violation_disposition: "OUT-OF-MODEL: dependency-contract", provenance: {kind: documented, source: "docs/design/authentication.md, Credential Verification"}}
+  - {name: target-api, relied_on_for: "target authorization and apply semantics", relied_on_properties: [target-authz-and-apply], caller_obligations_acknowledged: [], adversary_capabilities_forwarded: [apply-target-resources], outputs_consumed: [], covered_here: false, violation_disposition: "OUT-OF-MODEL: dependency-contract", provenance: {kind: documented, source: "docs/design/architecture/core_model.md, Targets and delivery"}}
+  - {name: transport-and-database, relied_on_for: "message and durable state behavior", relied_on_properties: [transport-integrity, durable-storage], caller_obligations_acknowledged: [], adversary_capabilities_forwarded: [], outputs_consumed: [], covered_here: false, violation_disposition: "OUT-OF-MODEL: dependency-contract", provenance: {kind: documented, source: "fleetshift-server/go.mod"}}
+
+build_policy: {security_relevant_flags_present: true, provenance: {kind: inferred, question_id: Q5}}
+build_flags:
+  - {name: production-deployment-profile, default: "deployment-defined", security_relevant: true, maintainer_stance: supported, affects_properties: [{property_id: P-AUTHZ, effect: narrows}, {property_id: P-PROV, effect: narrows}], provenance: {kind: maintainer, date: "2026-10"}}
+  - {name: local-privileged-kind-mode, default: "off", security_relevant: true, maintainer_stance: discouraged, affects_properties: [{property_id: P-LATERAL, effect: voids}], provenance: {kind: documented, source: "README.md, With kind"}}
+
+properties_claimed:
+  - {id: P-AUTHZ, kind: integrity, components: [resource-manager], tier: security-critical, conditions: "honest RM and configured grants", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "docs/design/architecture/tenancy_and_permissions.md, Resource hierarchy"}}
+  - {id: P-PROV, kind: integrity, components: [delivery-verifier], tier: security-critical, conditions: "verifying delivery path and accepted trust state", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "docs/design/security.md, Governing Principle"}}
+  - {id: P-TRUST, kind: integrity, components: [delivery-verifier, persistence], tier: security-critical, conditions: "initialized verifier with retained checkpoint", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Threat model"}}
+  - {id: P-GEN, kind: correctness, components: [delivery-verifier, target-and-index], tier: security-critical, conditions: "conforming target agent", violation_symptoms: [wrong-output], provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Generation ordering"}}
+  - {id: P-SCOPE, kind: integrity, components: [delivery-verifier, target-and-index, provider-factory], tier: security-critical, conditions: "typed evidence and attestation are required", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Evidence and Attestation Semantics"}}
+  - {id: P-CRED, kind: authentication, components: [resource-manager, delivery-verifier], tier: security-critical, conditions: "configured credential method", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "docs/design/authentication.md, Credential Verification"}}
+  - {id: P-RETRY, kind: availability, components: [resource-manager, persistence, fleetlet-transport, delivery-verifier, target-and-index], tier: security-critical, conditions: "durable workflow and idempotent target", violation_symptoms: [wrong-output, hang], provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Guarantees"}}
+  - {id: P-CAP, kind: integrity, components: [addon-and-ui, provider-factory], tier: security-critical, conditions: "enabled addon follows declared capability policy", violation_symptoms: [integrity-bypass], provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: P-LATERAL, kind: integrity, components: [fleetlet-transport, target-and-index, provider-factory], tier: security-critical, conditions: "scoped identities and target profiles", violation_symptoms: [integrity-bypass], provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: P-AVAIL, kind: availability, components: [resource-manager, persistence, fleetlet-transport, target-and-index], tier: security-critical, conditions: "honest deployment with defined quotas", violation_symptoms: [x-cross-tenant-outage], provenance: {kind: maintainer, date: "2026-10"}}
+
+properties_disclaimed:
+  - {id: D-RM-CONF, components: [resource-manager, persistence], conditions: "RM and database compromised", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Threat model"}}
+  - {id: D-RM-READ, components: [resource-manager, target-and-index], conditions: "ordinary reads after RM compromise", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Security Objective"}}
+  - {id: D-RM-DOS, components: [resource-manager, persistence], conditions: "RM compromise", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "docs/design/security.md, Governing Principle"}}
+  - {id: D-TARGET-ROOT, components: [target-and-index], conditions: "target host or verifier root compromised", tier: security-critical, false_friend: false, provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: D-GLOBAL-FORK, components: [delivery-verifier, persistence], conditions: "continuity/v3 without witnesses or gossip", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Threat model"}}
+  - {id: D-WALL-CLOCK, components: [delivery-verifier], conditions: "continuity/v3 baseline", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "docs/design/security.md, Provenance and live authorization"}}
+  - {id: D-CRED-ONLY, components: [resource-manager, delivery-verifier], conditions: "credential-only delivery", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Credential-only acceptance"}}
+  - {id: D-POLICY-REPLICA, components: [delivery-verifier, target-and-index], conditions: "target-side policy", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "docs/design/security.md, Governing Principle"}}
+  - {id: D-QUOTA, components: [resource-manager, fleetlet-transport, target-and-index, provider-factory], conditions: "quotas and resource budgets not yet defined", tier: security-critical, false_friend: false, provenance: {kind: inferred, question_id: Q1}}
+
+downstream_responsibilities:
+  - {id: authenticate-request, statement: "configure and validate caller credentials", enforces: [P-CRED], provenance: {kind: documented, source: "docs/design/authentication.md, Credential Verification"}}
+  - {id: authorize-scope, statement: "configure tenant and workspace grants", enforces: [P-AUTHZ], provenance: {kind: documented, source: "docs/design/architecture/tenancy_and_permissions.md, Responsibilities"}}
+  - {id: bound-request-load, statement: "configure rate, size, quota, and fan-out limits", enforces: [P-AVAIL], provenance: {kind: inferred, question_id: Q1}}
+  - {id: verify-evidence, statement: "use a provenance-verifying target for RM-compromise protection", enforces: [P-PROV], provenance: {kind: documented, source: "docs/design/security.md, Provenance and live authorization"}}
+  - {id: bind-target-generation, statement: "retain target-local generation and scope state", enforces: [P-GEN, P-SCOPE], provenance: {kind: documented, source: "docs/design/architecture/target_delivery_contract.md, Generation ordering"}}
+  - {id: authorize-addon, statement: "enable only reviewed and authenticated addon content", enforces: [P-CAP], provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: authorize-query, statement: "apply query authorization and resource limits", enforces: [P-AUTHZ, P-AVAIL], provenance: {kind: documented, source: "docs/design/architecture/resource_indexing.md, Search API shape"}}
+  - {id: authenticate-trust-update, statement: "protect bootstrap, trust updates, and recovery ceremonies", enforces: [P-TRUST], provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Bootstrap and steady state"}}
+
+known_misuses:
+  - {id: credential-only-as-provenance, components: [resource-manager, delivery-verifier], pattern: "treat credential-only delivery as exact-content provenance", safer_alternative: "require provenance at the target", provenance: {kind: documented, source: "docs/design/architecture/provenance.md, Credential-only acceptance"}}
+  - {id: untrusted-bootstrap, components: [delivery-verifier], pattern: "expose setup or TOFU to an untrusted network", safer_alternative: "use controlled bootstrap or explicit recovery", provenance: {kind: documented, source: "docs/design/trust_model_v3.md, New delivery agents"}}
+  - {id: unrestricted-factory-proxy, components: [provider-factory, fleetlet-transport], pattern: "enable a standing factory protocol tunnel", safer_alternative: "use restricted or buffered target profiles", provenance: {kind: documented, source: "docs/design/provider_consumer_model.md, Factory target profile"}}
+  - {id: ui-signing-co-location, components: [addon-and-ui], pattern: "give addon UI general signing-key access", safer_alternative: "use an isolated signing boundary", provenance: {kind: documented, source: "docs/design/trust_model_v3.md, Controlled-client security considerations"}}
+
+known_non_findings: []
+dispositions: [VALID, VALID-HARDENING, "OUT-OF-MODEL: trusted-input", "OUT-OF-MODEL: adversary-not-in-scope", "OUT-OF-MODEL: unsupported-component", "OUT-OF-MODEL: non-default-build", "OUT-OF-MODEL: dependency-contract", "BY-DESIGN: property-disclaimed", KNOWN-NON-FINDING, MODEL-GAP]
+disposition_precedence: [KNOWN-NON-FINDING, "OUT-OF-MODEL: unsupported-component", "OUT-OF-MODEL: non-default-build", "OUT-OF-MODEL: dependency-contract", "OUT-OF-MODEL: trusted-input", "OUT-OF-MODEL: adversary-not-in-scope", "BY-DESIGN: property-disclaimed", VALID, VALID-HARDENING, MODEL-GAP]
