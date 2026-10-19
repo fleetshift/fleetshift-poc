@@ -12,7 +12,7 @@ the [architecture reading guide](architecture.md#reading-guide).
 | **the OCM Fleet architecture** | This project's particular design, including its component relationships, fleetlet channels, and addon contracts. |
 | **a resource manager architecture** | A management architecture organized around a logically central service responsible for management APIs, authorization, persistent management state, and orchestration. This is descriptive terminology defined here, without assuming an industry-standard taxonomy. |
 | **platform** / **platform instance** | The complete deployed system or a particular installation, including its clients, enabled integrations, agents, and supporting services. Deployment participation does not imply project membership. Use **parent/child platform instance** for recursive installations. |
-| **management plane** | The services responsible for managing targets, including the resource manager server and participating addon services. |
+| **management plane** | The APIs, services, and user interfaces through which a platform instance represents, observes, configures, and governs resources and coordinates their lifecycle. It includes the resource manager server and the management capabilities supplied by addons. |
 | **resource manager server** / **resource manager (RM)** | The stateful component that owns domain APIs, authorization, persistence, and orchestration. Introduce **resource manager server** first; **resource manager** or **RM** can then refer to that component within the same context. |
 | **console** | The browser application, introduced as the **OCM Fleet console**. Use **OpenShift console** when referring to that separate application. |
 | **`fleetctl`** | The platform's command-line client. |
