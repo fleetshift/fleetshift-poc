@@ -1,5 +1,7 @@
 # Plugin Discovery
 
+> **Draft / early prototype notes.** This document describes prototype behavior and open questions to revisit; it is not a settled OCM Fleet discovery contract.
+
 Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
 
 OCM Fleet dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
@@ -63,15 +65,15 @@ As a prototyping convenience, the platform queries the cluster's aggregated API 
 
 - **Metrics API** (`metrics.k8s.io`): If present, enables the `observability` plugin. This API group is registered by the Metrics Server and provides pod/node resource usage data.
 
-In production, the plugin list should come from an authoritative source (CRDs, ConsolePlugins, or explicit configuration) rather than probing API groups.
+The API-group probe is only a rough prototype signal; the production discovery source remains to be defined for OCM Fleet.
 
 ### 4. OpenShift ConsolePlugin Discovery (OpenShift only)
 
-On OpenShift clusters, the platform also queries `console.openshift.io/v1` ConsolePlugin resources. This allows plugins that are deployed as OpenShift console plugins to be discovered:
+On OpenShift clusters, the platform also queries `console.openshift.io/v1` ConsolePlugin resources. This can provide one optional signal that an OpenShift console plugin is available to evaluate for reuse:
 
 - If a ConsolePlugin named `clowder-plugin` exists → enables the `clowder` plugin
 
-This check silently fails on vanilla Kubernetes clusters where the `console.openshift.io` API group does not exist.
+This check silently fails on vanilla Kubernetes clusters where the `console.openshift.io` API group does not exist. ConsolePlugin presence does not establish compatibility with OCM Fleet's extension contract.
 
 ## Platform Detection
 
@@ -80,7 +82,7 @@ During connection, the platform also determines whether the cluster is OpenShift
 - If `route.openshift.io` or `apps.openshift.io` is present → `platform: "openshift"`
 - Otherwise → `platform: "kubernetes"`
 
-This is stored on the cluster object and available to the GUI for platform-specific UI decisions.
+This is stored on the cluster object and available to the GUI for platform-specific UI decisions. This binary OpenShift/Kubernetes distinction is historical prototype behavior, not a final distribution taxonomy.
 
 ## Connection (current prototype)
 
@@ -129,9 +131,9 @@ The current graceful-degradation approach (silently falling back to always-on pl
 
 ### Re-use of existing OpenShift console plugins
 
-Re-using existing OpenShift console plugins (`ConsolePlugin` resources from `console.openshift.io/v1`) is an optional integration for connected OpenShift clusters. These plugins are the authoritative source of UI extensions on OpenShift clusters.
+Re-using existing OpenShift console plugins (`ConsolePlugin` resources from `console.openshift.io/v1`) is an optional integration for connected OpenShift clusters. A ConsolePlugin can be one optional signal that an OpenShift plugin is available to evaluate for reuse; it is not an authoritative source of OCM Fleet UI extensions, and its presence does not establish compatibility with OCM Fleet's extension contract.
 
-This will require some updates on the existing OCP plugin side as well — details will be covered in a separate OCP plugin re-use document.
+If reuse is pursued, an existing OCP plugin may still require changes to satisfy OCM Fleet contracts — details are discussed in the separate OCP plugin re-use document.
 
 ### Discoverability of cluster capabilities is critical
 

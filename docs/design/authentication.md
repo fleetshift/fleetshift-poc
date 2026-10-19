@@ -247,27 +247,31 @@ Trade-offs:
 
 ### None (run as platform)
 
-This model relies on provenance, transport authentication, and the "fleetlet"
-delivery agent design to reduce the authority concentrated in the platform
-server, while supporting both time and space separation for deliveries.
+This model relies on provenance, transport authentication, and the proposed
+shared target-side delivery enforcement in the fleetlet to reduce the authority
+concentrated in the resource manager server, while supporting both time and
+space separation for deliveries.
 Provenance proves what an authentic user or workload signed, and the fleetlet
 has isolated authority for its target behind network separation that decouples
-it from the platform server. The delivery agent applies with a credential that
-never leaves the target, such as its in-cluster ServiceAccount. No user or
-cluster credential has to travel through the RM.
+it from the resource manager server. The fleetlet enforces the common
+application-authorization and provenance requirements selected by target policy
+before handing work to the addon delivery agent.
+The addon delivery agent applies with a credential that never leaves the target,
+such as its in-cluster ServiceAccount. No user or cluster credential has to
+travel through the RM.
 
 The local identity should have no more permission than the delivery contract
-requires. When policy requires provenance, the agent uses its local authority
-only after verifying the delivered assertions and constraints. The resource
-manager remains the primary tenant, workspace, and resource authorization
-boundary; target verification narrows what the agent will apply rather than
-reproducing all RM policy.
+requires. When policy requires provenance, the fleetlet verifies the delivered
+assertions and common constraints before the addon delivery agent uses its local
+authority. The resource manager remains the primary tenant, workspace, and
+resource authorization boundary; target verification narrows what the agent
+will apply rather than reproducing all RM policy.
 
 The local apply credential is highly available. Complete authorization still
 depends on whatever credential, provenance, proof material, and trust state
-delivery policy requires. If a target accepts RM-delivered commands without
-independently checking an applicable credential or provenance, compromise of
-the RM effectively gains the delivery agent's apply scope.
+delivery policy requires. If the fleetlet does not independently check the
+applicable credential or provenance requirements, compromise of the RM
+effectively gains the addon delivery agent's apply scope.
 
 ### Standalone service account
 

@@ -177,7 +177,7 @@ This matters because the platform is recursively instantiable. A parent platform
 Concretely:
 
 - **Storage is pluggable.** Embedded SQLite serves small instances; external Postgres serves larger ones behind the same interface.
-- **Peer mesh is optional.** Single-replica instances skip peer discovery and forwarding entirely.
+- **Peer mesh is optional.** A single resource manager server replica within a platform instance skips peer discovery and forwarding entirely.
 - **All core subsystems work with a single writer.** Multi-writer support is an optimization, not a correctness requirement.
 - **No external service dependencies are required for core function.** External IdPs, object stores, or managed databases remain integrations rather than prerequisites.
 

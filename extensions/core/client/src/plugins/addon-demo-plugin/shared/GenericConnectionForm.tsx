@@ -24,9 +24,10 @@ export function createConnectionForm(config: ConnectionFormConfig) {
             titleText={`Connect to ${config.providerLabel}`}
           >
             <EmptyStateBody>
-              {config.providerLabel} connection configuration is coming soon.
-              For now, click &quot;Complete&quot; to simulate a successful
-              connection.
+              This example shows the {config.providerLabel} connection step.
+              Clicking &quot;Complete&quot; simulates a successful connection.
+              It does not connect to {config.providerLabel} or provision
+              resources.
             </EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>

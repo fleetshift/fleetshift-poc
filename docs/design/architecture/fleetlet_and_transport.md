@@ -9,12 +9,12 @@ The connectivity model of the platform:
 - channels and transport abstractions
 - built-in and addon-defined channel usage
 - proxy delivery
-- platform-side routing and peer mesh
+- resource manager server routing and peer mesh within one platform instance
 - control-plane versus data-plane choices
 
 ## When to read this
 
-Read this when you need to understand how addons, targets, and users communicate through the system, or when you need the routing and failure model for platform replicas.
+Read this when you need to understand how addons, targets, and users communicate through the system, or when you need the routing and failure model for resource manager server replicas within one platform instance.
 
 ## What is intentionally elsewhere
 
@@ -35,12 +35,26 @@ Read this when you need to understand how addons, targets, and users communicate
 
 All addon-platform communication goes through the fleetlet. Wherever an addon runs, it connects to a local fleetlet; the fleetlet connects to the platform's URL.
 
-The fleetlet is not an application agent. It runs no business logic. It is a transport multiplexer that serves one or more targets and centralizes:
+The fleetlet provides transport and shared cross-cutting services for local
+addon processes and the targets they serve. It serves one or more targets and
+centralizes:
 
 - connection lifecycle
 - authentication handoff
 - reconnection and backpressure
 - channel routing
+- common application-authorization, provenance, output-constraint, and
+  strategy-implied constraint checks for delivery
+
+The resource manager server remains the primary stateful authorizer for tenant,
+workspace, and resource policies. In this design, the fleetlet enforces the
+cross-cutting application-authorization and provenance requirements selected
+by target delivery policy, including shared output and strategy-implied
+constraints, before handing work to a target's addon delivery agent. Sharing
+these checks reduces the burden on addon developers and gives operators
+consistent enforcement. Addon delivery agents enforce domain- and
+resource-specific constraints before applying resources. This responsibility
+split remains unproven, as noted in the architecture overview.
 
 This preserves zero infrastructure coupling. Addons do not need to know how the platform is hosted.
 
@@ -98,7 +112,13 @@ The access channel is unusually latency- and reliability-sensitive because addon
 
 ### Delivery-channel semantics
 
-The delivery channel is request/response and per-target. The platform sends generated manifests; the delivery agent applies them and acknowledges success or error. The envelope can include attestation data that a delivery agent verifies before apply.
+The delivery channel is request/response and per-target. The platform sends
+generated manifests and delivery metadata. The fleetlet verifies the delivery
+envelope against the shared application-authorization, provenance, output, and
+strategy-implied constraints selected by target policy before handing work to
+the target's addon delivery agent. The delivery agent enforces domain- and
+resource-specific constraints before applying resources, then acknowledges
+success or error.
 
 ### Index-channel role
 
@@ -227,32 +247,32 @@ This is especially useful for bootstrap, air-gapped environments, VPN bridging, 
 
 This bootstrap is not circular. Whatever creates the target installs the co-located fleetlet as part of target creation. Proxy delivery exists for the specific case where network topology prevents the target's own fleetlet from connecting to the platform. Once that network path exists, or once the co-located fleetlet reaches a reachable platform, the proxy path is retired.
 
-## Platform-side topology
+## Resource manager server topology within one platform instance
 
-The platform runs as one or more replicas behind a load balancer. Fleetlet connections are persistent, so each fleetlet lands on one replica until it reconnects.
+A platform instance may run one or more resource manager server replicas behind a load balancer. Replicas here serve the same platform instance; a parent and child platform instance remain separate systems, each with its own resource manager server topology. Fleetlet connections are persistent, so each fleetlet lands on one resource manager replica until it reconnects.
 
-That creates a routing problem: a user request can land on any replica, but the target's fleetlet may be connected elsewhere.
+That creates a routing problem within the platform instance: a user request can land on any resource manager replica, but the target's fleetlet may be connected to another replica.
 
 ### Peer mesh
 
-Platform replicas therefore form a full mesh of peer connections. Each peer connection does two jobs:
+The resource manager server replicas within the platform instance therefore form a full mesh of peer connections. Each peer connection does two jobs:
 
-1. **Registry**: replicas tell each other which targets are connected where
-2. **Transport**: a replica can forward a request to the replica that owns the fleetlet connection
+1. **Registry**: resource manager replicas tell each other which targets are connected where
+2. **Transport**: one resource manager replica can forward a request to the replica that owns the fleetlet connection
 
 ```text
-User request -> load balancer -> any platform replica
+User request -> load balancer -> any resource manager replica
              -> peer forward to replica that owns the target connection
              -> fleetlet tunnel to target
 ```
 
-The always-on mesh avoids an external registry. An on-demand model would avoid idle peer connections, but it would still need some separate registry or gossip system to know which peer owns which target. In the always-on mesh, the peer connection is the registry: session add and remove notifications flow over the persistent connection, so every replica has a current view of fleet connection topology without external state. Peer discovery remains pluggable so the platform itself stays infrastructure-agnostic.
+The always-on mesh avoids an external registry. An on-demand model would avoid idle peer connections, but it would still need some separate registry or gossip system to know which peer owns which target. In the always-on mesh, the peer connection is the registry: session add and remove notifications flow over the persistent connection, so every resource manager replica has a current view of fleet connection topology without external state. Peer discovery remains pluggable so the platform itself stays infrastructure-agnostic.
 
 ### Scale and failure model
 
-The peer mesh scales with platform replica count rather than fleet size. A small replica set is therefore practical.
+The peer mesh scales with resource manager replica count within one platform instance rather than fleet size. A small replica set is therefore practical.
 
-If a peer connection drops, requests for targets on that peer fail until the connection is restored. If a platform replica crashes, fleetlet instances reconnect through the load balancer and the peer mesh updates accordingly.
+If a peer connection drops, requests for targets on that peer fail until the connection is restored. If a resource manager server replica crashes, fleetlet instances reconnect through the load balancer and the peer mesh updates accordingly.
 
 ## Control plane versus data plane
 

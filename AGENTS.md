@@ -31,7 +31,18 @@ This is the monorepo for OCM Fleet, an experimental Open Cluster Management vari
 
 The architecture documentation lives in docs/design/ and is the primary source of truth for domain concepts, system design, and open questions.
 
-Use **OCM Fleet** for the project, **the OCM Fleet architecture** for its particular design, **a resource manager architecture** for the locally defined architectural approach, and **resource manager server** (or **resource manager** once scoped) for the API, authorization, persistence, and orchestration component. A platform instance includes enabled integrations and supporting services; participation in a deployment does not establish addon membership in the project. Use **fleetlet instances** for multiple deployments of the canonical fleetlet and **management plane** for services that manage targets. See docs/design/glossary.md for the architecture terminology guide.
+Use **OCM Fleet** for the project, **the OCM Fleet architecture** for its
+particular design, **a resource manager architecture** for the locally defined
+architectural approach, and **resource manager server** (or **resource manager**
+once scoped) for the API, authorization, persistence, and orchestration
+component. A platform instance includes enabled integrations and supporting
+services; participation in a deployment does not establish addon membership in
+the project. Use **fleetlet instances** for multiple deployments of the
+canonical fleetlet and **management plane** for the APIs, services, and user
+interfaces through which a platform instance represents, observes, configures,
+and governs resources and coordinates their lifecycle. It includes the resource
+manager server and addon-supplied management capabilities. See
+docs/design/glossary.md for the architecture terminology guide.
 
 - Start with docs/design/architecture.md -- it gives the system's core mental model, names the major subsystems, and contains a reading guide that routes to the detailed sub-documents in docs/design/architecture/:
  - core_model.md -- core vocabulary, strategy axes, fulfillment kernel primitive, target model, delivery contract, single-pod invariant

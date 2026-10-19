@@ -40,7 +40,11 @@ Delivery and indexing are independent. A stateless delivery agent handles apply/
 
 The indexer watches all non-denied resources on the cluster by default, collecting base metadata and conditions for every resource. Resources with enriched schema entries get additional field extractions, computed properties via hooks, and edge computation. Topology edges (`ownedBy`, `runsOn`, `attachedTo`, `selects`) remain part of the indexing core, but the in-process path disables edge persistence — edges are not written to the platform in the current integration.
 
-The addon supports two deployment models: in-process within the platform server and as an external agent. The reusable indexing core (discovery, filtering, informers, extraction, writer, inventory reporting) is shared across both. What changes between models is the wiring — who starts indexers, how credentials are supplied, and how inventory reports reach the platform.
+The addon supports two deployment models: in-process within the resource manager
+server and as an external agent. The reusable indexing core (discovery,
+filtering, informers, extraction, writer, inventory reporting) is shared across
+both. What changes between models is the wiring — who starts indexers, how
+credentials are supplied, and how inventory reports reach the platform.
 
 ## Addon descriptor and capabilities
 
@@ -94,7 +98,9 @@ The reusable indexing core is shared. How indexers get created and wired depends
 
 ### In-process
 
-In the in-process model, the platform server hosts multiple per-target indexers — one per Kubernetes target that a producer (or startup replay) has ensured:
+In the in-process model, the resource manager server hosts multiple per-target
+indexers — one per Kubernetes target that a producer (or startup replay) has
+ensured:
 
 - **Indexer registry**: tracks running indexers by target ID (generation, fingerprint, readiness, restart metadata)
 - **Ensure / start**: starts or replaces an indexer after discovery readiness; joins in-flight matching starts; generation-fenced

@@ -24,15 +24,18 @@ export function createProviderWizard(config: ProviderWizardConfig) {
         <WizardStep name="Configuration" id="config">
           <EmptyState headingLevel="h2" titleText="Configuration">
             <EmptyStateBody>
-              {config.providerName} cluster configuration is coming soon.
+              This example illustrates configuration options for{" "}
+              {config.providerName} clusters. It does not configure or provision
+              resources.
             </EmptyStateBody>
           </EmptyState>
         </WizardStep>
         <WizardStep name="Networking" id="networking">
           <EmptyState headingLevel="h2" titleText="Networking">
             <EmptyStateBody>
-              Network settings for {config.providerName} clusters will be
-              available in a future release.
+              This example illustrates networking options for{" "}
+              {config.providerName} clusters. It does not configure networking
+              or provision resources.
             </EmptyStateBody>
           </EmptyState>
         </WizardStep>

@@ -841,7 +841,16 @@ evidence-log position assigned at acceptance.
 
 ### Target
 
-The target or delivery agent:
+In the proposed OCM Fleet design, the fleetlet performs shared target-side
+credential and provenance verification and common attestation evaluation,
+including output and strategy-implied constraints, before handing work to an
+addon delivery agent. The delivery agent enforces addon-specific domain and
+resource constraints before applying authenticated content, so addons do not
+need to reimplement common checks. This describes a proposed component
+placement, not a claim that it is already implemented; the resource manager
+remains the primary stateful authorizer.
+
+The target-side delivery path:
 
 - begins from bootstrapped and subsequently authenticated trust state;
 - parses hints only to locate authenticated authority configuration;

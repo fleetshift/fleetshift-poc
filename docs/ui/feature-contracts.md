@@ -338,6 +338,10 @@ Affected code: `generatePluginPages` in `server/internal/transport/http/uiconfig
 
 ## Relationship to Addon Model (OME-3)
 
-The addon/extension model (OME-3) covers the full lifecycle: registration, discovery, delivery. Feature contracts are the **UI-facing slice** — how addons surface capabilities in the shell. An addon registers with the management plane (backend), and its UI plugin declares features and extensions that the shell indexes for search and navigation.
+The addon/extension model (OME-3) covers the full lifecycle: registration,
+discovery, delivery. Feature contracts are the **UI-facing slice** — how addons
+surface capabilities in the shell. An addon registers with the resource manager
+server, and its UI plugin declares features and extensions that the shell
+indexes for search and navigation.
 
 The feature contract model should be designed so that when the addon registration API lands, a registered addon's UI plugin can declare its features and have them automatically discoverable via search.

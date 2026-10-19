@@ -50,6 +50,13 @@ or strictly "zero trust". The resource manager remains the primary API and
 authorization engine. It coordinates addons and decides which work to attempt.
 Targets do not and cannot reproduce all of that state or policy.
 
+In the proposed OCM Fleet design, the fleetlet is the shared target-side
+enforcement point for application-authorization and provenance checks selected
+by delivery policy before invoking an addon delivery agent. The addon delivery
+agent enforces domain- and resource-specific constraints before applying
+resources; stateful tenant and workspace authorization remains with the resource
+manager.
+
 This is nevertheless a substantial departure from the usual management-plane
 trust boundary. Fleet managers and GitOps reconcilers commonly retain target
 credentials or operate a privileged target-side agent; cloud service control

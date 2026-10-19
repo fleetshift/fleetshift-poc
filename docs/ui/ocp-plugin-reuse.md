@@ -1,6 +1,6 @@
 # OpenShift Console Plugin Re-use
 
-Re-using existing OpenShift console plugins in the OCM Fleet console is an optional integration under the common capability model. These plugins already contain mature, production-tested UI for cluster capabilities (monitoring, networking, storage, etc.) and rewriting them from scratch would be wasteful.
+> **Draft: optional integration exploration.** Reuse is one candidate for OCM Fleet, not an assumed path or requirement. Existing OpenShift console plugins may be useful candidates to evaluate, but their current maturity alone does not make reuse necessary. A plugin selected for reuse may need changes to meet OCM Fleet contracts even if it already works in the OpenShift console.
 
 ## The Problem
 
@@ -54,6 +54,8 @@ The re-use effort should be incremental:
 4. **Dual registration** — the plugin should continue to work in the OpenShift console while also being loadable by the platform console
 
 ## Requirements
+
+These draft requirements apply to plugins selected for reuse if that integration is pursued; they do not apply to OpenShift plugins in general.
 
 ### REQ-OCP-1: Plugins must not depend on OpenShift console context
 
