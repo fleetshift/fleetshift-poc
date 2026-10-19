@@ -35,8 +35,8 @@ podman build -f Dockerfile.aio \
 Bare run needs **no** OIDC flags. Packaging starts peer Dex behind the AIO TLS
 edge at `https://ocm-fleet.localhost:8085/idp` and fills AuthMethod/UI
 defaults for `serve`. Foreground is the demo-friendly launch: startup stays
-quiet until the public endpoint is ready, then prints a welcome block with the
-URL and demo credentials. Press Ctrl+C to stop.
+quiet until the public endpoint is ready, then prints the ready message, an
+**OCM FLEET** block-art banner, and the URL and demo credentials. Press Ctrl+C to stop.
 
 ```bash
 podman run \
