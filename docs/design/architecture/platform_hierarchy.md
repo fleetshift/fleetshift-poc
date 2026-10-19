@@ -160,7 +160,7 @@ Examples include:
 - Terraform-based flows
 - cloud-provider-specific APIs
 
-The delivery agent applies the provisioning manifests to a management target. The provisioner creates infrastructure, and newly created targets appear when their fleetlets connect to the platform.
+The delivery agent applies the provisioning manifests to a management target. The provisioner creates infrastructure, and newly created targets appear when their fleetlet instances connect to the platform.
 
 ### Target correlation
 

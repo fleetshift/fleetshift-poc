@@ -1,8 +1,5 @@
-import type {
-  ResourceResult,
-  SearchResultResolve,
-} from "@ocm-resource-manager/common";
-import { createResourceApi } from "@ocm-resource-manager/common";
+import type { ResourceResult, SearchResultResolve } from "@ocm-fleet/common";
+import { createResourceApi } from "@ocm-fleet/common";
 import {
   useExtensions,
   useResolvedExtensions,

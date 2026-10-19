@@ -1,15 +1,15 @@
-.ocm-rm-addon-security__severity-badges {
+.ocm-fleet-addon-security__severity-badges {
   display: inline-flex;
   gap: var(--pf-t--global--spacer--xs);
   flex-wrap: wrap;
 }
 
 // Welcome modal
-.ocm-rm-addon-security__welcome {
+.ocm-fleet-addon-security__welcome {
   padding: var(--pf-t--global--spacer--md) 0;
 }
 
-.ocm-rm-addon-security__welcome-icon {
+.ocm-fleet-addon-security__welcome-icon {
   width: 140px;
   height: 140px;
   border-radius: 50%;
@@ -32,31 +32,31 @@
   }
 }
 
-.ocm-rm-addon-security__welcome-shield {
+.ocm-fleet-addon-security__welcome-shield {
   font-size: 48px;
   color: var(--pf-t--global--color--brand--default);
 }
 
 // Getting started card
-.ocm-rm-addon-security__getting-started-header {
+.ocm-fleet-addon-security__getting-started-header {
   user-select: none;
 }
 
-.ocm-rm-addon-security__gs-column {
+.ocm-fleet-addon-security__gs-column {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
 
-.ocm-rm-addon-security__gs-column-body {
+.ocm-fleet-addon-security__gs-column-body {
   padding: var(--pf-t--global--spacer--md);
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.ocm-rm-addon-security__gs-links {
+.ocm-fleet-addon-security__gs-links {
   list-style: none;
   padding: 0;
   margin: 0 0 var(--pf-t--global--spacer--md) 0;
@@ -77,7 +77,7 @@
   }
 }
 
-.ocm-rm-addon-security__gs-footer-link {
+.ocm-fleet-addon-security__gs-footer-link {
   display: inline-flex;
   align-items: center;
   gap: var(--pf-t--global--spacer--xs);
@@ -92,7 +92,7 @@
 }
 
 // CVE section
-.ocm-rm-addon-security__cve-section {
+.ocm-fleet-addon-security__cve-section {
   margin-top: var(--pf-t--global--spacer--md);
 
   .pf-v6-c-toolbar__content {
@@ -100,23 +100,23 @@
   }
 }
 
-.ocm-rm-addon-security__tab-pills {
+.ocm-fleet-addon-security__tab-pills {
   padding: var(--pf-t--global--spacer--sm) 0;
   border-bottom: 1px solid var(--pf-t--global--border--color--default);
   margin-bottom: var(--pf-t--global--spacer--xs);
 }
 
-.ocm-rm-addon-security__tab-pill {
+.ocm-fleet-addon-security__tab-pill {
   cursor: pointer;
 }
 
-.ocm-rm-addon-security__critical-badge {
+.ocm-fleet-addon-security__critical-badge {
   display: inline-flex;
   align-items: center;
   gap: var(--pf-t--global--spacer--xs);
 }
 
-.ocm-rm-addon-security__critical-badge-count {
+.ocm-fleet-addon-security__critical-badge-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -130,7 +130,7 @@
   padding: 0 4px;
 }
 
-.ocm-rm-addon-security__gs-header-label {
+.ocm-fleet-addon-security__gs-header-label {
   width: 100%;
   border-radius: var(--pf-t--global--border--radius--small);
   padding: var(--pf-t--global--spacer--xs) !important;

@@ -6,9 +6,9 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 const testRT = domain.ResourceType("kind.open-cluster-management.io/Cluster")

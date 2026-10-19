@@ -12,11 +12,11 @@ export type {
   ClusterDetailTabProperties,
   ClusterProviderProperties,
   EncodedCodeRef,
+  FleetExtension,
+  FleetPluginOptions,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
-  ResourceManagerExtension,
-  ResourceManagerPluginOptions,
   SearchResultRendererExtras,
   SearchResultRendererInput,
   SearchResultRendererProperties,
@@ -31,8 +31,8 @@ export {
   createOnboardingAction,
   createSearchResultRenderer,
   createSetup,
+  FleetPlugin,
   RENDER_SEARCH_TYPE,
-  ResourceManagerPlugin,
 } from "./extensions";
 export { default as getCommonDynamicModules } from "./getCommonDynamicModules";
 export { default as getDynamicModules } from "./getDynamicModules";

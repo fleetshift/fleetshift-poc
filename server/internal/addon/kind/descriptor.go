@@ -3,7 +3,7 @@ package kind
 import (
 	_ "embed"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 const specProtoPath = "ocm/kind/v1alpha/kind_cluster_spec.proto"

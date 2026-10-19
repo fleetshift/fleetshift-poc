@@ -10,8 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioinit"
-	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioproxy"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioproxy"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func run() error {
 	}
 	resourceManagerURL, err := url.Parse("http://" + endpoints.HTTPListen)
 	if err != nil {
-		return fmt.Errorf("ocm-resource-manager upstream: %w", err)
+		return fmt.Errorf("ocm-fleet upstream: %w", err)
 	}
 	proxy, err := aioproxy.New(aioproxy.Config{
 		ListenAddr:         endpoints.GatewayListen,

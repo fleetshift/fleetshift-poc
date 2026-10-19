@@ -1,4 +1,4 @@
-import type { OnboardingActionCardProps } from "@ocm-resource-manager/common";
+import type { OnboardingActionCardProps } from "@ocm-fleet/common";
 import {
   Button,
   Card,

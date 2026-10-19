@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	kubernetesaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	kubernetesaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // recordingActivator is a test double for [application.SchemaActivator]

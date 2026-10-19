@@ -1,4 +1,4 @@
-import { extractClusterId, PluginLink } from "@ocm-resource-manager/common";
+import { extractClusterId, PluginLink } from "@ocm-fleet/common";
 import {
   SkeletonTableBody,
   SkeletonTableHead,

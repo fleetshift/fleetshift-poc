@@ -4,10 +4,10 @@ const [user, password] = process.argv.slice(2);
 if (!user || !password)
   throw new Error(`Usage: ${process.argv[1]} <admin-user> <admin-password>`);
 const host = (
-  await $`oc get route web -n ocm-resource-manager -o jsonpath={.spec.host}`
+  await $`oc get route web -n ocm-fleet -o jsonpath={.spec.host}`
 ).stdout.trim();
 const issuer = (
-  await $`oc get configmap ocm-resource-manager-server-config -n ocm-resource-manager -o jsonpath={.data.OIDC_ISSUER_URL}`
+  await $`oc get configmap resource-manager-config -n ocm-fleet -o jsonpath={.data.OIDC_ISSUER_URL}`
 ).stdout.trim();
 const kc = issuer.replace(/\/realms\/.*$/, "");
 const form = new URLSearchParams({
@@ -20,14 +20,14 @@ const token = (
   await $`curl -sf -X POST ${kc}/realms/master/protocol/openid-connect/token --data-urlencode ${`grant_type=${form.get("grant_type")}`} --data-urlencode ${`client_id=${form.get("client_id")}`} --data-urlencode ${`username=${form.get("username")}`} --data-urlencode ${`password=${form.get("password")}`}`
 ).stdout;
 const access = JSON.parse(token).access_token;
-const client = `${kc}/admin/realms/ocm-resource-manager/clients`;
+const client = `${kc}/admin/realms/ocm-fleet/clients`;
 const clients = JSON.parse(
   (
-    await $`curl -sf ${client}?clientId=ocm-resource-manager-ui -H ${`Authorization: Bearer ${access}`}`
+    await $`curl -sf ${client}?clientId=ocm-fleet-console -H ${`Authorization: Bearer ${access}`}`
   ).stdout,
 );
 if (!clients[0]?.id)
-  throw new Error("Client 'ocm-resource-manager-ui' not found in realm 'ocm-resource-manager'.");
+  throw new Error("Client 'ocm-fleet-console' not found in realm 'ocm-fleet'.");
 const id = clients[0].id;
 const body = JSON.parse(
   (await $`curl -sf ${client}/${id} -H ${`Authorization: Bearer ${access}`}`)

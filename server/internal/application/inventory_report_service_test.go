@@ -9,8 +9,8 @@ import (
 
 	"context"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 const inventoryReportTestType domain.ResourceType = "kind.open-cluster-management.io/Cluster"

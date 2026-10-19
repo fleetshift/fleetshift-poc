@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {

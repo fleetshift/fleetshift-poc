@@ -1,6 +1,6 @@
 # POC
 
-This folder represents standalone proofs of concepts for concepts explored as part of the ocm-resource-manager vision. These are primarily intended for learning purposes. They may or may not be integrated into the main prototype. As such, they can be implemented in any language.
+This folder represents standalone proofs of concepts for concepts explored as part of the ocm-fleet vision. These are primarily intended for learning purposes. They may or may not be integrated into the main prototype. As such, they can be implemented in any language.
 
 Current POCs include:
 

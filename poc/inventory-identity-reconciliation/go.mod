@@ -1,4 +1,4 @@
-module github.com/stolostron/ocm-resource-manager/poc/inventory-identity-reconciliation
+module github.com/stolostron/ocm-fleet/poc/inventory-identity-reconciliation
 
 go 1.26.0
 toolchain go1.26.6

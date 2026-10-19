@@ -53,9 +53,9 @@ describe("kind JSON parsing", () => {
     expect(parseMetadataName('{"metadata":{"name":"e2e-abcd"}}')).toBe(
       "e2e-abcd",
     );
-    expect(
-      parseConfigMapData('{"data":{"from":"ocm-resource-manager-e2e-cli"}}'),
-    ).toEqual({ from: "ocm-resource-manager-e2e-cli" });
+    expect(parseConfigMapData('{"data":{"from":"ocm-fleet-e2e-cli"}}')).toEqual(
+      { from: "ocm-fleet-e2e-cli" },
+    );
   });
 
   it("reports invalid JSON", () => {

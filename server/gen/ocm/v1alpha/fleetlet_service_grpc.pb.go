@@ -27,7 +27,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// FleetletService is the platform-side API that fleetlets connect to.
+// FleetletService is the platform-side API that fleetlet instances connect to.
 // Authentication is per-fleetlet at the transport level; the platform
 // identifies the caller from gRPC metadata on stream creation.
 type FleetletServiceClient interface {
@@ -78,7 +78,7 @@ type FleetletService_DeliverClient = grpc.BidiStreamingClient[DeliverEvent, Deli
 // All implementations must embed UnimplementedFleetletServiceServer
 // for forward compatibility.
 //
-// FleetletService is the platform-side API that fleetlets connect to.
+// FleetletService is the platform-side API that fleetlet instances connect to.
 // Authentication is per-fleetlet at the transport level; the platform
 // identifies the caller from gRPC metadata on stream creation.
 type FleetletServiceServer interface {

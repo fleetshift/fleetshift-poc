@@ -22,14 +22,14 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 // buildClusterService creates a RegisteredService backed only by the

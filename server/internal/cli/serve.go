@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/bootstrap"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/slogutil"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/slogutil"
 )
 
 // serveFlags holds raw serve CLI flag values before edge resolution into

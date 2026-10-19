@@ -39,11 +39,11 @@ describe("buildTestEnvironment", () => {
     );
 
     expect(env.EXISTING).toBe("kept");
-    expect(env.BASE_URL).toBe("https://ocm-resource-manager.localhost:8085");
+    expect(env.BASE_URL).toBe("https://ocm-fleet.localhost:8085");
     expect(env.OCM_RM_GRPC_TARGET).toBe("127.0.0.1:50051");
     expect(env.OCM_RM_CA_FILE).toBe("/tmp/run/ca.crt");
-    expect(env.OCM_RM_E2E_RUN_ID).toBe("abcd");
-    expect(env.OCM_RM_E2E_WORK_DIR).toBe("/tmp/run");
+    expect(env.OCM_FLEET_E2E_RUN_ID).toBe("abcd");
+    expect(env.OCM_FLEET_E2E_WORK_DIR).toBe("/tmp/run");
     expect(env.OCM_RM_KIND_PREFIX).toBe("kind-e2e-abcd-");
   });
 });
@@ -88,19 +88,19 @@ describe("parseOwnedKindNodes", () => {
 
 describe("usesPrebuiltImage", () => {
   it("only an explicit prebuilt flag skips the local image build", () => {
-    expect(usesPrebuiltImage({ OCM_RM_E2E_AIO_PREBUILT: "1" })).toBe(true);
+    expect(usesPrebuiltImage({ OCM_FLEET_E2E_AIO_PREBUILT: "1" })).toBe(true);
     expect(usesPrebuiltImage({})).toBe(false);
-    expect(usesPrebuiltImage({ OCM_RM_E2E_AIO_PREBUILT: "0" })).toBe(false);
-    expect(usesPrebuiltImage({ OCM_RM_E2E_AIO_PULL: "1" })).toBe(false);
+    expect(usesPrebuiltImage({ OCM_FLEET_E2E_AIO_PREBUILT: "0" })).toBe(false);
+    expect(usesPrebuiltImage({ OCM_FLEET_E2E_AIO_PULL: "1" })).toBe(false);
   });
 });
 
 describe("usesPulledImage", () => {
   it("only an explicit pull flag pulls instead of building", () => {
-    expect(usesPulledImage({ OCM_RM_E2E_AIO_PULL: "1" })).toBe(true);
+    expect(usesPulledImage({ OCM_FLEET_E2E_AIO_PULL: "1" })).toBe(true);
     expect(usesPulledImage({})).toBe(false);
-    expect(usesPulledImage({ OCM_RM_E2E_AIO_PULL: "0" })).toBe(false);
-    expect(usesPulledImage({ OCM_RM_E2E_AIO_PREBUILT: "1" })).toBe(false);
+    expect(usesPulledImage({ OCM_FLEET_E2E_AIO_PULL: "0" })).toBe(false);
+    expect(usesPulledImage({ OCM_FLEET_E2E_AIO_PREBUILT: "1" })).toBe(false);
   });
 });
 
@@ -121,14 +121,14 @@ describe("sandboxLogLevel", () => {
 describe("sandboxRunArgs", () => {
   it("passes LOG_LEVEL into the AIO container", () => {
     const args = sandboxRunArgs(
-      { containerName: "ocm-resource-manager-e2e-abcd", runId: "abcd" },
+      { containerName: "ocm-fleet-e2e-abcd", runId: "abcd" },
       "/run/podman.sock",
       { LOG_LEVEL: "debug" },
     );
     const envIdx = args.indexOf("-e");
     expect(envIdx).toBeGreaterThan(-1);
     expect(args[envIdx + 1]).toBe("LOG_LEVEL=debug");
-    expect(args.at(-1)).toBe("quay.io/stolostron/ocm-resource-manager:latest");
+    expect(args.at(-1)).toBe("quay.io/stolostron/ocm-fleet:latest");
   });
 });
 

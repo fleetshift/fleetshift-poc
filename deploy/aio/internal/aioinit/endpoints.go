@@ -1,4 +1,4 @@
-// Package aioinit holds OCM Resource Manager AIO packaging helpers: public origin and
+// Package aioinit holds OCM Fleet AIO packaging helpers: public origin and
 // listen addresses, sandbox PKI, peer Dex config, serve argv,
 // and kind networking.
 package aioinit
@@ -11,9 +11,9 @@ import (
 
 const (
 	// PublicHost is the browser-facing DNS name.
-	PublicHost = "ocm-resource-manager.localhost"
+	PublicHost = "ocm-fleet.localhost"
 	// HostsMarker tags (comments) the AIO-container /etc/hosts mapping.
-	HostsMarker = "ocm-resource-manager-aio"
+	HostsMarker = "ocm-fleet-aio"
 
 	gatewayPort = "8085"
 	httpPort    = "8086"
@@ -22,7 +22,7 @@ const (
 
 	// PublicEnvPath is sourced by the resource-manager s6 run script for the public
 	// origin and Dex discovery URL.
-	PublicEnvPath = "/run/ocm-resource-manager/public.env"
+	PublicEnvPath = "/run/ocm-fleet/public.env"
 )
 
 // publicOrigin is the browser-facing https URL for PublicHost:gatewayPort.
@@ -36,7 +36,7 @@ var PeerDexIssuer = publicOrigin() + "/idp"
 
 // Endpoints is the AIO public origin plus internal listen addresses.
 // PublicOrigin is the browser-facing URL. HTTPListen and DexListen are the
-// The resource manager server and Dex bind to container-loopback addresses.
+// container-loopback listen addresses for the resource manager server and Dex.
 type Endpoints struct {
 	PublicOrigin  string
 	UICallback    string

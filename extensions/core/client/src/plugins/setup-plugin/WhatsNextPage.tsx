@@ -3,7 +3,7 @@ import "./WhatsNextPage.scss";
 import type {
   OnboardingActionCardProps,
   OnboardingActionFormProps,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
 import {
   useExtensions,
@@ -25,7 +25,7 @@ import { useSearchParams } from "react-router-dom";
 import { useSetupProgress } from "./useSetupProgress";
 
 type OnboardingActionExtension = Extension<
-  "ocm-resource-manager.onboarding-action",
+  "ocm-fleet.onboarding-action",
   {
     id: string;
     label: string;
@@ -39,7 +39,7 @@ type OnboardingActionExtension = Extension<
 >;
 
 function isOnboardingAction(e: Extension): e is OnboardingActionExtension {
-  return e.type === "ocm-resource-manager.onboarding-action";
+  return e.type === "ocm-fleet.onboarding-action";
 }
 
 interface WhatsNextPageProps {
@@ -110,8 +110,8 @@ const WhatsNextPage = ({ onSetupNext, onSetupSkip }: WhatsNextPageProps) => {
   }, [setSearchParams, categoryFilter]);
 
   const toolbar = (onSetupNext || onSetupSkip) && (
-    <div className="ocm-rm-setup-whats-next__toolbar">
-      <div className="ocm-rm-setup-whats-next__toolbar-inner">
+    <div className="ocm-fleet-setup-whats-next__toolbar">
+      <div className="ocm-fleet-setup-whats-next__toolbar-inner">
         {onSetupNext && (
           <Button variant="primary" onClick={onSetupNext}>
             Continue to console
@@ -128,8 +128,8 @@ const WhatsNextPage = ({ onSetupNext, onSetupSkip }: WhatsNextPageProps) => {
 
   if (!extensionsLoaded || !progressLoaded) {
     return (
-      <div className="ocm-rm-setup-whats-next">
-        <div className="ocm-rm-setup-whats-next__body">
+      <div className="ocm-fleet-setup-whats-next">
+        <div className="ocm-fleet-setup-whats-next__body">
           <Spinner size="xl" aria-label="Loading onboarding actions" />
         </div>
         {toolbar}
@@ -139,12 +139,15 @@ const WhatsNextPage = ({ onSetupNext, onSetupSkip }: WhatsNextPageProps) => {
 
   if (actionId && completed) {
     return (
-      <div className="ocm-rm-setup-whats-next">
-        <div className="ocm-rm-setup-whats-next--centered">
+      <div className="ocm-fleet-setup-whats-next">
+        <div className="ocm-fleet-setup-whats-next--centered">
           <Icon size="xl" status="success" className="pf-v6-u-mb-md">
             <CheckCircleIcon />
           </Icon>
-          <Title headingLevel="h1" className="ocm-rm-setup-whats-next__title">
+          <Title
+            headingLevel="h1"
+            className="ocm-fleet-setup-whats-next__title"
+          >
             {completed} configured
           </Title>
           <Content component="p" className="pf-v6-u-mb-lg">
@@ -173,7 +176,7 @@ const WhatsNextPage = ({ onSetupNext, onSetupSkip }: WhatsNextPageProps) => {
 
   if (actionId && activeExt && FormComponent && !completed) {
     return (
-      <div className="ocm-rm-setup-whats-next">
+      <div className="ocm-fleet-setup-whats-next">
         <FormComponent
           onComplete={() =>
             handleComplete(activeExt.properties.id, activeExt.properties.label)
@@ -186,22 +189,25 @@ const WhatsNextPage = ({ onSetupNext, onSetupSkip }: WhatsNextPageProps) => {
 
   const catalogTitle = isSetup
     ? "What do you want to do next?"
-    : categoryFilter === "ocm-resource-manager.cluster-provider"
+    : categoryFilter === "ocm-fleet.cluster-provider"
       ? "Cluster Providers"
       : "Extensions";
 
   return (
-    <div className="ocm-rm-setup-whats-next">
-      <div className="ocm-rm-setup-whats-next__body">
-        <div className="ocm-rm-setup-whats-next__inner">
-          <Title headingLevel="h1" className="ocm-rm-setup-whats-next__title">
+    <div className="ocm-fleet-setup-whats-next">
+      <div className="ocm-fleet-setup-whats-next__body">
+        <div className="ocm-fleet-setup-whats-next__inner">
+          <Title
+            headingLevel="h1"
+            className="ocm-fleet-setup-whats-next__title"
+          >
             {catalogTitle}
           </Title>
           <Content component="p" className="pf-v6-u-mb-lg">
             Configure addons and integrations for your fleet.
           </Content>
 
-          <div className="ocm-rm-setup-whats-next__catalog">
+          <div className="ocm-fleet-setup-whats-next__catalog">
             {filteredExtensions.map((ext) => {
               const CardComponent = ext.properties.card;
               return (

@@ -2,11 +2,11 @@
  * TypeScript types for the platform management API.
  *
  * Derived from the finalized OpenAPI spec:
- * `docs/openapi/ocm-resource-manager.swagger.yaml` in ocm-resource-manager.
+ * `docs/openapi/ocm-fleet.swagger.yaml` in ocm-fleet.
  *
  * Use with {@link createApiClient}:
  * ```ts
- * import { createApiClient, type Deployment } from "@ocm-resource-manager/common";
+ * import { createApiClient, type Deployment } from "@ocm-fleet/common";
  * const mgmt = createApiClient("/v1alpha");
  * const { deployments } = await mgmt.get<ListDeploymentsResponse>("/deployments");
  * ```

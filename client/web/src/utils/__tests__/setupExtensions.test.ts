@@ -19,7 +19,7 @@ function makeExt(
       requiresAuth: true,
       ...(priority !== undefined ? { priority } : {}),
     },
-    type: "ocm-resource-manager.setup",
+    type: "ocm-fleet.setup",
     pluginName: "test-plugin",
     uid: `test[${id}]`,
   } as ResolvedSetup;

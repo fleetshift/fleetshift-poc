@@ -113,7 +113,7 @@ const file_ocm_v1alpha_deliver_instruction_proto_rawDesc = "" +
 	"\x12DeliverInstruction\x12I\n" +
 	"\x10delivery_request\x18\x01 \x01(\v2\x1c.ocm.v1alpha.DeliveryRequestH\x00R\x0fdeliveryRequest\x12C\n" +
 	"\x0eremove_request\x18\x02 \x01(\v2\x1a.ocm.v1alpha.RemoveRequestH\x00R\rremoveRequestB\r\n" +
-	"\vinstructionBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\vinstructionBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_deliver_instruction_proto_rawDescOnce sync.Once

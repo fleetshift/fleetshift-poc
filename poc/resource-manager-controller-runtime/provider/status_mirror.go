@@ -8,8 +8,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	deliveryv1 "github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/contract"
+	deliveryv1 "github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/contract"
 )
 
 // statusMirror translates Delivery status writes into DeliveryReporter

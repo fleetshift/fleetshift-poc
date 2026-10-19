@@ -1,5 +1,5 @@
 {
-  "name": "@ocm-resource-manager/web",
+  "name": "@ocm-fleet/web",
   "description": "React SPA shell — composable dashboard with Module Federation and Scalprum plugin loading.",
   "version": "0.0.0",
   "private": true,
@@ -8,7 +8,7 @@
   "dependencies": {
     "@dnd-kit/react": "^0.3.2",
     "@module-federation/enhanced": "^2.9.0",
-    "@ocm-resource-manager/common": "^0.0.0",
+    "@ocm-fleet/common": "^0.0.0",
     "@openshift/dynamic-plugin-sdk": "^9.1.0",
     "@orama/orama": "^3.1.18",
     "@patternfly/patternfly": "^6.5.1",
@@ -28,7 +28,7 @@
     "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
-    "@ocm-resource-manager/build-utils": "^0.0.0",
+    "@ocm-fleet/build-utils": "^0.0.0",
     "@rspack/cli": "^2.0.8",
     "@rspack/core": "^2.0.8",
     "@types/react": "^19.1.0",

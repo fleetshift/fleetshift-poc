@@ -297,7 +297,7 @@ const file_ocm_v1alpha_deployment_proto_rawDesc = "" +
 	"\fSTATE_ACTIVE\x10\x02\x12\x12\n" +
 	"\x0eSTATE_DELETING\x10\x03\x12\x10\n" +
 	"\fSTATE_FAILED\x10\x04\"\x04\b\x05\x10\x05*\x11STATE_PAUSED_AUTH:G\xeaAD\n" +
-	"%open-cluster-management.io/Deployment\x12\x18deployments/{deployment}R\x01\x01BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"%open-cluster-management.io/Deployment\x12\x18deployments/{deployment}R\x01\x01BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_deployment_proto_rawDescOnce sync.Once

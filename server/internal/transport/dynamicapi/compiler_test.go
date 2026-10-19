@@ -9,8 +9,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 const specMessageName = "ocm.kind.v1alpha.KindClusterSpec"

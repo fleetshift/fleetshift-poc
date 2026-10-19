@@ -153,7 +153,7 @@ const file_ocm_v1alpha_oidc_config_proto_rawDesc = "" +
 	"\bjwks_uri\x18\x05 \x01(\tB\x03\xe0A\x03R\ajwksUri\x126\n" +
 	"\x17key_enrollment_audience\x18\x06 \x01(\tR\x15keyEnrollmentAudience\x12=\n" +
 	"\x1bpublic_key_claim_expression\x18\b \x01(\tR\x18publicKeyClaimExpression\x12]\n" +
-	"\x18registry_subject_mapping\x18\a \x01(\v2#.ocm.v1alpha.RegistrySubjectMappingR\x16registrySubjectMappingBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x18registry_subject_mapping\x18\a \x01(\v2#.ocm.v1alpha.RegistrySubjectMappingR\x16registrySubjectMappingBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_oidc_config_proto_rawDescOnce sync.Once

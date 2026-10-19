@@ -1,5 +1,5 @@
-import type { ClusterProviderWizardProps } from "@ocm-resource-manager/common";
-import { usePluginNavigate } from "@ocm-resource-manager/common";
+import type { ClusterProviderWizardProps } from "@ocm-fleet/common";
+import { usePluginNavigate } from "@ocm-fleet/common";
 import { Alert, Wizard, WizardStep } from "@patternfly/react-core";
 import { useCallback, useState } from "react";
 

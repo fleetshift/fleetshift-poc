@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func mustExtract(t *testing.T, r *unstructured.Unstructured, entry SchemaEntry, clusterResourceName domain.ResourceName, scope ObjectScope) (InventoryObjectReport, inventoryNode) {

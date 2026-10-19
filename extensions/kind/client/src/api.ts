@@ -1,4 +1,4 @@
-import { createApiClient } from "@ocm-resource-manager/common";
+import { createApiClient } from "@ocm-fleet/common";
 
 const client = createApiClient("/apis/kind.open-cluster-management.io/v1alpha");
 

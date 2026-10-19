@@ -188,7 +188,7 @@ users:
   user:
     exec:
       apiVersion: client.authentication.k8s.io/v1
-      command: ocm-resource-manager
+      command: fleetctl
       args: ["auth", "token"]
 ```
 
@@ -252,7 +252,7 @@ The always-on mesh avoids an external registry. An on-demand model would avoid i
 
 The peer mesh scales with platform replica count rather than fleet size. A small replica set is therefore practical.
 
-If a peer connection drops, requests for targets on that peer fail until the connection is restored. If a platform replica crashes, fleetlets reconnect through the load balancer and the peer mesh updates accordingly.
+If a peer connection drops, requests for targets on that peer fail until the connection is restored. If a platform replica crashes, fleetlet instances reconnect through the load balancer and the peer mesh updates accordingly.
 
 ## Control plane versus data plane
 
@@ -275,13 +275,13 @@ Legacy or existing backends may prefer direct agent-to-backend traffic. In this 
 
 > NOTE: This design is not yet verified and make change arbitrarily.
 
-New addons can treat the fleetlet as a complete networking shell. Agents and backends both talk only to their local fleetlet. The fleetlets handle routing, fan-in, TLS, reconnection, discovery, and multi-tenancy-aware ingress.
+New addons can treat the fleetlet as a complete networking shell. Agents and backends both talk only to their local fleetlet. The fleetlet instances handle routing, fan-in, TLS, reconnection, discovery, and multi-tenancy-aware ingress.
 
 When an addon registers a capability, it declares its data channels and the fleetlet that serves them. The platform records this in its routing table. When a source fleetlet sees a local process open a data channel, it asks the platform for the destination and receives the destination fleetlet's address.
 
 If the destination fleetlet is directly reachable, the source fleetlet connects directly and the platform stays out of the data path. If direct connectivity is unavailable, such as when both sides sit behind NAT, the platform can relay the stream as a fallback. The local programming model stays the same either way.
 
-When many source fleetlets converge on one destination, the destination fleetlet can multiplex those inbound streams onto one local channel. The addon backend reads one merged stream rather than managing hundreds of inbound connections, while still being able to distinguish sources when needed.
+When many source fleetlet instances converge on one destination, the destination fleetlet can multiplex those inbound streams onto one local channel. The addon backend reads one merged stream rather than managing hundreds of inbound connections, while still being able to distinguish sources when needed.
 
 Why this matters for addon developers:
 

@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioinit"
 )
 
 const (
@@ -22,8 +22,8 @@ const (
 
 	// dexEnabledFlag is written on Dex-on so the s6-rc dex longrun execs Dex
 	// instead of parking on s6-pause (Dex-off).
-	dexEnabledFlag = "/run/ocm-resource-manager/dex.enabled"
-	runDir         = "/run/ocm-resource-manager"
+	dexEnabledFlag = "/run/ocm-fleet/dex.enabled"
+	runDir         = "/run/ocm-fleet"
 	hostsPath      = "/etc/hosts"
 )
 
@@ -34,7 +34,7 @@ func main() {
 	}
 }
 
-// run performs packaging init and writes /run/ocm-resource-manager/exec-serve.
+// run performs packaging init and writes /run/ocm-fleet/exec-serve.
 func run() error {
 	if err := os.MkdirAll(runDir, 0755); err != nil {
 		return err
@@ -130,7 +130,7 @@ func prepareDataLayout() error {
 }
 
 // ensureOwnedDir creates path and, when running as root, sets ownership to uid:gid.
-// aio-init runs as root under s6 (then ocm-resource-manager/dex/aio-proxy drop privileges); chown only
+// aio-init runs as root under s6 (then ocm-fleet/dex/aio-proxy drop privileges); chown only
 // works in that case. Non-root callers (e.g. unit tests) still get the directory
 // but skip chown, which would fail with EPERM.
 func ensureOwnedDir(path string, uid, gid int) error {

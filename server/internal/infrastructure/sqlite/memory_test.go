@@ -3,7 +3,7 @@ package sqlite_test
 import (
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 func TestOpenMemory_RoundTripAndIsolation(t *testing.T) {

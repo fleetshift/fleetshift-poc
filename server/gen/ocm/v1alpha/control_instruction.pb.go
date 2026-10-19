@@ -113,7 +113,7 @@ const file_ocm_v1alpha_control_instruction_proto_rawDesc = "" +
 	"\x12ControlInstruction\x12F\n" +
 	"\x0ftarget_accepted\x18\x01 \x01(\v2\x1b.ocm.v1alpha.TargetAcceptedH\x00R\x0etargetAccepted\x122\n" +
 	"\x05error\x18\x02 \x01(\v2\x1a.ocm.v1alpha.FleetletErrorH\x00R\x05errorB\r\n" +
-	"\vinstructionBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\vinstructionBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_control_instruction_proto_rawDescOnce sync.Once

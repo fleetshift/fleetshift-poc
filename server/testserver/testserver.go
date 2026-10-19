@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/bootstrap"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // stubVerifier returns a fixed test identity for any token.
@@ -53,16 +53,16 @@ func Start(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "ocm-resource-manager.db")
+	dbPath := filepath.Join(dir, "resource-manager.db")
 	// TODO: shared-cache in-memory SQLite once bootstrap keeps an OpenMemory
-	// sentinel. See docs/ocm-resource-manager/e2e-testing/2026-09-03-testserver-in-memory-sqlite.md.
+	// sentinel. See docs/ocm-fleet/e2e-testing/2026-09-03-testserver-in-memory-sqlite.md.
 
 	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "ocm-resource-manager",
+		OIDCResourceAudience: "resource-manager",
 		// Kind drives trust-bundle placement for provision-IdP.
 		Addons: "kind",
 	})

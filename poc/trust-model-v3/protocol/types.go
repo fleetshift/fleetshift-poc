@@ -13,8 +13,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/internal/merklelog"
-	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/internal/sparsemap"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/merklelog"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/sparsemap"
 	"github.com/transparency-dev/merkle/proof"
 	"github.com/transparency-dev/merkle/rfc6962"
 )

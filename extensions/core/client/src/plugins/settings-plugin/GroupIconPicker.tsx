@@ -1,4 +1,4 @@
-import { getCachedPfIcon, loadPfIcon } from "@ocm-resource-manager/common";
+import { getCachedPfIcon, loadPfIcon } from "@ocm-fleet/common";
 import { Button, Icon, Skeleton } from "@patternfly/react-core";
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useState } from "react";

@@ -142,7 +142,7 @@ const file_ocm_v1alpha_query_resources_request_proto_rawDesc = "" +
 	"\tpage_size\x18\x03 \x01(\x05B\x03\xe0A\x01R\bpageSize\x12\"\n" +
 	"\n" +
 	"page_token\x18\x04 \x01(\tB\x03\xe0A\x01R\tpageToken\x12\x1e\n" +
-	"\border_by\x18\x05 \x01(\tB\x03\xe0A\x01R\aorderByBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\border_by\x18\x05 \x01(\tB\x03\xe0A\x01R\aorderByBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_query_resources_request_proto_rawDescOnce sync.Once

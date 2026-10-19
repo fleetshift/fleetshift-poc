@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestParseObjectScope(t *testing.T) {

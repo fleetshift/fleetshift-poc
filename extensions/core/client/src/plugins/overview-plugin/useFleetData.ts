@@ -3,7 +3,7 @@ import {
   createResourceApi,
   extractClusterId,
   ResourceResult,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import { createContext, useContext, useEffect, useState } from "react";
 
 export interface DashboardCluster {
@@ -28,7 +28,7 @@ export interface FleetData {
   error: string | null;
 }
 
-const STORAGE_KEY = "ocm-resource-manager:cluster-enrichment";
+const STORAGE_KEY = "ocm-fleet:cluster-enrichment";
 
 interface EnrichmentData {
   region: string;

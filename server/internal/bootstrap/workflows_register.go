@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/observability"
-	transporthttp "github.com/stolostron/ocm-resource-manager/server/internal/transport/http"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/observability"
+	transporthttp "github.com/stolostron/ocm-fleet/server/internal/transport/http"
 )
 
 // registeredWorkflows are workflow handles and shared deps registered before

@@ -4,17 +4,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/authmethodrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/deliveryrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/deploymentrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/extensionresourcerepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/fulfillmentrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/inventoryrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/resourceidentityrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/storetest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain/targetrepotest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/authmethodrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/deliveryrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/deploymentrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/extensionresourcerepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/fulfillmentrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/inventoryrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/resourceidentityrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/storetest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/targetrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 func newStore(t *testing.T) *postgres.Store {

@@ -84,7 +84,7 @@ const file_ocm_v1alpha_query_resources_response_proto_rawDesc = "" +
 	"*ocm/v1alpha/query_resources_response.proto\x12\vocm.v1alpha\x1a!ocm/v1alpha/resource_result.proto\"{\n" +
 	"\x16QueryResourcesResponse\x129\n" +
 	"\tresources\x18\x01 \x03(\v2\x1b.ocm.v1alpha.ResourceResultR\tresources\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageTokenBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageTokenBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_query_resources_response_proto_rawDescOnce sync.Once

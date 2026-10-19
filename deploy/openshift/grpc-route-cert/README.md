@@ -1,11 +1,11 @@
-# OCM Resource Manager gRPC Route Certificate
+# OCM Fleet gRPC Route Certificate
 
-Scripted, repeatable workflow for attaching a trusted, unique certificate to the OCM Resource Manager `grpc` OpenShift Route while keeping the working `edge + h2c` transport model.
+Scripted, repeatable workflow for attaching a trusted, unique certificate to the OCM Fleet `grpc` OpenShift Route while keeping the working `edge + h2c` transport model.
 
 The resulting path is:
 
 ```text
-fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manager-server :50051
+fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> resource-manager :50051
 ```
 
 ## What this does
@@ -14,7 +14,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manag
 
 1. Enables HTTP/2 on the default ingress controller if needed
 2. Installs cert-manager if needed
-3. Creates or updates an OCM Resource Manager-specific `ClusterIssuer`
+3. Creates or updates an OCM Fleet-specific `ClusterIssuer`
 4. Grants `openshift-ingress:router` permission to read the TLS Secret
 5. Restores a backed-up TLS Secret first, unless `--fresh-cert` is requested
 6. Requests or reconciles a certificate for the **existing** gRPC Route hostname
@@ -27,7 +27,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manag
 1. Removes the Route certificate integration
 2. Backs up the Route TLS Secret to avoid unnecessary ACME reissuance on redeploy
 3. Deletes the namespace-scoped certificate resources
-4. Deletes the OCM Resource Manager-specific `ClusterIssuer`
+4. Deletes the OCM Fleet-specific `ClusterIssuer`
 5. Asks interactively whether to uninstall cert-manager
 6. Leaves the ingress HTTP/2 annotation unchanged by default
 
@@ -35,7 +35,7 @@ fleetctl -- TLS + ALPN h2 --> OpenShift Route :443 -- h2c --> ocm-resource-manag
 
 - `oc` CLI installed
 - Logged into the target OpenShift cluster
-- OCM Resource Manager already deployed (`route/grpc` and `service/ocm-resource-manager-server` must exist)
+- OCM Fleet already deployed (`route/grpc` and `service/resource-manager` must exist)
 - `appProtocol: kubernetes.io/h2c` already present on the Service `grpc` port
 - `openssl` and `curl` in PATH
 - `grpcurl` in PATH if you want the built-in gRPC verification step
@@ -57,7 +57,7 @@ Why this matters:
 - the ingress controller HTTP/2 annotation enables the frontend/client-facing HTTP/2 capability
 - both were required in the live investigation before the gRPC Route would negotiate ALPN `h2` correctly
 
-## Important note about normal OCM Resource Manager deploys
+## Important note about normal OCM Fleet deploys
 
 The base OpenShift deploy still applies the plain `route-grpc.yaml` from `deploy/openshift/`.
 
@@ -83,10 +83,10 @@ Optional flags:
 ```bash
 node ./scripts/deploy.mjs \
   --acme-email you@example.com \
-  --namespace ocm-resource-manager \
+  --namespace ocm-fleet \
   --route-name grpc \
-  --issuer-name ocm-resource-manager-grpc-letsencrypt-prod \
-  --tls-secret-name ocm-resource-manager-grpc-route-tls
+  --issuer-name ocm-fleet-grpc-letsencrypt-prod \
+  --tls-secret-name ocm-fleet-grpc-route-tls
 ```
 
 Force a fresh certificate request instead of restoring the saved backup:
@@ -98,13 +98,13 @@ node ./scripts/deploy.mjs --acme-email you@example.com --fresh-cert
 The script auto-detects the current Route host from:
 
 ```bash
-oc get route grpc -n ocm-resource-manager -o jsonpath='{.spec.host}'
+oc get route grpc -n ocm-fleet -o jsonpath='{.spec.host}'
 ```
 
 For this POC, that host is expected to be:
 
 ```text
-grpc-ocm-resource-manager.apps.sno-1-6c5z7.aws-acm-cluster-virt.devcluster.openshift.com
+grpc-ocm-fleet.apps.sno-1-6c5z7.aws-acm-cluster-virt.devcluster.openshift.com
 ```
 
 ### Task wrapper
@@ -136,7 +136,7 @@ node ./scripts/teardown.mjs
 Optional cleanup flags:
 
 ```bash
-node ./scripts/teardown.mjs --namespace ocm-resource-manager --route-name grpc
+node ./scripts/teardown.mjs --namespace ocm-fleet --route-name grpc
 ```
 
 ### Task wrapper
@@ -151,8 +151,8 @@ By default, teardown:
 
 - backs up the current TLS Secret to `cert-manager-operator/<tls-secret-name>-backup`
 - removes the Route certificate integration
-- deletes the OCM Resource Manager namespace-scoped cert resources
-- deletes the OCM Resource Manager-specific `ClusterIssuer`
+- deletes the OCM Fleet namespace-scoped cert resources
+- deletes the OCM Fleet-specific `ClusterIssuer`
 - asks interactively before uninstalling cert-manager
 - **does not** revert the ingress HTTP/2 annotation
 

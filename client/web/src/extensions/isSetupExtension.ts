@@ -7,7 +7,7 @@ export interface SetupComponentProps {
 }
 
 export type SetupExtension = Extension<
-  "ocm-resource-manager.setup",
+  "ocm-fleet.setup",
   {
     id: string;
     label: string;
@@ -21,5 +21,5 @@ export type SetupExtension = Extension<
 >;
 
 export function isSetupExtension(e: Extension): e is SetupExtension {
-  return e.type === "ocm-resource-manager.setup";
+  return e.type === "ocm-fleet.setup";
 }

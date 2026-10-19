@@ -98,7 +98,7 @@ const file_ocm_v1alpha_subject_claims_proto_rawDesc = "" +
 	"\n" +
 	"ExtraEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12-\n" +
-	"\x05value\x18\x02 \x01(\v2\x17.ocm.v1alpha.StringListR\x05value:\x028\x01BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x05value\x18\x02 \x01(\v2\x17.ocm.v1alpha.StringListR\x05value:\x028\x01BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_subject_claims_proto_rawDescOnce sync.Once

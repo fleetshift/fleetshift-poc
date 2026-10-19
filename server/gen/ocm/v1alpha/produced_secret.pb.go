@@ -85,7 +85,7 @@ const file_ocm_v1alpha_produced_secret_proto_rawDesc = "" +
 	"!ocm/v1alpha/produced_secret.proto\x12\vocm.v1alpha\x1a\x1fgoogle/api/field_behavior.proto\"B\n" +
 	"\x0eProducedSecret\x12\x15\n" +
 	"\x03ref\x18\x01 \x01(\tB\x03\xe0A\x02R\x03ref\x12\x19\n" +
-	"\x05value\x18\x02 \x01(\fB\x03\xe0A\x02R\x05valueBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x05value\x18\x02 \x01(\fB\x03\xe0A\x02R\x05valueBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_produced_secret_proto_rawDescOnce sync.Once

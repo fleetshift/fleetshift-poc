@@ -13,13 +13,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
-	transportgrpc "github.com/stolostron/ocm-resource-manager/server/internal/transport/grpc"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
+	transportgrpc "github.com/stolostron/ocm-fleet/server/internal/transport/grpc"
 )
 
 const testTargetType domain.TargetType = "test"

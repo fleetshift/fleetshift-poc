@@ -6,7 +6,7 @@ Dependencies flow downward only.
 
 ### Layer 1: Main (`cmd/resource-manager`, `internal/cli`, and `internal/bootstrap`)
 
-CLI commands, config serialization, and the application object graph / lifecycle. No business logic. `internal/bootstrap` is the sole composition edge: it eagerly constructs the complete production graph, owns listeners, readiness, supervision, and shutdown, and is shared by `resource-manager serve` and the frozen `testserver` facade used by existing ocm-resource-manager-cli tests. `internal/cli` stays a thin front for flags, environment/file resolution, logger construction, and OS signals. Packages below `bootstrap` must not import it.
+CLI commands, config serialization, and the application object graph / lifecycle. No business logic. `internal/bootstrap` is the sole composition edge: it eagerly constructs the complete production graph, owns listeners, readiness, supervision, and shutdown, and is shared by `resource-manager serve` and the frozen `testserver` facade used by existing fleetctl tests. `internal/cli` stays a thin front for flags, environment/file resolution, logger construction, and OS signals. Packages below `bootstrap` must not import it.
 
 Depends on: Transport and Infrastructure, sometimes Application and Domain (when the CLI is acting as "the transport")
 

@@ -19,14 +19,14 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
-	transportgrpc "github.com/stolostron/ocm-resource-manager/server/internal/transport/grpc"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
+	transportgrpc "github.com/stolostron/ocm-fleet/server/internal/transport/grpc"
 )
 
 type resourceQueryEnv struct {

@@ -11,10 +11,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 const kindClusterServiceName = "ocm.kind.v1alpha.ClusterService"

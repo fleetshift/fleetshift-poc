@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // TargetRepo implements [domain.TargetRepository] backed by SQLite.

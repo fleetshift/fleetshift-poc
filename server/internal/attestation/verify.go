@@ -15,8 +15,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	fscrypto "github.com/stolostron/ocm-resource-manager/server/pkg/crypto"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	fscrypto "github.com/stolostron/ocm-fleet/server/pkg/crypto"
 )
 
 // TrustedIssuer describes an OIDC issuer the delivery agent trusts.

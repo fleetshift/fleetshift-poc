@@ -92,7 +92,7 @@ const file_ocm_v1alpha_remove_request_proto_rawDesc = "" +
 	"\vdelivery_id\x18\x01 \x01(\tB\x03\xe0A\x02R\n" +
 	"deliveryId\x12(\n" +
 	"\rdeployment_id\x18\x02 \x01(\tB\x03\xe0A\x02R\fdeploymentId\x12 \n" +
-	"\ttarget_id\x18\x03 \x01(\tB\x03\xe0A\x02R\btargetIdBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\ttarget_id\x18\x03 \x01(\tB\x03\xe0A\x02R\btargetIdBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_remove_request_proto_rawDescOnce sync.Once

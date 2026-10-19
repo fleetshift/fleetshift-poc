@@ -126,7 +126,7 @@ const file_ocm_v1alpha_resume_deployment_request_proto_rawDesc = "" +
 	"\vvalid_until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
 	"validUntil\x12\x17\n" +
 	"\x04etag\x18\x04 \x01(\tB\x03\xe0A\x01R\x04etag\x124\n" +
-	"\x13expected_generation\x18\x05 \x01(\x03B\x03\xe0A\x01R\x12expectedGenerationBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x13expected_generation\x18\x05 \x01(\x03B\x03\xe0A\x01R\x12expectedGenerationBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_resume_deployment_request_proto_rawDescOnce sync.Once

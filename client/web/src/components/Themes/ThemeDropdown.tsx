@@ -28,9 +28,9 @@ const validThemes: string[] = [
 ];
 
 const STORAGE_KEYS = {
-  theme: "ocm-resource-manager_theme",
-  colorScheme: "ocm-resource-manager_color_scheme",
-  contrastMode: "ocm-resource-manager_contrast_mode",
+  theme: "ocm-fleet_theme",
+  colorScheme: "ocm-fleet_color_scheme",
+  contrastMode: "ocm-fleet_contrast_mode",
 };
 
 function readStored<T extends string>(key: string, fallback: T): T {
@@ -165,10 +165,10 @@ const ThemeDropdown = () => {
   );
 
   const panel = (
-    <Panel ref={panelRef} variant="raised" className="ocm-rm-theme-dropdown">
+    <Panel ref={panelRef} variant="raised" className="ocm-fleet-theme-dropdown">
       <PanelMain>
         <PanelMainBody>
-          <div className="ocm-rm-theme-dropdown__section">
+          <div className="ocm-fleet-theme-dropdown__section">
             <Title headingLevel="h4" size="md">
               Theme
             </Title>
@@ -185,7 +185,7 @@ const ThemeDropdown = () => {
               />
             </ToggleGroup>
           </div>
-          <div className="ocm-rm-theme-dropdown__section">
+          <div className="ocm-fleet-theme-dropdown__section">
             <Title headingLevel="h4" size="md">
               Color scheme
             </Title>
@@ -207,7 +207,7 @@ const ThemeDropdown = () => {
               />
             </ToggleGroup>
           </div>
-          <div className="ocm-rm-theme-dropdown__section">
+          <div className="ocm-fleet-theme-dropdown__section">
             <Title headingLevel="h4" size="md">
               Contrast mode
             </Title>

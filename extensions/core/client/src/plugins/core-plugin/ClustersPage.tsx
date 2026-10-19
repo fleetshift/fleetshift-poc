@@ -6,7 +6,7 @@ import {
   createResourceApi,
   extractClusterId,
   PluginLink,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import {
   SkeletonTableBody,
   SkeletonTableHead,
@@ -329,7 +329,7 @@ export default function ClustersPage() {
         <DataView activeState={activeState}>
           <DataViewToolbar
             clearAllFilters={clearAllFilters}
-            className="ocm-rm-core-clusters-toolbar"
+            className="ocm-fleet-core-clusters-toolbar"
             actions={
               <Button variant="primary" onClick={openCreateWizard}>
                 Create cluster

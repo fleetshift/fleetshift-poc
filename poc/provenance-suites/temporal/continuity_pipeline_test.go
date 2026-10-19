@@ -7,9 +7,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/internal/merklelog"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/resourcemanager"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/internal/merklelog"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/resourcemanager"
 )
 
 const (

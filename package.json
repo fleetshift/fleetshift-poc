@@ -1,5 +1,5 @@
 {
-  "name": "ocm-resource-manager",
+  "name": "ocm-fleet",
   "private": true,
   "workspaces": [
     "client/cli",

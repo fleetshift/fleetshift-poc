@@ -1,13 +1,13 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: web
+  name: grpc
 spec:
   to:
     kind: Service
-    name: ocm-resource-manager-server
+    name: resource-manager
   port:
-    targetPort: http
+    targetPort: grpc
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect

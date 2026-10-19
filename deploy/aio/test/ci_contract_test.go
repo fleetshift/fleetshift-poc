@@ -32,21 +32,21 @@ import (
 
 const (
 	// releaseRawBase is github.com/openshift/release@master as raw GitHub
-	// content. These files are not in ocm-resource-manager.
+	// content. These files are not in ocm-fleet.
 	releaseRawBase = "https://raw.githubusercontent.com/openshift/release/master/"
 	// ciConfigPath is the ci-operator config that owns the AIO image graph.
 	// Generated Prow jobs must stay in sync with this file.
-	ciConfigPath = "ci-operator/config/stolostron/ocm-resource-manager/stolostron-ocm-resource-manager-main.yaml"
+	ciConfigPath = "ci-operator/config/stolostron/ocm-fleet/stolostron-ocm-fleet-main.yaml"
 	// presubmitsPath is the generated PR jobs for that config.
-	presubmitsPath = "ci-operator/jobs/stolostron/ocm-resource-manager/stolostron-ocm-resource-manager-main-presubmits.yaml"
+	presubmitsPath = "ci-operator/jobs/stolostron/ocm-fleet/stolostron-ocm-fleet-main-presubmits.yaml"
 	// postsubmitsPath is the generated merge jobs for that config.
-	postsubmitsPath = "ci-operator/jobs/stolostron/ocm-resource-manager/stolostron-ocm-resource-manager-main-postsubmits.yaml"
+	postsubmitsPath = "ci-operator/jobs/stolostron/ocm-fleet/stolostron-ocm-fleet-main-postsubmits.yaml"
 
 	// webFromArg is the Dockerfile FROM text ci-operator must match in
-	// inputs.ocm-resource-manager-web.as (exact string, before ARG expansion).
+	// inputs.ocm-fleet-web.as (exact string, before ARG expansion).
 	webFromArg = "${WEB_IMAGE}"
 	// serverFromArg is the last Dockerfile FROM. ci-operator from: rewrites
-	// that instruction to the pipeline image named in ocm-resource-manager.from.
+	// that instruction to the pipeline image named in ocm-fleet.from.
 	serverFromArg = "${SERVER_IMAGE}"
 )
 
@@ -68,7 +68,7 @@ func TestDockerfileResourceManagerOpenShiftRewriteContract(t *testing.T) {
 		t.Fatalf("Dockerfile.aio: need at least web + server FROM, got %q", froms)
 	}
 	if !contains(froms, webFromArg) {
-		t.Fatalf("Dockerfile.aio: missing FROM %s (ci-operator inputs.ocm-resource-manager-web.as must match this text; got %q)", webFromArg, froms)
+		t.Fatalf("Dockerfile.aio: missing FROM %s (ci-operator inputs.ocm-fleet-web.as must match this text; got %q)", webFromArg, froms)
 	}
 	if got := froms[len(froms)-1]; got != serverFromArg {
 		t.Fatalf("Dockerfile.aio: last FROM must be %s so it stays the runtime base `from:` rewrites; got %q", serverFromArg, got)
@@ -96,13 +96,13 @@ func TestOpenShiftReleaseAIOImageGraphContract(t *testing.T) {
 // already-parsed YAML. froms is Dockerfile FROM text in order.
 //
 // Owned by openshift/release ci-operator config unless noted:
-//   - images.to includes ocm-resource-manager-server, ocm-resource-manager-server-local,
-//     ocm-resource-manager-web, and ocm-resource-manager (one pipeline)
+//   - images.to includes ocm-fleet-server, ocm-fleet-server-local,
+//     ocm-fleet-web, and ocm-fleet (one pipeline)
 //   - those images.dockerfile_path values are Dockerfile, Dockerfile.local,
 //     Dockerfile.web, and Dockerfile.aio
-//   - ocm-resource-manager-server-local.from is ocm-resource-manager-server (this-SHA server)
-//   - ocm-resource-manager.from is ocm-resource-manager-server-local (from: rewrites last FROM)
-//   - ocm-resource-manager.inputs.ocm-resource-manager-web.as matches a Dockerfile FROM string
+//   - ocm-fleet-server-local.from is ocm-fleet-server (this-SHA server)
+//   - ocm-fleet.from is ocm-fleet-server-local (from: rewrites last FROM)
+//   - ocm-fleet.inputs.ocm-fleet-web.as matches a Dockerfile FROM string
 //     (web substitution + wait). Prefer ${WEB_IMAGE}; if that FROM is
 //     missing, compare against froms[0] so a Dockerfile edit still fails
 //     as an as: mismatch rather than a skipped check
@@ -130,10 +130,10 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		byTo[img.To] = img
 	}
 	for _, w := range []struct{ to, path string }{
-		{"ocm-resource-manager-server", "Dockerfile"},
-		{"ocm-resource-manager-server-local", "Dockerfile.local"},
-		{"ocm-resource-manager-web", "Dockerfile.web"},
-		{"ocm-resource-manager", "Dockerfile.aio"},
+		{"ocm-fleet-server", "Dockerfile"},
+		{"ocm-fleet-server-local", "Dockerfile.local"},
+		{"ocm-fleet-web", "Dockerfile.web"},
+		{"ocm-fleet", "Dockerfile.aio"},
 	} {
 		t.Run("images/"+w.to, func(t *testing.T) {
 			img, ok := byTo[w.to]
@@ -146,28 +146,28 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 			}
 		})
 	}
-	if img, ok := byTo["ocm-resource-manager-server-local"]; ok {
-		t.Run("ocm-resource-manager-server-local.from", func(t *testing.T) {
-			if img.From != "ocm-resource-manager-server" {
-				t.Errorf("ocm-resource-manager-server-local.from = %q, want ocm-resource-manager-server", img.From)
+	if img, ok := byTo["ocm-fleet-server-local"]; ok {
+		t.Run("ocm-fleet-server-local.from", func(t *testing.T) {
+			if img.From != "ocm-fleet-server" {
+				t.Errorf("ocm-fleet-server-local.from = %q, want ocm-fleet-server", img.From)
 			}
 		})
 	}
-	aio, aioOK := byTo["ocm-resource-manager"]
+	aio, aioOK := byTo["ocm-fleet"]
 	if aioOK {
-		t.Run("ocm-resource-manager.from", func(t *testing.T) {
-			if aio.From != "ocm-resource-manager-server-local" {
-				t.Errorf("ocm-resource-manager.from = %q, want ocm-resource-manager-server-local (`from:` rewrites last FROM)", aio.From)
+		t.Run("ocm-fleet.from", func(t *testing.T) {
+			if aio.From != "ocm-fleet-server-local" {
+				t.Errorf("ocm-fleet.from = %q, want ocm-fleet-server-local (`from:` rewrites last FROM)", aio.From)
 			}
 		})
-		t.Run("ocm-resource-manager.inputs", func(t *testing.T) {
-			webIn, ok := aio.Inputs["ocm-resource-manager-web"]
+		t.Run("ocm-fleet.inputs", func(t *testing.T) {
+			webIn, ok := aio.Inputs["ocm-fleet-web"]
 			if !ok {
-				t.Error("ocm-resource-manager.inputs: missing ocm-resource-manager-web (AIO would not wait for web, and would not substitute it)")
+				t.Error("ocm-fleet.inputs: missing ocm-fleet-web (AIO would not wait for web, and would not substitute it)")
 				return
 			}
 			if !contains(webIn.As, webFROM) {
-				t.Errorf("ocm-resource-manager.inputs.ocm-resource-manager-web.as = %q, want %q (must match Dockerfile FROM text before ARG expansion)", webIn.As, webFROM)
+				t.Errorf("ocm-fleet.inputs.ocm-fleet-web.as = %q, want %q (must match Dockerfile FROM text before ARG expansion)", webIn.As, webFROM)
 			}
 		})
 	}
@@ -177,14 +177,14 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		tests[test.As] = test
 	}
 	for _, w := range []struct{ name, image string }{
-		{"pr-image-mirror-server", "ocm-resource-manager-server"},
-		{"pr-image-mirror-local", "ocm-resource-manager-server-local"},
-		{"pr-image-mirror-web", "ocm-resource-manager-web"},
-		{"pr-image-mirror-aio", "ocm-resource-manager"},
-		{"pr-merge-image-mirror-server", "ocm-resource-manager-server"},
-		{"pr-merge-image-mirror-local", "ocm-resource-manager-server-local"},
-		{"pr-merge-image-mirror-web", "ocm-resource-manager-web"},
-		{"pr-merge-image-mirror-aio", "ocm-resource-manager"},
+		{"pr-image-mirror-server", "ocm-fleet-server"},
+		{"pr-image-mirror-local", "ocm-fleet-server-local"},
+		{"pr-image-mirror-web", "ocm-fleet-web"},
+		{"pr-image-mirror-aio", "ocm-fleet"},
+		{"pr-merge-image-mirror-server", "ocm-fleet-server"},
+		{"pr-merge-image-mirror-local", "ocm-fleet-server-local"},
+		{"pr-merge-image-mirror-web", "ocm-fleet-web"},
+		{"pr-merge-image-mirror-aio", "ocm-fleet"},
 	} {
 		t.Run("tests/"+w.name, func(t *testing.T) {
 			test, ok := tests[w.name]
@@ -205,7 +205,7 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		})
 	}
 
-	jobs := presubmits.Presubmits["stolostron/ocm-resource-manager"]
+	jobs := presubmits.Presubmits["stolostron/ocm-fleet"]
 	for _, ctx := range []string{
 		"ci/prow/images",
 		"ci/prow/pr-image-mirror-server",
@@ -225,12 +225,12 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		})
 	}
 
-	post := postsubmits.Postsubmits["stolostron/ocm-resource-manager"]
+	post := postsubmits.Postsubmits["stolostron/ocm-fleet"]
 	for _, name := range []string{
-		"branch-ci-stolostron-ocm-resource-manager-main-pr-merge-image-mirror-server",
-		"branch-ci-stolostron-ocm-resource-manager-main-pr-merge-image-mirror-local",
-		"branch-ci-stolostron-ocm-resource-manager-main-pr-merge-image-mirror-web",
-		"branch-ci-stolostron-ocm-resource-manager-main-pr-merge-image-mirror-aio",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-server",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-local",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-web",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-aio",
 	} {
 		t.Run("postsubmits/"+name, func(t *testing.T) {
 			job := findProwJobByName(post, name)
@@ -286,7 +286,7 @@ func fetchOpenShiftReleaseYAML[T any](t *testing.T, url string) T {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("User-Agent", "ocm-resource-manager-aio-ci-contract-test")
+	req.Header.Set("User-Agent", "ocm-fleet-aio-ci-contract-test")
 	res, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)

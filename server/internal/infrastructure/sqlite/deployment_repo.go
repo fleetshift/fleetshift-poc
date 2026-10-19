@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // DeploymentRepo implements [domain.DeploymentRepository] backed by SQLite.

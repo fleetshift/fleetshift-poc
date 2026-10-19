@@ -6,7 +6,7 @@
 
 ## Problem
 
-The current search is client-side full-text (Orama) over plugin-contributed `ocm-resource-manager.search-index` extensions. It handles keyword lookups well but cannot express structured queries like field comparisons, label selectors, or date ranges. Users managing fleets need to filter by status, provider, node count, labels, and other resource attributes — things that require a query language, not a text box.
+The current search is client-side full-text (Orama) over plugin-contributed `ocm-fleet.search-index` extensions. It handles keyword lookups well but cannot express structured queries like field comparisons, label selectors, or date ranges. Users managing fleets need to filter by status, provider, node count, labels, and other resource attributes — things that require a query language, not a text box.
 
 ## Proposal
 
@@ -18,7 +18,7 @@ Add CEL (Common Expression Language) as the query language for advanced search. 
 
 Use `@react-querybuilder/core` (Option A — logic only, no vendor UI) as the query manipulation and CEL formatting engine. Build a fully custom PatternFly interface on top.
 
-**Why headless:** The UI must feel native to our PF design system with `ocm-rm-` scoped styles. Wrapping a third-party widget with `controlElements` overrides (Option B) still couples us to their component tree and context. The core package gives us everything we need without the UI baggage.
+**Why headless:** The UI must feel native to our PF design system with `ocm-fleet-` scoped styles. Wrapping a third-party widget with `controlElements` overrides (Option B) still couples us to their component tree and context. The core package gives us everything we need without the UI baggage.
 
 #### `@react-querybuilder/core` provides
 
@@ -378,7 +378,7 @@ Execution limits (expression complexity, AST depth) should be enforced server-si
 No backend changes. Uses existing `QueryResources` endpoint with `?filter=`.
 
 1. Add `@react-querybuilder/core` dependency — CEL formatting (`formatQuery`) and parsing (`parseCEL`)
-2. Define static base field registry in `@ocm-resource-manager/common` — fields, types, operators, enum values, descriptions, aliases
+2. Define static base field registry in `@ocm-fleet/common` — fields, types, operators, enum values, descriptions, aliases
 3. Build Orama autocomplete index from the field registry — fuzzy field name matching for suggestions
 4. Build advanced search components (shell — `web`):
    - **Search bar expansion** — full-width animation on activation (`/` shortcut or icon button)

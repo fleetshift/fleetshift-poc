@@ -7,7 +7,7 @@
 
 ## Problem
 
-OCM Resource Manager is a management platform that connects to clusters it does not own. It also does not own the identity providers (IdPs) that users use to authenticate against those clusters. When a user wants the resource manager server to do something on their behalf — create a cluster, scale a deployment, change configuration — the platform needs a way to confirm that the user is actually authorizing the action.
+OCM Fleet is a management platform that connects to clusters it does not own. It also does not own the identity providers (IdPs) that users use to authenticate against those clusters. When a user wants the resource manager server to do something on their behalf — create a cluster, scale a deployment, change configuration — the platform needs a way to confirm that the user is actually authorizing the action.
 
 The regular login (OIDC via Keycloak or similar) proves who you are to the platform. But that is not enough when the resource manager needs to act on your behalf against external clusters with their own identity systems. There needs to be a separate, stronger signal that says "I, the human(agent), am authorizing this specific action right now."
 
@@ -29,7 +29,7 @@ The idea is to use WebAuthn as a step-up authentication layer on top of the regu
 - The browser signs a challenge with the private key. The server verifies the signature against the stored public key.
 - If it checks out, the resource manager knows the actual user is present and approving.
 
-### Why this matters for OCM Resource Manager
+### Why this matters for OCM Fleet
 
 - **The platform does not control the IdP.** The clusters being managed may use their own IdPs (corporate SSO, cloud provider IAM, etc.). The resource manager cannot ask those IdPs to verify the user for delegation purposes.
 - **Tokens can be stolen or replayed.** A bearer token sitting in a session can be used by anything that has access to it. A passkey requires the actual user to be physically present.

@@ -2,8 +2,8 @@ import { useScalprum } from "@scalprum/react-core";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-interface ResourceManagerApi {
-  resourceManager: {
+interface FleetApi {
+  fleet: {
     getPluginPagePath: (scope: string, module: string) => string | undefined;
   };
 }
@@ -14,16 +14,16 @@ interface PluginNavigateTo {
 }
 
 const usePluginNavigate = (scope: string, module: string) => {
-  const { api } = useScalprum<{ api: ResourceManagerApi }>();
+  const { api } = useScalprum<{ api: FleetApi }>();
   const navigate = useNavigate();
 
-  const basePath = api.resourceManager.getPluginPagePath(scope, module);
+  const basePath = api.fleet.getPluginPagePath(scope, module);
   const available = basePath !== undefined;
 
   const navigateFn = useCallback(
     (to?: string | PluginNavigateTo) => {
       // Re-resolve at call time for freshness
-      const resolvedBase = api.resourceManager.getPluginPagePath(scope, module);
+      const resolvedBase = api.fleet.getPluginPagePath(scope, module);
       if (!resolvedBase) return;
 
       if (!to) {

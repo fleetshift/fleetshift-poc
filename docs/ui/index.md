@@ -1,8 +1,8 @@
-# OCM Resource Manager console documentation
+# OCM Fleet console documentation
 
 ## Console scope
 
-The console is the browser application for the experimental OCM Resource Manager platform. It is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
+The console is the browser application for the experimental OCM Fleet platform. It is a multi-cluster management UI that dynamically composes its interface based on the capabilities of connected Kubernetes clusters.
 
 See the [architecture glossary](../design/glossary.md) for shared project names
 and component boundaries.

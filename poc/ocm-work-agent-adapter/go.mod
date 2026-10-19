@@ -1,4 +1,4 @@
-module github.com/stolostron/ocm-resource-manager/poc/ocm-work-agent-adapter
+module github.com/stolostron/ocm-fleet/poc/ocm-work-agent-adapter
 
 go 1.26.3
 

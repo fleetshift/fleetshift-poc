@@ -1,4 +1,4 @@
-# OCM Resource Manager CLI end-to-end tests
+# OCM Fleet CLI end-to-end tests
 
 This Playwright Test suite exercises Fleetctl, the HTTPS gateway, Dex login,
 Kind lifecycle and delivery, and resource queries. Playwright is the test
@@ -24,7 +24,7 @@ CI restores the image rather than rebuilding it and sets the prebuilt flag. It
 still verifies that the required image is loaded:
 
 ```bash
-OCM_RM_E2E_AIO_PREBUILT=1 npx nx test:e2e e2e-cli
+OCM_FLEET_E2E_AIO_PREBUILT=1 npx nx test:e2e e2e-cli
 ```
 
 Arguments after `--` are forwarded to Playwright. For example:
@@ -40,7 +40,7 @@ config directory. Declare Kind needs with `kindClusters` on the exported
 pool rules:
 [Kind cluster declarations](../../docs/testing/end-to-end.md#kind-cluster-declarations).
 Do not start another AIO on ports 8085 or 50051 while the runner is up. Set
-`OCM_RM_E2E_KEEP=1` to retain the sandbox for local debugging.
+`OCM_FLEET_E2E_KEEP=1` to retain the sandbox for local debugging.
 
 Rootless Kind needs raised kernel keyring quotas. The runner checks before
 the image build and does not change your machine. Remediation and the local

@@ -20,14 +20,14 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	kindlog "sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	kubeaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	kubeaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
-const clusterName = "ocm-resource-manager-k8s-e2e"
+const clusterName = "ocm-fleet-k8s-e2e"
 
 // kindName is the ownership-encoded kind/docker cluster name (rm--{id}).
 const kindName = "rm--" + clusterName

@@ -1,4 +1,4 @@
-import { useExtensionInstall } from "@ocm-resource-manager/common";
+import { useExtensionInstall } from "@ocm-fleet/common";
 import {
   Bullseye,
   EmptyState,

@@ -115,7 +115,7 @@ export async function copySandboxCA() {
     try {
       await compose(
         "cp",
-        "ocm-resource-manager-server:/data/sandbox/pki/ca.crt",
+        "ocm-fleet:/data/sandbox/pki/ca.crt",
         destination,
       );
       return;

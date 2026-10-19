@@ -15,10 +15,10 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/log"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/testutil"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/testutil"
 )
 
 // awaitDone drains one result from ch with a safety-net timeout so
@@ -772,7 +772,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 	verifier := &fakeTokenVerifier{}
 	cfg := domain.OIDCConfig{
 		IssuerURL: "https://issuer.example.com",
-		Audience:  "ocm-resource-manager",
+		Audience:  "resource-manager",
 	}
 
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
@@ -804,7 +804,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 	verifier := &fakeTokenVerifier{err: errors.New("token expired")}
 	cfg := domain.OIDCConfig{
 		IssuerURL: "https://issuer.example.com",
-		Audience:  "ocm-resource-manager",
+		Audience:  "resource-manager",
 	}
 
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
@@ -817,7 +817,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 				Issuer:  "https://issuer.example.com",
 			},
 		},
-		Audience: []domain.Audience{"ocm-resource-manager"},
+		Audience: []domain.Audience{"resource-manager"},
 	}
 
 	manifests := []domain.Manifest{{
@@ -849,7 +849,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 	verifier := &fakeTokenVerifier{err: errors.New("should not be called")}
 	cfg := domain.OIDCConfig{
 		IssuerURL: "https://issuer.example.com",
-		Audience:  "ocm-resource-manager",
+		Audience:  "resource-manager",
 	}
 
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
@@ -910,7 +910,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
 		JWKSURI:            "https://issuer.example.com/jwks",
-		EnrollmentAudience: "ocm-resource-manager-enroll",
+		EnrollmentAudience: "ocm-fleet-enroll",
 		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 			RegistryID: "github.com",
 			Expression: "claims.preferred_username",
@@ -1129,7 +1129,7 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
 		JWKSURI:            "https://issuer.example.com/jwks",
-		EnrollmentAudience: "ocm-resource-manager-enroll",
+		EnrollmentAudience: "ocm-fleet-enroll",
 	}
 	trustRaw, _ := json.Marshal(trustEntry)
 

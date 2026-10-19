@@ -149,7 +149,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("dex-on adds ocm-resource-manager alias loopback forward", func(t *testing.T) {
+	t.Run("dex-on adds ocm-fleet alias loopback forward", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kind.env")
 		withUnixSocket(t)
 		clearEnv(t, kindExperimentalNetKey)
@@ -165,7 +165,7 @@ func TestConfigureKindEnv(t *testing.T) {
 		if !strings.Contains(body, kindExperimentalNetKey+"="+kindExperimentalNetDefault+"\n") {
 			t.Fatalf("kind.env missing network default: %q", body)
 		}
-		want := loopbackForwardToEnvKey + "=ocm-resource-manager:8085\n"
+		want := loopbackForwardToEnvKey + "=ocm-fleet:8085\n"
 		if !strings.Contains(body, want) {
 			t.Fatalf("kind.env missing %q, got %q", want, body)
 		}

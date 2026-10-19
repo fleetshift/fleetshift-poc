@@ -2,7 +2,7 @@
 
 Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
 
-OCM Resource Manager dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
+OCM Fleet dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
 
 ## Overview
 

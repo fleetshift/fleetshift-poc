@@ -1,4 +1,4 @@
-// OCM Resource Manager Architecture — LikeC4 Model
+// OCM Fleet Architecture — LikeC4 Model
 // Source of truth: docs/design/architecture.md and sub-documents.
 //
 // This diagram captures the key abstraction contours, not every internal detail.
@@ -342,7 +342,7 @@ views {
   // ── Capability Layers ───────────────────────
 
   view index {
-    title '[DRAFT] OCM Resource Manager — Capability Layers'
+    title '[DRAFT] OCM Fleet — Capability Layers'
     description '''
       The system in layers of responsibility. Domain addons capture
       fit-for-purpose knowledge and expose it through the platform.
@@ -403,7 +403,7 @@ views {
   // ── Landscape ───────────────────────────────
 
   view landscape {
-    title '[DRAFT] OCM Resource Manager — Landscape'
+    title '[DRAFT] OCM Fleet — Landscape'
     description '''
       The major abstraction boundaries: users interact with the platform,
       the platform orchestrates deployments through the fleetlet to targets,

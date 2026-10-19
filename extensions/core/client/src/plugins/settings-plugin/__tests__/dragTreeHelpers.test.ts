@@ -1,5 +1,5 @@
-import type { FlatNode } from "@ocm-resource-manager/common";
-import { NodeKind } from "@ocm-resource-manager/common";
+import type { FlatNode } from "@ocm-fleet/common";
+import { NodeKind } from "@ocm-fleet/common";
 import { describe, expect, it } from "vitest";
 
 import { computeKbMove, getBlockLength } from "../dragTreeHelpers";

@@ -1,7 +1,4 @@
-import type {
-  ClusterResource,
-  ResourceResult,
-} from "@ocm-resource-manager/common";
+import type { ClusterResource, ResourceResult } from "@ocm-fleet/common";
 
 export interface ClusterRow {
   result: ResourceResult<ClusterResource>;

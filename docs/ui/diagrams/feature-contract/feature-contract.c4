@@ -1,4 +1,4 @@
-// OCM Resource Manager UI — Feature Contract Architecture
+// OCM Fleet UI — Feature Contract Architecture
 // Source of truth: docs/feature-contracts.md, build-utils/src/extensions/
 //
 // How plugins declare capabilities via typed extension builders,
@@ -88,15 +88,15 @@ model {
   buildTime = system 'Build-Time Validation' {
     description '''
       Webpack build pipeline. Plugins declare extensions via typed builders.
-      ResourceManagerPlugin validates all extensions at compile time before
+      FleetPlugin validates all extensions at compile time before
       delegating to the SDK's DynamicRemotePlugin for Module Federation output.
     '''
 
     builders = component 'Extension Builders' {
       description '''
         Typed factory functions: createModule(), createSetup(),
-        createClusterProvider(), or any builder wrapping ResourceManagerExtension.
-        Each returns a ResourceManagerExtension<TType, TExtra> with the correct
+        createClusterProvider(), or any builder wrapping FleetExtension.
+        Each returns a FleetExtension<TType, TExtra> with the correct
         type tag and validated properties.
 
         The TType parameter accepts any string — built-in types get
@@ -104,12 +104,12 @@ model {
         (id, label). This is how addons define new extension types.
 
         Builder functions are convenience wrappers. The underlying
-        ResourceManagerExtension type is the contract.
+        FleetExtension type is the contract.
       '''
       technology 'TypeScript'
     }
 
-    resourceManagerPlugin = component 'ResourceManagerPlugin' {
+    fleetPlugin = component 'FleetPlugin' {
       description '''
         Webpack plugin wrapper. Receives extensions[] + pluginMetadata
         (including exposedModules). Runs validateExtensionSet() in the
@@ -131,7 +131,7 @@ model {
       description '''
         OpenShift Dynamic Plugin SDK webpack plugin.
         Generates Module Federation container entry and plugin-manifest.json.
-        ResourceManagerPlugin delegates to this after validation passes.
+        FleetPlugin delegates to this after validation passes.
       '''
       technology '@openshift/dynamic-plugin-sdk-webpack'
     }
@@ -168,7 +168,7 @@ model {
         against that type string to contribute content to the module.
 
         Example: "Clusters" module declares extensionPoint
-        "providers" with type "ocm-resource-manager.cluster-provider".
+        "providers" with type "ocm-fleet.cluster-provider".
       '''
     }
 
@@ -290,9 +290,9 @@ model {
   pluginModel.extensionPoints -> pluginModel.extensions 'type string match → parent-child link'
 
   // Build-time flow
-  buildTime.builders -[produces]-> buildTime.resourceManagerPlugin 'ResourceManagerExtension[]'
-  buildTime.resourceManagerPlugin -[validates]-> buildTime.builders 'validates CodeRefs, IDs, requires'
-  buildTime.resourceManagerPlugin -> buildTime.sdkPlugin 'delegates after validation'
+  buildTime.builders -[produces]-> buildTime.fleetPlugin 'FleetExtension[]'
+  buildTime.fleetPlugin -[validates]-> buildTime.builders 'validates CodeRefs, IDs, requires'
+  buildTime.fleetPlugin -> buildTime.sdkPlugin 'delegates after validation'
   buildTime.sdkPlugin -[produces]-> buildTime.manifest 'generates plugin-manifest.json + MF entry'
 
   // Manifest → Backend
@@ -389,7 +389,7 @@ views {
   view buildView of buildTime {
     title 'Feature Contract — Build-Time Validation'
     description '''
-      ResourceManagerPlugin wraps DynamicRemotePlugin with extension validation.
+      FleetPlugin wraps DynamicRemotePlugin with extension validation.
       Typed builders enforce correct properties at the TypeScript level.
       The plugin constructor validates cross-extension constraints
       (duplicate IDs, CodeRef→exposedModules) and fails the webpack build
@@ -407,7 +407,7 @@ views {
     style builders {
       color green
     }
-    style resourceManagerPlugin {
+    style fleetPlugin {
       color red
     }
     style sdkPlugin {

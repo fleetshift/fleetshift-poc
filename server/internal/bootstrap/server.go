@@ -20,17 +20,17 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
-	kubernetesaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/observability"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
-	transportgrpc "github.com/stolostron/ocm-resource-manager/server/internal/transport/grpc"
-	transporthttp "github.com/stolostron/ocm-resource-manager/server/internal/transport/http"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/platformresource"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	kubernetesaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/observability"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
+	transportgrpc "github.com/stolostron/ocm-fleet/server/internal/transport/grpc"
+	transporthttp "github.com/stolostron/ocm-fleet/server/internal/transport/http"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/platformresource"
 )
 
 // Server is a fully ready resource manager server process handle. Endpoints are immutable.

@@ -1,7 +1,7 @@
 """Offline Sigstore + TUF delivery-attestation proof of concept.
 
 This package is intentionally independent of ``sigstore_tuf``.  It reuses the
-OCM Resource Manager-specific content and CEL policy vocabulary from ``hybrid`` while
+OCM Fleet-specific content and CEL policy vocabulary from ``hybrid`` while
 replacing its signing and trust-distribution mechanisms.
 """
 

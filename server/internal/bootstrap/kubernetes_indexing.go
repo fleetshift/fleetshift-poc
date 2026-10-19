@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	kubernetesaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	kubernetesaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // kubernetesInProcessIndexing holds the indexing runtime for server composition.

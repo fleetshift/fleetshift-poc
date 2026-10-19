@@ -11,11 +11,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // raceTestOrchestration creates a minimal orchestration workflow backed by an

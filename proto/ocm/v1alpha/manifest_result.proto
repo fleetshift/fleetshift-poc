@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ocm.v1alpha;
 
-option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
 
 // ManifestResult reports the apply outcome of a single manifest within
 // a delivery. Identified by ordinal index into the delivery's manifest list.

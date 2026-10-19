@@ -1,9 +1,9 @@
-import type { ClusterDetailTabProps } from "@ocm-resource-manager/common";
+import type { ClusterDetailTabProps } from "@ocm-fleet/common";
 import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
 import type { ComponentType } from "react";
 
 export type ClusterDetailTabExtension = Extension<
-  "ocm-resource-manager.cluster-detail-tab",
+  "ocm-fleet.cluster-detail-tab",
   {
     id: string;
     label: string;
@@ -17,5 +17,5 @@ export type ClusterDetailTabExtension = Extension<
 export function isClusterDetailTabExtension(
   e: Extension,
 ): e is ClusterDetailTabExtension {
-  return e.type === "ocm-resource-manager.cluster-detail-tab";
+  return e.type === "ocm-fleet.cluster-detail-tab";
 }

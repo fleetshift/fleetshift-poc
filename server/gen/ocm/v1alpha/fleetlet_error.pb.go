@@ -156,7 +156,7 @@ const file_ocm_v1alpha_fleetlet_error_proto_rawDesc = "" +
 	"\x17CODE_ALREADY_REGISTERED\x10\x01\x12\x12\n" +
 	"\x0eCODE_NOT_FOUND\x10\x02\x12\x19\n" +
 	"\x15CODE_INVALID_ARGUMENT\x10\x03\x12\x11\n" +
-	"\rCODE_INTERNAL\x10\x04BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\rCODE_INTERNAL\x10\x04BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_fleetlet_error_proto_rawDescOnce sync.Once

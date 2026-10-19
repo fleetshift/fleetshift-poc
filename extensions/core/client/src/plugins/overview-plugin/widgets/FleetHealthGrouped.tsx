@@ -36,14 +36,14 @@ export default function FleetHealthGrouped(_props: { widgetId: string }) {
   );
 
   return (
-    <Stack hasGutter className="ocm-rm-overview-fleet-grouped-wrap">
+    <Stack hasGutter className="ocm-fleet-overview-fleet-grouped-wrap">
       {groups.map((g) => (
         <StackItem key={g.name}>
-          <div className="ocm-rm-overview-fleet-grouped-row">
-            <span className="ocm-rm-overview-fleet-grouped-row__name">
+          <div className="ocm-fleet-overview-fleet-grouped-row">
+            <span className="ocm-fleet-overview-fleet-grouped-row__name">
               {g.name}
             </span>
-            <span className="ocm-rm-overview-fleet-grouped-row__stats">
+            <span className="ocm-fleet-overview-fleet-grouped-row__stats">
               <Label color="green" icon={<CheckCircleIcon />} isCompact>
                 {g.healthy}
               </Label>
@@ -56,7 +56,7 @@ export default function FleetHealthGrouped(_props: { widgetId: string }) {
                   {g.degraded}
                 </Label>
               )}
-              <span className="ocm-rm-overview-fleet-grouped-row__total">
+              <span className="ocm-fleet-overview-fleet-grouped-row__total">
                 {g.total} total
               </span>
             </span>

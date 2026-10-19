@@ -9,12 +9,12 @@
  * SignASN1 approach.
  */
 
-import { createIDBStore } from "@ocm-resource-manager/common";
+import { createIDBStore } from "@ocm-fleet/common";
 
 const KEY_ID = "signing-key";
 
 const signingStore = createIDBStore<CryptoKeyPair>({
-  db: "ocm-resource-manager-signing",
+  db: "ocm-fleet-signing",
   version: 1,
   store: "keys",
   upgrade(db) {

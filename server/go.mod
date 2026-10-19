@@ -1,4 +1,4 @@
-module github.com/stolostron/ocm-resource-manager/server
+module github.com/stolostron/ocm-fleet/server
 
 go 1.26.0
 

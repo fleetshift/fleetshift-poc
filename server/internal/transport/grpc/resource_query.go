@@ -6,10 +6,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 // ResourceQueryServer implements [pb.ResourceQueryServiceServer].

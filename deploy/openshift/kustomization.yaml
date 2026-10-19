@@ -1,18 +1,18 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: ocm-resource-manager
+namespace: ocm-fleet
 resources:
   - namespace.yaml
   - postgres/statefulset.yaml
   - postgres/service.yaml
   - postgres/pvc.yaml
-  - ocm-resource-manager-server/deployment.yaml
-  - ocm-resource-manager-server/service.yaml
-  - ocm-resource-manager-server/route-http.yaml
-  - ocm-resource-manager-server/route-grpc.yaml
-  - ocm-resource-manager-server/imagestreams.yaml
+  - resource-manager/deployment.yaml
+  - resource-manager/service.yaml
+  - resource-manager/route-http.yaml
+  - resource-manager/route-grpc.yaml
+  - resource-manager/imagestreams.yaml
 configMapGenerator:
-  - name: ocm-resource-manager-server-config
+  - name: resource-manager-config
     envs:
       - config.env
 secretGenerator:

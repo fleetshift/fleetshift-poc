@@ -14,9 +14,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/directkey"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/internal/merklelog"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/internal/merklelog"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 var _ protocol.ResourceManagerAPI = (*directkey.Manager)(nil)

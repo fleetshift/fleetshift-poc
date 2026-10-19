@@ -3,8 +3,8 @@ package kubernetes_test
 import (
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestDescriptor_DeclaresDeliveryAndInventoryCapabilities(t *testing.T) {

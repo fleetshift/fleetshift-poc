@@ -6,10 +6,10 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/ocm-resource-manager-server/cmd/resource-manager",
+      "program": "${workspaceFolder}/ocm-fleet-server/cmd/resource-manager",
       "preLaunchTask": "make-debug-tmpdir",
-      "args": ["serve", "--log-level", "debug", "--db", "${workspaceFolder}/.vscode/.debug-tmpdir/ocm-resource-manager-debug.db", "--http-addr", ":8090"],
-      "cwd": "${workspaceFolder}/ocm-resource-manager-server",
+      "args": ["serve", "--log-level", "debug", "--db", "${workspaceFolder}/.vscode/.debug-tmpdir/ocm-fleet-debug.db", "--http-addr", ":8090"],
+      "cwd": "${workspaceFolder}/ocm-fleet-server",
       "console": "integratedTerminal"
     },
     {
@@ -17,10 +17,10 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/ocm-resource-manager-server/cmd/resource-manager",
+      "program": "${workspaceFolder}/ocm-fleet-server/cmd/resource-manager",
       "preLaunchTask": "make-debug-tmpdir",
-      "args": ["serve", "--db", "${workspaceFolder}/.vscode/.debug-tmpdir/ocm-resource-manager-debug.db", "--http-addr", ":8090"],
-      "cwd": "${workspaceFolder}/ocm-resource-manager-server",
+      "args": ["serve", "--db", "${workspaceFolder}/.vscode/.debug-tmpdir/ocm-fleet-debug.db", "--http-addr", ":8090"],
+      "cwd": "${workspaceFolder}/ocm-fleet-server",
       "console": "integratedTerminal"
     }
   ]

@@ -4,14 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
-const enrollmentAudience = "ocm-resource-manager-key-enrollment"
+const enrollmentAudience = "ocm-fleet-key-enrollment"
 
 func setupSignerEnrollmentService(t *testing.T) (*application.SignerEnrollmentService, *oidctest.Provider) {
 	t.Helper()

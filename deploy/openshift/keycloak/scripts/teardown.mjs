@@ -19,7 +19,7 @@ if (!/^y$/i.test(await question("Are you sure? (y/N): "))) {
 
 // Delete dependents before operators and namespace-scoped resources.
 console.log("==> Deleting Keycloak realm import...");
-await $`oc delete keycloakrealmimport ocm-resource-manager-realm -n ${namespace} --ignore-not-found`;
+await $`oc delete keycloakrealmimport ocm-fleet-realm -n ${namespace} --ignore-not-found`;
 console.log("==> Deleting Keycloak custom resource...");
 await $`oc delete keycloak keycloak -n ${namespace} --ignore-not-found`;
 console.log("==> Waiting for Keycloak pods to terminate...");
@@ -70,7 +70,7 @@ if (issuer.ok) {
   const owned =
     JSON.parse(issuer.stdout).metadata?.labels?.[
       "app.kubernetes.io/managed-by"
-    ] === "ocm-resource-manager-keycloak";
+    ] === "ocm-fleet-keycloak";
   if (
     owned ||
     /^y$/i.test(

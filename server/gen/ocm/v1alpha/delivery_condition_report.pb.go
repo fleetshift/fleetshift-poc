@@ -108,7 +108,7 @@ const file_ocm_v1alpha_delivery_condition_report_proto_rawDesc = "" +
 	"conditions\x18\x03 \x03(\v2\x16.ocm.v1alpha.ConditionR\n" +
 	"conditions\x12;\n" +
 	"\vobserved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"observedAtBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"observedAtBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_delivery_condition_report_proto_rawDescOnce sync.Once

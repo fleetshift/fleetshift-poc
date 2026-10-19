@@ -90,7 +90,7 @@ const file_ocm_v1alpha_registry_subject_mapping_proto_rawDesc = "" +
 	"registryId\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x02 \x01(\tR\n" +
-	"expressionBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"expressionBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_registry_subject_mapping_proto_rawDescOnce sync.Once

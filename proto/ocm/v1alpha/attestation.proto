@@ -7,7 +7,7 @@ import "ocm/v1alpha/manifest_strategy.proto";
 import "ocm/v1alpha/placement_strategy.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
 
 // FederatedIdentity unambiguously identifies a subject by pairing
 // the issuer-scoped subject ID with the issuer URL that vouches for it.

@@ -1,4 +1,4 @@
-import type { ClusterProviderWizardProps } from "@ocm-resource-manager/common";
+import type { ClusterProviderWizardProps } from "@ocm-fleet/common";
 import {
   Button,
   EmptyState,

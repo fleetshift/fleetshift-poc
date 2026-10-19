@@ -9,7 +9,7 @@ export type ExtensionPointDeclaration = {
 };
 
 export type ModuleExtension = Extension<
-  "ocm-resource-manager.module",
+  "ocm-fleet.module",
   {
     id: string;
     label: string;
@@ -22,5 +22,5 @@ export type ModuleExtension = Extension<
 >;
 
 export function isModuleExtension(e: Extension): e is ModuleExtension {
-  return e.type === "ocm-resource-manager.module";
+  return e.type === "ocm-fleet.module";
 }

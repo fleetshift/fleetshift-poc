@@ -27,7 +27,7 @@ const file_ocm_v1alpha_resource_query_service_proto_rawDesc = "" +
 	"\n" +
 	"(ocm/v1alpha/resource_query_service.proto\x12\vocm.v1alpha\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a)ocm/v1alpha/query_resources_request.proto\x1a*ocm/v1alpha/query_resources_response.proto2\xc6\x01\n" +
 	"\x14ResourceQueryService\x12\xad\x01\n" +
-	"\x0eQueryResources\x12\".ocm.v1alpha.QueryResourcesRequest\x1a#.ocm.v1alpha.QueryResourcesResponse\"R\xdaA\x05scope\x82\xd3\xe4\x93\x02D\x12B/apis/open-cluster-management.io/v1alpha/{scope=**}:queryResourcesBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x0eQueryResources\x12\".ocm.v1alpha.QueryResourcesRequest\x1a#.ocm.v1alpha.QueryResourcesResponse\"R\xdaA\x05scope\x82\xd3\xe4\x93\x02D\x12B/apis/open-cluster-management.io/v1alpha/{scope=**}:queryResourcesBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var file_ocm_v1alpha_resource_query_service_proto_goTypes = []any{
 	(*QueryResourcesRequest)(nil),  // 0: ocm.v1alpha.QueryResourcesRequest

@@ -77,7 +77,7 @@ const file_ocm_v1alpha_target_selector_proto_rawDesc = "" +
 	"\fmatch_labels\x18\x01 \x03(\v2,.ocm.v1alpha.TargetSelector.MatchLabelsEntryB\x03\xe0A\x02R\vmatchLabels\x1a>\n" +
 	"\x10MatchLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_target_selector_proto_rawDescOnce sync.Once

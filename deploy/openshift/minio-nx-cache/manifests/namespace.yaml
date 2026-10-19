@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: minio-nx-cache
   labels:
-    app.kubernetes.io/part-of: ocm-resource-manager
+    app.kubernetes.io/part-of: ocm-fleet

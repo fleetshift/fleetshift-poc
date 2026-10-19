@@ -100,7 +100,7 @@ const file_ocm_v1alpha_resource_result_proto_rawDesc = "" +
 	"\x0eResourceResult\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\x03R\x04name\x12(\n" +
 	"\rresource_type\x18\x02 \x01(\tB\x03\xe0A\x03R\fresourceType\x128\n" +
-	"\bresource\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x03\xe0A\x03R\bresourceBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\bresource\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x03\xe0A\x03R\bresourceBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_resource_result_proto_rawDescOnce sync.Once

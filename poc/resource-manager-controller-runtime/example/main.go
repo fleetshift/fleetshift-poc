@@ -17,12 +17,12 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 
-	deliveryv1 "github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/contract"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/controllers"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/platform"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/provider"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/rmruntime"
+	deliveryv1 "github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/contract"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/controllers"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/platform"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/provider"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/rmruntime"
 )
 
 func main() {

@@ -9,8 +9,8 @@ import (
 
 	"buf.build/go/protovalidate"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 // TestBuildHTTPHandler_UsesRegisteredPrefix proves that the prefix

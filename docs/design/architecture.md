@@ -2,12 +2,12 @@
 
 This document is the entry point for the architecture. It is intentionally short: it gives the system's core mental model, names the major subsystems, and points to the deeper design documents that describe each area in detail.
 
-OCM Resource Manager is an experimental variant of Open Cluster Management (OCM) using a resource manager architecture. The resource manager server owns domain APIs and database persistence directly. References to OCM controllers, ManifestWork, and klusterlets describe existing OCM components and their Kubernetes API-based architecture.
+OCM Fleet is an experimental variant of Open Cluster Management (OCM). The OCM Fleet architecture is a resource manager architecture, as defined in the [glossary](glossary.md). Its resource manager server owns domain APIs and database persistence directly. References to OCM controllers, ManifestWork, and klusterlets describe existing OCM components and their Kubernetes API-based architecture.
 
 ## Vocabulary
 
 The [architecture glossary](glossary.md) defines the high-level names used here,
-including OCM, OCM Resource Manager, platform instance, management plane, and
+including OCM, OCM Fleet, platform instance, management plane, and
 resource manager server. Use it when deciding which scope a passage describes.
 
 The console, `fleetctl`, and addons are distinct components of the platform.
@@ -155,7 +155,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 - Read [docs/design/authentication.md](authentication.md) for live credential verification and presentation, request signing, target credential exchange, and `PausedAuth`.
 - Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, attestation semantics, trust updates, historical verification, and evidence-log integration.
 - Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
-- Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
+- Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlet instances, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.
 - Read [docs/design/architecture/addon_integration.md](architecture/addon_integration.md) for capability registration, addon strategy contracts, managed-resource bridging, and UI/API extension points.
 - Read [docs/design/architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the two-layer API model, resource identity, platform resources, extension API packages, and how multiple extensions model the same logical resource.

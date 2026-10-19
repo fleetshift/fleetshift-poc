@@ -7,7 +7,7 @@
 package platformresource
 
 import (
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // ProtoPackage is the fixed proto package for all platform-canonical

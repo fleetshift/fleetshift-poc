@@ -1,10 +1,10 @@
 # QueryResources CEL filters
 
-This is the OCM Resource Manager-specific reference for the `filter` argument on
+This is the OCM Fleet-specific reference for the `filter` argument on
 `queryResources` (CLI: `fleetctl resource query --filter`).
 
 It assumes familiarity with [CEL](https://cel.dev/). This document
-covers only OCM Resource Manager’s supported subset and the fields and value
+covers only OCM Fleet’s supported subset and the fields and value
 rules that apply to query results.
 
 ## What the filter evaluates

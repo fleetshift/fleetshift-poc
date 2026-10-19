@@ -7,8 +7,8 @@ export interface NavPage {
   title: string;
 }
 
-export interface ResourceManagerApi {
-  resourceManager: {
+export interface FleetApi {
+  fleet: {
     getPluginPagePath: (scope: string, module: string) => string | undefined;
     getNavPages: () => NavPage[];
     /** Backend-defined navigation layout (before user overrides). */

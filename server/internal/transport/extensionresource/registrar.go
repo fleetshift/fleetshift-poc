@@ -16,10 +16,10 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	ocmv1alpha "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	ocmv1alpha "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // RegisteredService is a fully built dynamic gRPC service ready to be

@@ -116,7 +116,7 @@ const file_ocm_v1alpha_create_deployment_request_proto_rawDesc = "" +
 	"deployment\x12*\n" +
 	"\x0euser_signature\x18\x03 \x01(\fB\x03\xe0A\x01R\ruserSignature\x12@\n" +
 	"\vvalid_until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
-	"validUntilBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"validUntilBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_create_deployment_request_proto_rawDescOnce sync.Once

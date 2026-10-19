@@ -80,7 +80,7 @@ Global flags:
 | `--server-tls` | disabled | Enable TLS for gRPC |
 | `--server-ca-file` | empty | Add PEM CA bundle for server certificate |
 | `--server-insecure` | disabled | Skip TLS certificate verification; debugging only |
-| `--config-dir` | `~/.config/ocm-resource-manager` | Directory containing `auth.json` |
+| `--config-dir` | `~/.config/ocm-fleet` | Directory containing `auth.json` |
 | `--insecure-storage` | disabled | Use plaintext files instead of OS keyring |
 
 `--server-ca-file` and `--server-insecure` require `--server-tls`.
@@ -425,7 +425,7 @@ through one unified model.
 
 Runtime differences should be hidden behind Scalprum/SDK adapters, while
 extension contracts, API clients, capabilities, context, and validation remain
-shared. If Scalprum lacks required Node features, OCM Resource Manager can extend or own
+shared. If Scalprum lacks required Node features, OCM Fleet can extend or own
 those additions rather than replacing the shared runtime with a separate CLI
 implementation.
 

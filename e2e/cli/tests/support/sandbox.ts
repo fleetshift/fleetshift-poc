@@ -25,6 +25,6 @@ export function readSandboxEnvironment(): Sandbox {
     issuer: `${uiOrigin}/idp`,
     kindIdPrefix: requireEnvironment("OCM_RM_KIND_PREFIX"),
     uiOrigin,
-    workDir: requireEnvironment("OCM_RM_E2E_WORK_DIR"),
+    workDir: requireEnvironment("OCM_FLEET_E2E_WORK_DIR"),
   };
 }

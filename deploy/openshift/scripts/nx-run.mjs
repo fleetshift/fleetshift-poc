@@ -3,7 +3,7 @@ import { $ } from "zx";
 import { resolve } from "node:path";
 import { importKeyValueArgs, requireOcCluster } from "../../scripts/common.mjs";
 const [command, ...rest] = importKeyValueArgs(process.argv.slice(2));
-await requireOcCluster("OCM_RM_CLUSTER_API");
+await requireOcCluster("OCM_FLEET_CLUSTER_API");
 const script = (name) => resolve(import.meta.dirname, `${name}.mjs`);
 
 // Keep target dispatch in one place while deployment steps stay independently runnable.
@@ -12,11 +12,11 @@ if (["deploy", "teardown"].includes(command)) {
   process.exit(0);
 }
 if (command === "status") {
-  await $`oc get all -n ${process.env.NAMESPACE || "ocm-resource-manager"}`;
+  await $`oc get all -n ${process.env.NAMESPACE || "ocm-fleet"}`;
   process.exit(0);
 }
 if (command === "logs") {
-  await $`oc logs -f deployment/ocm-resource-manager-server -n ${process.env.NAMESPACE || "ocm-resource-manager"} --all-containers`;
+  await $`oc logs -f deployment/resource-manager -n ${process.env.NAMESPACE || "ocm-fleet"} --all-containers`;
   process.exit(0);
 }
 if (command === "set-image") {
@@ -24,16 +24,16 @@ if (command === "set-image") {
     throw new Error(
       "TAG is required. Usage: npx nx run deploy:openshift:set-image -- TAG=<image-tag>",
     );
-  await $`oc tag quay.io/stolostron/ocm-resource-manager:${process.env.TAG} ocm-resource-manager-server:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"}`;
+  await $`oc tag quay.io/stolostron/ocm-fleet:${process.env.TAG} ocm-fleet-server:latest -n ${process.env.NAMESPACE || "ocm-fleet"}`;
   process.exit(0);
 }
 if (command === "reset-image") {
-  await $`oc tag --scheduled quay.io/stolostron/ocm-resource-manager-server:latest ocm-resource-manager-server:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"}`;
+  await $`oc tag --scheduled quay.io/stolostron/ocm-fleet-server:latest ocm-fleet-server:latest -n ${process.env.NAMESPACE || "ocm-fleet"}`;
   process.exit(0);
 }
 if (command === "import-images") {
-  await $`oc import-image ocm-resource-manager-server:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"} --confirm`;
-  await $`oc import-image ocm-resource-manager-web:latest -n ${process.env.NAMESPACE || "ocm-resource-manager"} --confirm`;
+  await $`oc import-image ocm-fleet-server:latest -n ${process.env.NAMESPACE || "ocm-fleet"} --confirm`;
+  await $`oc import-image ocm-fleet-web:latest -n ${process.env.NAMESPACE || "ocm-fleet"} --confirm`;
   process.exit(0);
 }
 if (command === "register-redirect") {

@@ -65,7 +65,7 @@ func TestGoWorkflowRegistry_ConcurrentClose(t *testing.T) {
 func TestLifecycle_GoWorkflowRegistryCloseThroughServer(t *testing.T) {
 	// Default unit helpers use the in-memory registry; exercise production
 	// go-workflows through Server shutdown (appCancel + Close) and a second Close.
-	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	rt, err := NewGoWorkflowRegistry(SQLite{Path: dbPath}, testLogger())
 	if err != nil {
 		t.Fatalf("NewGoWorkflowRegistry: %v", err)
@@ -76,7 +76,7 @@ func TestLifecycle_GoWorkflowRegistryCloseThroughServer(t *testing.T) {
 		HTTPAddr:             "127.0.0.1:0",
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "ocm-resource-manager",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)

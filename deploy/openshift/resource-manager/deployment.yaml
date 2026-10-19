@@ -1,38 +1,38 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ocm-resource-manager-server
+  name: resource-manager
   annotations:
     image.openshift.io/triggers: >-
       [
-        {"from":{"kind":"ImageStreamTag","name":"ocm-resource-manager-server:latest"},
-         "fieldPath":"spec.template.spec.containers[?(@.name==\"ocm-resource-manager-server\")].image"},
-        {"from":{"kind":"ImageStreamTag","name":"ocm-resource-manager-web:latest"},
+        {"from":{"kind":"ImageStreamTag","name":"ocm-fleet-server:latest"},
+         "fieldPath":"spec.template.spec.containers[?(@.name==\"resource-manager\")].image"},
+        {"from":{"kind":"ImageStreamTag","name":"ocm-fleet-web:latest"},
          "fieldPath":"spec.template.spec.initContainers[?(@.name==\"web-builder\")].image"}
       ]
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ocm-resource-manager-server
+      app: resource-manager
   template:
     metadata:
       labels:
-        app: ocm-resource-manager-server
+        app: resource-manager
     spec:
       initContainers:
         - name: web-builder
-          image: quay.io/stolostron/ocm-resource-manager-web:latest
+          image: quay.io/stolostron/ocm-fleet-web:latest
           command: ["sh", "-c", "cp -r /srv/web/* /output/"]
           volumeMounts:
             - name: web-assets
               mountPath: /output
       containers:
-        - name: ocm-resource-manager-server
-          image: quay.io/stolostron/ocm-resource-manager-server:latest
+        - name: resource-manager
+          image: quay.io/stolostron/ocm-fleet-server:latest
           args:
             - serve
-            - --database-url-file=/run/secrets/ocm-resource-manager/database-url
+            - --database-url-file=/run/secrets/resource-manager/database-url
             - --http-addr=:8085
             - --grpc-addr=:50051
             - --log-level=$(OCM_RM_LOG_LEVEL)
@@ -48,7 +48,7 @@ spec:
             - --oidc-registry-subject-expression=$(KEY_REGISTRY_SUBJECT_EXPR)
           envFrom:
             - configMapRef:
-                name: ocm-resource-manager-server-config
+                name: resource-manager-config
           ports:
             - name: http
               containerPort: 8085
@@ -67,7 +67,7 @@ spec:
             periodSeconds: 5
           volumeMounts:
             - name: db-credentials
-              mountPath: /run/secrets/ocm-resource-manager
+              mountPath: /run/secrets/resource-manager
               readOnly: true
             - name: web-assets
               mountPath: /srv/web

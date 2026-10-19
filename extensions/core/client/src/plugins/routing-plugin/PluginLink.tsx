@@ -2,8 +2,8 @@ import { useScalprum } from "@scalprum/react-core";
 import type { ReactNode } from "react";
 import { Link, type LinkProps, type To } from "react-router-dom";
 
-interface ResourceManagerApi {
-  resourceManager: {
+interface FleetApi {
+  fleet: {
     getPluginPagePath: (scope: string, module: string) => string | undefined;
   };
 }
@@ -24,8 +24,8 @@ const PluginLink = ({
   children,
   ...rest
 }: PluginLinkProps) => {
-  const { api } = useScalprum<{ api: ResourceManagerApi }>();
-  const basePath = api.resourceManager.getPluginPagePath(scope, module);
+  const { api } = useScalprum<{ api: FleetApi }>();
+  const basePath = api.fleet.getPluginPagePath(scope, module);
 
   if (!basePath) {
     return <>{fallback}</>;

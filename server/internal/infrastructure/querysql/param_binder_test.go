@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
 )
 
 // dollarTestParams is a test-local $N binder so querysql tests do not

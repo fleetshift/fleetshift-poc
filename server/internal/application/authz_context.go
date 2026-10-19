@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 type authzContextKey struct{}

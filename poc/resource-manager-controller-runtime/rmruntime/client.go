@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/store"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/store"
 )
 
 // StatusHook runs on Status().Update before the store write. If it

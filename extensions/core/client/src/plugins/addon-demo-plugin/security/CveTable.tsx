@@ -57,8 +57,8 @@ const PER_PAGE_OPTIONS = [
 
 function CriticalBadge({ count }: { count: number }) {
   return (
-    <span className="ocm-rm-addon-security__critical-badge">
-      <span className="ocm-rm-addon-security__critical-badge-count">
+    <span className="ocm-fleet-addon-security__critical-badge">
+      <span className="ocm-fleet-addon-security__critical-badge-count">
         {count}
       </span>
       <span className="pf-v6-u-text-color-subtle">Critical images</span>
@@ -120,7 +120,7 @@ export default function CveTable() {
   );
 
   return (
-    <div className="ocm-rm-addon-security__cve-section">
+    <div className="ocm-fleet-addon-security__cve-section">
       <Split className="pf-v6-u-mb-sm">
         <SplitItem isFilled>
           <Title headingLevel="h2" size="lg">
@@ -181,7 +181,7 @@ export default function CveTable() {
             />
           }
         />
-        <div className="ocm-rm-addon-security__tab-pills pf-v6-u-mb-md">
+        <div className="ocm-fleet-addon-security__tab-pills pf-v6-u-mb-md">
           <Split>
             <SplitItem className="pf-v6-u-mr-sm pf-v6-u-font-size-sm pf-v6-u-font-weight-bold">
               {TOTAL_CVE_COUNT.toLocaleString()} CVEs

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/pkg/canonical"
+	"github.com/stolostron/ocm-fleet/server/pkg/canonical"
 )
 
 var testValidUntil = time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC)

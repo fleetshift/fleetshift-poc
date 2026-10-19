@@ -1,6 +1,6 @@
 # Provider/consumer management model
 
-This document proposes extensions to the resource manager architecture to support the provider/consumer/factory topology observed in every managed infrastructure service at scale. These proposals emerge from analysis of managed Kubernetes services, hosted control plane implementations, and multicluster management systems, and from the observation that the provider/consumer split is not unique to cloud providers -- it is the natural structure of any organization managing infrastructure at scale, including enterprise IT teams and mid-market customers.
+This document proposes extensions to the OCM Fleet architecture to support the provider/consumer/factory topology observed in every managed infrastructure service at scale. These proposals emerge from analysis of managed Kubernetes services, hosted control plane implementations, and multicluster management systems, and from the observation that the provider/consumer split is not unique to cloud providers -- it is the natural structure of any organization managing infrastructure at scale, including enterprise IT teams and mid-market customers.
 
 The core argument: the provider/consumer/factory/neighborhood model should be first-class structure in the resource manager server's kernel, not a pattern assembled from generic primitives. The generic Manifest x Placement x Rollout model remains the foundation, but provider-side concepts (managed resource types, factory pools, neighborhoods, signed intents) are built-in alongside it.
 
@@ -170,7 +170,7 @@ The flow:
 **Proposal**: distinguish between **substrate indexing** (resources on the factory cluster itself -- management-internal) and **managed target indexing** (resources on clusters that were provisioned for consumers and are consumer-visible).
 
 - **Substrate indexing (factory clusters)**: disabled by default (proposal 5). Factory cluster resource state is not indexed through the platform. Provider-internal observability uses provider-internal tooling.
-- **Managed target indexing (consumer clusters)**: enabled. Consumer workload clusters provisioned by the provider have fleetlets that connect to the consumer platform and index resources there. The consumer sees their own cluster's resources through the platform's search API.
+- **Managed target indexing (consumer clusters)**: enabled. Consumer workload clusters provisioned by the provider have fleetlet instances that connect to the consumer platform and index resources there. The consumer sees their own cluster's resources through the platform's search API.
 
 The boundary is clean: factory clusters connect to the provider platform with restricted channel profiles (no index channel). Consumer clusters connect to the consumer platform with full channel profiles (including index channel). The two never overlap -- a cluster is either infrastructure (provider-visible only) or a managed target (consumer-visible).
 

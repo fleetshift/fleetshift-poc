@@ -3,7 +3,7 @@ import {
   iconSlugToName,
   isCustomGroup,
   type NavLayoutGroup,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import { Icon, NavExpandable } from "@patternfly/react-core";
 import type { ComponentType } from "react";
 import { useLocation } from "react-router-dom";

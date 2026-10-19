@@ -1,12 +1,12 @@
 import "./NavOrderEditor.scss";
 
-import type { ResourceManagerApi } from "@ocm-resource-manager/common";
+import type { FleetApi } from "@ocm-fleet/common";
 import {
   CORE_EXTENSION_META,
   orderByIds,
   useExtensionInstall,
   useNavOrder,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import {
   Button,
   Content,
@@ -55,10 +55,10 @@ function toDraggable(
 }
 
 function useNavPages(): NavEntry[] {
-  const { api } = useScalprum<{ api: ResourceManagerApi }>();
+  const { api } = useScalprum<{ api: FleetApi }>();
   return useMemo(
     () =>
-      api.resourceManager
+      api.fleet
         .getNavPages()
         .map((p) => ({ id: p.id, scope: p.scope, label: p.title })),
     [api],
@@ -150,8 +150,8 @@ const NavOrderEditor = () => {
   }, [allEntries, setOrder]);
 
   return (
-    <div className="ocm-rm-settings-nav-order">
-      <div className="ocm-rm-settings-nav-order__header">
+    <div className="ocm-fleet-settings-nav-order">
+      <div className="ocm-fleet-settings-nav-order__header">
         <Title headingLevel="h2">Navigation order</Title>
         <Button variant="link" onClick={handleReset}>
           Reset to default

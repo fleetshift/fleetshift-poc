@@ -3,12 +3,12 @@ import type {
   NavLayoutEntry,
   NavLayoutGroup,
   NavLayoutPage,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import {
   CORE_EXTENSION_META,
   isCustomGroup,
   NodeKind,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 
 import type { DragState } from "../useDragTree";
 

@@ -84,7 +84,7 @@ const file_ocm_v1alpha_manifest_proto_rawDesc = "" +
 	"\x1aocm/v1alpha/manifest.proto\x12\vocm.v1alpha\x1a\x1fgoogle/api/field_behavior.proto\"K\n" +
 	"\bManifest\x12(\n" +
 	"\rmanifest_type\x18\x01 \x01(\tB\x03\xe0A\x02R\fmanifestType\x12\x15\n" +
-	"\x03raw\x18\x02 \x01(\fB\x03\xe0A\x02R\x03rawBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x03raw\x18\x02 \x01(\fB\x03\xe0A\x02R\x03rawBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_manifest_proto_rawDescOnce sync.Once

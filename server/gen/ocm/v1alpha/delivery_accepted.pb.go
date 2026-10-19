@@ -74,7 +74,7 @@ const file_ocm_v1alpha_delivery_accepted_proto_rawDesc = "" +
 	"#ocm/v1alpha/delivery_accepted.proto\x12\vocm.v1alpha\"3\n" +
 	"\x10DeliveryAccepted\x12\x1f\n" +
 	"\vdelivery_id\x18\x01 \x01(\tR\n" +
-	"deliveryIdBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"deliveryIdBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_delivery_accepted_proto_rawDescOnce sync.Once

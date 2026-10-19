@@ -1,8 +1,8 @@
-# OCM Resource Manager logless Sigstore bundle POC
+# OCM Fleet logless Sigstore bundle POC
 
 This is informed by the historical `sigstore_tuf` experiment (absent from this
 checkout) and by `../hybrid`, and built around the standard Sigstore bundle and
-trust-root data models. It asks the same OCM Resource Manager question:
+trust-root data models. It asks the same OCM Fleet question:
 
 > Can a delivery agent verify a complete authorization and fulfillment chain
 > locally, while the management plane only couriers the evidence?
@@ -23,7 +23,7 @@ per-tenant Fulcio             platform Fulcio
     └──────────┬───────────────────┘
                ▼
        DSSE(in-toto Statement/v1)
-       + OCM Resource Manager predicate
+       + OCM Fleet predicate
                │ raw signature bytes
                ▼
        external RFC 3161 TSA
@@ -75,7 +75,7 @@ Every signature is represented as
 - one external RFC 3161 timestamp response;
 - no Rekor entries.
 
-The DSSE payload is an in-toto Statement/v1. OCM Resource Manager defines four predicate
+The DSSE payload is an in-toto Statement/v1. OCM Fleet defines four predicate
 types rather than overloading a generic payload:
 
 - `delivery-authorization/v1`: input content, expiry, output constraints, and
@@ -128,7 +128,7 @@ agent.
 The package deliberately contains no TUF root, root key IDs, or verifier
 object. This avoids making the courier the source of bootstrap trust.
 
-## OCM Resource Manager delivery semantics retained
+## OCM Fleet delivery semantics retained
 
 The peer reuses the hybrid POC's content, CEL, strategy, and mutation model so
 the security comparison is about provenance rather than a second policy
@@ -248,12 +248,12 @@ mapping. Eleven additional tests cover the new trust and bundle profile.
 From the repository root:
 
 ```bash
-python3 -m venv /tmp/ocm-resource-manager-sigstore-bundle
-/tmp/ocm-resource-manager-sigstore-bundle/bin/pip install \
+python3 -m venv /tmp/ocm-fleet-sigstore-bundle
+/tmp/ocm-fleet-sigstore-bundle/bin/pip install \
   -r poc/attestation/requirements.txt \
   -r poc/attestation/sigstore_tuf_bundle/requirements.txt
 PYTHONPATH=poc/attestation \
-  /tmp/ocm-resource-manager-sigstore-bundle/bin/python -m pytest \
+  /tmp/ocm-fleet-sigstore-bundle/bin/python -m pytest \
   poc/attestation/sigstore_tuf_bundle -q
 ```
 
@@ -272,7 +272,7 @@ See `TEST_PORTING.md` for the exact inventory and semantic adjustments.
 | `tuf.py` | Standard TUF publisher, memory fetcher, and persistent updater |
 | `model.py` | Complete delivery graph and fulfillment evidence |
 | `build.py` | Per-tenant/platform trust setup and signing/assembly helpers |
-| `verify.py` | Stateful offline agent and OCM Resource Manager policy pipeline |
+| `verify.py` | Stateful offline agent and OCM Fleet policy pipeline |
 | `test_*_parity.py` | Name-for-name hybrid test ports |
 | `test_security.py` | Sigstore/TUF-specific hardening tests |
 | `test_porting_contract.py` | Assertion-fidelity and exact-inventory regression checks |

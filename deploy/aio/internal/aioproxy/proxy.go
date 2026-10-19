@@ -80,7 +80,7 @@ func New(cfg Config) (*Proxy, error) {
 	if err := checkUpstream("dex", cfg.DexURL); err != nil {
 		return nil, err
 	}
-	if err := checkUpstream("ocm-resource-manager", cfg.ResourceManagerURL); err != nil {
+	if err := checkUpstream("resource-manager", cfg.ResourceManagerURL); err != nil {
 		return nil, err
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()

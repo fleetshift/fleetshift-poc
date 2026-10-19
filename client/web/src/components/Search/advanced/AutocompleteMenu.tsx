@@ -57,7 +57,7 @@ export default function AutocompleteMenu({
       {Array.from(grouped.entries()).map(([type, items]) =>
         type === "operator" ? (
           <MenuGroup key={type} label={TYPE_LABELS[type]}>
-            <div className="ocm-rm-search__operator-chips">
+            <div className="ocm-fleet-search__operator-chips">
               {items.map(({ suggestion, index }) => (
                 <button
                   key={`${type}-${index}`}
@@ -66,9 +66,9 @@ export default function AutocompleteMenu({
                     else itemRefs.current.delete(index);
                   }}
                   className={clsx(
-                    "ocm-rm-search__operator-chip",
+                    "ocm-fleet-search__operator-chip",
                     index === selectedIndex &&
-                      "ocm-rm-search__operator-chip--active",
+                      "ocm-fleet-search__operator-chip--active",
                   )}
                   onClick={() => handleItemClick(index)}
                   onMouseEnter={() => onIndexChange(index)}

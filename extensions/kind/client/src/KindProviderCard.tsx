@@ -1,4 +1,4 @@
-import type { ClusterProviderCardProps } from "@ocm-resource-manager/common";
+import type { ClusterProviderCardProps } from "@ocm-fleet/common";
 import {
   Card,
   CardBody,

@@ -32,7 +32,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // Provider is a fake OIDC identity provider for testing. It serves
@@ -74,7 +74,7 @@ type providerConfig struct {
 }
 
 // WithAudience sets the default audience for issued tokens.
-// Defaults to "ocm-resource-manager".
+// Defaults to "resource-manager".
 func WithAudience(aud string) Option {
 	return func(c *providerConfig) { c.audience = aud }
 }
@@ -105,7 +105,7 @@ func WithIssuerURL(url string) Option {
 // (Start supplies t.TempDir). Callers must call close when finished.
 func newProvider(opts ...Option) (*Provider, error) {
 	cfg := providerConfig{
-		audience:      "ocm-resource-manager",
+		audience:      "resource-manager",
 		listenAddress: "127.0.0.1:0",
 	}
 	for _, o := range opts {

@@ -14,8 +14,8 @@ export {
   createClusterDetailTab,
   validateClusterDetailTabProperties,
 } from "./clusterDetailTab";
-export type { ResourceManagerPluginOptions } from "./ResourceManagerPlugin";
-export { ResourceManagerPlugin } from "./ResourceManagerPlugin";
+export type { FleetPluginOptions } from "./FleetPlugin";
+export { FleetPlugin } from "./FleetPlugin";
 export type {
   SearchResultRendererExtras,
   SearchResultRendererInput,
@@ -32,18 +32,18 @@ export type {
   ClusterProviderProperties,
   EncodedCodeRef,
   ExtensionPointDeclaration,
+  FleetExtension,
+  FleetExtensionType,
   ModuleExtras,
   ModuleGroupExtras,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
-  ResourceManagerExtension,
-  ResourceManagerExtensionType,
   SetupExtras,
   SetupProperties,
 } from "./types";
-export { OCM_RM_EXTENSION_TYPES } from "./types";
+export { OCM_FLEET_EXTENSION_TYPES } from "./types";
 export {
   validateClusterProviderProperties,
   validateCodeRef,

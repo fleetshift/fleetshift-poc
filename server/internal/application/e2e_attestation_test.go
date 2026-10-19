@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/attestation"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/keyregistry"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/attestation"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/keyregistry"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation exercises
@@ -24,7 +24,7 @@ import (
 //  3. Orchestration assembles an Attestation and passes it to the delivery agent
 //  4. The delivery agent's attestation is verified end-to-end (key resolved from registry)
 func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T) {
-	provider := oidctest.Start(t, oidctest.WithAudience("ocm-resource-manager-enroll"))
+	provider := oidctest.Start(t, oidctest.WithAudience("ocm-fleet-enroll"))
 	signerID := domain.SubjectID("e2e-user")
 	issuer := provider.IssuerURL()
 
@@ -37,7 +37,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 
 	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(signerID),
-		Audience: "ocm-resource-manager-enroll",
+		Audience: "ocm-fleet-enroll",
 		Extra:    map[string]any{"preferred_username": registrySubject},
 	})
 
@@ -135,7 +135,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 		map[domain.IssuerURL]attestation.TrustedIssuer{
 			issuer: {
 				JWKSURI:  domain.EndpointURL(jwksURI),
-				Audience: "ocm-resource-manager-enroll",
+				Audience: "ocm-fleet-enroll",
 				RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 					RegistryID: "github.com",
 					Expression: celExpr,

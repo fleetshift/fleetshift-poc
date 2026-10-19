@@ -8,7 +8,7 @@
 
 The Dynamic Plugin SDK and Scalprum were built for browser-based micro-frontends. They assume they are running in a browser — using `window` for global state, relying on DOM APIs, and generating webpack configurations that target web environments. This works for the GUI but breaks when we try to use the same plugin system for the CLI.
 
-OCM Resource Manager has both a web UI and a CLI. Ideally, both share the same plugin architecture — plugins declare extensions, the host discovers and loads them at runtime via Module Federation. The extension system, shared stores, and remote hooks should work the same way regardless of whether the host is a browser application or a Node.js process.
+OCM Fleet has both a web UI and a CLI. Ideally, both share the same plugin architecture — plugins declare extensions, the host discovers and loads them at runtime via Module Federation. The extension system, shared stores, and remote hooks should work the same way regardless of whether the host is a browser application or a Node.js process.
 
 Right now, the CLI plugins have to bypass the SDK entirely and use `@module-federation/enhanced` directly because the SDK's webpack plugin and runtime cannot run outside the browser. This means two separate build setups, no shared tooling, and no shared runtime abstractions between GUI and CLI plugins.
 

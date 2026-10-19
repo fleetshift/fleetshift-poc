@@ -1,4 +1,4 @@
-// OCM Resource Manager UI — Extension Validation Architecture
+// OCM Fleet UI — Extension Validation Architecture
 // Source of truth: docs/extension-validation.md, build-utils/src/extensions/
 //
 // Two-sided trust boundary for ALL extension types:
@@ -150,7 +150,7 @@ model {
       technology 'TypeScript'
     }
 
-    resourceManagerPlugin = component 'ResourceManagerPlugin' {
+    fleetPlugin = component 'FleetPlugin' {
       description '''
         Enhanced: calls validateExtensionSet() with new checks,
         AND hoists extensionPoint validate CodeRefs into a
@@ -219,7 +219,7 @@ model {
       description '''
         NEW. Scalprum shared store exposed by the shell,
         accessible cross-MF via useValidationResults hook
-        (re-exported from @ocm-resource-manager/common). No React
+        (re-exported from @ocm-fleet/common). No React
         context provider needed — no additional singletons.
 
         Populated by useValidatedExtensions. Consumed by
@@ -347,11 +347,11 @@ model {
   pluginDev -> buildTime.builders 'declares extensions with isValidExtension CodeRef'
 
   // Build-time flow
-  buildTime.builders -[produces]-> buildTime.resourceManagerPlugin 'ResourceManagerExtension[]'
+  buildTime.builders -[produces]-> buildTime.fleetPlugin 'FleetExtension[]'
   buildTime.builders -> buildTime.validationCheck 'per-type property validation'
   buildTime.validationCheck -[validates]-> buildTime.builders 'checks isValidExtension CodeRef presence + format'
-  buildTime.resourceManagerPlugin -[validates]-> buildTime.validationCheck 'validateExtensionSet() calls per-type validators'
-  buildTime.resourceManagerPlugin -[produces]-> buildTime.manifest 'plugin-manifest.json with isValidExtension CodeRefs'
+  buildTime.fleetPlugin -[validates]-> buildTime.validationCheck 'validateExtensionSet() calls per-type validators'
+  buildTime.fleetPlugin -[produces]-> buildTime.manifest 'plugin-manifest.json with isValidExtension CodeRefs'
 
   // Scalprum resolves CodeRefs
   scalprumRuntime -> buildTime.manifest 'loads MF entry, resolves CodeRefs'
@@ -432,7 +432,7 @@ views {
   view buildView of buildTime {
     title 'Extension Validation — Build-Time Enforcement'
     description '''
-      ResourceManagerPlugin validates that ALL extensions include
+      FleetPlugin validates that ALL extensions include
       isValidExtension CodeRefs and ALL extension point declarations
       include validate CodeRefs. The shared base validator and
       per-type validators gain CodeRef checks. The existing
@@ -450,7 +450,7 @@ views {
     style validationCheck {
       color red
     }
-    style resourceManagerPlugin {
+    style fleetPlugin {
       color red
     }
   }

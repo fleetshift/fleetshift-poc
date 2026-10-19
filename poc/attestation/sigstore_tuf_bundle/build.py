@@ -88,18 +88,18 @@ class PoCEnvironment:
         user_anchor_constraints: list[dict[str, str]] | None = None,
     ) -> None:
         self.tenant_id = tenant_id
-        user_issuer = user_issuer or f"https://idp.ocm-resource-manager.local/tenants/{tenant_id}"
+        user_issuer = user_issuer or f"https://idp.ocm-fleet.local/tenants/{tenant_id}"
         self.user_anchor_id = user_anchor_id
         self.user_issuer = user_issuer
         self.tenant_idp = OIDCIssuer(user_issuer)
-        self.platform_issuer = "https://idp.ocm-resource-manager.local/platform"
+        self.platform_issuer = "https://idp.ocm-fleet.local/platform"
         self.platform_idp = OIDCIssuer(self.platform_issuer)
         self.user_fulcio = FulcioCA(f"{tenant_id} Fulcio", self.tenant_idp)
-        self.workload_fulcio = FulcioCA("OCM Resource Manager platform Fulcio", self.platform_idp)
-        self.tsa = RFC3161TimestampAuthority("OCM Resource Manager external TSA")
-        self.user_ca_uri = f"https://fulcio.ocm-resource-manager.local/tenants/{tenant_id}"
-        self.platform_ca_uri = "https://fulcio.ocm-resource-manager.local/platform"
-        self.tsa_uri = "https://tsa.ocm-resource-manager.local"
+        self.workload_fulcio = FulcioCA("OCM Fleet platform Fulcio", self.platform_idp)
+        self.tsa = RFC3161TimestampAuthority("OCM Fleet external TSA")
+        self.user_ca_uri = f"https://fulcio.ocm-fleet.local/tenants/{tenant_id}"
+        self.platform_ca_uri = "https://fulcio.ocm-fleet.local/platform"
+        self.tsa_uri = "https://tsa.ocm-fleet.local"
 
         user_subject_regexp = user_subject_regexp or rf".*@{tenant_id}\.example"
         allowed_users = (
@@ -161,7 +161,7 @@ class PoCEnvironment:
                     }
                     for addon_id in addon_ids
                 ],
-                "attributes": {"operator": "ocm-resource-manager-platform"},
+                "attributes": {"operator": "ocm-fleet-platform"},
                 "constraints": [],
             },
         }
@@ -171,7 +171,7 @@ class PoCEnvironment:
 
     @staticmethod
     def _addon_subject(addon_id: str) -> str:
-        return f"spiffe://resource-manager.open-cluster-management.io/addons/{addon_id}"
+        return f"spiffe://ocm-fleet.local/addons/{addon_id}"
 
     @staticmethod
     def _certificate_authority(
@@ -207,19 +207,19 @@ class PoCEnvironment:
             certificate_authorities=[
                 self._certificate_authority(
                     self.user_ca_uri,
-                    f"{self.tenant_id}.ocm-resource-manager.local",
+                    f"{self.tenant_id}.ocm-fleet.local",
                     (self.user_fulcio.intermediate, self.user_fulcio.root),
                 ),
                 self._certificate_authority(
                     self.platform_ca_uri,
-                    "platform.ocm-resource-manager.local",
+                    "platform.ocm-fleet.local",
                     (self.workload_fulcio.intermediate, self.workload_fulcio.root),
                 ),
             ],
             timestamp_authorities=[
                 self._certificate_authority(
                     self.tsa_uri,
-                    "external-tsa.ocm-resource-manager.local",
+                    "external-tsa.ocm-fleet.local",
                     (self.tsa.leaf, self.tsa.root),
                 )
             ],

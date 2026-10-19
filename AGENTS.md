@@ -1,6 +1,6 @@
 # Rules for Agents
 
-This is the monorepo for OCM Resource Manager, an experimental Open Cluster Management variant using a resource manager architecture. It contains the resource manager server, CLI, proto definitions, React web UI, addons, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
+This is the monorepo for OCM Fleet, an experimental Open Cluster Management variant using a resource manager architecture. It contains the resource manager server, CLI, proto definitions, React web UI, addons, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->
@@ -31,13 +31,13 @@ This is the monorepo for OCM Resource Manager, an experimental Open Cluster Mana
 
 The architecture documentation lives in docs/design/ and is the primary source of truth for domain concepts, system design, and open questions.
 
-Use **OCM Resource Manager** for the whole project or platform, **resource manager architecture** for the architectural approach, and **resource manager server** (or **resource manager** once scoped) for the API, authorization, persistence, and orchestration component. The console, CLI, and addons are separate platform components. Use **management plane** for services that manage targets, rather than as a universal synonym for the platform. See docs/design/glossary.md for the architecture terminology guide.
+Use **OCM Fleet** for the project, **the OCM Fleet architecture** for its particular design, **a resource manager architecture** for the locally defined architectural approach, and **resource manager server** (or **resource manager** once scoped) for the API, authorization, persistence, and orchestration component. A platform instance includes enabled integrations and supporting services; participation in a deployment does not establish addon membership in the project. Use **fleetlet instances** for multiple deployments of the canonical fleetlet and **management plane** for services that manage targets. See docs/design/glossary.md for the architecture terminology guide.
 
 - Start with docs/design/architecture.md -- it gives the system's core mental model, names the major subsystems, and contains a reading guide that routes to the detailed sub-documents in docs/design/architecture/:
  - core_model.md -- core vocabulary, strategy axes, fulfillment kernel primitive, target model, delivery contract, single-pod invariant
  - target_delivery_contract.md -- detailed target delivery protocol, reliability guarantees, generation ordering, journaling, observation reporting
  - orchestration.md -- fulfillment execution, re-evaluation, rollout
-  - fleetlet_and_transport.md -- fleetlets, channels, proxying, routing, data paths
+  - fleetlet_and_transport.md -- fleetlet instances, channels, proxying, routing, data paths
   - tenancy_and_permissions.md -- provider/tenant/workspace model, generic permission boundary
   - addon_integration.md -- capability registration, addon strategy contracts, managed-resource bridging, UI/API extensions
   - resource_identity_and_api.md -- two-layer API model, resource identity, platform resources, extension API packages, HTTP transcoding
@@ -78,6 +78,6 @@ For how to...
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.
 
-## OCM Resource Manager console
+## OCM Fleet console
 
-This is the complete frontend web app for ocm-resource-manager. See docs/ui/AGENTS.md for agent instructions.
+This is the complete frontend web app for ocm-fleet. See docs/ui/AGENTS.md for agent instructions.

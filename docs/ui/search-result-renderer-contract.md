@@ -29,11 +29,11 @@ This doc covers three layers in order:
 
 ### Extension type
 
-All search result renderers share a single static extension type: `ocm-resource-manager.render-search`. The `resourceType` string (e.g. `kind.open-cluster-management.io/Cluster`) is stored as a property, not encoded into the type.
+All search result renderers share a single static extension type: `ocm-fleet.render-search`. The `resourceType` string (e.g. `kind.open-cluster-management.io/Cluster`) is stored as a property, not encoded into the type.
 
 **Why static, not encoded?** The SDK's `DynamicRemotePlugin` validates extension types against `/^[a-zA-Z]+(?:-[a-zA-Z]+)*\.[a-zA-Z]+(?:-[a-zA-Z]+)*$/` — only letters and hyphens. Base64url encoding (an earlier approach) produces digits and underscores, which the regex rejects. A static type with `resourceType` as a property is simpler and SDK-compliant.
 
-**Renderer lookup at runtime:** The shell collects all resolved `ocm-resource-manager.render-search` extensions into a `Map<resourceType, renderer>`. For each inventory result, it looks up `result.resourceType` directly — no encoding needed.
+**Renderer lookup at runtime:** The shell collects all resolved `ocm-fleet.render-search` extensions into a `Map<resourceType, renderer>`. For each inventory result, it looks up `result.resourceType` directly — no encoding needed.
 
 ### Why use `resourceType` as the renderer key?
 
@@ -68,7 +68,7 @@ Follows the existing `createClusterProvider` pattern — CodeRefs are passed alr
 ```typescript
 // build-utils/src/extensions/searchResultRenderer.ts
 
-export const RENDER_SEARCH_TYPE = "ocm-resource-manager.render-search" as const;
+export const RENDER_SEARCH_TYPE = "ocm-fleet.render-search" as const;
 
 export type SearchResultRendererExtras = {
   resourceType: string;
@@ -81,7 +81,7 @@ export type SearchResultRendererProperties = BaseExtensionProperties & SearchRes
 
 export function createSearchResultRenderer(
   properties: SearchResultRendererProperties,
-): ResourceManagerExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
+): FleetExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
   const ctx = `${RENDER_SEARCH_TYPE} "${properties.id || "(no id)"}"`;
   throwOnErrors(validateSearchResultRendererProperties(properties, ctx), RENDER_SEARCH_TYPE);
   return { type: RENDER_SEARCH_TYPE, properties };
@@ -156,7 +156,7 @@ The Kind addon routes to `ClustersModule` in `core-plugin`. An addon with its ow
 
 ### What we build on top
 
-The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `ocm-resource-manager.render-search` exactly:
+The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `ocm-fleet.render-search` exactly:
 
 ```typescript
 // web/src/extensions/isSearchResultRendererExtension.ts
@@ -164,7 +164,7 @@ The SDK's `useResolvedExtensions` hook already handles the discovery flow — it
 export function isSearchResultRendererExtension(
   e: Extension,
 ): e is SearchResultRendererExtension {
-  return e.type === "ocm-resource-manager.render-search";
+  return e.type === "ocm-fleet.render-search";
 }
 ```
 
@@ -173,7 +173,7 @@ export function isSearchResultRendererExtension(
 ```
 Shell startup
   └─ useResolvedExtensions(isSearchResultRendererExtension)
-       └─ Scans all loaded manifests for ocm-resource-manager.render-search extensions
+       └─ Scans all loaded manifests for ocm-fleet.render-search extensions
        └─ Resolves CodeRefs → live resolve/icon functions
        └─ Returns [extensions, loaded]
 
@@ -399,7 +399,7 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 | `build-utils/src/extensions/searchResultRenderer.ts` | Build | `RENDER_SEARCH_TYPE`, `createSearchResultRenderer`, types |
 | `build-utils/src/extensions/__tests__/searchResultRenderer.test.ts` | Build | Builder output, validation, `validateExtensionSet` integration |
 | `common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
-| `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `ocm-resource-manager.render-search` extensions |
+| `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `ocm-fleet.render-search` extensions |
 | `web/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
 | `extensions/kind/client/src/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
 
@@ -430,7 +430,7 @@ This handles: addon provides backend resources but hasn't shipped a UI plugin, o
 
 - [x] **~~Expose `ListTypes` via HTTP?~~** — Not needed for v1. The search results carry the `resourceType` — sufficient for on-demand discovery.
 
-- [x] **~~Extension type encoding~~** — Resolved. Static type `ocm-resource-manager.render-search` with `resourceType` as a property. No encoding needed — SDK regex rejects digits/underscores from base64url.
+- [x] **~~Extension type encoding~~** — Resolved. Static type `ocm-fleet.render-search` with `resourceType` as a property. No encoding needed — SDK regex rejects digits/underscores from base64url.
 
 - [x] **~~Extension ID from resource name?~~** — Resolved. `resourceType` is the type-level key. `name` is instance-level, passed to `resolve()`.
 

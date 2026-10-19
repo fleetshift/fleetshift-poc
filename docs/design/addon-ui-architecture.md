@@ -181,8 +181,8 @@ not offer. This means:
    store UI assets; it stores pointers to where they are hosted.
 2. **Clusters only toggle state.** Installing an addon on a cluster is a
    state change ("cluster X has addon Y enabled"), not a data transfer.
-3. **No asset upload from fleetlets is necessary.** The push-to-platform
-   model (fleetlets uploading JS bundles over gRPC) adds complexity without
+3. **No asset upload from fleetlet instances is necessary.** The push-to-platform
+   model (fleetlet instances uploading JS bundles over gRPC) adds complexity without
    value. Assets are hosted externally and loaded directly by the browser.
 
 ## Architecture
@@ -302,7 +302,7 @@ rejected:
 | Asset availability | Only after a cluster connects | Always available (hosted externally) |
 | Duplicate uploads | N clusters with same addon = N uploads | Zero uploads |
 | Offline clusters | No UI until cluster reconnects | UI always works |
-| Version consistency | Race between fleetlets uploading different versions | Single source of truth (OCI tag) |
+| Version consistency | Race between fleetlet instances uploading different versions | Single source of truth (OCI tag) |
 | Bandwidth | Large JS bundles over gRPC on every reconnect | Zero network cost to engine |
 | Complexity | Fleetlet needs asset discovery + upload logic | Assets served by static file host |
 
@@ -529,8 +529,8 @@ graph TD
 
 Extension types:
 
-- **`ocm-resource-manager.module`** -- standalone page with its own nav item
-- **`ocm-resource-manager.dashboard-widget`** -- widget rendered on the dashboard
+- **`ocm-fleet.module`** -- standalone page with its own nav item
+- **`ocm-fleet.dashboard-widget`** -- widget rendered on the dashboard
 - **Core extension points** -- tabs, panels, or other slots defined by core
   plugins (e.g. a tab on the cluster detail page)
 
@@ -931,4 +931,4 @@ the engine stores (metadata + URLs) and where assets are served from
 
 The fleetlet-side asset discovery code is unnecessary under this model
 and should not be used in production. Assets flow from OCI registry →
-asset host → browser, never through the engine or fleetlets.
+asset host → browser, never through the engine or fleetlet instances.

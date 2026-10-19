@@ -27,8 +27,8 @@ const (
 	AnnotationAttestationRef = "open-cluster-management.io/attestation-ref"
 	labelDeliveryID          = "open-cluster-management.io/delivery-id"
 	labelTargetID            = "open-cluster-management.io/target-id"
-	defaultHubHash           = "ocm-resource-manager-demo-hub"
-	defaultAgentID           = "ocm-resource-manager-demo-agent"
+	defaultHubHash           = "ocm-fleet-demo-hub"
+	defaultAgentID           = "ocm-fleet-demo-agent"
 )
 
 type DeliveryID string

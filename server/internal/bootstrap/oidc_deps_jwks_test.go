@@ -16,11 +16,11 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // gatedJWKSVerifier forces RegisterJWKS to fail instantly so startup's
@@ -59,8 +59,8 @@ func seedOIDCAuthMethod(t *testing.T, dbPath string, cfg domain.OIDCConfig) {
 func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
 	// Fast cement for bootstrap: registerAuthMethodJWKS failures must not
 	// fail Start (warn-and-continue).
-	idp := oidctest.Start(t, oidctest.WithAudience("ocm-resource-manager"))
-	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
+	idp := oidctest.Start(t, oidctest.WithAudience("resource-manager"))
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	seedOIDCAuthMethod(t, dbPath, idp.OIDCConfig())
 
 	inner, err := oidc.NewVerifier(context.Background(), oidc.WithHTTPClient(idp.HTTPClient()))
@@ -102,7 +102,7 @@ func TestStart_ContinuesWhenPersistedJWKSUnavailable(t *testing.T) {
 func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 	// Production *oidc.Verifier against a JWKS URL that is down at boot and
 	// up later. Uses a short HTTP timeout so a 503 cannot stall Start.
-	idp := oidctest.Start(t, oidctest.WithAudience("ocm-resource-manager"))
+	idp := oidctest.Start(t, oidctest.WithAudience("resource-manager"))
 	oidcCfg := idp.OIDCConfig()
 
 	req, err := http.NewRequest(http.MethodGet, string(oidcCfg.JWKSURI), nil)
@@ -136,7 +136,7 @@ func TestStart_OnDemandJWKSRegistrationAfterIdPRecovery(t *testing.T) {
 	cfgForSeed := oidcCfg
 	cfgForSeed.JWKSURI = domain.EndpointURL(jwksProxy.URL + "/jwks")
 
-	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	seedOIDCAuthMethod(t, dbPath, cfgForSeed)
 
 	// Short client timeout keeps boot-time RegisterJWKS from hanging when

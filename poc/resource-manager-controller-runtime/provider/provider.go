@@ -23,10 +23,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 
-	deliveryv1 "github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/contract"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/rmruntime"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/store"
+	deliveryv1 "github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/contract"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/rmruntime"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/store"
 )
 
 var (
@@ -77,7 +77,7 @@ func New(opts Options) (*Provider, error) {
 		return nil, fmt.Errorf("provider: Reporter is required")
 	}
 	if opts.Logger.GetSink() == nil {
-		opts.Logger = log.Log.WithName("ocm-resource-manager-provider")
+		opts.Logger = log.Log.WithName("ocm-fleet-provider")
 	}
 	p := &Provider{
 		scheme:    opts.Scheme,

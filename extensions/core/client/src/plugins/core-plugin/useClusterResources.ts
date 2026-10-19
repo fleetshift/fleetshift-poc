@@ -1,7 +1,4 @@
-import {
-  createResourceApi,
-  type ResourceResult,
-} from "@ocm-resource-manager/common";
+import { createResourceApi, type ResourceResult } from "@ocm-fleet/common";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface K8sObservationMetadata {
@@ -105,7 +102,7 @@ export function useClusterResources(
 }
 
 const CANONICAL_RE =
-  /\/\/kubernetes\.ocm-resource-manager\.io\/clusters\/([^/]+)\/apiResources\/[^/]+\/objects\/[^/]+/;
+  /\/\/kubernetes\.ocm-fleet\.io\/clusters\/([^/]+)\/apiResources\/[^/]+\/objects\/[^/]+/;
 
 export function extractClusterId(resourceName: string): string {
   const m = CANONICAL_RE.exec(resourceName);

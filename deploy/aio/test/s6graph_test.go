@@ -10,12 +10,12 @@ import (
 // TestS6ServiceGraph locks the s6-rc graph and run-script contracts under
 // deploy/aio/s6. A failure is this image's packaging, not openshift/release.
 //
-// It requires aio-proxy / aio-init / dex / ocm-resource-manager / aio-welcome
+// It requires aio-proxy / aio-init / dex / ocm-fleet / aio-welcome
 // dependency files and the user bundle, then checks: aio-proxy runs as
-// 1002:1002 (not resource manager server 1000); ocm-resource-manager drops to 1000, sources
+// 1002:1002 (not resource manager server 1000); ocm-fleet drops to 1000, sources
 // public.env, probes Dex with the sandbox CA, bypasses HTTP_PROXY for
 // PUBLIC_HOST, does not use curl -k, and exits non-zero if discovery is
-// not ready; aio-welcome is a oneshot that depends on ocm-resource-manager.
+// not ready; aio-welcome is a oneshot that depends on ocm-fleet.
 func TestS6ServiceGraph(t *testing.T) {
 	root := findAIORoot(t)
 	for _, rel := range []string{
@@ -65,28 +65,28 @@ func TestS6ServiceGraph(t *testing.T) {
 	}
 	rmBody := string(rmRun)
 	if !strings.Contains(rmBody, "-u 1000") && !strings.Contains(rmBody, "s6-setuidgid 1000:1000") {
-		t.Fatal("ocm-resource-manager run must drop to 1000:1000")
+		t.Fatal("ocm-fleet run must drop to 1000:1000")
 	}
 	if strings.Contains(rmBody, "1002:1002") {
-		t.Fatal("ocm-resource-manager run must not use the aio-proxy uid")
+		t.Fatal("ocm-fleet run must not use the aio-proxy uid")
 	}
-	if !strings.Contains(rmBody, ". /run/ocm-resource-manager/public.env") {
-		t.Fatal("ocm-resource-manager run must source public.env for Dex discovery")
+	if !strings.Contains(rmBody, ". /run/ocm-fleet/public.env") {
+		t.Fatal("ocm-fleet run must source public.env for Dex discovery")
 	}
 	if !strings.Contains(rmBody, "${DEX_DISCOVERY_URL}") {
-		t.Fatal("ocm-resource-manager run must probe Dex discovery from public.env")
+		t.Fatal("ocm-fleet run must probe Dex discovery from public.env")
 	}
 	if !strings.Contains(rmBody, "--cacert /data/sandbox/pki/ca.crt") {
-		t.Fatal("ocm-resource-manager run must trust the sandbox CA")
+		t.Fatal("ocm-fleet run must trust the sandbox CA")
 	}
 	if !strings.Contains(rmBody, `--noproxy "${PUBLIC_HOST}"`) {
-		t.Fatal("ocm-resource-manager run must bypass HTTP_PROXY for PUBLIC_HOST")
+		t.Fatal("ocm-fleet run must bypass HTTP_PROXY for PUBLIC_HOST")
 	}
 	if strings.Contains(rmBody, "curl -k") || strings.Contains(rmBody, "curl -sk") {
-		t.Fatal("ocm-resource-manager run must not use curl -k")
+		t.Fatal("ocm-fleet run must not use curl -k")
 	}
 	if !strings.Contains(rmBody, "exit 1") {
-		t.Fatal("ocm-resource-manager run must fail if Dex discovery is not ready")
+		t.Fatal("ocm-fleet run must fail if Dex discovery is not ready")
 	}
 
 	welcomeType, err := os.ReadFile(filepath.Join(root, "s6/s6-rc.d/aio-welcome/type"))

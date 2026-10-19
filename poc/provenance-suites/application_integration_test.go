@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/deliveryagent"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/directkey"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/producer"
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/deliveryagent"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/producer"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 func TestCommonVerifierHasNoApplicationEffects(t *testing.T) {

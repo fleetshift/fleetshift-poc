@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/scripted"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 	"google.golang.org/grpc"
 )
 
@@ -136,8 +136,8 @@ func TestExpectedSurface_HTTPRouteFamilies(t *testing.T) {
 func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
 	// With an auth method present, exempt WS routes stay reachable while
 	// wrapped UI routes require a bearer token.
-	idp := oidctest.Start(t, oidctest.WithAudience("ocm-resource-manager"))
-	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
+	idp := oidctest.Start(t, oidctest.WithAudience("resource-manager"))
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	seedOIDCAuthMethod(t, dbPath, idp.OIDCConfig())
 
 	srv := startTestServerWithConfig(t, ConfigInput{
@@ -173,7 +173,7 @@ func TestExpectedSurface_AuthExemptionsWithConfiguredOIDC(t *testing.T) {
 }
 
 func TestExpectedSurface_KindScriptedTargetsAndSchemasLive(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "ocm-resource-manager.db")
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	srv := startTestServerWithConfig(t, ConfigInput{DBPath: dbPath}, WithAddonAssembly(func(_ context.Context, deps AddonDeps) ([]AddonSpec, error) {
 		kindDesc := kindaddon.Descriptor()
 		kindDesc.Capabilities = []domain.Capability{

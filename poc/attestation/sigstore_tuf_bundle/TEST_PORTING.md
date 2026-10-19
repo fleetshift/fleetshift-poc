@@ -87,7 +87,7 @@ where a simpler rejection would test a different property:
 - DSSE multi-signature rejection;
 - corrupted RFC 3161 response rejection;
 - verification of a timestamped signature after its short-lived Fulcio leaf
-  expires, while OCM Resource Manager's separate authorization expiry remains active.
+  expires, while OCM Fleet's separate authorization expiry remains active.
 
 `test_porting_contract.py` adds three regression guardrails for exact name
 inventory, negative/pinned assertion shape, and the absence of soft boolean

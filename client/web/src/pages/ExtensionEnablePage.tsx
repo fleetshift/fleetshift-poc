@@ -48,7 +48,7 @@ export const ExtensionEnablePage = ({
 
   if (phase === "error") {
     return (
-      <div className="ocm-rm-enable-page">
+      <div className="ocm-fleet-enable-page">
         <EmptyState
           icon={ExclamationCircleIcon}
           headingLevel="h2"
@@ -74,7 +74,7 @@ export const ExtensionEnablePage = ({
 
   if (phase === "installing") {
     return (
-      <div className="ocm-rm-enable-page">
+      <div className="ocm-fleet-enable-page">
         <EmptyState
           icon={OptimizeIcon}
           headingLevel="h2"
@@ -90,7 +90,7 @@ export const ExtensionEnablePage = ({
   }
 
   return (
-    <div className="ocm-rm-enable-page">
+    <div className="ocm-fleet-enable-page">
       <EmptyState
         icon={ServicesIcon}
         headingLevel="h2"

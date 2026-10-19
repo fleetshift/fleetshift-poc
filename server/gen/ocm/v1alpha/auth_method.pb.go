@@ -149,7 +149,7 @@ const file_ocm_v1alpha_auth_method_proto_rawDesc = "" +
 	"\x04Type\x12\x14\n" +
 	"\x10TYPE_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tTYPE_OIDC\x10\x01:E\xeaAB\n" +
-	"%open-cluster-management.io/AuthMethod\x12\x19authMethods/{auth_method}BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"%open-cluster-management.io/AuthMethod\x12\x19authMethods/{auth_method}BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_auth_method_proto_rawDescOnce sync.Once

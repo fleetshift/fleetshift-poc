@@ -153,7 +153,7 @@ const file_ocm_v1alpha_signer_enrollment_proto_rawDesc = "" +
 	"createTime\x12@\n" +
 	"\vexpire_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
 	"expireTime:W\xeaAT\n" +
-	"+open-cluster-management.io/SignerEnrollment\x12%signerEnrollments/{signer_enrollment}BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"+open-cluster-management.io/SignerEnrollment\x12%signerEnrollments/{signer_enrollment}BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_signer_enrollment_proto_rawDescOnce sync.Once

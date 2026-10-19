@@ -2,7 +2,7 @@
 
 ## What this doc covers
 
-The security model shared by OCM Resource Manager credential presentation and delivery
+The security model shared by OCM Fleet credential presentation and delivery
 provenance:
 
 - the governing principle and resource-manager threat model;
@@ -13,7 +13,7 @@ provenance:
 
 ## When to read this
 
-Read this first when deciding what an OCM Resource Manager delivery protects, what remains
+Read this first when deciding what an OCM Fleet delivery protects, what remains
 trusted, or which combination of credentials and provenance fits a target. The
 credential and provenance documents define the corresponding mechanisms in
 detail.
@@ -41,7 +41,7 @@ detail.
 
 ## Governing Principle And Threat Model
 
-OCM Resource Manager is designed so that compromise of the customer-facing resource
+OCM Fleet is designed so that compromise of the customer-facing resource
 manager does not automatically compromise an entire multi-tenant provider
 estate.
 
@@ -59,7 +59,7 @@ credential isolation, but compromise of their accepted control input and apply
 path usually leaves the target unable to distinguish legitimate intent from a
 command fabricated by the management plane.
 
-OCM Resource Manager instead lets the target independently verify selected facts about
+OCM Fleet instead lets the target independently verify selected facts about
 identity, exact intent and supporting assertions, tenant and target scope,
 ordering, and trust updates. For those facts, the RM is demoted from a
 multitenant security oracle to a constrained deputy and provenance courier.
@@ -112,7 +112,7 @@ of separation:
   where the user has no direct account or network path. See
   [provider_consumer_model.md](provider_consumer_model.md) for that topology.
 
-OCM Resource Manager addresses these with two orthogonal axes:
+OCM Fleet addresses these with two orthogonal axes:
 
 - **Credential presentation** determines which credential, if any, is live at
   the target when the concrete operation is performed. It may be the user's
@@ -221,7 +221,7 @@ tenant mapping, accepted credential methods or provenance profiles, content
 types, purposes, identities, target relationships, freshness, and historical
 cutoffs. A shared multi-tenant IdP or CA may use a verified tenant claim or
 certificate field to isolate principals without duplicating identical anchor
-configuration per OCM Resource Manager tenant.
+configuration per OCM Fleet tenant.
 
 The ordinary RM database is not authoritative for target trust. Bootstrap or
 TOFU installs the exact initial trust configuration on an uninitialized
@@ -240,4 +240,4 @@ This distribution model does not require every authority to be customer-run.
 A provider may operate a multi-tenant IdP, CA, repository, or workload
 authority. Its compromise has the blast radius granted to it by authenticated
 configuration, so shared authorities are conscious provider and tenant trust
-choices rather than implicit OCM Resource Manager roots.
+choices rather than implicit OCM Fleet roots.

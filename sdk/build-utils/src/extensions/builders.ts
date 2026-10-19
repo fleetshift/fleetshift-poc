@@ -1,13 +1,13 @@
 import type {
   ClusterProviderExtras,
   ClusterProviderProperties,
+  FleetExtension,
   ModuleExtras,
   ModuleGroupExtras,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
-  ResourceManagerExtension,
   SetupExtras,
   SetupProperties,
 } from "./types";
@@ -29,59 +29,44 @@ function throwOnErrors(errors: string[], type: string): void {
 
 export function createModuleGroup(
   properties: ModuleGroupProperties,
-): ResourceManagerExtension<
-  "ocm-resource-manager.module-group",
-  ModuleGroupExtras
-> {
+): FleetExtension<"ocm-fleet.module-group", ModuleGroupExtras> {
   throwOnErrors(
     validateModuleGroupProperties(properties),
-    "ocm-resource-manager.module-group",
+    "ocm-fleet.module-group",
   );
-  return { type: "ocm-resource-manager.module-group", properties };
+  return { type: "ocm-fleet.module-group", properties };
 }
 
 export function createModule(
   properties: ModuleProperties,
-): ResourceManagerExtension<"ocm-resource-manager.module", ModuleExtras> {
-  throwOnErrors(
-    validateModuleProperties(properties),
-    "ocm-resource-manager.module",
-  );
-  return { type: "ocm-resource-manager.module", properties };
+): FleetExtension<"ocm-fleet.module", ModuleExtras> {
+  throwOnErrors(validateModuleProperties(properties), "ocm-fleet.module");
+  return { type: "ocm-fleet.module", properties };
 }
 
 export function createSetup(
   properties: SetupProperties,
-): ResourceManagerExtension<"ocm-resource-manager.setup", SetupExtras> {
-  throwOnErrors(
-    validateSetupProperties(properties),
-    "ocm-resource-manager.setup",
-  );
-  return { type: "ocm-resource-manager.setup", properties };
+): FleetExtension<"ocm-fleet.setup", SetupExtras> {
+  throwOnErrors(validateSetupProperties(properties), "ocm-fleet.setup");
+  return { type: "ocm-fleet.setup", properties };
 }
 
 export function createClusterProvider(
   properties: ClusterProviderProperties,
-): ResourceManagerExtension<
-  "ocm-resource-manager.cluster-provider",
-  ClusterProviderExtras
-> {
+): FleetExtension<"ocm-fleet.cluster-provider", ClusterProviderExtras> {
   throwOnErrors(
     validateClusterProviderProperties(properties),
-    "ocm-resource-manager.cluster-provider",
+    "ocm-fleet.cluster-provider",
   );
-  return { type: "ocm-resource-manager.cluster-provider", properties };
+  return { type: "ocm-fleet.cluster-provider", properties };
 }
 
 export function createOnboardingAction(
   properties: OnboardingActionProperties,
-): ResourceManagerExtension<
-  "ocm-resource-manager.onboarding-action",
-  OnboardingActionExtras
-> {
+): FleetExtension<"ocm-fleet.onboarding-action", OnboardingActionExtras> {
   throwOnErrors(
     validateOnboardingActionProperties(properties),
-    "ocm-resource-manager.onboarding-action",
+    "ocm-fleet.onboarding-action",
   );
-  return { type: "ocm-resource-manager.onboarding-action", properties };
+  return { type: "ocm-fleet.onboarding-action", properties };
 }

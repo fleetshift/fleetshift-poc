@@ -1,8 +1,8 @@
 /**
- * Re-export tree utilities from @ocm-resource-manager/common.
+ * Re-export tree utilities from @ocm-fleet/common.
  * Canonical source: common/src/navLayout.ts
  */
-export type { FlatNode } from "@ocm-resource-manager/common";
+export type { FlatNode } from "@ocm-fleet/common";
 export {
   arrayMove,
   buildLayout,
@@ -11,4 +11,4 @@ export {
   getProjection,
   INDENTATION,
   normalizeOrder,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";

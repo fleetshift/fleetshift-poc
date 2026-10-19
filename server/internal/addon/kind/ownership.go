@@ -13,11 +13,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 const (
-	ownershipConfigMapName      = "ocm-resource-manager-kind-ownership"
+	ownershipConfigMapName      = "resource-manager-kind-ownership"
 	ownershipConfigMapNamespace = "kube-system"
 	ownershipGenerationKey      = "generation"
 )

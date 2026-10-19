@@ -1,6 +1,6 @@
 package kubernetes
 
-import "github.com/stolostron/ocm-resource-manager/server/internal/domain"
+import "github.com/stolostron/ocm-fleet/server/internal/domain"
 
 // AddonID is the [domain.AddonID] for the Kubernetes addon. It also
 // doubles as the service-name prefix every resource type the addon

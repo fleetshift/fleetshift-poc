@@ -27,7 +27,7 @@ const file_ocm_v1alpha_signer_enrollment_service_proto_rawDesc = "" +
 	"\n" +
 	"+ocm/v1alpha/signer_enrollment_service.proto\x12\vocm.v1alpha\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a#ocm/v1alpha/signer_enrollment.proto\x1a2ocm/v1alpha/create_signer_enrollment_request.proto2\xcc\x01\n" +
 	"\x17SignerEnrollmentService\x12\xb0\x01\n" +
-	"\x16CreateSignerEnrollment\x12*.ocm.v1alpha.CreateSignerEnrollmentRequest\x1a\x1d.ocm.v1alpha.SignerEnrollment\"K\xdaA#signer_enrollment_id,identity_token\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1alpha/signerEnrollmentsBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x16CreateSignerEnrollment\x12*.ocm.v1alpha.CreateSignerEnrollmentRequest\x1a\x1d.ocm.v1alpha.SignerEnrollment\"K\xdaA#signer_enrollment_id,identity_token\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1alpha/signerEnrollmentsBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var file_ocm_v1alpha_signer_enrollment_service_proto_goTypes = []any{
 	(*CreateSignerEnrollmentRequest)(nil), // 0: ocm.v1alpha.CreateSignerEnrollmentRequest

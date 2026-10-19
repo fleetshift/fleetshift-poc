@@ -11,8 +11,8 @@ package extensionresource
 import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // ResourceTypeConfig describes an extension service for a platform resource

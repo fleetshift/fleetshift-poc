@@ -312,7 +312,7 @@ When a user moves modules into custom groups, search should reflect the customiz
 
 ```mermaid
 flowchart LR
-    BE["Backend API<br/>navLayout"] --> R["reconcile<br/>@ocm-resource-manager/common"]
+    BE["Backend API<br/>navLayout"] --> R["reconcile<br/>@ocm-fleet/common"]
     IDB[("IndexedDB<br/>override")] --> R
     R --> AN[AppNav]
     R --> S[Search]
@@ -320,14 +320,14 @@ flowchart LR
     T -- save --> IDB
 ```
 
-The reconciliation logic lives in `@ocm-resource-manager/common` so both AppNav and search consume the same merged layout.
+The reconciliation logic lives in `@ocm-fleet/common` so both AppNav and search consume the same merged layout.
 
 ## Implementation Phases
 
 ### Phase 1: Storage and Merge
 
 1. New IndexedDB store shape: `NavLayoutOverride` with full `NavLayoutEntry[]`.
-2. `mergeLayout(backend, override)` function in `@ocm-resource-manager/common`.
+2. `mergeLayout(backend, override)` function in `@ocm-fleet/common`.
 3. Migrate `useNavOrder` → `useNavLayout` (or extend it) to read/write the new shape.
 4. `AppNav` consumes merged layout instead of `orderByIds()`.
 5. Backward compat: if only a flat `string[]` exists in IndexedDB, treat it as ordering-only (no custom groups).

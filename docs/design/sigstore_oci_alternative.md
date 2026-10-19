@@ -10,7 +10,7 @@
 This document explores an alternative foundation for that older attested
 provenance model. It proposes replacing the custom key lifecycle, signing, and trust distribution mechanisms with three established, composable standards: [sigstore](https://www.sigstore.dev/) (identity-bound signing and transparency), [OCI artifacts](https://specs.opencontainers.org/image-spec/?v=v1.1.0) with the [referrers API](https://specs.opencontainers.org/distribution-spec/?v=v1.1.1) (content-addressed storage and distribution), and [TUF](https://theupdateframework.github.io/specification/latest/) (secure trust root distribution and rotation).
 
-The constraint evaluation model, strategy-implied policy, derivation chains, and credential presentation concerns from `authentication.md` are not replaced. They are retained as an OCM Resource Manager-specific policy layer on top of these standards.
+The constraint evaluation model, strategy-implied policy, derivation chains, and credential presentation concerns from `authentication.md` are not replaced. They are retained as an OCM Fleet-specific policy layer on top of these standards.
 
 ## Motivation
 
@@ -55,7 +55,7 @@ This alternative architecture addresses these by adopting standards that were de
 
 **What it is.** The [OCI image specification](https://specs.opencontainers.org/image-spec/?v=v1.1.0) supports packaging non-image content as artifacts, identified by custom `artifactType` values. The [OCI distribution specification v1.1](https://specs.opencontainers.org/distribution-spec/?v=v1.1.1) adds a `subject` field on manifests and a referrers API (`GET /v2/<name>/referrers/<digest>`) that returns all manifests whose `subject` matches a given digest, creating a discoverable DAG of related artifacts.
 
-**What it does here.** OCM Resource Manager objects (deployment intents, managed resource specs, addon-rendered manifests, placement evidence, update attestations) are stored as OCI artifacts in a registry. Sigstore bundles (signatures, certificates, Rekor proofs) are attached as referrer artifacts. The registry serves as the distribution mechanism for both the signed artifacts and their verification material, replacing the custom `VerificationBundle` carried in-band.
+**What it does here.** OCM Fleet objects (deployment intents, managed resource specs, addon-rendered manifests, placement evidence, update attestations) are stored as OCI artifacts in a registry. Sigstore bundles (signatures, certificates, Rekor proofs) are attached as referrer artifacts. The registry serves as the distribution mechanism for both the signed artifacts and their verification material, replacing the custom `VerificationBundle` carried in-band.
 
 ## What changes
 
@@ -101,7 +101,7 @@ The `KeyBinding` type in `poc/attestation/hybrid/model.py` and its proof-of-poss
 4. Signing event recorded to Rekor
 5. Delivery agent validates: Fulcio certificate chain (against TUF-distributed Fulcio root), Rekor inclusion proof (against TUF-distributed Rekor key), OIDC identity extraction (see "Signer identity model" below), trust anchor constraint evaluation
 
-For CLI users, the experience is comparable: `ocm-resource-manager deploy` triggers an OIDC authentication flow (browser redirect or device code) instead of a keychain prompt. The cryptographic plumbing changes but the user-facing interaction remains "authenticate, then deploy."
+For CLI users, the experience is comparable: `fleetctl deploy` triggers an OIDC authentication flow (browser redirect or device code) instead of a keychain prompt. The cryptographic plumbing changes but the user-facing interaction remains "authenticate, then deploy."
 
 **Passkeys / WebAuthn.** The current design in `authentication.md` uses the passkey to directly sign `hash(intent)` -- the WebAuthn challenge IS the content hash, so the hardware authenticator directly authorizes the specific deployment content. With keyless signing, this property is lost: the passkey authenticates the OIDC flow to Fulcio, and the ephemeral key signs the content. The hardware authenticator has no awareness of what is being signed by the ephemeral key. This is a genuine regression in user-consent binding. However, the WebAuthn-based intent signing in `authentication.md` is itself unvalidated as practical (passkey providers may not support arbitrary challenge data as a signing surface in the way the design assumes). Given this, we treat the passkey interaction as an open design area for both architectures rather than claiming equivalence. If a content-bound approval step is needed, it would require an additional mechanism (e.g., a confirmation dialog with content hash displayed before OIDC authentication proceeds).
 
@@ -119,7 +119,7 @@ This means addons can sign through Fulcio the same way users do. The addon authe
 
 The entire "Addon key lifecycle" section of `authentication.md` -- SPIFFE/SPIRE integration, CSR API, cert-manager, admin-provisioned keys, JWT key binding bundles for addons, addon key distribution to the delivery agent -- collapses to: "addons authenticate to Fulcio via workload identity."
 
-There is a deployment nuance. SPIFFE-based Fulcio issuance requires the Fulcio instance to be configured with the SPIFFE trust domain. Kubernetes SA token issuance requires the OIDC issuer URL of the cluster's SA token issuer to be configured in Fulcio. Both are standard Fulcio configuration -- not custom OCM Resource Manager infrastructure.
+There is a deployment nuance. SPIFFE-based Fulcio issuance requires the Fulcio instance to be configured with the SPIFFE trust domain. Kubernetes SA token issuance requires the OIDC issuer URL of the cluster's SA token issuer to be configured in Fulcio. Both are standard Fulcio configuration -- not custom OCM Fleet infrastructure.
 
 ### Attestation envelope format
 
@@ -141,7 +141,7 @@ Bundle:
 
 For attestations (as opposed to bare signatures), cosign uses the DSSE content variant. The DSSE envelope wraps an in-toto statement with `payloadType: "application/vnd.in-toto+json"`. The in-toto statement has a `predicateType` and typed `predicate` body.
 
-OCM Resource Manager would define custom in-toto predicate types for its content:
+OCM Fleet would define custom in-toto predicate types for its content:
 
 | Content | Predicate type (illustrative) |
 |---|---|
@@ -187,7 +187,7 @@ The link between them is the manifest itself: the manifest's `layers[0].digest` 
 
 ### What stays the same
 
-The following are OCM Resource Manager-specific concerns that layer on top of the sigstore/OCI/TUF foundation and are retained unchanged:
+The following are OCM Fleet-specific concerns that layer on top of the sigstore/OCI/TUF foundation and are retained unchanged:
 
 - **Strategy-implied constraints** (`policy.py:derive_strategy_constraints`): The delivery agent derives verification constraints from the signed content's strategy declarations. `inline` manifests must match exactly; `addon` manifests must be signed by the named addon; `predicate` placement evaluates a CEL expression against target identity; `addon` placement requires signed evidence. Unknown strategy types fail closed. This logic has no equivalent in sigstore.
 
@@ -207,9 +207,9 @@ The following are OCM Resource Manager-specific concerns that layer on top of th
 
 ## OCI registry as storage and distribution
 
-### OCM Resource Manager objects as OCI artifacts
+### OCM Fleet objects as OCI artifacts
 
-Each OCM Resource Manager object type is stored as an OCI artifact with an OCM Resource Manager-specific `artifactType`. The OCI image manifest's [artifact usage guidelines](https://github.com/opencontainers/image-spec/blob/main/artifacts-guidance.md) support this: set `artifactType` to a custom media type, use the empty descriptor for `config` (if no separate config blob is needed), and place the content in `layers`.
+Each OCM Fleet object type is stored as an OCI artifact with an OCM Fleet-specific `artifactType`. The OCI image manifest's [artifact usage guidelines](https://github.com/opencontainers/image-spec/blob/main/artifacts-guidance.md) support this: set `artifactType` to a custom media type, use the empty descriptor for `config` (if no separate config blob is needed), and place the content in `layers`.
 
 Example manifest for a deployment intent:
 
@@ -217,7 +217,7 @@ Example manifest for a deployment intent:
 {
   "schemaVersion": 2,
   "mediaType": "application/vnd.oci.image.manifest.v1+json",
-  "artifactType": "application/vnd.ocm-resource-manager.deployment.v1+json",
+  "artifactType": "application/vnd.ocm-fleet.deployment.v1+json",
   "config": {
     "mediaType": "application/vnd.oci.empty.v1+json",
     "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
@@ -225,7 +225,7 @@ Example manifest for a deployment intent:
   },
   "layers": [
     {
-      "mediaType": "application/vnd.ocm-resource-manager.deployment.v1+json",
+      "mediaType": "application/vnd.ocm-fleet.deployment.v1+json",
       "digest": "sha256:<content-digest>",
       "size": 1234
     }
@@ -247,23 +247,23 @@ Response: an OCI index listing all artifacts whose `subject.digest` matches the 
 
 - **Level 0 (deployment digest):** query referrers, discover:
   - Sigstore bundles (user signatures): `artifactType: application/vnd.dev.sigstore.bundle.v0.3+json`
-  - Addon-signed manifests: `artifactType: application/vnd.ocm-resource-manager.addon-manifests.v1+json`
-  - Placement evidence: `artifactType: application/vnd.ocm-resource-manager.placement-evidence.v1+json`
+  - Addon-signed manifests: `artifactType: application/vnd.ocm-fleet.addon-manifests.v1+json`
+  - Placement evidence: `artifactType: application/vnd.ocm-fleet.placement-evidence.v1+json`
 - **Level 1 (discovered artifact digests):** for each addon manifest or placement evidence artifact, query referrers to discover their sigstore bundles
 - **Level N:** if any discovered artifact has its own referrers (e.g., a derivation chain node), continue walking
 
 The delivery agent implements a **recursive referrers walk** to assemble the full attestation graph:
 
 1. Start with the deployment artifact's digest
-2. Query `GET /v2/<name>/referrers/<digest>` with `artifactType` filtering to limit results to known OCM Resource Manager and sigstore types
+2. Query `GET /v2/<name>/referrers/<digest>` with `artifactType` filtering to limit results to known OCM Fleet and sigstore types
 3. For each discovered artifact, fetch its manifest and content
 4. For each discovered artifact that may have its own attestations (addon manifests, placement evidence, derivation chain nodes), recurse: query its referrers
 5. Enforce a maximum traversal depth (bounded by the derivation chain depth limit) and track visited digests to prevent cycles
 6. Handle pagination via the `Link` header per the OCI distribution spec
 
-This replaces the custom `VerificationBundle` in `verify.py`, which manually assembles inputs, attestations, and fulfillment relations into a single object. The recursive walk is more complex than a single query, but the graph structure is well-defined by OCM Resource Manager's artifact types and the protocol is deterministic.
+This replaces the custom `VerificationBundle` in `verify.py`, which manually assembles inputs, attestations, and fulfillment relations into a single object. The recursive walk is more complex than a single query, but the graph structure is well-defined by OCM Fleet's artifact types and the protocol is deterministic.
 
-**Registry compatibility.** The referrers API is defined in OCI distribution spec v1.1. Registries that support it include Harbor (v2.6+), Zot, ACR, GCR/Artifact Registry, and ECR. For registries that do not yet support the referrers API natively, the [OCI referrers tag schema](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers) defines a fallback: referrers are discoverable via a tag of the form `sha256-<digest>`. Clients like [ORAS](https://oras.land/) implement both paths transparently. OCM Resource Manager should support the tag-schema fallback to avoid constraining registry choice, or explicitly document minimum registry requirements.
+**Registry compatibility.** The referrers API is defined in OCI distribution spec v1.1. Registries that support it include Harbor (v2.6+), Zot, ACR, GCR/Artifact Registry, and ECR. For registries that do not yet support the referrers API natively, the [OCI referrers tag schema](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers) defines a fallback: referrers are discoverable via a tag of the form `sha256-<digest>`. Clients like [ORAS](https://oras.land/) implement both paths transparently. OCM Fleet should support the tag-schema fallback to avoid constraining registry choice, or explicitly document minimum registry requirements.
 
 ### Derivation chains as reference chains
 
@@ -273,14 +273,14 @@ The `DerivedInput` model (prior input -> update attestation -> derived content) 
 - Update v2: `update-v2@sha256:bbb` with `subject: deployment@sha256:aaa` (update artifact, signed by upgrade planner, containing the `spec_update` payload)
 - The delivery agent discovers the update via the referrers API on the base deployment's digest
 
-The update attestation is itself a signed OCI artifact (with its own sigstore bundle). The recursive verification in `DerivedInput.verify()` maps to: walk the referrers chain, verify sigstore bundles at each node, then apply OCM Resource Manager derivation logic.
+The update attestation is itself a signed OCI artifact (with its own sigstore bundle). The recursive verification in `DerivedInput.verify()` maps to: walk the referrers chain, verify sigstore bundles at each node, then apply OCM Fleet derivation logic.
 
 Concretely, at each node in the derivation chain:
 
 1. **Sigstore verification**: verify the sigstore bundle (Fulcio certificate chain, Rekor inclusion proof, signature over DSSE envelope)
 2. **Content integrity**: verify that the in-toto `subject[0].digest` matches the OCI layer digest of the artifact content
 3. **Identity and trust anchor evaluation**: extract signer identity from Fulcio certificate extensions (issuer from OID `.1.8`, token subject from OID `.1.24`), evaluate against trust anchor constraints
-4. **Precondition check**: evaluate the update attestation's preconditions (CEL expressions from `DerivedInput.preconditions`) against the prior input's content -- these are OCM Resource Manager-specific predicates that gate whether the update is valid given the prior state
+4. **Precondition check**: evaluate the update attestation's preconditions (CEL expressions from `DerivedInput.preconditions`) against the prior input's content -- these are OCM Fleet-specific predicates that gate whether the update is valid given the prior state
 5. **Constraint inheritance**: the derived content inherits output constraints from the prior input, combined with any new constraints introduced by the update attestation -- this is the `derive_strategy_constraints` logic from `policy.py`
 6. **Derivation expression**: apply the CEL derivation expression to produce the derived content from the prior input and the update payload
 
@@ -288,7 +288,7 @@ Steps 4-6 are unchanged from the current POC. Steps 1-3 replace the POC's `Signe
 
 ### Multi-signature
 
-The DSSE specification supports multiple signatures on a single envelope, but the sigstore bundle format restricts each bundle to a single signature. Multi-signature for OCM Resource Manager is achieved by attaching multiple sigstore bundles to the same artifact via the OCI referrers API -- each signer produces their own bundle, each referencing the same deployment artifact's digest. This supports the multi-signature model described in `authentication.md`: multiple authorized users sign the same deployment for high availability and audit.
+The DSSE specification supports multiple signatures on a single envelope, but the sigstore bundle format restricts each bundle to a single signature. Multi-signature for OCM Fleet is achieved by attaching multiple sigstore bundles to the same artifact via the OCI referrers API -- each signer produces their own bundle, each referencing the same deployment artifact's digest. This supports the multi-signature model described in `authentication.md`: multiple authorized users sign the same deployment for high availability and audit.
 
 The delivery agent discovers all sigstore bundles referencing a deployment via the referrers API (filtered by `artifactType`), verifies each, and applies the configured policy (any-of, quorum, etc.).
 
@@ -314,7 +314,7 @@ For the provider/consumer network curtain (factory clusters with restricted flee
 - A factory-side registry replicates from the management-side registry
 - The fleetlet pulls from the factory-side registry, never reaching out to the management network
 
-The replication target is the same for both OCM Resource Manager attestation artifacts and the container images the deployment references.
+The replication target is the same for both OCM Fleet attestation artifacts and the container images the deployment references.
 
 ## TUF for trust root management
 
@@ -333,7 +333,7 @@ TUF provides all of these properties through its four-role metadata structure.
 
 ### Role mapping
 
-| TUF role | OCM Resource Manager purpose | Key storage | Rotation |
+| TUF role | OCM Fleet purpose | Key storage | Rotation |
 |---|---|---|---|
 | Root | Tenant administrator escape hatch | Offline (hardware token, air-gapped) | N-of-M threshold, chain of trust via versioned root.json |
 | Targets | Trust anchor registry | Delegated to sub-roles | Standard TUF targets delegation |
@@ -342,7 +342,7 @@ TUF provides all of these properties through its four-role metadata structure.
 
 ### Targets structure
 
-The TUF targets role signs metadata describing which trust configuration files are current. In OCM Resource Manager, the "targets" are trust configuration artifacts:
+The TUF targets role signs metadata describing which trust configuration files are current. In OCM Fleet, the "targets" are trust configuration artifacts:
 
 ```
 targets.json
@@ -359,7 +359,7 @@ Each entry in the targets metadata includes the file's cryptographic hash and si
 
 **Certificate Transparency log: deployment choice.** Fulcio can optionally embed a Signed Certificate Timestamp (SCT) from a Certificate Transparency log in issued certificates. The CT log provides auditability of certificate issuance separate from Rekor's signature event transparency. For self-hosted Fulcio deployments, operating a CT log is an additional infrastructure cost. The Fulcio specification notes that private deployments may omit CT if an alternative auditing mechanism exists -- Rekor itself provides this alternative, since every signing event (including the Fulcio certificate) is logged to Rekor.
 
-OCM Resource Manager supports two modes:
+OCM Fleet supports two modes:
 
 - **CT-enabled (higher assurance):** The TUF targets include `ctlog-public-key.pem`. Fulcio is configured with a CT log backend. The delivery agent verifies the embedded SCT in the Fulcio certificate against the TUF-distributed CT log key. This provides two independent transparency mechanisms (CT for certificate issuance, Rekor for signing events), making undetected forgery harder.
 - **CT-omitted (Rekor-only transparency):** The TUF targets omit `ctlog-public-key.pem`. Fulcio is configured without a CT log. The delivery agent skips SCT verification. Rekor alone provides transparency -- forged certificates still result in Rekor entries detectable by monitors. This reduces operational cost at the expense of a single point of transparency.
@@ -408,7 +408,7 @@ The TUF `paths` patterns enforce that each delegated role can only modify its sc
 TUF metadata is just signed JSON files. It can be served from:
 
 - A static file server or CDN
-- The same OCI registry used for OCM Resource Manager artifacts (TUF metadata as OCI artifacts)
+- The same OCI registry used for OCM Fleet artifacts (TUF metadata as OCI artifacts)
 - An S3 bucket or similar object store
 
 This is the same pattern sigstore itself uses: the [sigstore TUF root](https://github.com/sigstore/root-signing) is distributed as a set of static JSON files that cosign ships with, and updated via the TUF client update protocol.
@@ -445,11 +445,11 @@ Using [sigstore-go](https://pkg.go.dev/github.com/sigstore/sigstore-go) (current
   - SPIFFE: URI SAN (e.g., `spiffe://trust-domain/workload-id`)
   - GitHub Actions: URI SAN (e.g., `https://github.com/owner/repo/.github/workflows/...`)
 
-OCM Resource Manager's canonical signer identity for trust anchor evaluation should be the tuple `(issuer, token_subject)` -- extracted from extensions `.1.8` and `.1.24` respectively. The SAN provides additional context (human-readable identity, workload URI) but should not be the primary key for policy evaluation, since its format is provider-dependent. Trust anchor constraints (CEL predicates) can reference both the canonical identity and the SAN where needed for provider-specific matching.
+OCM Fleet's canonical signer identity for trust anchor evaluation should be the tuple `(issuer, token_subject)` -- extracted from extensions `.1.8` and `.1.24` respectively. The SAN provides additional context (human-readable identity, workload URI) but should not be the primary key for policy evaluation, since its format is provider-dependent. Trust anchor constraints (CEL predicates) can reference both the canonical identity and the SAN where needed for provider-specific matching.
 
 This means `sigstore-go` verification should extract the full certificate extension set rather than relying solely on the SAN-based identity matching that cosign uses by default. The `sigstore-go` verification API supports custom identity policies that can inspect arbitrary certificate extensions.
 
-**Phase 2: Identity and trust anchor evaluation.** The extracted signer identity (issuer + token subject from Fulcio extensions) is checked against the TUF-distributed trust anchor configuration. Trust anchor constraints (CEL predicates from `TrustAnchorConstraint`) are evaluated against the signer's identity and the attested content. This phase is OCM Resource Manager-specific -- sigstore verifies the certificate chain but does not evaluate OCM Resource Manager's scoped trust model.
+**Phase 2: Identity and trust anchor evaluation.** The extracted signer identity (issuer + token subject from Fulcio extensions) is checked against the TUF-distributed trust anchor configuration. Trust anchor constraints (CEL predicates from `TrustAnchorConstraint`) are evaluated against the signer's identity and the attested content. This phase is OCM Fleet-specific -- sigstore verifies the certificate chain but does not evaluate OCM Fleet's scoped trust model.
 
 **Phase 3: Content constraint evaluation (unchanged).** Strategy-implied constraints are derived from the signed content's strategy declarations (`policy.py:derive_strategy_constraints`). Explicit output constraints (signed CEL expressions) are combined with strategy-implied constraints. All constraints are evaluated over `{input, output, target, action, placement}`. This is the same logic as today.
 
@@ -518,9 +518,9 @@ If TUF refresh fails (network partition), the delivery agent's existing TUF meta
 | "Trust anchor distribution" | TUF targets metadata, signed by tenant admin offline keys, distributed to delivery agents via the TUF update protocol. |
 | "Trust bundle rotation: overlap windows" | TUF targets metadata versions explicitly control the overlap: list both old and new, then remove old. Rollback protection prevents regression. |
 | "Root user escape hatch" | TUF root role. Offline keys, threshold signatures, chain-of-trust rotation. |
-| "Multi-signature policy" | Multiple sigstore bundles attached to the same artifact via OCI referrers (one bundle per signer). The delivery agent discovers all bundles and applies OCM Resource Manager policy (any-of, quorum) on top. |
-| "Derivation chain depth" | Unchanged -- still an OCM Resource Manager concern. Each node in the chain is a sigstore-signed OCI artifact, but the depth question is the same. |
-| "Claims freshness" | Still relevant, and **not bounded by Fulcio certificate validity**. Sigstore bundles are designed to be verifiable indefinitely after the certificate expires -- the Rekor timestamp evidence proves the signature was created during the cert's validity window, but the signed artifact has no sigstore-imposed expiry. The 10-minute cert validity bounds *when* the OIDC claims were current (at signing time), not *how long* OCM Resource Manager accepts the signed deployment. Long-term authorization freshness remains an OCM Resource Manager policy concern: `valid_until` in the signed predicate, re-signing (cheap with keyless signing), or SCIM/CAEP checks provide the actual freshness bound. |
+| "Multi-signature policy" | Multiple sigstore bundles attached to the same artifact via OCI referrers (one bundle per signer). The delivery agent discovers all bundles and applies OCM Fleet policy (any-of, quorum) on top. |
+| "Derivation chain depth" | Unchanged -- still an OCM Fleet concern. Each node in the chain is a sigstore-signed OCI artifact, but the depth question is the same. |
+| "Claims freshness" | Still relevant, and **not bounded by Fulcio certificate validity**. Sigstore bundles are designed to be verifiable indefinitely after the certificate expires -- the Rekor timestamp evidence proves the signature was created during the cert's validity window, but the signed artifact has no sigstore-imposed expiry. The 10-minute cert validity bounds *when* the OIDC claims were current (at signing time), not *how long* OCM Fleet accepts the signed deployment. Long-term authorization freshness remains an OCM Fleet policy concern: `valid_until` in the signed predicate, re-signing (cheap with keyless signing), or SCIM/CAEP checks provide the actual freshness bound. |
 
 ## Open questions specific to this alternative
 
@@ -528,10 +528,10 @@ If TUF refresh fails (network partition), the delivery agent's existing TUF meta
 - **Fulcio availability**: Fulcio must be reachable at signing time. If Fulcio is down, no new signatures can be created. This is a new availability dependency (the current model has no CA dependency at signing time, only at key enrollment time). Fulcio can be deployed with high availability (multiple replicas, load balancing), but it is a dependency that doesn't exist today.
 - **Rekor log management**: Who operates the Rekor instance? A per-tenant Rekor is operationally expensive. A shared Rekor instance raises questions about log partitioning and tenant isolation (all signing events from all tenants in one log). Rekor sharding may help. This needs investigation.
 - **OCI registry dependency for hardened transport**: Using the OCI registry as a transport introduces a registry availability dependency. This is the same class of dependency as S3/Kafka/NATS in the current design but is worth noting explicitly.
-- **In-toto statement vs custom envelope**: Adopting the in-toto statement format for OCM Resource Manager attestations provides ecosystem interoperability but introduces a dependency on the in-toto specification. The `subject` field (identifying what is being attested about, by digest) maps naturally to OCM Resource Manager's content model, but the mapping of `predicate` to OCM Resource Manager's richer constraint model needs careful design. In particular, the in-toto spec does not define how to handle CEL constraint evaluation or strategy-implied policy -- those remain OCM Resource Manager-specific predicate semantics.
+- **In-toto statement vs custom envelope**: Adopting the in-toto statement format for OCM Fleet attestations provides ecosystem interoperability but introduces a dependency on the in-toto specification. The `subject` field (identifying what is being attested about, by digest) maps naturally to OCM Fleet's content model, but the mapping of `predicate` to OCM Fleet's richer constraint model needs careful design. In particular, the in-toto spec does not define how to handle CEL constraint evaluation or strategy-implied policy -- those remain OCM Fleet-specific predicate semantics.
 - **Content-bound user approval**: With keyless signing, there is no mechanism equivalent to the current design's `hash(intent)` as WebAuthn challenge, where the hardware authenticator directly authorizes the specific content. The OIDC authentication step (which can use a passkey or biometric) authenticates the user but has no awareness of what the ephemeral key will sign. If content-bound approval is needed, an additional mechanism must be designed (e.g., a content hash displayed in the OIDC consent screen, or a separate confirmation step between authentication and signing). This is an open design area for both this architecture and the current design, since the WebAuthn-based approach in `authentication.md` is itself unvalidated as practical.
 - **Addon workload identity onboarding**: Kubernetes ServiceAccount OIDC issuers and SPIFFE trust domains must be configured in the Fulcio instance. For a shared or provider-hosted Fulcio serving many tenants, this means trusting arbitrary customer-managed cluster SA issuers across tenant environments. The operational cost and security implications of this need investigation -- especially for fleetlet-local addons running behind the network curtain on factory clusters with diverse OIDC issuers.
-- **GitOps signing flow**: With keyless signing, `ocm-resource-manager gitops sign` authenticates to Fulcio and produces a sigstore bundle. This bundle must be stored somewhere alongside the git content. Options: (a) stored in the git repo as a file (similar to current `.sig` file approach), (b) pushed to the OCI registry as a referrer artifact, (c) both. Option (b) is cleaner but requires the GitOps tooling to push to the registry, not just commit to git.
+- **GitOps signing flow**: With keyless signing, `ocm-fleet gitops sign` authenticates to Fulcio and produces a sigstore bundle. This bundle must be stored somewhere alongside the git content. Options: (a) stored in the git repo as a file (similar to current `.sig` file approach), (b) pushed to the OCI registry as a referrer artifact, (c) both. Option (b) is cleaner but requires the GitOps tooling to push to the registry, not just commit to git.
 - **Latency at signing time**: Keyless signing adds network round-trips at signing time (Fulcio certificate issuance + Rekor log entry). Fulcio issuance is typically sub-second. Rekor entry creation is also sub-second for the public instance. For a self-hosted instance, latency depends on the backend (Trillian). This is unlikely to be noticeable in interactive flows (deploy from CLI or web UI) but may matter for high-throughput automated signing (e.g. addon rendering manifests for many deployments).
 
 ## Relationship to the current design
@@ -547,7 +547,7 @@ This document is an **alternative** to the key lifecycle, key binding, addon sig
 - Bootstrap-time privilege constraints
 - Verification level (intent signing vs output signing)
 
-The constraint evaluation model, strategy-implied constraints, CEL output constraints, derivation chains, placement enforcement, and anti-replay mechanisms from `authentication.md` and `poc/attestation/hybrid/` are retained as-is. They are the OCM Resource Manager-specific policy layer that sits on top of whichever signing and trust infrastructure is used.
+The constraint evaluation model, strategy-implied constraints, CEL output constraints, derivation chains, placement enforcement, and anti-replay mechanisms from `authentication.md` and `poc/attestation/hybrid/` are retained as-is. They are the OCM Fleet-specific policy layer that sits on top of whichever signing and trust infrastructure is used.
 
 ### Relationship to the single-pod viability invariant
 

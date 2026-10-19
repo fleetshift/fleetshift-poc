@@ -8,7 +8,7 @@ import {
   type NavLayoutGroup as CommonNavLayoutGroup,
   useExtensionInstall,
   useNavLayout,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import {
   useExtensions,
   useResolvedExtensions,
@@ -292,7 +292,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         for (const ep of Object.values(extensionPoints)) {
           typeToFeatureId.set(ep.type, globalFeatureId);
 
-          if (ep.type === "ocm-resource-manager.cluster-provider") {
+          if (ep.type === "ocm-fleet.cluster-provider") {
             const createId = `ext-${globalFeatureId}-create`;
             inserts.push(
               insertEntry(db, {
@@ -318,9 +318,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const { id, label, description, keywords, to, searchResult, searchIcon } =
         ext.properties;
 
-      const parentFeatureId = typeToFeatureId.get(
-        "ocm-resource-manager.cluster-provider",
-      );
+      const parentFeatureId = typeToFeatureId.get("ocm-fleet.cluster-provider");
       const parent = parentFeatureId
         ? featureParentRef.current.get(parentFeatureId)
         : undefined;

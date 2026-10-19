@@ -2,9 +2,9 @@
 # Resource manager server longrun. When peer Dex is enabled, wait for HTTPS discovery
 # through the AIO TLS edge so the serve bootstrap budget is not consumed by Dex boot.
 set -eu
-if [ -f /run/ocm-resource-manager/dex.enabled ]; then
+if [ -f /run/ocm-fleet/dex.enabled ]; then
 	# shellcheck disable=SC1091
-	. /run/ocm-resource-manager/public.env
+	. /run/ocm-fleet/public.env
 	i=0
 	ready=0
 	while [ "$i" -lt 30 ]; do
@@ -24,7 +24,7 @@ if [ -f /run/ocm-resource-manager/dex.enabled ]; then
 		exit 1
 	fi
 fi
-# s6-setuidgid changes uid/gid only; keep HOME on the ocm-resource-manager home so
+# s6-setuidgid changes uid/gid only; keep HOME on the resource-manager home so
 # tools like podman do not probe /root.
 export HOME=/data
 
@@ -32,10 +32,10 @@ export HOME=/data
 # engine socket is mounted): KIND_EXPERIMENTAL_DOCKER_NETWORK and, on Dex-on,
 # KIND_LOOPBACK_FORWARD_TO for the control-plane loopback TCP proxy (which also
 # installs kube-apiserver hostAliases for the issuer hostname).
-if [ -f /run/ocm-resource-manager/kind.env ]; then
+if [ -f /run/ocm-fleet/kind.env ]; then
 	set -a
 	# shellcheck disable=SC1091
-	. /run/ocm-resource-manager/kind.env
+	. /run/ocm-fleet/kind.env
 	set +a
 fi
 
@@ -49,6 +49,6 @@ case "$sock" in
 esac
 if [ -n "$sock" ] && [ -S "$sock" ]; then
 	sgid=$(stat -c %g "$sock")
-	exec s6-applyuidgid -u 1000 -g 1000 -G "$sgid" /run/ocm-resource-manager/exec-serve
+	exec s6-applyuidgid -u 1000 -g 1000 -G "$sgid" /run/ocm-fleet/exec-serve
 fi
-exec s6-setuidgid 1000:1000 /run/ocm-resource-manager/exec-serve
+exec s6-setuidgid 1000:1000 /run/ocm-fleet/exec-serve

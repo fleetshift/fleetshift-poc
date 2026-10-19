@@ -84,7 +84,7 @@ const file_ocm_v1alpha_delivery_auth_proto_rawDesc = "" +
 	"\x1focm/v1alpha/delivery_auth.proto\x12\vocm.v1alpha\x1a ocm/v1alpha/subject_claims.proto\"`\n" +
 	"\fDeliveryAuth\x122\n" +
 	"\x06caller\x18\x01 \x01(\v2\x1a.ocm.v1alpha.SubjectClaimsR\x06caller\x12\x1c\n" +
-	"\taudiences\x18\x02 \x03(\tR\taudiencesBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\taudiences\x18\x02 \x03(\tR\taudiencesBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_delivery_auth_proto_rawDescOnce sync.Once

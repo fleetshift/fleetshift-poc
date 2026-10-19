@@ -26,16 +26,16 @@ if (process.env.DEV === "true" || process.env.BUILD === "true") {
   await $`npx nx run image:aio`;
 }
 
-console.log("==> Starting OCM Resource Manager stack");
+console.log("==> Starting OCM Fleet stack");
 const upArgs = ["up", "-d"];
 if (process.env.DEV === "true" || process.env.BUILD === "true")
   upArgs.push("--build");
 await compose(...upArgs);
 
 const httpPort = process.env.OCM_RM_SERVER_HTTP_PORT || "8085";
-const publicOrigin = `https://ocm-resource-manager.localhost:${httpPort}`;
+const publicOrigin = `https://ocm-fleet.localhost:${httpPort}`;
 console.log(
-  `\n==> OCM Resource Manager stack is running!\n    Console:               ${publicOrigin}  (opens /app after the certificate warning)`,
+  `\n==> OCM Fleet stack is running!\n    Console:               ${publicOrigin}  (opens /app after the certificate warning)`,
 );
 
 if (!process.env.OIDC_ISSUER_URL) {
@@ -45,14 +45,14 @@ if (!process.env.OIDC_ISSUER_URL) {
     await copySandboxCA();
   } catch {
     console.error(
-      `    WARN: sandbox CA not ready yet. Copy it later with:\n      podman compose cp ocm-resource-manager-server:/data/sandbox/pki/ca.crt ${composeDir}/.certs/ca.crt`,
+      `    WARN: sandbox CA not ready yet. Copy it later with:\n      podman compose cp ocm-fleet:/data/sandbox/pki/ca.crt ${composeDir}/.certs/ca.crt`,
     );
   }
   console.log(`
   Built-in Dex sandbox IdP (no OIDC_ISSUER_URL set):
     Issuer:  ${publicOrigin}/idp
-    Users:   ops@ocm-resource-manager.local / ocm-resource-manager-ops
-             dev@ocm-resource-manager.local / ocm-resource-manager-dev
+    Users:   ops@ocm-fleet.local / ocm-fleet-ops
+             dev@ocm-fleet.local / ocm-fleet-dev
 
   Open ${publicOrigin} and accept the browser certificate warning
   (unknown sandbox CA). Dex is same-origin under /idp; port 5556 is not published.
@@ -63,10 +63,10 @@ if (!process.env.OIDC_ISSUER_URL) {
   Configure fleetctl:
     bin/fleetctl auth setup \\
       --issuer-url ${publicOrigin}/idp \\
-      --client-id ocm-resource-manager-cli \\
-      --key-enrollment-client-id ocm-resource-manager-signing \\
+      --client-id fleetctl \\
+      --key-enrollment-client-id resource-manager-signing \\
       --oidc-ca-file ${composeDir}/.certs/ca.crt \\
-      --scopes 'openid,profile,email,audience:server:client_id:ocm-resource-manager'
+      --scopes 'openid,profile,email,audience:server:client_id:resource-manager'
     bin/fleetctl auth login
 `);
 } else {

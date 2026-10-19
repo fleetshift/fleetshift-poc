@@ -8,11 +8,11 @@ describe("tokenEmail", () => {
     expect(
       tokenEmail(
         JSON.stringify({
-          access_token: { claims: { email: "ops@ocm-resource-manager.local" } },
-          id_token: { claims: { email: "other@ocm-resource-manager.local" } },
+          access_token: { claims: { email: "ops@ocm-fleet.local" } },
+          id_token: { claims: { email: "other@ocm-fleet.local" } },
         }),
       ),
-    ).toBe("ops@ocm-resource-manager.local");
+    ).toBe("ops@ocm-fleet.local");
   });
 
   it("falls back to id_token when access_token has no email", () => {
@@ -20,17 +20,17 @@ describe("tokenEmail", () => {
       tokenEmail(
         JSON.stringify({
           access_token: { claims: { email: "   " } },
-          id_token: { claims: { email: "dev@ocm-resource-manager.local" } },
+          id_token: { claims: { email: "dev@ocm-fleet.local" } },
         }),
       ),
-    ).toBe("dev@ocm-resource-manager.local");
+    ).toBe("dev@ocm-fleet.local");
   });
 
   it.each([
     { name: "null JSON", raw: "null", message: /malformed/ },
     {
       name: "a JSON string",
-      raw: '"ops@ocm-resource-manager.local"',
+      raw: '"ops@ocm-fleet.local"',
       message: /malformed/,
     },
     { name: "missing claims", raw: "{}", message: /no email claim/ },

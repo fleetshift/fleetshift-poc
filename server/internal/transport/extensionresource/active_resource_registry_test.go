@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/extensionresource"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
@@ -26,7 +26,7 @@ func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
 		APIVersion:      "v1",
 		GRPCServiceName: "kind.open-cluster-management.io.v1.ClusterService",
 		HTTPPrefix:      "/apis/kind.open-cluster-management.io/v1alpha/clusters",
-		DescriptorPath:  "dynamic/kind/ocm-resource-manager/io/v1/cluster_service.proto",
+		DescriptorPath:  "dynamic/kind/ocm-fleet/io/v1/cluster_service.proto",
 		QuerySchema: domain.ResourceQuerySchema{
 			ResourceType:   rt,
 			ServiceName:    "kind.open-cluster-management.io",

@@ -18,8 +18,8 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
-	deliveryv1 "github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/contract"
+	deliveryv1 "github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/contract"
 )
 
 // DeliveryReconciler reconciles Delivery objects projected into each

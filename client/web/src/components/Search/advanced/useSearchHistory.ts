@@ -1,4 +1,4 @@
-import { createIDBStore, useIDBMap } from "@ocm-resource-manager/common";
+import { createIDBStore, useIDBMap } from "@ocm-fleet/common";
 import { useCallback, useMemo } from "react";
 
 import type { HistoryEntry } from "./types";
@@ -6,7 +6,7 @@ import type { HistoryEntry } from "./types";
 const MAX_ENTRIES = 50;
 
 const historyStore = createIDBStore<HistoryEntry>({
-  db: "ocm-resource-manager-search-history",
+  db: "ocm-fleet-search-history",
   version: 1,
   store: "history",
   upgrade: (db) => {

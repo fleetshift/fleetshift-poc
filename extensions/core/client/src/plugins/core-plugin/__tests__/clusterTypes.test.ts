@@ -1,7 +1,4 @@
-import {
-  ClusterResource,
-  extractClusterId,
-} from "@ocm-resource-manager/common";
+import { ClusterResource, extractClusterId } from "@ocm-fleet/common";
 import { describe, expect, it } from "vitest";
 
 import {

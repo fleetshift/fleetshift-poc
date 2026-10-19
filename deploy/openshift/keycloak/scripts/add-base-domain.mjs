@@ -27,7 +27,7 @@ const token = JSON.parse(
   ).stdout,
 ).access_token;
 if (!token) throw new Error("Failed to obtain Keycloak admin token");
-const endpoint = `https://${host}/admin/realms/ocm-resource-manager/clients`;
+const endpoint = `https://${host}/admin/realms/ocm-fleet/clients`;
 const found = JSON.parse(
   (
     await $`curl -s ${endpoint}?clientId=ocp-console -H ${`Authorization: Bearer ${token}`}`
@@ -35,7 +35,7 @@ const found = JSON.parse(
 )[0];
 if (!found?.id)
   throw new Error(
-    "Client 'ocp-console' not found in realm 'ocm-resource-manager'. Run deploy.sh first.",
+    "Client 'ocp-console' not found in realm 'ocm-fleet'. Run deploy.sh first.",
   );
 const client = JSON.parse(
   (

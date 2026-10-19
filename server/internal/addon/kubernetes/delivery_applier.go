@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/restmapper"
 )
 
-const fieldManager = "ocm-resource-manager"
+const fieldManager = "resource-manager"
 
 // applier wraps a dynamic client and REST mapper for SSA.
 type applier struct {

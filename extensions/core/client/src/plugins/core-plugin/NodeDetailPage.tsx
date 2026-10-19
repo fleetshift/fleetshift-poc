@@ -2,7 +2,7 @@ import {
   createResourceApi,
   PluginLink,
   type ResourceResult,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 import {
   Breadcrumb,

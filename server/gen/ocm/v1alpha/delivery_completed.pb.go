@@ -181,7 +181,7 @@ const file_ocm_v1alpha_delivery_completed_proto_rawDesc = "" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSTATE_DELIVERED\x10\x01\x12\x10\n" +
 	"\fSTATE_FAILED\x10\x02\x12\x11\n" +
-	"\rSTATE_PARTIAL\x10\x03BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\rSTATE_PARTIAL\x10\x03BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_delivery_completed_proto_rawDescOnce sync.Once

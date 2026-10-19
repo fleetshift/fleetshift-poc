@@ -14,7 +14,7 @@ describe("createModuleGroup", () => {
       id: "settings",
       label: "Settings",
     });
-    expect(ext.type).toBe("ocm-resource-manager.module-group");
+    expect(ext.type).toBe("ocm-fleet.module-group");
     expect(ext.properties.id).toBe("settings");
   });
 
@@ -47,7 +47,7 @@ describe("createModule", () => {
       component: { $codeRef: "ClustersModule.default" },
       icon: { $codeRef: "ClustersIcon.default" },
     });
-    expect(ext.type).toBe("ocm-resource-manager.module");
+    expect(ext.type).toBe("ocm-fleet.module");
     expect(ext.properties.id).toBe("clusters");
     expect(ext.properties.component).toEqual({
       $codeRef: "ClustersModule.default",
@@ -69,7 +69,7 @@ describe("createModule", () => {
       extensionPoints: {
         providers: {
           description: "Cluster providers",
-          type: "ocm-resource-manager.cluster-provider",
+          type: "ocm-fleet.cluster-provider",
         },
       },
     });
@@ -79,7 +79,7 @@ describe("createModule", () => {
       $codeRef: "SearchResult.default",
     });
     expect(ext.properties.extensionPoints?.providers.type).toBe(
-      "ocm-resource-manager.cluster-provider",
+      "ocm-fleet.cluster-provider",
     );
   });
 
@@ -148,7 +148,7 @@ describe("createSetup", () => {
       requires: [],
       requiresAuth: false,
     });
-    expect(ext.type).toBe("ocm-resource-manager.setup");
+    expect(ext.type).toBe("ocm-fleet.setup");
     expect(ext.properties.path).toBe("auth");
     expect(ext.properties.requires).toEqual([]);
     expect(ext.properties.requiresAuth).toBe(false);
@@ -191,7 +191,7 @@ describe("createClusterProvider", () => {
       card: { $codeRef: "Card.default" },
       wizard: { $codeRef: "Wizard.default" },
     });
-    expect(ext.type).toBe("ocm-resource-manager.cluster-provider");
+    expect(ext.type).toBe("ocm-fleet.cluster-provider");
     expect(ext.properties.icon).toEqual({ $codeRef: "Card.KindIcon" });
   });
 
@@ -231,7 +231,7 @@ describe("createOnboardingAction", () => {
       card: { $codeRef: "Card.default" },
       form: { $codeRef: "Form.default" },
     });
-    expect(ext.type).toBe("ocm-resource-manager.onboarding-action");
+    expect(ext.type).toBe("ocm-fleet.onboarding-action");
     expect(ext.properties.id).toBe("kind-connect");
     expect(ext.properties.card).toEqual({ $codeRef: "Card.default" });
     expect(ext.properties.form).toEqual({ $codeRef: "Form.default" });

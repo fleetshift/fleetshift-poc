@@ -860,7 +860,7 @@ const file_ocm_v1alpha_attestation_proto_rawDesc = "" +
 	"\x11PlacementEvidence\x12'\n" +
 	"\x0fdeployment_name\x18\x01 \x01(\tR\x0edeploymentName\x12\x18\n" +
 	"\atargets\x18\x02 \x03(\tR\atargets\x12:\n" +
-	"\tsignature\x18\x03 \x01(\v2\x1c.ocm.v1alpha.OutputSignatureR\tsignatureBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\tsignature\x18\x03 \x01(\v2\x1c.ocm.v1alpha.OutputSignatureR\tsignatureBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_attestation_proto_rawDescOnce sync.Once

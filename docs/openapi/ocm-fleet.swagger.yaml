@@ -9,7 +9,7 @@ tags:
     description: DeploymentService manages deployment resources.
   - name: FleetletService
     description: |-
-      FleetletService is the platform-side API that fleetlets connect to.
+      FleetletService is the platform-side API that fleetlet instances connect to.
       Authentication is per-fleetlet at the transport level; the platform
       identifies the caller from gRPC metadata on stream creation.
   - name: ResourceQueryService

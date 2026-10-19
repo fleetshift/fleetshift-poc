@@ -44,7 +44,7 @@ export default function ActiveIncidents(_props: { widgetId: string }) {
             <CardBody>
               <Stack hasGutter>
                 <StackItem>
-                  <span className="ocm-rm-overview-incident-header">
+                  <span className="ocm-fleet-overview-incident-header">
                     {severityIcon(inc.severity)}
                     <strong>{inc.id}</strong>
                     <span>{inc.title}</span>
@@ -54,7 +54,7 @@ export default function ActiveIncidents(_props: { widgetId: string }) {
                   </span>
                 </StackItem>
                 <StackItem>
-                  <span className="ocm-rm-overview-incident-badges">
+                  <span className="ocm-fleet-overview-incident-badges">
                     <Label color="purple" isCompact>
                       Blast: {inc.blastRadius}
                     </Label>

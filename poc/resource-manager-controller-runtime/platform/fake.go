@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/contract"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/contract"
 )
 
 // EventRecord is a recorded ReportEvent call.

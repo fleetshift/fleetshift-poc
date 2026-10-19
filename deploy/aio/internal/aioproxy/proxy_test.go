@@ -26,12 +26,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/deploy/aio/internal/aioproxy"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioproxy"
 )
 
 const (
-	publicOrigin  = "https://ocm-resource-manager.localhost:8085"
-	canonicalHost = "ocm-resource-manager.localhost:8085"
+	publicOrigin  = "https://ocm-fleet.localhost:8085"
+	canonicalHost = "ocm-fleet.localhost:8085"
 )
 
 func TestProxy_New_PublicOrigin(t *testing.T) {
@@ -127,9 +127,9 @@ func TestProxy_New_RejectsBadConfig(t *testing.T) {
 			want: "dex upstream is required",
 		},
 		{
-			name: "nil ocm-resource-manager",
+			name: "nil resource-manager",
 			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, DexURL: dex},
-			want: "ocm-resource-manager upstream is required",
+			want: "resource-manager upstream is required",
 		},
 		{
 			name: "dex userinfo",
@@ -181,12 +181,12 @@ func TestProxy_RoutesDexAndResourceManager(t *testing.T) {
 		{path: "/idp/", want: "dex"},
 		{path: "/idp/.well-known/openid-configuration", want: "dex"},
 		{path: "/idp/auth", want: "dex"},
-		{path: "/idpevil", want: "ocm-resource-manager"},
-		{path: "/", want: "ocm-resource-manager"},
-		{path: "/app/", want: "ocm-resource-manager"},
-		{path: "/api/ui/config", want: "ocm-resource-manager"},
-		{path: "/app/auth/callback", want: "ocm-resource-manager"},
-		{path: "/app/assets/app.js", want: "ocm-resource-manager"},
+		{path: "/idpevil", want: "resource-manager"},
+		{path: "/", want: "resource-manager"},
+		{path: "/app/", want: "resource-manager"},
+		{path: "/api/ui/config", want: "resource-manager"},
+		{path: "/app/auth/callback", want: "resource-manager"},
+		{path: "/app/assets/app.js", want: "resource-manager"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -215,7 +215,7 @@ func TestProxy_PreservesQueryPOSTCookiesRedirects(t *testing.T) {
 	}))
 	t.Cleanup(dex.Close)
 	resourceManager := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("ocm-resource-manager should not be called")
+		t.Error("resource-manager should not be called")
 	}))
 	t.Cleanup(resourceManager.Close)
 	p := newTestProxy(t, dex.URL, resourceManager.URL)
@@ -247,7 +247,7 @@ func TestProxy_PreservesEncodedPath(t *testing.T) {
 	}))
 	t.Cleanup(dex.Close)
 	resourceManager := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("ocm-resource-manager should not be called")
+		t.Error("resource-manager should not be called")
 	}))
 	t.Cleanup(resourceManager.Close)
 	p := newTestProxy(t, dex.URL, resourceManager.URL)
@@ -272,8 +272,8 @@ func TestProxy_EncodedIdpSlashStaysOnResourceManager(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.Bytes())
 	}
-	if got := rr.Header().Get("X-Upstream"); got != "ocm-resource-manager" {
-		t.Fatalf("X-Upstream = %q, want ocm-resource-manager", got)
+	if got := rr.Header().Get("X-Upstream"); got != "resource-manager" {
+		t.Fatalf("X-Upstream = %q, want resource-manager", got)
 	}
 }
 
@@ -543,8 +543,8 @@ func TestProxy_UpgradeWithoutConnectionIsNotWebSocket(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (origin check applies only to websocket upgrades)", rr.Code)
 	}
-	if got := rr.Header().Get("X-Upstream"); got != "ocm-resource-manager" {
-		t.Fatalf("X-Upstream = %q, want ocm-resource-manager", got)
+	if got := rr.Header().Get("X-Upstream"); got != "resource-manager" {
+		t.Fatalf("X-Upstream = %q, want resource-manager", got)
 	}
 }
 
@@ -593,7 +593,7 @@ func TestProxy_ListenAndServeTLS(t *testing.T) {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				RootCAs:    caPool,
-				ServerName: "ocm-resource-manager.localhost",
+				ServerName: "ocm-fleet.localhost",
 			},
 		},
 	}
@@ -650,7 +650,7 @@ func TestProxy_TLSHandshakeErrorLog(t *testing.T) {
 
 	untrusted := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{ServerName: "ocm-resource-manager.localhost"},
+			TLSClientConfig: &tls.Config{ServerName: "ocm-fleet.localhost"},
 		},
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -728,7 +728,7 @@ func recordingUpstreams(t *testing.T) (dex, resourceManager *httptest.Server) {
 		})
 	}
 	dex = httptest.NewServer(handler("dex"))
-	resourceManager = httptest.NewServer(handler("ocm-resource-manager"))
+	resourceManager = httptest.NewServer(handler("resource-manager"))
 	t.Cleanup(dex.Close)
 	t.Cleanup(resourceManager.Close)
 	return dex, resourceManager
@@ -890,14 +890,14 @@ func writeGatewayCert(t *testing.T, dir string) (certFile, keyFile string) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "OCM Resource Manager AIO gateway"},
+		Subject:               pkix.Name{CommonName: "OCM Fleet AIO gateway"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		DNSNames:              []string{"ocm-resource-manager.localhost"},
+		DNSNames:              []string{"ocm-fleet.localhost"},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {

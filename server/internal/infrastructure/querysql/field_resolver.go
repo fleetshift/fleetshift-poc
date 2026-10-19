@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // FieldPath is a CEL field-select/index chain flattened to its

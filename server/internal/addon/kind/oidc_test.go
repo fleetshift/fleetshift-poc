@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func callerAuth() domain.DeliveryAuth {
@@ -17,7 +17,7 @@ func callerAuth() domain.DeliveryAuth {
 				Issuer:  "https://host.docker.internal:9443",
 			},
 		},
-		Audience: []domain.Audience{"ocm-resource-manager"},
+		Audience: []domain.Audience{"resource-manager"},
 	}
 }
 

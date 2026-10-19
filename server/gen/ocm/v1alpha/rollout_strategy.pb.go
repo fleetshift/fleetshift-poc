@@ -126,7 +126,7 @@ const file_ocm_v1alpha_rollout_strategy_proto_rawDesc = "" +
 	"\x04type\x18\x01 \x01(\x0e2!.ocm.v1alpha.RolloutStrategy.TypeB\x03\xe0A\x02R\x04type\"0\n" +
 	"\x04Type\x12\x14\n" +
 	"\x10TYPE_UNSPECIFIED\x10\x00\x12\x12\n" +
-	"\x0eTYPE_IMMEDIATE\x10\x01BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x0eTYPE_IMMEDIATE\x10\x01BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_rollout_strategy_proto_rawDescOnce sync.Once

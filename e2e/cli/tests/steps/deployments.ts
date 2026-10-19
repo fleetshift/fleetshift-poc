@@ -17,7 +17,7 @@ const REMAINS_HOLD_MS = 15_000;
 const KUBERNETES_RESOURCE_TYPE = "kubernetes";
 export const CONFIG_MAP_NAME = "test-config";
 export const CONFIG_MAP_DATA = {
-  from: "ocm-resource-manager-e2e-cli",
+  from: "ocm-fleet-e2e-cli",
 } as const;
 
 export interface DeploymentView {

@@ -91,7 +91,7 @@ const file_ocm_v1alpha_create_signer_enrollment_request_proto_rawDesc = "" +
 	"2ocm/v1alpha/create_signer_enrollment_request.proto\x12\vocm.v1alpha\x1a\x1fgoogle/api/field_behavior.proto\"\x82\x01\n" +
 	"\x1dCreateSignerEnrollmentRequest\x125\n" +
 	"\x14signer_enrollment_id\x18\x01 \x01(\tB\x03\xe0A\x02R\x12signerEnrollmentId\x12*\n" +
-	"\x0eidentity_token\x18\x02 \x01(\tB\x03\xe0A\x02R\ridentityTokenBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x0eidentity_token\x18\x02 \x01(\tB\x03\xe0A\x02R\ridentityTokenBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_create_signer_enrollment_request_proto_rawDescOnce sync.Once

@@ -138,7 +138,7 @@ const file_ocm_v1alpha_delivery_request_proto_rawDesc = "" +
 	"\vattestation\x18\x06 \x01(\v2\x18.ocm.v1alpha.AttestationR\vattestation\x12#\n" +
 	"\n" +
 	"generation\x18\a \x01(\x03B\x03\xe0A\x02R\n" +
-	"generationBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"generationBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_delivery_request_proto_rawDescOnce sync.Once

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 // The common handlers decode authenticated content once. Their boolean result

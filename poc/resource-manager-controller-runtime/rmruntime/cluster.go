@@ -29,7 +29,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/store"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/store"
 )
 
 // Options configures a store-backed Cluster / Manager.

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	fscrypto "github.com/stolostron/ocm-resource-manager/server/pkg/crypto"
+	fscrypto "github.com/stolostron/ocm-fleet/server/pkg/crypto"
 )
 
 // ProvenanceService constructs and verifies [Provenance] for signed

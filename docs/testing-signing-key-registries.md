@@ -22,12 +22,12 @@ Wait for all services to be healthy. The stack starts with **OIDC** registry by 
 ### Switch the server
 
 ```bash
-docker compose exec ocm-resource-manager fleetctl auth setup \
-  --server ocm-resource-manager:50051 \
-  --issuer-url http://keycloak:8180/auth/realms/ocm-resource-manager \
-  --client-id ocm-resource-manager-cli \
-  --audience ocm-resource-manager \
-  --key-enrollment-client-id ocm-resource-manager-signing \
+docker compose exec ocm-fleet fleetctl auth setup \
+  --server resource-manager:50051 \
+  --issuer-url http://keycloak:8180/auth/realms/ocm-fleet \
+  --client-id fleetctl \
+  --audience resource-manager \
+  --key-enrollment-client-id resource-manager-signing \
   --registry-id github.com \
   --registry-subject-expression 'claims.github_username'
 ```
@@ -44,12 +44,12 @@ docker compose exec ocm-resource-manager fleetctl auth setup \
 ## Test 3: Switch back to OIDC
 
 ```bash
-docker compose exec ocm-resource-manager fleetctl auth setup \
-  --server ocm-resource-manager:50051 \
-  --issuer-url http://keycloak:8180/auth/realms/ocm-resource-manager \
-  --client-id ocm-resource-manager-cli \
-  --audience ocm-resource-manager \
-  --key-enrollment-client-id ocm-resource-manager-signing \
+docker compose exec ocm-fleet fleetctl auth setup \
+  --server resource-manager:50051 \
+  --issuer-url http://keycloak:8180/auth/realms/ocm-fleet \
+  --client-id fleetctl \
+  --audience resource-manager \
+  --key-enrollment-client-id resource-manager-signing \
   --public-key-claim-expression 'claims.signing_public_key'
 ```
 
@@ -73,11 +73,11 @@ The platform uses a CEL expression to extract the signing public key from the ID
 
 ```bash
 fleetctl auth setup \
-  --server ocm-resource-manager:50051 \
-  --issuer-url http://keycloak:8180/auth/realms/ocm-resource-manager \
-  --client-id ocm-resource-manager-cli \
-  --audience ocm-resource-manager \
-  --key-enrollment-client-id ocm-resource-manager-signing \
+  --server resource-manager:50051 \
+  --issuer-url http://keycloak:8180/auth/realms/ocm-fleet \
+  --client-id fleetctl \
+  --audience resource-manager \
+  --key-enrollment-client-id resource-manager-signing \
   --public-key-claim-expression 'claims.signing_public_key'
 ```
 

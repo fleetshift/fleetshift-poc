@@ -86,7 +86,7 @@ describe("runCommand", () => {
 
   it("rejects when the binary is missing", async () => {
     await expect(
-      runCommand("ocm-resource-manager-e2e-missing-binary"),
+      runCommand("ocm-fleet-e2e-missing-binary"),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

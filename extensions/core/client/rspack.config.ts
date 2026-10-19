@@ -10,10 +10,10 @@ import {
   createPfTransformImport,
   createSearchResultRenderer,
   createSetup,
-  ResourceManagerPlugin,
+  FleetPlugin,
   getCommonDynamicModules,
   getDynamicModules,
-} from "@ocm-resource-manager/build-utils";
+} from "@ocm-fleet/build-utils";
 import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
 import type { Configuration } from "@rspack/core";
 import rspack from "@rspack/core";
@@ -76,7 +76,7 @@ const mfOverride = {
 
 const p = (rel: string) => path.resolve(configDir, rel);
 
-const ManagementPlugin = new ResourceManagerPlugin({
+const ManagementPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "targets",
@@ -101,7 +101,7 @@ const ManagementPlugin = new ResourceManagerPlugin({
   },
 });
 
-const CorePlugin = new ResourceManagerPlugin({
+const CorePlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "clusters",
@@ -113,11 +113,11 @@ const CorePlugin = new ResourceManagerPlugin({
       extensionPoints: {
         providers: {
           description: "Cluster providers available in the creation wizard",
-          type: "ocm-resource-manager.cluster-provider",
+          type: "ocm-fleet.cluster-provider",
         },
         detailTabs: {
           description: "Tabs shown on the cluster detail page",
-          type: "ocm-resource-manager.cluster-detail-tab",
+          type: "ocm-fleet.cluster-detail-tab",
         },
       },
     }),
@@ -205,7 +205,7 @@ const CorePlugin = new ResourceManagerPlugin({
   },
 });
 
-const SigningPlugin = new ResourceManagerPlugin({
+const SigningPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "signing-keys",
@@ -244,7 +244,7 @@ const SigningPlugin = new ResourceManagerPlugin({
   },
 });
 
-const RoutingPlugin = new ResourceManagerPlugin({
+const RoutingPlugin = new FleetPlugin({
   extensions: [],
   sharedModules,
   entryScriptFilename: "plugins/routing/routing-plugin.[contenthash].js",
@@ -263,7 +263,7 @@ const RoutingPlugin = new ResourceManagerPlugin({
   },
 });
 
-const OverviewPlugin = new ResourceManagerPlugin({
+const OverviewPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "overview",
@@ -290,7 +290,7 @@ const OverviewPlugin = new ResourceManagerPlugin({
   },
 });
 
-const SettingsPlugin = new ResourceManagerPlugin({
+const SettingsPlugin = new FleetPlugin({
   extensions: [
     createModuleGroup({
       id: "settings",
@@ -339,7 +339,7 @@ const SettingsPlugin = new ResourceManagerPlugin({
   },
 });
 
-const SetupPlugin = new ResourceManagerPlugin({
+const SetupPlugin = new FleetPlugin({
   extensions: [
     createSetup({
       id: "whats-next",
@@ -366,7 +366,7 @@ const SetupPlugin = new ResourceManagerPlugin({
   },
 });
 
-const ConfigurationPlugin = new ResourceManagerPlugin({
+const ConfigurationPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "configuration",
@@ -398,7 +398,7 @@ const ConfigurationPlugin = new ResourceManagerPlugin({
   },
 });
 
-const VirtualizationPlugin = new ResourceManagerPlugin({
+const VirtualizationPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "virtualization",
@@ -436,7 +436,7 @@ const VirtualizationPlugin = new ResourceManagerPlugin({
   },
 });
 
-const AddonDemoPlugin = new ResourceManagerPlugin({
+const AddonDemoPlugin = new FleetPlugin({
   extensions: [
     // --- Cluster providers ---
     createClusterProvider({
@@ -472,7 +472,7 @@ const AddonDemoPlugin = new ResourceManagerPlugin({
       icon: { $codeRef: "EksIcon.default" },
       card: { $codeRef: "EksOnboarding.EksOnboardingCard" },
       form: { $codeRef: "EksOnboarding.EksOnboardingForm" },
-      category: "ocm-resource-manager.cluster-provider",
+      category: "ocm-fleet.cluster-provider",
     }),
     createOnboardingAction({
       id: "vsphere-connect",
@@ -482,7 +482,7 @@ const AddonDemoPlugin = new ResourceManagerPlugin({
       icon: { $codeRef: "VsphereIcon.default" },
       card: { $codeRef: "VsphereOnboarding.VsphereOnboardingCard" },
       form: { $codeRef: "VsphereOnboarding.VsphereOnboardingForm" },
-      category: "ocm-resource-manager.cluster-provider",
+      category: "ocm-fleet.cluster-provider",
     }),
     createOnboardingAction({
       id: "kind-connect",
@@ -492,7 +492,7 @@ const AddonDemoPlugin = new ResourceManagerPlugin({
       icon: { $codeRef: "KindOnboardingIcon.default" },
       card: { $codeRef: "KindOnboarding.KindOnboardingCard" },
       form: { $codeRef: "KindOnboarding.KindOnboardingForm" },
-      category: "ocm-resource-manager.cluster-provider",
+      category: "ocm-fleet.cluster-provider",
     }),
 
     // --- Module pages ---
@@ -548,7 +548,7 @@ const AddonDemoPlugin = new ResourceManagerPlugin({
       icon: { $codeRef: "SecurityIcon.default" },
       card: { $codeRef: "SecurityOnboardingCard.SecurityOnboardingCard" },
       form: { $codeRef: "SecurityOnboardingForm.default" },
-      category: "ocm-resource-manager.module",
+      category: "ocm-fleet.module",
     }),
     createOnboardingAction({
       id: "observability-enable",
@@ -559,7 +559,7 @@ const AddonDemoPlugin = new ResourceManagerPlugin({
         $codeRef: "ObservabilityOnboardingCard.ObservabilityOnboardingCard",
       },
       form: { $codeRef: "ObservabilityOnboardingForm.default" },
-      category: "ocm-resource-manager.module",
+      category: "ocm-fleet.module",
     }),
     createOnboardingAction({
       id: "compliance-enable",
@@ -568,7 +568,7 @@ const AddonDemoPlugin = new ResourceManagerPlugin({
       icon: { $codeRef: "ComplianceIcon.default" },
       card: { $codeRef: "ComplianceOnboardingCard.ComplianceOnboardingCard" },
       form: { $codeRef: "ComplianceOnboardingForm.default" },
-      category: "ocm-resource-manager.module",
+      category: "ocm-fleet.module",
     }),
   ],
   sharedModules,

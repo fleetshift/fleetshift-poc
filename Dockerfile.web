@@ -54,15 +54,15 @@ ENV NX_SELF_HOSTED_REMOTE_CACHE_SERVER=${NX_SELF_HOSTED_REMOTE_CACHE_SERVER} \
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/build/node_modules \
     npm install --include-workspace-root \
-    -w @ocm-resource-manager/common \
-    -w @ocm-resource-manager/build-utils \
-    -w @ocm-resource-manager/web \
-    -w @ocm-resource-manager/mock-ui-plugins \
-    -w @ocm-resource-manager/kind-plugin \
+    -w @ocm-fleet/common \
+    -w @ocm-fleet/build-utils \
+    -w @ocm-fleet/web \
+    -w @ocm-fleet/mock-ui-plugins \
+    -w @ocm-fleet/kind-plugin \
     && ulimit -n 65536 \
     && NX=./node_modules/.bin/nx \
     && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
-    && $NX run-many --target=build --projects=plugins,@ocm-resource-manager/kind-plugin \
+    && $NX run-many --target=build --projects=plugins,@ocm-fleet/kind-plugin \
     && node tools/generate-plugin-registry.mjs \
     && $NX run web:build \
     && node tools/merge-web.mjs

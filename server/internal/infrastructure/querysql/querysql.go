@@ -111,7 +111,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // CELSQLCompiler compiles a CEL filter into a parameterized SQL

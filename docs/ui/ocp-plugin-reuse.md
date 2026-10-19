@@ -1,6 +1,6 @@
 # OpenShift Console Plugin Re-use
 
-Re-using existing OpenShift console plugins in the OCM Resource Manager console is an optional integration under the common capability model. These plugins already contain mature, production-tested UI for cluster capabilities (monitoring, networking, storage, etc.) and rewriting them from scratch would be wasteful.
+Re-using existing OpenShift console plugins in the OCM Fleet console is an optional integration under the common capability model. These plugins already contain mature, production-tested UI for cluster capabilities (monitoring, networking, storage, etc.) and rewriting them from scratch would be wasteful.
 
 ## The Problem
 
@@ -30,7 +30,7 @@ In the platform console, a plugin may render for one specific cluster or across 
 
 OCP console plugins register extensions via `console.openshift.io/v1` ConsolePlugin manifests with console-specific extension types (`console.page/route`, `console.navigation/section`, etc.).
 
-OCM Resource Manager defines its own extension types (`ocm-resource-manager.nav-item`, `ocm-resource-manager.deployment-detail-tab`, etc.) loaded via Module Federation and Scalprum.
+OCM Fleet defines its own extension types (`ocm-fleet.nav-item`, `ocm-fleet.deployment-detail-tab`, etc.) loaded via Module Federation and Scalprum.
 
 For re-use, either:
 - The plugin provides a platform-compatible extension manifest alongside its OCP one, or

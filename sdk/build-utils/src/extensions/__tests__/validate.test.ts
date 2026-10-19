@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type {
   ClusterProviderProperties,
+  FleetExtension,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
-  ResourceManagerExtension,
   SetupProperties,
 } from "../types";
 import {
@@ -324,7 +324,7 @@ describe("validateExtensionSet", () => {
   it("accepts valid extension set", () => {
     expect(() =>
       validateExtensionSet(
-        [{ type: "ocm-resource-manager.module", properties: validModule }],
+        [{ type: "ocm-fleet.module", properties: validModule }],
         exposedModules,
       ),
     ).not.toThrow();
@@ -334,9 +334,9 @@ describe("validateExtensionSet", () => {
     expect(() =>
       validateExtensionSet(
         [
-          { type: "ocm-resource-manager.module", properties: validModule },
+          { type: "ocm-fleet.module", properties: validModule },
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: { ...validModule, label: "Different" },
           },
         ],
@@ -350,7 +350,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               component: { $codeRef: "MissingModule.default" },
@@ -367,7 +367,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "acme.custom-widget" as unknown as ResourceManagerExtension["type"],
+            type: "acme.custom-widget" as unknown as FleetExtension["type"],
             properties: { id: "my-widget", label: "My Widget" },
           },
         ],
@@ -381,7 +381,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "acme.custom" as unknown as ResourceManagerExtension["type"],
+            type: "acme.custom" as unknown as FleetExtension["type"],
             properties: { id: "", label: "" },
           },
         ],
@@ -395,9 +395,8 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module",
-            properties:
-              null as unknown as ResourceManagerExtension["properties"],
+            type: "ocm-fleet.module",
+            properties: null as unknown as FleetExtension["properties"],
           },
         ],
         {},
@@ -410,11 +409,11 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module-group",
+            type: "ocm-fleet.module-group",
             properties: validModuleGroup,
           },
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "navigation",
@@ -432,7 +431,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "navigation",
@@ -450,11 +449,11 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module-group",
+            type: "ocm-fleet.module-group",
             properties: validModuleGroup,
           },
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "nav",
@@ -463,7 +462,7 @@ describe("validateExtensionSet", () => {
             },
           },
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "nav",
@@ -482,11 +481,11 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module-group",
+            type: "ocm-fleet.module-group",
             properties: { ...validModuleGroup, id: "group-a" },
           },
           {
-            type: "ocm-resource-manager.module-group",
+            type: "ocm-fleet.module-group",
             properties: {
               ...validModuleGroup,
               id: "group-b",
@@ -494,7 +493,7 @@ describe("validateExtensionSet", () => {
             },
           },
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "overview",
@@ -503,7 +502,7 @@ describe("validateExtensionSet", () => {
             },
           },
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "overview",
@@ -522,7 +521,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-resource-manager.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "",

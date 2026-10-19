@@ -202,7 +202,7 @@ func TestAuthMethodSnapshot_RoundTrip(t *testing.T) {
 		Type: AuthMethodTypeOIDC,
 		OIDC: &OIDCConfig{
 			IssuerURL: "https://accounts.example.com",
-			Audience:  "ocm-resource-manager",
+			Audience:  "resource-manager",
 		},
 	}
 

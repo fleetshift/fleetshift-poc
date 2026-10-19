@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/store"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/store"
 )
 
 // rmCache is a controller-runtime cache.Cache backed by stock

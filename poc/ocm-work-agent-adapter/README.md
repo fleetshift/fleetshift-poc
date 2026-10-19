@@ -1,6 +1,6 @@
 # OCM Work-Agent Adapter POC
 
-This is a standalone Go proof of concept for reusing Open Cluster Management's (OCM's) work agent within the OCM Resource Manager experiment:
+This is a standalone Go proof of concept for reusing Open Cluster Management's (OCM's) work agent within the OCM Fleet experiment:
 
 Can the resource manager server project its delivery output into an OCM-shaped compatibility view and then reuse the spoke-side `work-agent` shape, without adopting the whole `klusterlet` or persisting extra OCM state?
 

@@ -27,7 +27,7 @@ const file_ocm_v1alpha_fleetlet_service_proto_rawDesc = "" +
 	"\"ocm/v1alpha/fleetlet_service.proto\x12\vocm.v1alpha\x1a\x1focm/v1alpha/control_event.proto\x1a%ocm/v1alpha/control_instruction.proto\x1a\x1focm/v1alpha/deliver_event.proto\x1a%ocm/v1alpha/deliver_instruction.proto2\xa7\x01\n" +
 	"\x0fFleetletService\x12I\n" +
 	"\aControl\x12\x19.ocm.v1alpha.ControlEvent\x1a\x1f.ocm.v1alpha.ControlInstruction(\x010\x01\x12I\n" +
-	"\aDeliver\x12\x19.ocm.v1alpha.DeliverEvent\x1a\x1f.ocm.v1alpha.DeliverInstruction(\x010\x01BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\aDeliver\x12\x19.ocm.v1alpha.DeliverEvent\x1a\x1f.ocm.v1alpha.DeliverInstruction(\x010\x01BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var file_ocm_v1alpha_fleetlet_service_proto_goTypes = []any{
 	(*ControlEvent)(nil),       // 0: ocm.v1alpha.ControlEvent

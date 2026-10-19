@@ -2,7 +2,7 @@
 
 ## What this doc covers
 
-The trust machinery used to authenticate OCM Resource Manager delivery evidence:
+The trust machinery used to authenticate OCM Fleet delivery evidence:
 
 - bootstrapped and subsequently updated authority configuration
 - canonical principal identity and multi-tenant authority partitioning
@@ -52,7 +52,7 @@ root.
 
 ## Overview
 
-OCM Resource Manager deliveries often outlive the credential or interactive session that
+OCM Fleet deliveries often outlive the credential or interactive session that
 created them, and they cross a resource manager that the target should not have
 to trust as the author of user or workload intent. The target therefore needs
 durable cryptographic evidence answering three questions:
@@ -213,7 +213,7 @@ appropriate provider-wide scope.
 ### Authority registry
 
 Trust configuration is organized by canonical **principal authority**, not by
-OCM Resource Manager tenant and not by a globally named trust-domain object.
+OCM Fleet tenant and not by a globally named trust-domain object.
 
 Conceptually:
 
@@ -260,7 +260,7 @@ Credential methods under the authority describe validation of live JWTs,
 X.509 credentials, and request-signing key bindings independently from the
 provenance profiles used for durable evidence.
 
-One authority config may serve one OCM Resource Manager tenant or many tenant
+One authority config may serve one OCM Fleet tenant or many tenant
 partitions. A provider-operated multi-tenant IdP or CA therefore does not
 require every tenant to duplicate the same trust configuration.
 
@@ -281,10 +281,10 @@ the unpartitioned tenant under that authority.
 
 The configured credential or provenance implementation derives the partition
 from verified material: for example, a JWT claim, an X.509 OID or SAN component,
-or authenticated continuity state. It need not be an OCM Resource Manager-specific claim.
+or authenticated continuity state. It need not be an OCM Fleet-specific claim.
 Evidence hints and RM labels do not establish tenant identity.
 
-Internal OCM Resource Manager tenant IDs remain local to the resource manager for storage,
+Internal OCM Fleet tenant IDs remain local to the resource manager for storage,
 routing, and ordinary permission evaluation. The RM binds an external tenant
 identity to that local ID. Producer configuration, signed delivery scopes, and
 target provisioning use the external identity; a delivery agent does not need
@@ -716,7 +716,7 @@ locates the authority config. The target verifies the Fulcio chain and OIDC
 identity extensions, obtains Alice's canonical OIDC principal and tenant
 partition, rechecks the policy for that intent, and compares the external
 tenant identity with the signed scope and the target's provisioned tenant A.
-The target does not translate that identity to an internal OCM Resource Manager ID.
+The target does not translate that identity to an internal OCM Fleet ID.
 
 The signed intent names a provider addon as its manifest strategy. That addon
 signs the exact manifests using its provider workload authority, such as a
@@ -902,7 +902,7 @@ Examples:
 - Fulcio keyless normally obtains a short-lived certificate externally during
   signing and needs no resource manager key-registration operation.
 
-Common OCM Resource Manager API conventions still apply: authenticate the caller,
+Common OCM Fleet API conventions still apply: authenticate the caller,
 perform RM authorization, route through authenticated authority config, use
 idempotency keys where needed, and integrate with durable workflows and the
 evidence log where ordering has security meaning. The provenance type or
@@ -1278,7 +1278,7 @@ wall-clock time.
 ### Sigstore
 
 The initial Sigstore profile authenticates a standard Bundle v0.3 over the
-exact OCM Resource Manager assertion, as defined in
+exact OCM Fleet assertion, as defined in
 [Initial evidence encodings](#initial-evidence-encodings). A configured Fulcio
 CA authenticates the certificate and its OIDC identity extensions. A
 configured RFC 3161 TSA supplies trusted signing time for historical

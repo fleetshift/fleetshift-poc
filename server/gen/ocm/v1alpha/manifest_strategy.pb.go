@@ -136,7 +136,7 @@ const file_ocm_v1alpha_manifest_strategy_proto_rawDesc = "" +
 	"\tmanifests\x18\x02 \x03(\v2\x15.ocm.v1alpha.ManifestB\x03\xe0A\x01R\tmanifests\"-\n" +
 	"\x04Type\x12\x14\n" +
 	"\x10TYPE_UNSPECIFIED\x10\x00\x12\x0f\n" +
-	"\vTYPE_INLINE\x10\x01BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\vTYPE_INLINE\x10\x01BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_manifest_strategy_proto_rawDescOnce sync.Once

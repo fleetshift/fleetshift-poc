@@ -1,4 +1,4 @@
-# OCM Resource Manager controller-runtime POC
+# OCM Fleet controller-runtime POC
 
 Standalone proof of concept: run **controller-runtime** reconcilers against
 **platform delivery targets** instead of kube-apiserver, using

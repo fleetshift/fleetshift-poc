@@ -37,10 +37,10 @@ if (argv.includes("--help") || argv.includes("-h")) {
   );
   process.exit(0);
 }
-const namespace = value("--namespace", "ocm-resource-manager");
+const namespace = value("--namespace", "ocm-fleet");
 const routeName = value("--route-name", "grpc");
-const issuerName = value("--issuer-name", "ocm-resource-manager-grpc-letsencrypt-prod");
-const secretName = value("--tls-secret-name", "ocm-resource-manager-grpc-route-tls");
+const issuerName = value("--issuer-name", "ocm-fleet-grpc-letsencrypt-prod");
+const secretName = value("--tls-secret-name", "ocm-fleet-grpc-route-tls");
 const backupNamespace = "cert-manager-operator";
 const email = value("--acme-email", process.env.ACME_EMAIL);
 const fresh = argv.includes("--fresh-cert");
@@ -69,13 +69,13 @@ if (!host)
   );
 if (routeHost && routeHost !== host)
   fail(`--route-host (${routeHost}) does not match live Route host (${host}).`);
-await $`oc get svc ocm-resource-manager-server -n ${namespace}`;
+await $`oc get svc resource-manager -n ${namespace}`;
 const h2c = (
-  await $`oc get svc ocm-resource-manager-server -n ${namespace} -o jsonpath={.spec.ports[?(@.name=="grpc")].appProtocol}`.nothrow()
+  await $`oc get svc resource-manager -n ${namespace} -o jsonpath={.spec.ports[?(@.name=="grpc")].appProtocol}`.nothrow()
 ).stdout.trim();
 if (h2c !== "kubernetes.io/h2c")
   fail(
-    "Service ocm-resource-manager-server grpc port must have appProtocol=kubernetes.io/h2c.",
+    "Service resource-manager grpc port must have appProtocol=kubernetes.io/h2c.",
   );
 const ingress =
   await $`oc get ingresscontrollers.operator.openshift.io/default -n openshift-ingress-operator -o jsonpath={.metadata.annotations.ingress\.operator\.openshift\.io/default-enable-http2}`.nothrow();
@@ -151,7 +151,7 @@ if (!fresh && !existing.ok && backup.ok) {
   await $({ input: JSON.stringify(secret) })`oc apply -n ${namespace} -f -`;
 }
 await apply("certificate.yaml");
-await $`oc wait --for=condition=Ready certificate/ocm-resource-manager-grpc-route -n ${namespace} --timeout=600s`;
+await $`oc wait --for=condition=Ready certificate/ocm-fleet-grpc-route -n ${namespace} --timeout=600s`;
 await $`oc get secret ${secretName} -n ${namespace}`;
 await $`oc patch route ${routeName} -n ${namespace} --type=merge -p ${'{"spec":{"tls":{"certificate":null,"key":null,"caCertificate":null,"externalCertificate":{"name":"' + secretName + '"}}}}'}`;
 await sleep(5000);

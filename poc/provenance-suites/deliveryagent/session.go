@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/stolostron/ocm-resource-manager/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 type nodePhase uint8

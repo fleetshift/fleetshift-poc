@@ -18,14 +18,14 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kind"
-	kubeaddon "github.com/stolostron/ocm-resource-manager/server/internal/addon/kubernetes"
-	"github.com/stolostron/ocm-resource-manager/server/internal/application"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/delivery"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	kubeaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // containerHostAddr returns the hostname (or IP) that kind containers
@@ -173,9 +173,9 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		Caller: &domain.SubjectClaims{
 			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
 		},
-		Audience: []domain.Audience{"ocm-resource-manager"},
+		Audience: []domain.Audience{"resource-manager"},
 	}
-	res := createOIDCCluster(t, "ocm-resource-manager-oidc-test", auth)
+	res := createOIDCCluster(t, "ocm-fleet-oidc-test", auth)
 
 	t.Run("Auth", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -290,7 +290,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 					Issuer:  res.IssuerURL,
 				},
 			},
-			Audience: []domain.Audience{"ocm-resource-manager"},
+			Audience: []domain.Audience{"resource-manager"},
 			Token:    domain.RawToken(aliceToken),
 		}
 
@@ -325,7 +325,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 					Issuer:  res.IssuerURL,
 				},
 			},
-			Audience: []domain.Audience{"ocm-resource-manager"},
+			Audience: []domain.Audience{"resource-manager"},
 			Token:    domain.RawToken(bobToken),
 		}
 
@@ -379,7 +379,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 
-	const resourceID = "ocm-resource-manager-mr-oidc"
+	const resourceID = "ocm-fleet-mr-oidc"
 	kindName := encodedKindName(resourceID)
 
 	t.Cleanup(func() {
@@ -393,7 +393,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	hostAddr, extraSANIPs := containerHostAddr(t)
 	idp := oidctest.Start(t,
 		oidctest.WithListenAddress("0.0.0.0:0"),
-		oidctest.WithAudience("ocm-resource-manager"),
+		oidctest.WithAudience("resource-manager"),
 		oidctest.WithExtraSANIPs(extraSANIPs...),
 	)
 	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostAddr, idp.Port()))
@@ -480,7 +480,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 				Issuer:  dockerIssuer,
 			},
 		},
-		Audience: []domain.Audience{"ocm-resource-manager"},
+		Audience: []domain.Audience{"resource-manager"},
 		Token:    "platform-token",
 	})
 

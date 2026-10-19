@@ -146,7 +146,7 @@ When no attestation is provided, the delivery falls through to passthrough mode.
 
 ### Server-side apply
 
-Both modes use the same apply path. Manifests are applied sequentially via server-side apply with field manager `ocm-resource-manager`. Progress events are reported per manifest. A failure on any manifest stops the delivery. Kubernetes 401/403 errors map to `AuthFailed`; all other errors map to `Failed`.
+Both modes use the same apply path. Manifests are applied sequentially via server-side apply with field manager `resource-manager`. Progress events are reported per manifest. A failure on any manifest stops the delivery. Kubernetes 401/403 errors map to `AuthFailed`; all other errors map to `Failed`.
 
 ### Removal
 

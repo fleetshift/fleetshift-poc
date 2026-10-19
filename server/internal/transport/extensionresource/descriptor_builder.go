@@ -13,9 +13,9 @@ import (
 	// Blank import ensures attestation.proto is registered in
 	// protoregistry.GlobalFiles so the dynamic descriptor builder
 	// can resolve the Provenance message type.
-	_ "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha"
+	_ "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // ExtensionServiceDescriptors holds the compiled descriptors for a dynamically-built

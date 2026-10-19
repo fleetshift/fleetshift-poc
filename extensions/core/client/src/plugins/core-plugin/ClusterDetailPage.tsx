@@ -4,14 +4,14 @@ import type {
   ClusterDetailTabProps,
   ClusterResource,
   ResourceResult,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import {
   createApiClient,
   createResourceApi,
   extractClusterId,
   PluginLink,
   usePluginNavigate,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import type { Extension } from "@openshift/dynamic-plugin-sdk";
 import {
   useExtensions,
@@ -77,11 +77,11 @@ interface ResolvedTab {
   Component: ComponentType<ClusterDetailTabProps>;
 }
 
-const CLUSTER_DETAIL_TAB_TYPE = "ocm-resource-manager.cluster-detail-tab";
+const CLUSTER_DETAIL_TAB_TYPE = "ocm-fleet.cluster-detail-tab";
 
 function isClusterDetailTabExtension(
   e: Extension,
-): e is Extension<"ocm-resource-manager.cluster-detail-tab"> {
+): e is Extension<"ocm-fleet.cluster-detail-tab"> {
   return e.type === CLUSTER_DETAIL_TAB_TYPE;
 }
 
@@ -98,7 +98,7 @@ function OverviewTab({
   const isKind = service === "kind.open-cluster-management.io";
 
   return (
-    <div className="ocm-rm-core-overview-layout">
+    <div className="ocm-fleet-core-overview-layout">
       <Grid hasGutter>
         <GridItem span={4}>
           <Card isCompact isFullHeight>
@@ -395,7 +395,7 @@ export default function ClusterDetailPage() {
     ));
 
   return (
-    <div className="ocm-rm-core-detail-layout">
+    <div className="ocm-fleet-core-detail-layout">
       <PageHeader
         title={clusterName}
         subtitle={`Created ${formatTime(result.resource.createTime)}`}

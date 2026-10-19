@@ -16,7 +16,7 @@
         "{projectRoot}/tsconfig*.json"
       ],
       "outputs": ["{projectRoot}/dist"],
-      "dependsOn": ["ocm-resource-manager:web:generate-icons"]
+      "dependsOn": ["ocm-fleet:web:generate-icons"]
     },
     "lint": {
       "executor": "@nx/eslint:lint",

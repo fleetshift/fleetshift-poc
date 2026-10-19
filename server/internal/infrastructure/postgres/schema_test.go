@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 func TestResourceRepresentationsSchema_DoesNotExposeLegacyDeletedAt(t *testing.T) {

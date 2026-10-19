@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createModule, createModuleGroup, createSetup } from "../builders";
-import { ResourceManagerPlugin } from "../ResourceManagerPlugin";
+import { FleetPlugin } from "../FleetPlugin";
 
 const { applySpy } = vi.hoisted(() => ({ applySpy: vi.fn() }));
 
@@ -31,11 +31,11 @@ const baseOptions = {
   pluginManifestFilename: "plugins/test/test-plugin-manifest.json",
 };
 
-describe("ResourceManagerPlugin", () => {
+describe("FleetPlugin", () => {
   it("constructs with valid extensions", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           extensions: [
             createModule({
@@ -52,7 +52,7 @@ describe("ResourceManagerPlugin", () => {
   it("throws when CodeRef references missing exposed module", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           extensions: [
             createModule({
@@ -69,7 +69,7 @@ describe("ResourceManagerPlugin", () => {
   it("throws on duplicate extension IDs", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           pluginMetadata: {
             ...baseOptions.pluginMetadata,
@@ -100,7 +100,7 @@ describe("ResourceManagerPlugin", () => {
   it("accepts mixed extension types", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           pluginMetadata: {
             ...baseOptions.pluginMetadata,
@@ -133,7 +133,7 @@ describe("ResourceManagerPlugin", () => {
   it("constructs with module group and grouped modules", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           pluginMetadata: {
             ...baseOptions.pluginMetadata,
@@ -163,7 +163,7 @@ describe("ResourceManagerPlugin", () => {
   it("throws when module references non-existent group", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           extensions: [
             createModule({
@@ -181,7 +181,7 @@ describe("ResourceManagerPlugin", () => {
   it("accepts empty extensions array", () => {
     expect(
       () =>
-        new ResourceManagerPlugin({
+        new FleetPlugin({
           ...baseOptions,
           extensions: [],
         }),
@@ -190,7 +190,7 @@ describe("ResourceManagerPlugin", () => {
 
   it("delegates apply to inner plugin", () => {
     applySpy.mockClear();
-    const plugin = new ResourceManagerPlugin({
+    const plugin = new FleetPlugin({
       ...baseOptions,
       extensions: [],
     });

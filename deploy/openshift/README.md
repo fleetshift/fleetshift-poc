@@ -1,6 +1,6 @@
 # OpenShift Deployment Example
 
-This example deploys OCM Resource Manager to an OpenShift cluster using Kustomize manifests. Everything runs in the `ocm-resource-manager` namespace. For a local Podman/Kind setup, see the [Podman stack guide](../podman/README.md).
+This example deploys OCM Fleet to an OpenShift cluster using Kustomize manifests. Everything runs in the `ocm-fleet` namespace. For a local Podman/Kind setup, see the [Podman stack guide](../podman/README.md).
 
 ## What gets deployed
 
@@ -14,7 +14,7 @@ This example deploys OCM Resource Manager to an OpenShift cluster using Kustomiz
 
 - `oc` CLI installed and logged into an OpenShift cluster
 - External Keycloak deployed and accessible (see [deploy/openshift/keycloak/README.md](keycloak/README.md))
-- Images pushed to quay.io (`quay.io/stolostron/ocm-resource-manager-server:latest`, `quay.io/stolostron/ocm-resource-manager-web:latest`)
+- Images pushed to quay.io (`quay.io/stolostron/ocm-fleet-server:latest`, `quay.io/stolostron/ocm-fleet-web:latest`)
 - `.env` configured at the repo root (copy from `.env.template`)
 
 ## Quick Start
@@ -39,10 +39,10 @@ Tasks for this deployment use the `deploy:openshift:*` Nx targets.
 
 | Task | Description |
 |------|-------------|
-| `deploy:openshift:deploy` | Deploy OCM Resource Manager (manifests and images) |
+| `deploy:openshift:deploy` | Deploy OCM Fleet (manifests and images) |
 | `deploy:openshift:teardown` | Remove all resources and namespace |
 | `deploy:openshift:status` | Show pods, services, routes; warn if image override is active |
-| `deploy:openshift:logs` | Tail logs from ocm-resource-manager-server (all containers) |
+| `deploy:openshift:logs` | Tail logs from resource-manager (all containers) |
 | `deploy:openshift:set-image TAG=<tag>` | Override the server image via ImageStream (e.g. PR testing) |
 | `deploy:openshift:reset-image` | Restore default `:latest` tag with scheduled import |
 | `deploy:openshift:import-images` | Force reimport of images from quay.io |
@@ -82,7 +82,7 @@ ImageStreams use `importPolicy.scheduled: true` for automatic periodic pulls. Th
 
 ## gRPC Route Certificate
 
-External gRPC access requires HTTP/2, which needs a trusted certificate on the Route. After deploying OCM Resource Manager, run the certificate workflow as a post-deploy step:
+External gRPC access requires HTTP/2, which needs a trusted certificate on the Route. After deploying OCM Fleet, run the certificate workflow as a post-deploy step:
 
 ```bash
 npx nx run deploy:openshift:grpc-cert:deploy -- ACME_EMAIL=you@example.com
@@ -97,7 +97,7 @@ its OIDC bootstrap flags when the AuthMethod store was empty. Configure local
 Fleetctl client settings separately (fleetctl auth setup), then login:
 
 ```bash
-GRPC_ROUTE=$(oc get route grpc -n ocm-resource-manager -o jsonpath='{.spec.host}')
+GRPC_ROUTE=$(oc get route grpc -n ocm-fleet -o jsonpath='{.spec.host}')
 
 # Login and use (after local Fleetctl OIDC client config exists)
 bin/fleetctl auth login

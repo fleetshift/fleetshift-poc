@@ -7,9 +7,9 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	deliveryv1 "github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/contract"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/platform"
+	deliveryv1 "github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/contract"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/platform"
 )
 
 func TestStatusMirrorReportsProgressThenTerminal(t *testing.T) {

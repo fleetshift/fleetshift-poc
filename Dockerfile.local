@@ -1,4 +1,4 @@
-FROM localhost/ocm-resource-manager-server:latest
+FROM localhost/ocm-fleet-server:latest
 
 ARG KIND_VERSION=v0.31.0
 ARG KUBECTL_VERSION=v1.33.0

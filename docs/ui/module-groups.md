@@ -6,7 +6,7 @@
 
 ## Context
 
-OCM Resource Manager navigation is flat — each `ocm-resource-manager.module` gets a top-level `NavItem` in the sidebar and a route at `/{pluginKey}/{moduleId}`. As the number of plugins grows, the nav becomes an undifferentiated list. Plugins like `settings-plugin` already declare multiple modules (Navigation, Authentication, Extensions) that logically belong together but render as three separate nav items.
+OCM Fleet navigation is flat — each `ocm-fleet.module` gets a top-level `NavItem` in the sidebar and a route at `/{pluginKey}/{moduleId}`. As the number of plugins grows, the nav becomes an undifferentiated list. Plugins like `settings-plugin` already declare multiple modules (Navigation, Authentication, Extensions) that logically belong together but render as three separate nav items.
 
 We need **expandable nav groups** — a bucket of related modules that collapses and expands in the sidebar, with nested routes under a shared URL prefix. This also impacts search (hierarchical result grouping) and breadcrumbs.
 
@@ -17,7 +17,7 @@ We need **expandable nav groups** — a bucket of related modules that collapses
 3. **Backward-compatible.** Modules without a `group` stay top-level. Existing plugins work unchanged.
 4. **User reorder (existing).** Users can already reorder nav items via Settings. This must work with groups — reorder groups at the top level and modules within groups. Search and breadcrumbs follow the active (user-customized) layout. Creating custom groups or moving modules across plugin boundaries is a future extension.
 
-## New Extension Type: `ocm-resource-manager.module-group`
+## New Extension Type: `ocm-fleet.module-group`
 
 A module group declares a navigational container for related modules within the same plugin.
 
@@ -30,12 +30,12 @@ Module groups have no extra properties beyond `BaseExtensionProperties` (id, lab
 Added to the extension type registry:
 
 ```typescript
-const OCM_RM_EXTENSION_TYPES = [
-  "ocm-resource-manager.module-group",   // new
-  "ocm-resource-manager.module",
-  "ocm-resource-manager.setup",
-  "ocm-resource-manager.cluster-provider",
-  "ocm-resource-manager.onboarding-action",
+const OCM_FLEET_EXTENSION_TYPES = [
+  "ocm-fleet.module-group",   // new
+  "ocm-fleet.module",
+  "ocm-fleet.setup",
+  "ocm-fleet.cluster-provider",
+  "ocm-fleet.onboarding-action",
 ] as const;
 ```
 
@@ -44,14 +44,14 @@ const OCM_RM_EXTENSION_TYPES = [
 ```typescript
 function createModuleGroup(
   props: BaseExtensionProperties & ModuleGroupExtras
-): ResourceManagerExtension<"ocm-resource-manager.module-group", ModuleGroupExtras>;
+): FleetExtension<"ocm-fleet.module-group", ModuleGroupExtras>;
 ```
 
 ### Manifest output
 
 ```json
 {
-  "type": "ocm-resource-manager.module-group",
+  "type": "ocm-fleet.module-group",
   "properties": {
     "id": "settings",
     "label": "Settings",
@@ -62,16 +62,16 @@ function createModuleGroup(
 }
 ```
 
-## Updated `ocm-resource-manager.module`
+## Updated `ocm-fleet.module`
 
-Modules gain an optional `group` field referencing a `ocm-resource-manager.module-group` id **within the same plugin**.
+Modules gain an optional `group` field referencing a `ocm-fleet.module-group` id **within the same plugin**.
 
 ```typescript
 type ModuleExtras = {
   component: EncodedCodeRef;
   icon: EncodedCodeRef;
   extensionPoints?: Record<string, ExtensionPointDeclaration>;
-  /** References a ocm-resource-manager.module-group id in the same plugin. */
+  /** References a ocm-fleet.module-group id in the same plugin. */
   group?: string;
 };
 ```
@@ -116,7 +116,7 @@ The `{groupId}` replaces `{pluginKey}` as the URL namespace for grouped modules.
 Before (current — `settings-plugin`):
 
 ```typescript
-const SettingsPlugin = new ResourceManagerPlugin({
+const SettingsPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "settings",
@@ -142,7 +142,7 @@ Routes: `/settings/settings`, `/settings/extensions`
 After:
 
 ```typescript
-const SettingsPlugin = new ResourceManagerPlugin({
+const SettingsPlugin = new FleetPlugin({
   extensions: [
     createModuleGroup({
       id: "settings",
@@ -177,9 +177,9 @@ Routes: `/settings/navigation`, `/settings/extensions`
 
 ## Build-Time Validation
 
-`ResourceManagerPlugin` validates at build time:
+`FleetPlugin` validates at build time:
 
-1. **Group exists.** If a module declares `group: "foo"`, a `ocm-resource-manager.module-group` with `id: "foo"` must exist in the same plugin's `extensions` array. Build fails otherwise.
+1. **Group exists.** If a module declares `group: "foo"`, a `ocm-fleet.module-group` with `id: "foo"` must exist in the same plugin's `extensions` array. Build fails otherwise.
 2. **No cross-plugin groups.** Groups are scoped to the plugin. There is no mechanism to reference a group from another plugin.
 3. **Unique ids within group.** Two modules in the same group cannot share an id.
 4. **Group id format.** Must match `/^[a-z][a-z0-9-]*$/` (same as module ids) since it becomes a URL segment.
@@ -222,7 +222,7 @@ Routes: `/settings/navigation`, `/settings/extensions`
 }
 ```
 
-The backend's `generateNavLayout()` function scans manifests for `ocm-resource-manager.module-group` extensions, collects modules with matching `group` fields, and nests them under the group entry. Ungrouped modules remain as top-level `"type": "page"` entries.
+The backend's `generateNavLayout()` function scans manifests for `ocm-fleet.module-group` extensions, collects modules with matching `group` fields, and nests them under the group entry. Ungrouped modules remain as top-level `"type": "page"` entries.
 
 `pluginPages` is unchanged — it still lists every module as a flat page entry (id, title, path, scope, module, pluginKey). The grouping is a nav concern, not a routing concern. The shell's router registers all pages flat; the nav component renders the hierarchy from `navLayout`.
 
@@ -290,9 +290,9 @@ interface SearchEntry {
 
 | Extension type | `category` | `group` | `feature` | `route` |
 |----------------|-----------|---------|-----------|---------|
-| `ocm-resource-manager.module-group` | `nav-group` | — | — | `/{groupId}` (or first child) |
-| `ocm-resource-manager.module` (grouped) | `nav` | group id | `{pluginKey}.{moduleId}` | `/{groupId}/{moduleId}` |
-| `ocm-resource-manager.module` (ungrouped) | `nav` | — | `{pluginKey}.{moduleId}` | `/{pluginKey}/{moduleId}` |
+| `ocm-fleet.module-group` | `nav-group` | — | — | `/{groupId}` (or first child) |
+| `ocm-fleet.module` (grouped) | `nav` | group id | `{pluginKey}.{moduleId}` | `/{groupId}/{moduleId}` |
+| `ocm-fleet.module` (ungrouped) | `nav` | — | `{pluginKey}.{moduleId}` | `/{pluginKey}/{moduleId}` |
 | Other extensions | `extension` | inherited from parent module | parent feature id | composed from parent |
 
 ### Search result rendering
@@ -327,7 +327,7 @@ With hierarchical routes, breadcrumbs follow the group → module → extension 
 | `/core/clusters` | Clusters (ungrouped, no parent) |
 | `/core/clusters?create=example` | Clusters > Example provider |
 
-The shell derives breadcrumbs from `navLayout` + current route. Group label comes from the `ocm-resource-manager.module-group` metadata. Module label comes from the `ocm-resource-manager.module` metadata.
+The shell derives breadcrumbs from `navLayout` + current route. Group label comes from the `ocm-fleet.module-group` metadata. Module label comes from the `ocm-fleet.module` metadata.
 
 ## `CORE_EXTENSION_META` and `navSection`
 
@@ -366,14 +366,14 @@ The flat `string[]` storage works for groups. Groups are treated as atomic dragg
 
 ### Phase 1: Contract (build-utils)
 
-1. Add `ModuleGroupExtras` type and `"ocm-resource-manager.module-group"` to `OCM_RM_EXTENSION_TYPES`.
+1. Add `ModuleGroupExtras` type and `"ocm-fleet.module-group"` to `OCM_FLEET_EXTENSION_TYPES`.
 2. Add optional `group?: string` to `ModuleExtras`.
 3. Add `createModuleGroup()` builder function.
-4. Add build-time validation in `ResourceManagerPlugin`.
+4. Add build-time validation in `FleetPlugin`.
 
-### Phase 2: Backend (ocm-resource-manager)
+### Phase 2: Backend (ocm-fleet)
 
-1. Update `generatePluginPages()` to handle `ocm-resource-manager.module-group` extensions and `group` properties.
+1. Update `generatePluginPages()` to handle `ocm-fleet.module-group` extensions and `group` properties.
 2. Update `generateNavLayout()` to emit nested `{ type: "group", children: [...] }` entries.
 3. Route generation: grouped modules get `/{groupId}/{moduleId}` paths.
 

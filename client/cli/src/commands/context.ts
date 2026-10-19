@@ -52,7 +52,6 @@ export function serverForArgs(args: Parameters<typeof flagString>[0]): string {
   return flagString(
     args,
     "server",
-    process.env.FLEETCTL_SERVER ||
-      "https://ocm-resource-manager.localhost:8085",
+    process.env.FLEETCTL_SERVER || "https://ocm-fleet.localhost:8085",
   );
 }

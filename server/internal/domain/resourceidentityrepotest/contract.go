@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func collectAliases(set domain.AliasSet) []domain.Alias {
@@ -517,7 +517,7 @@ func Run(t *testing.T, factory Factory) {
 
 		r := domain.NewPlatformResource(name, map[string]string{"env": "prod"}, now)
 		projectID, _ := domain.NewAlias("gcp", "project_id", "full-identity-project")
-		clusterID, _ := domain.NewAlias("ocm-resource-manager", "cluster_id", "full-identity-cluster")
+		clusterID, _ := domain.NewAlias("resource-manager", "cluster_id", "full-identity-cluster")
 		if err := r.AddAlias(projectID); err != nil {
 			t.Fatalf("AddAlias project_id: %v", err)
 		}

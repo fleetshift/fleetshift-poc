@@ -9,7 +9,7 @@ import (
 )
 
 func TestOpenWithPragmas_BusyTimeoutAppliedToEveryConnection(t *testing.T) {
-	db, err := openWithPragmas(filepath.Join(t.TempDir(), "ocm-resource-manager.db"))
+	db, err := openWithPragmas(filepath.Join(t.TempDir(), "resource-manager.db"))
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

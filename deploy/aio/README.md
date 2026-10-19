@@ -1,6 +1,6 @@
-# OCM Resource Manager all-in-one image
+# OCM Fleet all-in-one image
 
-Single container (`quay.io/stolostron/ocm-resource-manager`) with API, baked-in UI, and
+Single container (`quay.io/stolostron/ocm-fleet`) with API, baked-in UI, and
 peer Dex under s6-overlay. Documented and tested with **podman**. To launch
 this image through the Podman compose stack, see
 [deploy/podman/](../podman/README.md).
@@ -22,10 +22,10 @@ via `Dockerfile.aio`. To reassemble from already-built component tags:
 
 ```bash
 podman build -f Dockerfile.aio \
-  --build-arg SERVER_IMAGE=localhost/ocm-resource-manager-server-local:latest \
-  --build-arg WEB_IMAGE=localhost/ocm-resource-manager-web:latest \
-  -t localhost/ocm-resource-manager:latest \
-  -t quay.io/stolostron/ocm-resource-manager:latest .
+  --build-arg SERVER_IMAGE=localhost/ocm-fleet-server-local:latest \
+  --build-arg WEB_IMAGE=localhost/ocm-fleet-web:latest \
+  -t localhost/ocm-fleet:latest \
+  -t quay.io/stolostron/ocm-fleet:latest .
 ```
 
 ## Quick start (Dex-on)
@@ -33,7 +33,7 @@ podman build -f Dockerfile.aio \
 ### Podman
 
 Bare run needs **no** OIDC flags. Packaging starts peer Dex behind the AIO TLS
-edge at `https://ocm-resource-manager.localhost:8085/idp` and fills AuthMethod/UI
+edge at `https://ocm-fleet.localhost:8085/idp` and fills AuthMethod/UI
 defaults for `serve`. Foreground is the demo-friendly launch: startup stays
 quiet until the public endpoint is ready, then prints a welcome block with the
 URL and demo credentials. Press Ctrl+C to stop.
@@ -42,14 +42,14 @@ URL and demo credentials. Press Ctrl+C to stop.
 podman run \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  quay.io/stolostron/ocm-resource-manager:latest
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 Detached is the same image with `-d`; `podman logs` still shows the welcome
 block after readiness (no terminal color codes).
 
-Open https://ocm-resource-manager.localhost:8085 — the exact path `/` redirects
-to `/app/`. The welcome banner is printed only after `https://ocm-resource-manager.localhost:8085/readyz`
+Open https://ocm-fleet.localhost:8085 — the exact path `/` redirects
+to `/app/`. The welcome banner is printed only after `https://ocm-fleet.localhost:8085/readyz`
 returns success. Demo credentials appear only with built-in Dex. Errors still
 stream beneath the banner if something fails later.
 
@@ -89,8 +89,8 @@ email:
 
 | Persona | Email | Password | `preferred_username` | Group |
 |---|---|---|---|---|
-| Operator | `ops@ocm-resource-manager.local` | `ocm-resource-manager-ops` | `ops-user` | `ops` |
-| Developer | `dev@ocm-resource-manager.local` | `ocm-resource-manager-dev` | `dev-user` | `dev` |
+| Operator | `ops@ocm-fleet.local` | `ocm-fleet-ops` | `ops-user` | `ops` |
+| Developer | `dev@ocm-fleet.local` | `ocm-fleet-dev` | `dev-user` | `dev` |
 
 ## Packaging defaults
 
@@ -110,11 +110,11 @@ uses a different config surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 
 | Setting | Env | If omitted |
 |---|---|---|
-| Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://ocm-resource-manager.localhost:8085/idp` (Dex-on). Setting this switches to Dex-off; there is no packaging issuer in that mode. |
-| UI client | `OIDC_UI_CLIENT_ID` | `ocm-resource-manager-ui` |
-| UI scope | `OIDC_UI_SCOPE` | Dex-on: `openid profile email groups audience:server:client_id:ocm-resource-manager`. Dex-off: `openid profile email` |
-| Resource audience | `OIDC_RESOURCE_AUDIENCE` | `ocm-resource-manager` |
-| Enrollment audience | `OIDC_KEY_ENROLLMENT_AUDIENCE` | `ocm-resource-manager-signing` |
+| Issuer | `OIDC_ISSUER_URL` | Peer Dex `https://ocm-fleet.localhost:8085/idp` (Dex-on). Setting this switches to Dex-off; there is no packaging issuer in that mode. |
+| UI client | `OIDC_UI_CLIENT_ID` | `ocm-fleet-console` |
+| UI scope | `OIDC_UI_SCOPE` | Dex-on: `openid profile email groups audience:server:client_id:resource-manager`. Dex-off: `openid profile email` |
+| Resource audience | `OIDC_RESOURCE_AUDIENCE` | `resource-manager` |
+| Enrollment audience | `OIDC_KEY_ENROLLMENT_AUDIENCE` | `resource-manager-signing` |
 | Registry ID | `OIDC_REGISTRY_ID` | `github.com`, unless a public-key claim is set |
 | Registry subject | `OIDC_REGISTRY_SUBJECT_EXPRESSION` | `claims.preferred_username`, unless a public-key claim is set |
 | Public-key claim | `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` | unset (registry mapping is used instead) |
@@ -122,7 +122,7 @@ uses a different config surface (`.env` / `KEY_REGISTRY_*`); do not mix the two.
 | Log level | `LOG_LEVEL` | `error`. One control for the resource manager server, peer Dex, and s6 lifecycle verbosity (`debug`, `info`, `warn`, `error`) |
 | Addons | `OCM_RM_SERVER_ADDONS` | `kind,kubernetes` |
 | Container socket | `CONTAINER_HOST` | image default `unix:///var/run/docker.sock`. Override only if the mount path differs |
-| Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | Dex-on + live socket: `ocm-resource-manager:8085`. Set empty to disable. Not written on Dex-off |
+| Kind loopback forward | `KIND_LOOPBACK_FORWARD_TO` | Dex-on + live socket: `ocm-fleet:8085`. Set empty to disable. Not written on Dex-off |
 
 If you override registry ID or subject expression, set both. Registry mapping and
 `OIDC_PUBLIC_KEY_CLAIM_EXPRESSION` are mutually exclusive (`resource-manager serve`
@@ -137,14 +137,14 @@ podman run \
   -e LOG_LEVEL=debug \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  quay.io/stolostron/ocm-resource-manager:latest
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 ## External issuer (Dex-off)
 
 Presence of `OIDC_ISSUER_URL` skips peer Dex and forwards that issuer into the
 same serve bootstrap path. The AIO UI/API edge stays
-`https://ocm-resource-manager.localhost:8085`; do not proxy the external IdP
+`https://ocm-fleet.localhost:8085`; do not proxy the external IdP
 under `/idp`. Register that origin, `/app/auth/callback`, and
 `/app/silent-renew.html` on the external client. Packaging still fills omitted
 fields above, but UI scope becomes portable OIDC (`openid profile email`)
@@ -164,8 +164,8 @@ Minimal:
 podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/ocm-resource-manager \
-  quay.io/stolostron/ocm-resource-manager:latest
+  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/ocm-fleet \
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 All OIDC overrides (values shown are packaging defaults except issuer/CA and the
@@ -175,15 +175,15 @@ public-key claim alternative):
 podman run -d \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/ocm-resource-manager \
+  -e OIDC_ISSUER_URL=https://your-oidc-issuer/realms/ocm-fleet \
   -e OIDC_CA_FILE=/path/to/ca.crt \
-  -e OIDC_UI_CLIENT_ID=ocm-resource-manager-ui \
+  -e OIDC_UI_CLIENT_ID=ocm-fleet-console \
   -e OIDC_UI_SCOPE='openid profile email' \
-  -e OIDC_RESOURCE_AUDIENCE=ocm-resource-manager \
-  -e OIDC_KEY_ENROLLMENT_AUDIENCE=ocm-resource-manager-signing \
+  -e OIDC_RESOURCE_AUDIENCE=resource-manager \
+  -e OIDC_KEY_ENROLLMENT_AUDIENCE=resource-manager-signing \
   -e OIDC_REGISTRY_ID=github.com \
   -e OIDC_REGISTRY_SUBJECT_EXPRESSION=claims.preferred_username \
-  quay.io/stolostron/ocm-resource-manager:latest
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 To use a public-key claim instead of registry mapping, omit
@@ -199,23 +199,23 @@ local/dev only). Create the `kind` network once if needed:
 `podman network create kind`.
 
 When a live unix socket is present at `CONTAINER_HOST`, packaging writes
-`/run/ocm-resource-manager/kind.env`:
+`/run/ocm-fleet/kind.env`:
 
 - `KIND_EXPERIMENTAL_DOCKER_NETWORK=kind` unless already set (including
   intentionally empty to disable)
-- On Dex-on only: `KIND_LOOPBACK_FORWARD_TO=ocm-resource-manager:8085` so kind
+- On Dex-on only: `KIND_LOOPBACK_FORWARD_TO=ocm-fleet:8085` so kind
   control-plane nodes run a loopback TCP proxy (`127.0.0.1:8085` →
-  `ocm-resource-manager:8085`, the AIO TLS edge). The kind addon also installs a
+  `ocm-fleet:8085`, the AIO TLS edge). The kind addon also installs a
   kube-apiserver `hostAliases` mapping for the OIDC issuer hostname
   (via a kubeadm patch directory extra-mounted into control-plane nodes)
   so that name resolves to `127.0.0.1` before first start. A TCP proxy
   binary is run as a systemd unit on the node (not iptables DNAT) so
-  Fedora and macOS behave the same. Podman DNS resolves the `ocm-resource-manager`
+  Fedora and macOS behave the same. Podman DNS resolves the `ocm-fleet`
   alias, so AIO restarts keep working. Override with a different
   `host:port`, or set the variable empty to disable both the proxy and
   the hostAliases overlay.
 
-Join `--network kind:alias=ocm-resource-manager`. Without that alias the default
+Join `--network kind:alias=ocm-fleet`. Without that alias the default
 destination host does not resolve from kind nodes.
 
 On Linux, rootless Podman does not listen on `/var/run/docker.sock` (that
@@ -236,8 +236,8 @@ podman run -d \
   -p 127.0.0.1:50051:50051 \
   -v /tmp:/tmp \
   -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
-  --network kind:alias=ocm-resource-manager \
-  quay.io/stolostron/ocm-resource-manager:latest
+  --network kind:alias=ocm-fleet \
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 ## Fleetctl against Dex-on
@@ -252,20 +252,20 @@ store:
 podman cp <container>:/data/sandbox/pki/ca.crt .
 
 fleetctl auth setup \
-  --issuer-url https://ocm-resource-manager.localhost:8085/idp \
-  --client-id ocm-resource-manager-cli \
-  --key-enrollment-client-id ocm-resource-manager-signing \
+  --issuer-url https://ocm-fleet.localhost:8085/idp \
+  --client-id fleetctl \
+  --key-enrollment-client-id resource-manager-signing \
   --oidc-ca-file ca.crt \
-  --scopes 'openid,profile,email,audience:server:client_id:ocm-resource-manager'
+  --scopes 'openid,profile,email,audience:server:client_id:resource-manager'
 
 fleetctl auth login
-fleetctl auth inspect-token   # aud should include ocm-resource-manager (and ocm-resource-manager-cli)
+fleetctl auth inspect-token   # aud should include resource-manager (and fleetctl)
 fleetctl deployments list
 ```
 
 `auth login` opens a browser to Dex; sign in with a demo user above. Omit the
-`audience:server:client_id:ocm-resource-manager` scope and API calls fail with `aud` not
-satisfied (`ocm-resource-manager-cli` only).
+`audience:server:client_id:resource-manager` scope and API calls fail with `aud` not
+satisfied (`fleetctl` only).
 
 ---
 
@@ -295,7 +295,7 @@ the AIO log-level wrapper, which `exec`s `/init` so s6 remains PID 1.
 s6 services follow the [s6-overlay README](https://github.com/just-containers/s6-overlay/blob/v3.2.3.2/README.md)
 source format:
 
-- definitions under `s6-rc.d/{aio-init,aio-proxy,dex,ocm-resource-manager,aio-welcome}/`
+- definitions under `s6-rc.d/{aio-init,aio-proxy,dex,resource-manager,aio-welcome}/`
 - membership via `user-bundles.d/user/contents.d/`
 - oneshot `aio-init` script at `scripts/aio-init` (referenced from `up`)
 - oneshot `aio-welcome` script at `scripts/aio-welcome` (depends on `resource-manager`;
@@ -305,8 +305,8 @@ source format:
 ### Branches
 
 - **Dex-on (default):** no `OIDC_ISSUER_URL`. `aio-init` writes
-  `/run/ocm-resource-manager/dex.enabled`; the `dex` longrun execs peer Dex on
-  loopback HTTP; `aio-proxy` serves `https://ocm-resource-manager.localhost:8085`;
+  `/run/ocm-fleet/dex.enabled`; the `dex` longrun execs peer Dex on
+  loopback HTTP; `aio-proxy` serves `https://ocm-fleet.localhost:8085`;
   packaging wires AuthMethod/UI defaults into serve.
 - **Dex-off:** `OIDC_ISSUER_URL` set. No `dex.enabled` flag; the `dex` longrun
   parks on `s6-pause`. The AIO TLS edge and public callback stay the same.
@@ -314,7 +314,7 @@ source format:
 
 ### Identities
 
-- Resource manager server: `1000:1000`
+- Resource manager server (`resource-manager`): `1000:1000`
 - Dex: `1001:1001`
 - aio-proxy: `1002:1002` (owns the gateway leaf key; cannot read `/data` or Dex state)
 - s6 starts as container root only to initialize and drop privileges

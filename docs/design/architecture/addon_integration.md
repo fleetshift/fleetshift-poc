@@ -2,7 +2,7 @@
 
 ## What this doc covers
 
-Addons extend the OCM Resource Manager platform through API, UI, orchestration,
+Addons extend the OCM Fleet platform through API, UI, orchestration,
 and delivery contracts. The resource manager server coordinates their lifecycle;
 addon capabilities may execute in clients or independent workloads.
 

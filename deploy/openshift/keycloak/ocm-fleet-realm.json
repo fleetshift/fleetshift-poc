@@ -1,12 +1,12 @@
 {
-  "realm": "ocm-resource-manager",
+  "realm": "ocm-fleet",
   "displayName": "ACME Corp",
   "enabled": true,
   "sslRequired": "external",
   "loginWithEmailAllowed": true,
   "bruteForceProtected": true,
   "defaultRole": {
-    "name": "default-roles-ocm-resource-manager",
+    "name": "default-roles-ocm-fleet",
     "description": "${role_default-roles}",
     "composite": true
   },
@@ -33,47 +33,47 @@
         "description": "Developer persona — manages applications"
       },
       {
-        "name": "default-roles-ocm-resource-manager",
+        "name": "default-roles-ocm-fleet",
         "composite": true,
         "composites": {
           "client": {
-            "ocm-resource-manager": ["ocm-resource-manager-user"],
+            "resource-manager": ["ocm-fleet-user"],
             "account": ["manage-account", "view-profile"]
           }
         }
       }
     ],
     "client": {
-      "ocm-resource-manager": [
+      "resource-manager": [
         {
-          "name": "ocm-resource-manager-user",
-          "description": "Baseline role for all OCM Resource Manager users"
+          "name": "ocm-fleet-user",
+          "description": "Baseline role for all OCM Fleet users"
         }
       ]
     }
   },
   "clients": [
     {
-      "clientId": "ocm-resource-manager",
-      "name": "OCM Resource Manager API",
+      "clientId": "resource-manager",
+      "name": "Resource manager API",
       "standardFlowEnabled": false,
       "fullScopeAllowed": false
     },
     {
-      "clientId": "ocm-resource-manager-ui",
-      "name": "OCM Resource Manager console",
+      "clientId": "ocm-fleet-console",
+      "name": "OCM Fleet console",
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [
         "http://localhost:8085/*",
         "http://localhost:8888/*",
         "http://127.0.0.1:8085/*",
-        "https://ocm-resource-manager.localhost:8085/*"
+        "https://ocm-fleet.localhost:8085/*"
       ],
       "webOrigins": [
         "http://localhost:8085",
         "http://127.0.0.1:8085",
-        "https://ocm-resource-manager.localhost:8085"
+        "https://ocm-fleet.localhost:8085"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
@@ -108,7 +108,7 @@
       ]
     },
     {
-      "clientId": "ocm-resource-manager-cli",
+      "clientId": "fleetctl",
       "name": "fleetctl",
       "publicClient": true,
       "fullScopeAllowed": false,
@@ -156,8 +156,8 @@
       ]
     },
     {
-      "clientId": "ocm-resource-manager-signing",
-      "name": "OCM Resource Manager signing enrollment",
+      "clientId": "resource-manager-signing",
+      "name": "Resource manager signing enrollment",
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [
@@ -169,11 +169,11 @@
       },
       "protocolMappers": [
         {
-          "name": "ocm-resource-manager-signing-audience",
+          "name": "resource-manager-signing-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
           "config": {
-            "included.client.audience": "ocm-resource-manager-signing",
+            "included.client.audience": "resource-manager-signing",
             "id.token.claim": "true",
             "access.token.claim": "true"
           }
@@ -228,19 +228,19 @@
     }
   ],
   "clientScopeMappings": {
-    "ocm-resource-manager": [
-      { "client": "ocm-resource-manager-ui", "roles": ["ocm-resource-manager-user"] },
-      { "client": "ocm-resource-manager-cli", "roles": ["ocm-resource-manager-user"] },
-      { "client": "ocm-resource-manager-signing", "roles": ["ocm-resource-manager-user"] }
+    "resource-manager": [
+      { "client": "ocm-fleet-console", "roles": ["ocm-fleet-user"] },
+      { "client": "fleetctl", "roles": ["ocm-fleet-user"] },
+      { "client": "resource-manager-signing", "roles": ["ocm-fleet-user"] }
     ],
     "account": [
-      { "client": "ocm-resource-manager-ui", "roles": ["manage-account", "view-profile"] }
+      { "client": "ocm-fleet-console", "roles": ["manage-account", "view-profile"] }
     ]
   },
   "users": [
     {
       "username": "ops-user",
-      "email": "ops@ocm-resource-manager.local",
+      "email": "ops@ocm-fleet.local",
       "firstName": "Ops",
       "lastName": "User",
       "enabled": true,
@@ -251,7 +251,7 @@
           "value": "GENERATED_AT_DEPLOY_TIME"
         }
       ],
-      "realmRoles": ["ops", "default-roles-ocm-resource-manager"],
+      "realmRoles": ["ops", "default-roles-ocm-fleet"],
       "clientRoles": {
         "account": ["manage-account", "view-profile"]
       },
@@ -261,7 +261,7 @@
     },
     {
       "username": "dev-user",
-      "email": "dev@ocm-resource-manager.local",
+      "email": "dev@ocm-fleet.local",
       "firstName": "Dev",
       "lastName": "User",
       "enabled": true,
@@ -272,7 +272,7 @@
           "value": "GENERATED_AT_DEPLOY_TIME"
         }
       ],
-      "realmRoles": ["dev", "default-roles-ocm-resource-manager"],
+      "realmRoles": ["dev", "default-roles-ocm-fleet"],
       "clientRoles": {
         "account": ["manage-account", "view-profile"]
       },

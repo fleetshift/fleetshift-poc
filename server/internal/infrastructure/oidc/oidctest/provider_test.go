@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
 )
 
 func TestProvider_Discovery(t *testing.T) {

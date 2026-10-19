@@ -8,9 +8,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	deliveryv1 "github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/rmruntime"
-	"github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime/store"
+	deliveryv1 "github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/apis/delivery/v1alpha1"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/rmruntime"
+	"github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime/store"
 )
 
 func TestStatusHookFailureDoesNotPersist(t *testing.T) {

@@ -56,8 +56,8 @@ const SigningKeyEnrollment = ({
     step === EnrollStep.Verifying
   ) {
     return (
-      <div className="ocm-rm-signing-setup">
-        <Title headingLevel="h1" className="ocm-rm-signing-setup__title">
+      <div className="ocm-fleet-signing-setup">
+        <Title headingLevel="h1" className="ocm-fleet-signing-setup__title">
           Signing Key Enrollment
         </Title>
         <Spinner aria-label={messages[step]} />
@@ -71,8 +71,8 @@ const SigningKeyEnrollment = ({
   }
 
   return (
-    <div className="ocm-rm-signing-setup">
-      <Title headingLevel="h1" className="ocm-rm-signing-setup__title">
+    <div className="ocm-fleet-signing-setup">
+      <Title headingLevel="h1" className="ocm-fleet-signing-setup__title">
         Signing Key Enrollment
       </Title>
 
@@ -115,7 +115,7 @@ const SigningKeyEnrollment = ({
         </>
       ) : (
         <>
-          <p className="ocm-rm-signing-setup__subtitle">
+          <p className="ocm-fleet-signing-setup__subtitle">
             Register your signing key to sign deployments and policies.
           </p>
 

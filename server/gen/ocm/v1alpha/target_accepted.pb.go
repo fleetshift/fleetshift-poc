@@ -73,7 +73,7 @@ const file_ocm_v1alpha_target_accepted_proto_rawDesc = "" +
 	"\n" +
 	"!ocm/v1alpha/target_accepted.proto\x12\vocm.v1alpha\"-\n" +
 	"\x0eTargetAccepted\x12\x1b\n" +
-	"\ttarget_id\x18\x01 \x01(\tR\btargetIdBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\ttarget_id\x18\x01 \x01(\tR\btargetIdBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_target_accepted_proto_rawDescOnce sync.Once

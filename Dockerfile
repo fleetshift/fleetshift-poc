@@ -1,4 +1,4 @@
-FROM golang:1.26.6 AS ocm-resource-manager-builder
+FROM golang:1.26.6 AS ocm-fleet-builder
 
 WORKDIR /src
 
@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ocm-resource-manager-builder /bin/resource-manager /usr/local/bin/resource-manager
+COPY --from=ocm-fleet-builder /bin/resource-manager /usr/local/bin/resource-manager
 
 EXPOSE 50051 8085
 
 ENTRYPOINT ["resource-manager"]
-CMD ["serve", "--http-addr", ":8085", "--grpc-addr", ":50051", "--db", "/data/ocm-resource-manager.db", "--log-level", "debug"]
+CMD ["serve", "--http-addr", ":8085", "--grpc-addr", ":50051", "--db", "/data/resource-manager.db", "--log-level", "debug"]

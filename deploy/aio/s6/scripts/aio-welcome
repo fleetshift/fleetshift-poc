@@ -3,7 +3,7 @@
 set -eu
 
 # shellcheck disable=SC1091
-. /run/ocm-resource-manager/public.env
+. /run/ocm-fleet/public.env
 
 url="${PUBLIC_ORIGIN}/readyz"
 i=0
@@ -23,19 +23,19 @@ if [ "$i" -ge 30 ]; then
 	exit 1
 fi
 
-echo "OCM Resource Manager is ready."
+echo "OCM Fleet is ready."
 
-if [ -f /run/ocm-resource-manager/dex.enabled ]; then
+if [ -f /run/ocm-fleet/dex.enabled ]; then
 	cat <<EOF
 Open ${PUBLIC_ORIGIN}
 
 Demo login:
-  Email:    ops@ocm-resource-manager.local
-  Password: ocm-resource-manager-ops
+  Email:    ops@ocm-fleet.local
+  Password: ocm-fleet-ops
 
 Alternate developer login:
-  Email:    dev@ocm-resource-manager.local
-  Password: ocm-resource-manager-dev
+  Email:    dev@ocm-fleet.local
+  Password: ocm-fleet-dev
 
 The sandbox uses a local certificate. Your browser may ask you to accept it.
 Press Ctrl+C to stop.

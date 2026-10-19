@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/bootstrap"
-	"github.com/stolostron/ocm-resource-manager/server/internal/testutil"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/testutil"
 )
 
 func TestLoadServeConfig(t *testing.T) {

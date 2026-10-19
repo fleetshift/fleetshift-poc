@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // Operation distinguishes delivery from removal.

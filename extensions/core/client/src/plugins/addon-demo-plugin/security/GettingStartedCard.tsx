@@ -99,9 +99,9 @@ function GsColumnHeader({
       isPlain
       title={title}
       className={clsx(
-        "ocm-rm-addon-security__gs-header-label",
-        `ocm-rm-addon-security__gs-header-label--${color}`,
-        compact && "ocm-rm-addon-security__gs-header-label--compact",
+        "ocm-fleet-addon-security__gs-header-label",
+        `ocm-fleet-addon-security__gs-header-label--${color}`,
+        compact && "ocm-fleet-addon-security__gs-header-label--compact",
       )}
     />
   );
@@ -115,9 +115,9 @@ function GsColumn({
   children: ReactNode;
 }) {
   return (
-    <div className="ocm-rm-addon-security__gs-column">
+    <div className="ocm-fleet-addon-security__gs-column">
       <GsColumnHeader title={config.title} color={config.color} />
-      <div className="ocm-rm-addon-security__gs-column-body">{children}</div>
+      <div className="ocm-fleet-addon-security__gs-column-body">{children}</div>
     </div>
   );
 }
@@ -128,7 +128,7 @@ function GsColumnContent({ config }: { config: GsColumnConfig }) {
       <p className="pf-v6-u-mb-md pf-v6-u-text-color-subtle pf-v6-u-font-size-sm">
         {config.description}
       </p>
-      <ul className="ocm-rm-addon-security__gs-links">
+      <ul className="ocm-fleet-addon-security__gs-links">
         {config.links.map((link) => (
           <li key={link.text}>
             <a
@@ -156,7 +156,7 @@ function GsColumnContent({ config }: { config: GsColumnConfig }) {
           </li>
         ))}
       </ul>
-      <a href="#" className="ocm-rm-addon-security__gs-footer-link">
+      <a href="#" className="ocm-fleet-addon-security__gs-footer-link">
         {config.footerText} <ArrowRightIcon />
       </a>
     </>
@@ -170,7 +170,7 @@ export default function GettingStartedCard() {
   return (
     <Card
       variant="secondary"
-      className="ocm-rm-addon-security__getting-started pf-v6-u-mb-lg"
+      className="ocm-fleet-addon-security__getting-started pf-v6-u-mb-lg"
     >
       <CardHeader
         actions={{
@@ -204,7 +204,7 @@ export default function GettingStartedCard() {
         <Flex
           alignItems={{ default: "alignItemsCenter" }}
           gap={{ default: "gapMd" }}
-          className="ocm-rm-addon-security__getting-started-header"
+          className="ocm-fleet-addon-security__getting-started-header"
           onClick={() => setIsExpanded(!isExpanded)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {

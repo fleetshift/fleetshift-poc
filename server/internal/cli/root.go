@@ -8,7 +8,7 @@ import (
 func New() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "resource-manager",
-		Short: "API and orchestration server for OCM Resource Manager",
+		Short: "API and orchestration server for OCM Fleet",
 	}
 
 	root.AddCommand(newServeCmd())

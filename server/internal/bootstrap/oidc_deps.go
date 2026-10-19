@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/oidc"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc"
 )
 
 // JWKSRegistrar registers JWKS URIs required for token verification.

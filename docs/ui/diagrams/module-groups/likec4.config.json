@@ -1,4 +1,4 @@
 {
   "$schema": "https://likec4.dev/schemas/config.json",
-  "name": "ocm-resource-manager-ui-module-groups"
+  "name": "ocm-fleet-console-module-groups"
 }

@@ -87,7 +87,7 @@ const file_ocm_v1alpha_create_auth_method_request_proto_rawDesc = "" +
 	"\x17CreateAuthMethodRequest\x12)\n" +
 	"\x0eauth_method_id\x18\x01 \x01(\tB\x03\xe0A\x02R\fauthMethodId\x12=\n" +
 	"\vauth_method\x18\x02 \x01(\v2\x17.ocm.v1alpha.AuthMethodB\x03\xe0A\x02R\n" +
-	"authMethodBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"authMethodBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_create_auth_method_request_proto_rawDescOnce sync.Once

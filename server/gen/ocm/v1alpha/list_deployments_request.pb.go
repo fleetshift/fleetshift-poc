@@ -89,7 +89,7 @@ const file_ocm_v1alpha_list_deployments_request_proto_rawDesc = "" +
 	"\x16ListDeploymentsRequest\x12 \n" +
 	"\tpage_size\x18\x01 \x01(\x05B\x03\xe0A\x01R\bpageSize\x12\"\n" +
 	"\n" +
-	"page_token\x18\x02 \x01(\tB\x03\xe0A\x01R\tpageTokenBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"page_token\x18\x02 \x01(\tB\x03\xe0A\x01R\tpageTokenBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_list_deployments_request_proto_rawDescOnce sync.Once

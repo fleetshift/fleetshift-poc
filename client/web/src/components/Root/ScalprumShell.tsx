@@ -1,4 +1,4 @@
-import { getExtensionStore } from "@ocm-resource-manager/common";
+import { getExtensionStore } from "@ocm-fleet/common";
 import { ScalprumProvider } from "@scalprum/react-core";
 import { PropsWithChildren, useMemo, useRef } from "react";
 
@@ -17,7 +17,7 @@ const ScalprumShell = ({ children }: PropsWithChildren) => {
 
   const api = useMemo(
     () => ({
-      resourceManager: {
+      fleet: {
         apiBase: "/v1alpha",
         getPluginPagePath: (scope: string, module: string) => {
           const page = pluginPagesRef.current.find(

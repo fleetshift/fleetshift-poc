@@ -18,7 +18,7 @@ import (
 )
 
 // DefaultSQLitePath is the serve --db default when PostgreSQL is not selected.
-const DefaultSQLitePath = "ocm-resource-manager.db"
+const DefaultSQLitePath = "resource-manager.db"
 
 // DefaultInitialAuthMethodTimeout bounds implicit initial-AuthMethod discovery/install
 // when the AuthMethod store is empty and OIDC initial-AuthMethod config is present.

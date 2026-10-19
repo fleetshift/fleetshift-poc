@@ -2,7 +2,7 @@ import {
   getCachedPfIcon,
   loadPfIcon,
   useExtensionInstall,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import { Icon, NavItem, Tooltip } from "@patternfly/react-core";
 import { PuzzlePieceIcon } from "@patternfly/react-icons";
 import clsx from "clsx";

@@ -1,5 +1,5 @@
-import type { FlatNode } from "@ocm-resource-manager/common";
-import { MORE_ENTRY_ID, NodeKind } from "@ocm-resource-manager/common";
+import type { FlatNode } from "@ocm-fleet/common";
+import { MORE_ENTRY_ID, NodeKind } from "@ocm-fleet/common";
 import clsx from "clsx";
 import type { MotionValue } from "motion/react";
 
@@ -199,11 +199,11 @@ export function SortableSection({
           <li
             key={`${node.id}-empty`}
             className={clsx(
-              "ocm-rm-settings-tree-item ocm-rm-settings-tree-item--nested pf-v6-u-mr-2xl",
-              isDropTarget && "ocm-rm-settings-tree-item--drop-target",
+              "ocm-fleet-settings-tree-item ocm-fleet-settings-tree-item--nested pf-v6-u-mr-2xl",
+              isDropTarget && "ocm-fleet-settings-tree-item--drop-target",
             )}
           >
-            <div className="ocm-rm-settings-tree-item__empty-group">
+            <div className="ocm-fleet-settings-tree-item__empty-group">
               Drop items here to add to this group
             </div>
           </li>,
@@ -216,12 +216,12 @@ export function SortableSection({
 
   return (
     <div>
-      <div className="ocm-rm-settings-nav-editor__section-label">
+      <div className="ocm-fleet-settings-nav-editor__section-label">
         {sectionLabel}
       </div>
       <ul
         ref={containerRef}
-        className="ocm-rm-settings-nav-editor__tree-list"
+        className="ocm-fleet-settings-nav-editor__tree-list"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

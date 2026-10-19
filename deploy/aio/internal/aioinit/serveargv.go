@@ -9,31 +9,31 @@ import (
 
 const (
 	// DefaultUIClientID is the browser OIDC client ID.
-	DefaultUIClientID = "ocm-resource-manager-ui"
+	DefaultUIClientID = "ocm-fleet-console"
 	// DefaultPeerDexUIScope is the Dex-on browser scope (Issuer == PeerDexIssuer).
-	// audience:server:client_id:ocm-resource-manager is Dex cross-client trust so access
-	// tokens include the ocm-resource-manager resource-server audience.
-	DefaultPeerDexUIScope = "openid profile email groups audience:server:client_id:ocm-resource-manager"
+	// audience:server:client_id:resource-manager is Dex cross-client trust so access
+	// tokens include the resource-manager audience.
+	DefaultPeerDexUIScope = "openid profile email groups audience:server:client_id:resource-manager"
 	// DefaultExternalIssuerUIScope is the Dex-off browser scope (any other Issuer).
 	// Standard OIDC only: Keycloak and other IdPs reject Dex's
 	// audience:server:client_id:… scope with invalid_scope.
 	DefaultExternalIssuerUIScope = "openid profile email"
 	// DefaultResourceAudience is the ordinary AuthMethod audience.
-	DefaultResourceAudience = "ocm-resource-manager"
+	DefaultResourceAudience = "resource-manager"
 	// DefaultEnrollmentAudience is the signing enrollment audience.
-	DefaultEnrollmentAudience = "ocm-resource-manager-signing"
+	DefaultEnrollmentAudience = "resource-manager-signing"
 	// DefaultRegistryID is the default external key registry.
 	DefaultRegistryID = "github.com"
 	// DefaultRegistrySubjectExpression maps preferred_username.
 	DefaultRegistrySubjectExpression = "claims.preferred_username"
 
-	defaultServeDB     = "/data/ocm-resource-manager.db"
+	defaultServeDB     = "/data/resource-manager.db"
 	defaultServeWebDir = "/srv/web"
 	// defaultServeLogLevel is the packaging default when a logger level is omitted.
 	defaultServeLogLevel = "error"
 
 	// ServeExecPath is where aio-init writes the executable serve wrapper.
-	ServeExecPath = "/run/ocm-resource-manager/exec-serve"
+	ServeExecPath = "/run/ocm-fleet/exec-serve"
 )
 
 // ServeConfig is packaging-resolved configuration for `resource-manager serve`.

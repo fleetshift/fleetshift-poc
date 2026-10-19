@@ -2,7 +2,7 @@
 
 ## Overview
 
-OCM Resource Manager supports two key registry types for signing key enrollment. Each registry resolves a user's ECDSA P-256 public key for signature verification. The admin configures one registry at a time via `fleetctl auth setup`.
+OCM Fleet supports two key registry types for signing key enrollment. Each registry resolves a user's ECDSA P-256 public key for signature verification. The admin configures one registry at a time via `fleetctl auth setup`.
 
 - **OIDC** — the public key is embedded as a claim in the enrollment ID token. Works with any OIDC-capable IdP (Keycloak, Auth0, Ping, etc.).
 - **GitHub** — the user uploads their SSH signing key to GitHub; the server fetches it from the public API.
@@ -16,20 +16,20 @@ The admin configures the registry via `fleetctl auth setup`. For the OIDC regist
 ```bash
 # OIDC registry (default) — public key extracted from ID token claim
 fleetctl auth setup \
-  --server ocm-resource-manager:50051 \
-  --issuer-url http://keycloak:8180/auth/realms/ocm-resource-manager \
-  --client-id ocm-resource-manager-cli \
-  --audience ocm-resource-manager \
-  --key-enrollment-client-id ocm-resource-manager-signing \
+  --server resource-manager:50051 \
+  --issuer-url http://keycloak:8180/auth/realms/ocm-fleet \
+  --client-id fleetctl \
+  --audience resource-manager \
+  --key-enrollment-client-id resource-manager-signing \
   --public-key-claim-expression 'claims.signing_public_key'
 
 # GitHub registry — public key fetched from GitHub API
 fleetctl auth setup \
-  --server ocm-resource-manager:50051 \
-  --issuer-url http://keycloak:8180/auth/realms/ocm-resource-manager \
-  --client-id ocm-resource-manager-cli \
-  --audience ocm-resource-manager \
-  --key-enrollment-client-id ocm-resource-manager-signing \
+  --server resource-manager:50051 \
+  --issuer-url http://keycloak:8180/auth/realms/ocm-fleet \
+  --client-id fleetctl \
+  --audience resource-manager \
+  --key-enrollment-client-id resource-manager-signing \
   --registry-id github.com \
   --registry-subject-expression 'claims.github_username'
 ```

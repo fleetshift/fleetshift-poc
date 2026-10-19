@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestResourceTypeConstraints(t *testing.T) {

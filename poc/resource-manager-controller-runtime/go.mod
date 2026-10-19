@@ -1,4 +1,4 @@
-module github.com/stolostron/ocm-resource-manager/poc/resource-manager-controller-runtime
+module github.com/stolostron/ocm-fleet/poc/resource-manager-controller-runtime
 
 go 1.26.4
 

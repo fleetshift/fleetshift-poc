@@ -1,31 +1,31 @@
-# Assembles the all-in-one OCM Resource Manager image from component images.
+# Assembles the all-in-one OCM Fleet image from component images.
 # Packaging (deploy/aio) owns s6 PID 1, peer Dex (default), PKI, and serve argv.
 #
 # From-source (monorepo; preferred):
 #   npx nx run image:aio
 #
 # Or manually:
-#   podman build -t localhost/ocm-resource-manager-server:latest .
-#   podman build -f Dockerfile.local -t localhost/ocm-resource-manager-server-local:latest .
-#   podman build -f Dockerfile.web -t localhost/ocm-resource-manager-web:latest .
+#   podman build -t localhost/ocm-fleet-server:latest .
+#   podman build -f Dockerfile.local -t localhost/ocm-fleet-server-local:latest .
+#   podman build -f Dockerfile.web -t localhost/ocm-fleet-web:latest .
 #   podman build -f Dockerfile.aio \
-#     --build-arg SERVER_IMAGE=localhost/ocm-resource-manager-server-local:latest \
-#     --build-arg WEB_IMAGE=localhost/ocm-resource-manager-web:latest \
-#     -t localhost/ocm-resource-manager:latest \
-#     -t quay.io/stolostron/ocm-resource-manager:latest .
+#     --build-arg SERVER_IMAGE=localhost/ocm-fleet-server-local:latest \
+#     --build-arg WEB_IMAGE=localhost/ocm-fleet-web:latest \
+#     -t localhost/ocm-fleet:latest \
+#     -t quay.io/stolostron/ocm-fleet:latest .
 #
-# Base is ocm-resource-manager-server-local so the kind library can shell out to a
+# Base is ocm-fleet-server-local so the kind library can shell out to a
 # container runtime CLI (podman) against a mounted host socket. For kind,
 # run --privileged with the socket mounted and join
-# --network kind:alias=ocm-resource-manager. CONTAINER_HOST, KIND_EXPERIMENTAL_DOCKER_NETWORK,
-# and KIND_LOOPBACK_FORWARD_TO=ocm-resource-manager:8085 are packaging defaults
+# --network kind:alias=ocm-fleet. CONTAINER_HOST, KIND_EXPERIMENTAL_DOCKER_NETWORK,
+# and KIND_LOOPBACK_FORWARD_TO=ocm-fleet:8085 are packaging defaults
 # (see deploy/aio/README.md).
 #
 # Default: peer Dex under s6; bare podman run needs no OIDC flags.
 # Presence of OIDC_ISSUER_URL selects Dex-off and forwards that issuer.
 
-ARG SERVER_IMAGE=quay.io/stolostron/ocm-resource-manager-server-local:latest
-ARG WEB_IMAGE=quay.io/stolostron/ocm-resource-manager-web:latest
+ARG SERVER_IMAGE=quay.io/stolostron/ocm-fleet-server-local:latest
+ARG WEB_IMAGE=quay.io/stolostron/ocm-fleet-web:latest
 # Immutable build inputs (edit here when bumping).
 # Dex v2.45.1 — multi-arch index digest for docker.io/dexidp/dex:v2.45.1
 # Platform digests (informational; index digest is the pin used at build):
@@ -94,8 +94,8 @@ RUN set -eux; \
 	rm -f /tmp/s6-overlay-*.tar.xz; \
 	rm -rf /var/lib/apt/lists/*; \
 	# Resource manager server 1000:1000; Dex 1001:1001; aio-proxy 1002:1002.
-	if ! id -u ocm-resource-manager >/dev/null 2>&1; then \
-		useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin ocm-resource-manager; \
+	if ! id -u resource-manager >/dev/null 2>&1; then \
+		useradd --uid 1000 --create-home --home-dir /data --shell /usr/sbin/nologin resource-manager; \
 	fi; \
 	if ! id -u dex >/dev/null 2>&1; then \
 		useradd --uid 1001 --system --home-dir /nonexistent --shell /usr/sbin/nologin dex; \
@@ -103,8 +103,8 @@ RUN set -eux; \
 	if ! id -u aio-proxy >/dev/null 2>&1; then \
 		useradd --uid 1002 --system --home-dir /nonexistent --shell /usr/sbin/nologin aio-proxy; \
 	fi; \
-	mkdir -p /data /data/sandbox /run/ocm-resource-manager; \
-	chown -R ocm-resource-manager:ocm-resource-manager /data /srv/web; \
+	mkdir -p /data /data/sandbox /run/ocm-fleet; \
+	chown -R resource-manager:resource-manager /data /srv/web; \
 	# Sandbox tree is root-owned; the resource manager may create ordinary /data state.
 	chown root:root /data/sandbox; \
 	chmod 0755 /data/sandbox

@@ -157,7 +157,7 @@ const file_ocm_v1alpha_placement_strategy_proto_rawDesc = "" +
 	"\x10TYPE_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vTYPE_STATIC\x10\x01\x12\f\n" +
 	"\bTYPE_ALL\x10\x02\x12\x11\n" +
-	"\rTYPE_SELECTOR\x10\x03BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\rTYPE_SELECTOR\x10\x03BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_placement_strategy_proto_rawDescOnce sync.Once

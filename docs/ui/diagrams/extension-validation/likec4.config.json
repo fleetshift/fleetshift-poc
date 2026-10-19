@@ -1,4 +1,4 @@
 {
   "$schema": "https://likec4.dev/schemas/config.json",
-  "name": "ocm-resource-manager-ui-extension-validation"
+  "name": "ocm-fleet-console-extension-validation"
 }

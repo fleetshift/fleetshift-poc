@@ -10,8 +10,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/attestation"
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/attestation"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // TargetType is the [domain.TargetType] for Kubernetes clusters

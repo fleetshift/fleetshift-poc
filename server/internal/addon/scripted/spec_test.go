@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/scripted"
 )
 
 func mustCodec(t *testing.T) *scripted.Codec {

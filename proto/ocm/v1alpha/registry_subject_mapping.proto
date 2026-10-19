@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ocm.v1alpha;
 
-option go_package = "github.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alpha";
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
 
 // RegistrySubjectMapping configures how an ID token's claims are mapped
 // to a key registry subject (e.g. a GitHub username). The CEL expression

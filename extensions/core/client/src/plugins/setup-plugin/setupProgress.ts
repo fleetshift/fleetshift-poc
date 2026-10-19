@@ -1,7 +1,7 @@
-import { createIDBStore } from "@ocm-resource-manager/common";
+import { createIDBStore } from "@ocm-fleet/common";
 
 const setupStore = createIDBStore<boolean>({
-  db: "ocm-rm-setup-progress",
+  db: "ocm-fleet-setup-progress",
   version: 1,
   store: "steps",
   upgrade(db) {

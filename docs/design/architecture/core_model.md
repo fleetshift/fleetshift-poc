@@ -18,7 +18,7 @@ Read this when you need the platform's core mental model before diving into exec
 ## What is intentionally elsewhere
 
 - Execution semantics, invalidation, rollout planning, and `DeploymentGroup`: [orchestration.md](orchestration.md)
-- Fleetlets, channels, and platform routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
+- Fleetlet instances, channels, and platform routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
 - Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
 - Authority configuration, provenance profiles, and trust updates: [provenance.md](provenance.md)
 - Managed resources: [../managed_resources.md](../managed_resources.md)
@@ -201,7 +201,7 @@ The detailed target-side protocol — reliability guarantees, generation orderin
 
 **`kubernetes`**: a Kubernetes API server. The delivery agent uses Server-Side Apply, watches resource conditions for health, and prunes removed resources.
 
-**`platform`**: an OCM Resource Manager platform instance. The delivery agent is an API client that creates, updates, and deletes deployments through the child resource manager. This makes recursive deployment a direct consequence of the target model rather than a separate system.
+**`platform`**: an OCM Fleet platform instance. The delivery agent is an API client that creates, updates, and deletes deployments through the child resource manager. This makes recursive deployment a direct consequence of the target model rather than a separate system.
 
 **`local`**: the platform itself, resolved by the `local` placement strategy. This is the degenerate in-process form of a platform target and is used for platform-local orchestration such as `DeploymentGroup` and provisioning flows.
 

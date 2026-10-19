@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // Factory creates a fresh [domain.Tx] for each test. The Tx is needed

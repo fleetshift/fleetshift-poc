@@ -1,16 +1,16 @@
 import { DynamicRemotePlugin } from "@openshift/dynamic-plugin-sdk-webpack";
 import type { Compiler } from "@rspack/core";
 
-import type { ResourceManagerExtension } from "./types";
+import type { FleetExtension } from "./types";
 import { validateExtensionSet } from "./validate";
 
-export type ResourceManagerPluginOptions = {
+export type FleetPluginOptions = {
   pluginMetadata: {
     name: string;
     version: string;
     exposedModules?: Record<string, string>;
   };
-  extensions: ResourceManagerExtension[];
+  extensions: FleetExtension[];
   sharedModules?: Record<string, unknown>;
   moduleFederationSettings?: unknown;
   entryCallbackSettings?: unknown;
@@ -18,10 +18,10 @@ export type ResourceManagerPluginOptions = {
   pluginManifestFilename?: string;
 };
 
-export class ResourceManagerPlugin {
+export class FleetPlugin {
   private inner: DynamicRemotePlugin;
 
-  constructor(options: ResourceManagerPluginOptions) {
+  constructor(options: FleetPluginOptions) {
     const exposedModules = options.pluginMetadata.exposedModules ?? {};
 
     validateExtensionSet(options.extensions, exposedModules);

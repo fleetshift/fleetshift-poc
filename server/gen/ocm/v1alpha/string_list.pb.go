@@ -74,7 +74,7 @@ const file_ocm_v1alpha_string_list_proto_rawDesc = "" +
 	"\x1docm/v1alpha/string_list.proto\x12\vocm.v1alpha\"$\n" +
 	"\n" +
 	"StringList\x12\x16\n" +
-	"\x06values\x18\x01 \x03(\tR\x06valuesBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x06values\x18\x01 \x03(\tR\x06valuesBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_string_list_proto_rawDescOnce sync.Once

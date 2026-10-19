@@ -39,7 +39,7 @@ resuming a fulfillment that lacks acceptable authorization material.
 
 ## Overview
 
-The OCM Resource Manager architecture separates two concerns in delivery authorization:
+The OCM Fleet architecture separates two concerns in delivery authorization:
 
 - **Provenance** is durable cryptographic proof of who authenticated an exact
   typed intent or supporting assertion.

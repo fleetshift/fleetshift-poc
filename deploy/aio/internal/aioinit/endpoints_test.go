@@ -19,7 +19,7 @@ func TestFixedEndpoints(t *testing.T) {
 		DexListen:     net.JoinHostPort("127.0.0.1", dexPort),
 		GRPCListen:    ":" + grpcPort,
 	}
-	if PublicHost != "ocm-resource-manager.localhost" {
+	if PublicHost != "ocm-fleet.localhost" {
 		t.Fatalf("PublicHost = %q", PublicHost)
 	}
 	if gatewayPort != "8085" {

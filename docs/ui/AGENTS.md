@@ -1,6 +1,6 @@
 # Rules for Agents
 
-OCM Resource Manager console — React 18 shell + Scalprum micro-frontend plugins, rspack + Module Federation.
+OCM Fleet console — React 18 shell + Scalprum micro-frontend plugins, rspack + Module Federation.
 
 ## Source of truth
 
@@ -8,11 +8,11 @@ OCM Resource Manager console — React 18 shell + Scalprum micro-frontend plugin
 
 ## Packages
 
-- `client/web` (`@ocm-resource-manager/web`) — Shell SPA (routing, auth, search, layout). No business logic.
-- `extensions/core/client` (`@ocm-resource-manager/mock-ui-plugins`) — Core plugins under `src/plugins/<name>-plugin/`.
-- `extensions/kind/client` (`@ocm-resource-manager/kind-plugin`) — Kind local cluster provider plugin (separated from core).
-- `sdk/common` (`@ocm-resource-manager/common`) — Shared types, utils, cross-plugin hooks. Dual CJS/ESM.
-- `sdk/build-utils` (`@ocm-resource-manager/build-utils`) — Rspack helpers (PF transforms, ResourceManagerPlugin). No build step.
+- `client/web` (`@ocm-fleet/web`) — Shell SPA (routing, auth, search, layout). No business logic.
+- `extensions/core/client` (`@ocm-fleet/mock-ui-plugins`) — Core plugins under `src/plugins/<name>-plugin/`.
+- `extensions/kind/client` (`@ocm-fleet/kind-plugin`) — Kind local cluster provider plugin (separated from core).
+- `sdk/common` (`@ocm-fleet/common`) — Shared types, utils, cross-plugin hooks. Dual CJS/ESM.
+- `sdk/build-utils` (`@ocm-fleet/build-utils`) — Rspack helpers (PF transforms, FleetPlugin). No build step.
 - `e2e` — Playwright tests.
 
 ## Components
@@ -26,7 +26,7 @@ OCM Resource Manager console — React 18 shell + Scalprum micro-frontend plugin
 
 ## State
 
-- Cross-plugin → Scalprum shared stores as hooks, re-exported via `@ocm-resource-manager/common`. Pattern: `usePluginNavigate`.
+- Cross-plugin → Scalprum shared stores as hooks, re-exported via `@ocm-fleet/common`. Pattern: `usePluginNavigate`.
 - Intra-plugin → React hooks. Keep state local.
 - API data → fetched where needed. Each plugin has `api.ts` with typed fetch helpers against `/v1alpha/*`.
 
@@ -66,35 +66,35 @@ All CSS classes are scoped with a prefix to prevent collisions across MF boundar
 
 | Scope | Prefix | Example |
 |-------|--------|---------|
-| Shell (web) | `ocm-rm-` | `ocm-rm-search`, `ocm-rm-search__menu`, `ocm-rm-search__menu--open` |
-| Core plugin | `ocm-rm-core-` | `ocm-rm-core-clusters`, `ocm-rm-core-clusters__toolbar` |
-| Overview plugin | `ocm-rm-overview-` | `ocm-rm-overview-dashboard`, `ocm-rm-overview-capacity__bar` |
-| Day One plugin | `ocm-rm-day-one-` | `ocm-rm-day-one-welcome`, `ocm-rm-day-one-welcome__card` |
-| Signing plugin | `ocm-rm-signing-` | `ocm-rm-signing-keys`, `ocm-rm-signing-keys__form` |
-| Management plugin | `ocm-rm-mgmt-` | `ocm-rm-mgmt-targets`, `ocm-rm-mgmt-targets__row` |
-| Kind plugin | `ocm-rm-kind-` | `ocm-rm-kind-wizard`, `ocm-rm-kind-wizard__step` |
-| Settings plugin | `ocm-rm-settings-` | `ocm-rm-settings-nav-order`, `ocm-rm-settings-nav-order__item` |
+| Shell (web) | `ocm-fleet-` | `ocm-fleet-search`, `ocm-fleet-search__menu`, `ocm-fleet-search__menu--open` |
+| Core plugin | `ocm-fleet-core-` | `ocm-fleet-core-clusters`, `ocm-fleet-core-clusters__toolbar` |
+| Overview plugin | `ocm-fleet-overview-` | `ocm-fleet-overview-dashboard`, `ocm-fleet-overview-capacity__bar` |
+| Day One plugin | `ocm-fleet-day-one-` | `ocm-fleet-day-one-welcome`, `ocm-fleet-day-one-welcome__card` |
+| Signing plugin | `ocm-fleet-signing-` | `ocm-fleet-signing-keys`, `ocm-fleet-signing-keys__form` |
+| Management plugin | `ocm-fleet-mgmt-` | `ocm-fleet-mgmt-targets`, `ocm-fleet-mgmt-targets__row` |
+| Kind plugin | `ocm-fleet-kind-` | `ocm-fleet-kind-wizard`, `ocm-fleet-kind-wizard__step` |
+| Settings plugin | `ocm-fleet-settings-` | `ocm-fleet-settings-nav-order`, `ocm-fleet-settings-nav-order__item` |
 
 Enforced by stylelint (`stylelint.config.mjs`) with per-plugin overrides. Run `npx nx run web:lint:css` / `npx nx run plugins:lint:css` to check.
 
-**PF utility classes first.** For simple spacing, font, color, display, flex — use PF utility classes (`pf-v6-u-mb-md`, `pf-v6-u-font-size-sm`, `pf-v6-u-text-color-subtle`, `pf-v6-u-display-flex`, `pf-v6-u-flex-1`, etc.) directly in `className`. Don't create a custom SCSS class just to set `margin-bottom: var(--pf-t--global--spacer--md)`. Custom `ocm-rm-*` classes are for multi-property styles, component-specific layouts (gap, grid), or things PF utilities don't cover.
+**PF utility classes first.** For simple spacing, font, color, display, flex — use PF utility classes (`pf-v6-u-mb-md`, `pf-v6-u-font-size-sm`, `pf-v6-u-text-color-subtle`, `pf-v6-u-display-flex`, `pf-v6-u-flex-1`, etc.) directly in `className`. Don't create a custom SCSS class just to set `margin-bottom: var(--pf-t--global--spacer--md)`. Custom `ocm-fleet-*` classes are for multi-property styles, component-specific layouts (gap, grid), or things PF utilities don't cover.
 
 **Conditional classes → `clsx`.** Use `clsx` (already in extensions/core/client) for combining className strings conditionally. No manual template literals or ternaries for class composition.
 
 ```tsx
 // GOOD
 import clsx from "clsx";
-<div className={clsx("pf-v6-u-mb-md", isActive && "ocm-rm-core-active")} />
+<div className={clsx("pf-v6-u-mb-md", isActive && "ocm-fleet-core-active")} />
 
 // BAD
-<div className={`pf-v6-u-mb-md ${isActive ? "ocm-rm-core-active" : ""}`} />
+<div className={`pf-v6-u-mb-md ${isActive ? "ocm-fleet-core-active" : ""}`} />
 ```
 
-**Vendor class overrides** (`pf-*`, `react-*`): allowed ONLY nested inside your own `ocm-rm-*` class — never as top-level selectors. Apply a custom `ocm-rm-*` className to the element, then nest the vendor override inside it.
+**Vendor class overrides** (`pf-*`, `react-*`): allowed ONLY nested inside your own `ocm-fleet-*` class — never as top-level selectors. Apply a custom `ocm-fleet-*` className to the element, then nest the vendor override inside it.
 
 ```scss
 // GOOD — scoped override
-.ocm-rm-core-clusters__toolbar {
+.ocm-fleet-core-clusters__toolbar {
   .pf-v6-c-toolbar__item { flex-basis: auto; }
 }
 
@@ -113,8 +113,8 @@ import clsx from "clsx";
 ## Build & MF
 
 - Rspack 2.x with `builtin:swc-loader` (not webpack, not ts-loader).
-- PF imports: barrel → granular dynamic paths via SWC `transformImport` templates + `PfModuleReplacementPlugin` (corrects naive paths using `dynamic-modules.json`). `getDynamicModules` for MF shared entries, `createPfTransformImport` + `createPfModuleReplacementPlugin` from `@ocm-resource-manager/build-utils`.
-- `@ocm-resource-manager/common` in plugins → must be in MF `sharedModules`.
+- PF imports: barrel → granular dynamic paths via SWC `transformImport` templates + `PfModuleReplacementPlugin` (corrects naive paths using `dynamic-modules.json`). `getDynamicModules` for MF shared entries, `createPfTransformImport` + `createPfModuleReplacementPlugin` from `@ocm-fleet/build-utils`.
+- `@ocm-fleet/common` in plugins → must be in MF `sharedModules`.
 - Entry point: async boundary (`index.ts` → `import("./bootstrap")`).
 
 ## Commands

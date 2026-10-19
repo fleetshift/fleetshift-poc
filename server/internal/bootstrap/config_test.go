@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/bootstrap"
-	"github.com/stolostron/ocm-resource-manager/server/internal/testutil"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/testutil"
 )
 
 func TestNewConfig(t *testing.T) {
@@ -40,7 +40,7 @@ func TestNewConfig(t *testing.T) {
 				GRPCAddr:    ":50051",
 				HTTPAddr:    ":8080",
 				DBPath:      bootstrap.DefaultSQLitePath,
-				DatabaseURL: "postgres://user:pass@localhost:5432/ocm-resource-manager?sslmode=disable",
+				DatabaseURL: "postgres://user:pass@localhost:5432/resource_manager?sslmode=disable",
 			},
 			want: bootstrap.Config{
 				GRPCAddr: ":50051",
@@ -50,9 +50,9 @@ func TestNewConfig(t *testing.T) {
 					Port:      5432,
 					User:      "user",
 					Password:  "pass",
-					Name:      "ocm-resource-manager",
+					Name:      "resource_manager",
 					Params:    url.Values{"sslmode": []string{"disable"}},
-					DriverDSN: "postgres://user:pass@localhost:5432/ocm-resource-manager?sslmode=disable",
+					DriverDSN: "postgres://user:pass@localhost:5432/resource_manager?sslmode=disable",
 				},
 			},
 		},
@@ -302,8 +302,8 @@ func TestNewConfig(t *testing.T) {
 				HTTPAddr:                      ":8085",
 				DBPath:                        bootstrap.DefaultSQLitePath,
 				OIDCIssuer:                    "https://issuer.example/oidc",
-				OIDCResourceAudience:          "ocm-resource-manager",
-				OIDCKeyEnrollmentAudience:     "ocm-resource-manager-signing",
+				OIDCResourceAudience:          "resource-manager",
+				OIDCKeyEnrollmentAudience:     "resource-manager-signing",
 				OIDCRegistryID:                "github.com",
 				OIDCRegistrySubjectExpression: "claims.preferred_username",
 			},
@@ -312,8 +312,8 @@ func TestNewConfig(t *testing.T) {
 				HTTPAddr:                      ":8085",
 				Database:                      bootstrap.SQLite{Path: bootstrap.DefaultSQLitePath},
 				OIDCIssuer:                    "https://issuer.example/oidc",
-				OIDCResourceAudience:          "ocm-resource-manager",
-				OIDCKeyEnrollmentAudience:     "ocm-resource-manager-signing",
+				OIDCResourceAudience:          "resource-manager",
+				OIDCKeyEnrollmentAudience:     "resource-manager-signing",
 				OIDCRegistryID:                "github.com",
 				OIDCRegistrySubjectExpression: "claims.preferred_username",
 			},
@@ -541,8 +541,8 @@ func TestPostgresStringRedactsSecrets(t *testing.T) {
 		Port:      5432,
 		User:      "fleet",
 		Password:  secret,
-		Name:      "ocm-resource-manager",
-		DriverDSN: "postgres://fleet:" + secret + "@db.example:5432/ocm-resource-manager",
+		Name:      "resource_manager",
+		DriverDSN: "postgres://fleet:" + secret + "@db.example:5432/ocm-fleet",
 	}
 	for _, s := range []string{pg.String(), pg.GoString(), fmt.Sprintf("%v", pg), fmt.Sprintf("%#v", pg)} {
 		if strings.Contains(s, secret) {

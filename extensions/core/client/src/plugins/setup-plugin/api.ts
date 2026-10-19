@@ -35,7 +35,7 @@ async function getOidcClientId(): Promise<string> {
     throw new Error(`Failed to fetch UI config (${res.status})`);
   }
   const config = await res.json();
-  return config.oidc?.clientId ?? "ocm-resource-manager-ui";
+  return config.oidc?.clientId ?? "ocm-fleet-console";
 }
 
 export async function triggerAuthSetup(

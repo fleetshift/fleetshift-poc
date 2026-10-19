@@ -77,7 +77,7 @@ const file_ocm_v1alpha_get_auth_method_request_proto_rawDesc = "" +
 	")ocm/v1alpha/get_auth_method_request.proto\x12\vocm.v1alpha\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\"Y\n" +
 	"\x14GetAuthMethodRequest\x12A\n" +
 	"\x04name\x18\x01 \x01(\tB-\xe0A\x02\xfaA'\n" +
-	"%open-cluster-management.io/AuthMethodR\x04nameBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"%open-cluster-management.io/AuthMethodR\x04nameBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_get_auth_method_request_proto_rawDescOnce sync.Once

@@ -1,4 +1,4 @@
-name: Set up OCM Resource Manager E2E
+name: Set up OCM Fleet E2E
 description: |
   Prepares a GitHub Actions job to use an AIO image.
 
@@ -7,15 +7,15 @@ description: |
   `role: e2e` after `needs: aio-image`. Matrix entries do not share a running
   container.
 
-  The tar is `localhost/ocm-resource-manager-server`, `localhost/ocm-resource-manager-server-local`,
-  `localhost/ocm-resource-manager-web`, and `quay.io/stolostron/ocm-resource-manager:latest`. Save
+  The tar is `localhost/ocm-fleet-server`, `localhost/ocm-fleet-server-local`,
+  `localhost/ocm-fleet-web`, and `quay.io/stolostron/ocm-fleet:latest`. Save
   uses `podman save --multi-image-archive` so those names are four images, not
   extra tags on the first. On a miss, `cache` also uploads a 1-day artifact so
   `e2e` jobs can download if same-run cache restore does not see the new key
   yet.
 
   `published` does not touch that tar. It pulls
-  `quay.io/stolostron/ocm-resource-manager:latest` after
+  `quay.io/stolostron/ocm-fleet:latest` after
   the user podman socket is up so the image is in the same store the tests use.
   That is the already published Quay AIO, not the image from this checkout.
   The caller runs a UI sanity (`chromium-sanity`), not the full UI e2e suite.
@@ -40,17 +40,17 @@ inputs:
 
        e2e — the `e2e-playwright` matrix. Restore (or download) the tar, podman
        load, install Node and Playwright, start user podman.socket and
-      ensure the kind network. Set OCM_RM_E2E_AIO_PREBUILT=1 when invoking
+      ensure the kind network. Set OCM_FLEET_E2E_AIO_PREBUILT=1 when invoking
       the UI and CLI targets so their shared Node runner does not rebuild the
        restored image.
 
-      published — pull quay.io/stolostron/ocm-resource-manager:latest, the already
+      published — pull quay.io/stolostron/ocm-fleet:latest, the already
       published Quay AIO, never this checkout's image. Used by the published
       sanity job (start / Dex login / console), not a full UI e2e re-run. A
       failure means the live tag failed basic function (users are affected),
       not that the current branch is. Install Node and Playwright, start user
       podman.socket, ensure the kind network. Never restore or build the
-      checkout tar. Set OCM_RM_E2E_AIO_PULL=1 and invoke e2e-web with
+      checkout tar. Set OCM_FLEET_E2E_AIO_PULL=1 and invoke e2e-web with
       --project=chromium-sanity so the runner pulls that tag instead of
       building.
     required: true
@@ -131,10 +131,10 @@ runs:
         npx nx run image:aio
 
         required=(
-          localhost/ocm-resource-manager-server:latest
-          localhost/ocm-resource-manager-server-local:latest
-          localhost/ocm-resource-manager-web:latest
-          quay.io/stolostron/ocm-resource-manager:latest
+          localhost/ocm-fleet-server:latest
+          localhost/ocm-fleet-server-local:latest
+          localhost/ocm-fleet-web:latest
+          quay.io/stolostron/ocm-fleet:latest
         )
         for img in "${required[@]}"; do
           if ! podman image exists "$img"; then
@@ -188,10 +188,10 @@ runs:
         echo "loading AIO images from cache"
         podman load -i "$tar"
         required=(
-          localhost/ocm-resource-manager-server:latest
-          localhost/ocm-resource-manager-server-local:latest
-          localhost/ocm-resource-manager-web:latest
-          quay.io/stolostron/ocm-resource-manager:latest
+          localhost/ocm-fleet-server:latest
+          localhost/ocm-fleet-server-local:latest
+          localhost/ocm-fleet-web:latest
+          quay.io/stolostron/ocm-fleet:latest
         )
         for img in "${required[@]}"; do
           if ! podman image exists "$img"; then
@@ -200,10 +200,10 @@ runs:
             exit 1
           fi
         done
-        aio_id="$(podman image inspect -f '{{.Id}}' quay.io/stolostron/ocm-resource-manager:latest)"
-        server_id="$(podman image inspect -f '{{.Id}}' localhost/ocm-resource-manager-server:latest)"
+        aio_id="$(podman image inspect -f '{{.Id}}' quay.io/stolostron/ocm-fleet:latest)"
+        server_id="$(podman image inspect -f '{{.Id}}' localhost/ocm-fleet-server:latest)"
         if [ "$aio_id" = "$server_id" ]; then
-          echo "quay.io/stolostron/ocm-resource-manager:latest is the server image, not AIO (need podman save --multi-image-archive)" >&2
+          echo "quay.io/stolostron/ocm-fleet:latest is the server image, not AIO (need podman save --multi-image-archive)" >&2
           exit 1
         fi
 
@@ -220,7 +220,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        img="quay.io/stolostron/ocm-resource-manager:latest"
+        img="quay.io/stolostron/ocm-fleet:latest"
         echo "pulling $img"
         podman pull "$img"
         if ! podman image exists "$img"; then

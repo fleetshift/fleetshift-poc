@@ -164,7 +164,7 @@ const file_ocm_v1alpha_deliver_event_proto_rawDesc = "" +
 	"\x12delivery_completed\x18\x03 \x01(\v2\x1e.ocm.v1alpha.DeliveryCompletedH\x00R\x11deliveryCompleted\x12I\n" +
 	"\x10remove_completed\x18\x04 \x01(\v2\x1c.ocm.v1alpha.RemoveCompletedH\x00R\x0fremoveCompleted\x12Q\n" +
 	"\x10condition_report\x18\x05 \x01(\v2$.ocm.v1alpha.DeliveryConditionReportH\x00R\x0fconditionReportB\a\n" +
-	"\x05eventBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x05eventBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_deliver_event_proto_rawDescOnce sync.Once

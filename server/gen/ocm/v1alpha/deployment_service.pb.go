@@ -32,7 +32,7 @@ const file_ocm_v1alpha_deployment_service_proto_rawDesc = "" +
 	"\rGetDeployment\x12!.ocm.v1alpha.GetDeploymentRequest\x1a\x17.ocm.v1alpha.Deployment\",\xdaA\x04name\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1alpha/{name=deployments/*}\x12z\n" +
 	"\x0fListDeployments\x12#.ocm.v1alpha.ListDeploymentsRequest\x1a$.ocm.v1alpha.ListDeploymentsResponse\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1alpha/deployments\x12\x89\x01\n" +
 	"\x10ResumeDeployment\x12$.ocm.v1alpha.ResumeDeploymentRequest\x1a\x17.ocm.v1alpha.Deployment\"6\xdaA\x04name\x82\xd3\xe4\x93\x02):\x01*\"$/v1alpha/{name=deployments/*}:resume\x12\x7f\n" +
-	"\x10DeleteDeployment\x12$.ocm.v1alpha.DeleteDeploymentRequest\x1a\x17.ocm.v1alpha.Deployment\",\xdaA\x04name\x82\xd3\xe4\x93\x02\x1f*\x1d/v1alpha/{name=deployments/*}BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x10DeleteDeployment\x12$.ocm.v1alpha.DeleteDeploymentRequest\x1a\x17.ocm.v1alpha.Deployment\",\xdaA\x04name\x82\xd3\xe4\x93\x02\x1f*\x1d/v1alpha/{name=deployments/*}BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var file_ocm_v1alpha_deployment_service_proto_goTypes = []any{
 	(*CreateDeploymentRequest)(nil), // 0: ocm.v1alpha.CreateDeploymentRequest

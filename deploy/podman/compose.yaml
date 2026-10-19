@@ -1,15 +1,15 @@
 # AIO image via compose. Public origin:
-#   https://ocm-resource-manager.localhost:8085  (TLS edge; Dex under /idp)
+#   https://ocm-fleet.localhost:8085  (TLS edge; Dex under /idp)
 # Published: 127.0.0.1:8085 (HTTPS), 127.0.0.1:50051 (gRPC).
 # OIDC_ISSUER_URL unset → peer Dex; set → that issuer (Dex parks).
 # sqlite only. Use Nx deploy:podman:* targets — not podman compose directly.
 # If /data still has issuer https://127.0.0.1:5556/dex, run npx nx run deploy:podman:clean.
 
-x-ocm-resource-manager-aio: &ocm-resource-manager-aio
-  image: ${OCM_RM_SERVER_IMAGE:-quay.io/stolostron/ocm-resource-manager:latest}
+x-ocm-fleet-aio: &ocm-fleet-aio
+  image: ${OCM_FLEET_IMAGE:-quay.io/stolostron/ocm-fleet:latest}
   restart: unless-stopped
   privileged: true
-  # s6 starts as root, then drops to ocm-resource-manager 1000 / dex 1001 / aio-proxy 1002.
+  # s6 starts as root, then drops to resource-manager 1000 / dex 1001 / aio-proxy 1002.
   user: "0:0"
   # aio-init reads OIDC_* and OCM_RM_* and ignores the rest.
   env_file:
@@ -20,26 +20,26 @@ x-ocm-resource-manager-aio: &ocm-resource-manager-aio
   volumes:
     - ${PODMAN_SOCKET}:/var/run/docker.sock
     - /tmp:/tmp
-    - ocm-resource-manager-data:/data
+    - ocm-fleet-data:/data
   networks:
     default: {}
     kind:
       aliases:
-        - ocm-resource-manager
+        - ocm-fleet
 
 services:
 
   # Compose service name for the AIO container (proxy + API + UI + Dex).
-  ocm-resource-manager-server:
-    <<: *ocm-resource-manager-aio
+  ocm-fleet:
+    <<: *ocm-fleet-aio
     # No command: s6 is PID 1.
 
 volumes:
-  ocm-resource-manager-data:
+  ocm-fleet-data:
 
 networks:
   default:
-    name: ocm-resource-manager
+    name: ocm-fleet
   kind:
     name: kind
     external: true

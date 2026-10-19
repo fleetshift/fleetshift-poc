@@ -1,13 +1,10 @@
-import type {
-  NavLayoutEntry,
-  NavLayoutMore,
-} from "@ocm-resource-manager/common";
+import type { NavLayoutEntry, NavLayoutMore } from "@ocm-fleet/common";
 import {
   CORE_EXTENSION_META,
   mergeLayout,
   orderByIds,
   useNavLayout,
-} from "@ocm-resource-manager/common";
+} from "@ocm-fleet/common";
 import {
   useExtensions,
   useResolvedExtensions,

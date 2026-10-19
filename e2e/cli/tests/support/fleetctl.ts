@@ -11,9 +11,9 @@ import { type Persona } from "../../../shared/personas";
 import { commandFailure, type CommandResult, runCommand } from "./command";
 import { type Sandbox } from "./sandbox";
 
-const CLIENT_ID = "ocm-resource-manager-cli";
+const CLIENT_ID = "fleetctl";
 const SCOPES =
-  "openid,profile,email,audience:server:client_id:ocm-resource-manager";
+  "openid,profile,email,audience:server:client_id:resource-manager";
 const AUTH_FILE = "auth.json";
 const CREDENTIALS_FILE = "credentials.json";
 const LOGIN_TIMEOUT_MS = 60_000;

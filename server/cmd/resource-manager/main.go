@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/cli"
+	"github.com/stolostron/ocm-fleet/server/internal/cli"
 )
 
 func main() {

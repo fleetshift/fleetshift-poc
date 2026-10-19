@@ -7,10 +7,10 @@ const _origDocument = globalThis.document;
 
 beforeEach(() => {
   const store: Record<string, string> = {};
-  globalThis.document = { title: "OCM Resource Manager" } as unknown as Document;
+  globalThis.document = { title: "OCM Fleet" } as unknown as Document;
   globalThis.window = {
     location: {
-      origin: "https://ocm-resource-manager.localhost:8085",
+      origin: "https://ocm-fleet.localhost:8085",
       pathname: "/overview/overview",
     },
     history: {
@@ -51,8 +51,8 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://ocm-resource-manager.localhost:8085/idp",
-            clientId: "ocm-resource-manager-ui",
+            authority: "https://ocm-fleet.localhost:8085/idp",
+            clientId: "ocm-fleet-console",
             scope: "openid profile email groups",
           },
         }),
@@ -63,16 +63,14 @@ describe("fetchOidcConfig", () => {
     const props = await fetchOidcConfig(mockNavigate);
 
     expect(props.redirect_uri).toBe(
-      "https://ocm-resource-manager.localhost:8085/app/auth/callback",
+      "https://ocm-fleet.localhost:8085/app/auth/callback",
     );
     expect(props.silent_redirect_uri).toBe(
-      "https://ocm-resource-manager.localhost:8085/app/silent-renew.html",
+      "https://ocm-fleet.localhost:8085/app/silent-renew.html",
     );
     expect(props.response_type).toBe("code");
     expect(props.automaticSilentRenew).toBe(true);
-    expect(props.authority).toBe(
-      "https://ocm-resource-manager.localhost:8085/idp",
-    );
+    expect(props.authority).toBe("https://ocm-fleet.localhost:8085/idp");
     expect(props.scope).toBe("openid profile email groups");
 
     props.onSigninCallback?.({} as never);
@@ -93,8 +91,8 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://ocm-resource-manager.localhost:8085/idp",
-            clientId: "ocm-resource-manager-ui",
+            authority: "https://ocm-fleet.localhost:8085/idp",
+            clientId: "ocm-fleet-console",
             scope: "openid",
           },
         }),
@@ -114,8 +112,8 @@ describe("fetchOidcConfig", () => {
         ok: true,
         json: async () => ({
           oidc: {
-            authority: "https://ocm-resource-manager.localhost:8085/idp",
-            clientId: "ocm-resource-manager-ui",
+            authority: "https://ocm-fleet.localhost:8085/idp",
+            clientId: "ocm-fleet-console",
             scope: "",
           },
         }),

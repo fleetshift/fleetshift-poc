@@ -5,10 +5,10 @@ import {
   createPfModuleReplacementPlugin,
   createPfTransformImport,
   createSearchResultRenderer,
-  ResourceManagerPlugin,
+  FleetPlugin,
   getCommonDynamicModules,
   getDynamicModules,
-} from "@ocm-resource-manager/build-utils";
+} from "@ocm-fleet/build-utils";
 import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
 import type { Configuration } from "@rspack/core";
 import rspack from "@rspack/core";
@@ -69,7 +69,7 @@ const mfOverride = {
 
 const p = (rel: string) => path.resolve(configDir, rel);
 
-const KindPlugin = new ResourceManagerPlugin({
+const KindPlugin = new FleetPlugin({
   extensions: [
     createClusterProvider({
       id: "kind",

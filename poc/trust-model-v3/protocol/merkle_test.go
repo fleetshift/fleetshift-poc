@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/internal/merklelog"
-	"github.com/stolostron/ocm-resource-manager/poc/trust-model-v3/internal/sparsemap"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/merklelog"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/sparsemap"
 )
 
 func TestKeyHistoryUpdateHasMerkleInclusionAndConsistencyProofs(t *testing.T) {

@@ -28,7 +28,7 @@ const file_ocm_v1alpha_auth_method_service_proto_rawDesc = "" +
 	"%ocm/v1alpha/auth_method_service.proto\x12\vocm.v1alpha\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1docm/v1alpha/auth_method.proto\x1a,ocm/v1alpha/create_auth_method_request.proto\x1a)ocm/v1alpha/get_auth_method_request.proto2\xaa\x02\n" +
 	"\x11AuthMethodService\x12\x99\x01\n" +
 	"\x10CreateAuthMethod\x12$.ocm.v1alpha.CreateAuthMethodRequest\x1a\x17.ocm.v1alpha.AuthMethod\"F\xdaA\x1aauth_method,auth_method_id\x82\xd3\xe4\x93\x02#:\vauth_method\"\x14/v1alpha/authMethods\x12y\n" +
-	"\rGetAuthMethod\x12!.ocm.v1alpha.GetAuthMethodRequest\x1a\x17.ocm.v1alpha.AuthMethod\",\xdaA\x04name\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1alpha/{name=authMethods/*}BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\rGetAuthMethod\x12!.ocm.v1alpha.GetAuthMethodRequest\x1a\x17.ocm.v1alpha.AuthMethod\",\xdaA\x04name\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1alpha/{name=authMethods/*}BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var file_ocm_v1alpha_auth_method_service_proto_goTypes = []any{
 	(*CreateAuthMethodRequest)(nil), // 0: ocm.v1alpha.CreateAuthMethodRequest

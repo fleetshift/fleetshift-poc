@@ -1,8 +1,8 @@
 import type { ExtendedTemplateConfig } from "@patternfly/widgetized-dashboard";
 
 export const LAYOUT_VERSION = 8;
-const STORAGE_KEY = "ocm-resource-manager:dashboard-layout";
-const VERSION_KEY = "ocm-resource-manager:dashboard-layout-version";
+const STORAGE_KEY = "ocm-fleet:dashboard-layout";
+const VERSION_KEY = "ocm-fleet:dashboard-layout-version";
 
 export function loadTemplate(): ExtendedTemplateConfig | null {
   try {

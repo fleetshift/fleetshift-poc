@@ -1,5 +1,5 @@
 {
-  "name": "@ocm-resource-manager/kind-server",
+  "name": "@ocm-fleet/kind-server",
   "root": "extensions/kind/server",
   "projectType": "library",
   "tags": ["lang:go", "scope:backend", "type:extension"],

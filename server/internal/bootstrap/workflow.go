@@ -11,9 +11,9 @@ import (
 	"github.com/cschleiden/go-workflows/client"
 	"github.com/cschleiden/go-workflows/worker"
 
-	"github.com/stolostron/ocm-resource-manager/server/internal/domain"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/goworkflows"
-	"github.com/stolostron/ocm-resource-manager/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/goworkflows"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
 )
 
 // NewGoWorkflowRegistry builds the production go-workflows registry for database.

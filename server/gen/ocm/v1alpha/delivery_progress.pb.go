@@ -173,7 +173,7 @@ const file_ocm_v1alpha_delivery_progress_proto_rawDesc = "" +
 	"\rKIND_PROGRESS\x10\x01\x12\x10\n" +
 	"\fKIND_WARNING\x10\x02\x12\x0e\n" +
 	"\n" +
-	"KIND_ERROR\x10\x03BNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"KIND_ERROR\x10\x03BCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_delivery_progress_proto_rawDescOnce sync.Once

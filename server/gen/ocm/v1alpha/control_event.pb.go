@@ -96,7 +96,7 @@ const file_ocm_v1alpha_control_event_proto_rawDesc = "" +
 	"\x1focm/v1alpha/control_event.proto\x12\vocm.v1alpha\x1a!ocm/v1alpha/register_target.proto\"_\n" +
 	"\fControlEvent\x12F\n" +
 	"\x0fregister_target\x18\x01 \x01(\v2\x1b.ocm.v1alpha.RegisterTargetH\x00R\x0eregisterTargetB\a\n" +
-	"\x05eventBNZLgithub.com/stolostron/ocm-resource-manager/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
+	"\x05eventBCZAgithub.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alphab\x06proto3"
 
 var (
 	file_ocm_v1alpha_control_event_proto_rawDescOnce sync.Once
