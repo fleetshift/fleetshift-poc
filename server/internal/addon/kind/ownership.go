@@ -65,7 +65,7 @@ func (d GenerationDisposition) String() string {
 // CheckAndAdvance as a hard failure on every path.
 //
 // Intentional toy limitations:
-//   - rm-- naming is convention, not proof of ownership.
+//   - ocm-fleet-- naming is convention, not proof of ownership.
 //   - Create-crash or persist failure before the ConfigMap write: the
 //     next delivery sees a missing ConfigMap, treats configuration as
 //     unknown, and recreates (possible recreation loop until persist

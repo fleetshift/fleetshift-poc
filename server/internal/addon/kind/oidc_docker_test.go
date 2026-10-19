@@ -58,7 +58,7 @@ type oidcClusterResult struct {
 // the caller's identity. It starts a fake OIDC provider, delivers the
 // cluster via the kind agent, and returns the kubeconfig and provider.
 // resourceID is the platform resource ID; the kind/docker name is
-// ownership-encoded as rm--{resourceID}.
+// ownership-encoded as ocm-fleet--{resourceID}.
 func createOIDCCluster(t *testing.T, resourceID string, auth domain.DeliveryAuth) oidcClusterResult {
 	t.Helper()
 

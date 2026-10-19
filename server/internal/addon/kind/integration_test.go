@@ -138,8 +138,8 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 
 	<-provider.created
-	if !provider.hasCluster("rm--dev-cluster") {
-		t.Error("expected kind cluster 'rm--dev-cluster' to be created by the provider")
+	if !provider.hasCluster("ocm-fleet--dev-cluster") {
+		t.Error("expected kind cluster 'ocm-fleet--dev-cluster' to be created by the provider")
 	}
 }
 
@@ -241,11 +241,11 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	<-provider.created
-	// The kind/docker cluster name is ownership-encoded as rm--{resourceID}
-	// ("rm--mr-cluster"), not the full resource name ("clusters/mr-cluster")
+	// The kind/docker cluster name is ownership-encoded as ocm-fleet--{resourceID}
+	// ("ocm-fleet--mr-cluster"), not the full resource name ("clusters/mr-cluster")
 	// -- docker/podman reject "/" in container names.
-	if !provider.hasCluster("rm--mr-cluster") {
-		t.Error("expected kind cluster 'rm--mr-cluster' to be created by the provider")
+	if !provider.hasCluster("ocm-fleet--mr-cluster") {
+		t.Error("expected kind cluster 'ocm-fleet--mr-cluster' to be created by the provider")
 	}
 }
 

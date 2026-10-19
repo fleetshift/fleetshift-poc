@@ -12,19 +12,19 @@ func TestMemoryGenerationStore_CheckAndAdvance(t *testing.T) {
 	s := NewMemoryGenerationStore()
 	ctx := context.Background()
 
-	d, g, err := s.CheckAndAdvance(ctx, "rm--demo", nil, 1)
+	d, g, err := s.CheckAndAdvance(ctx, "ocm-fleet--demo", nil, 1)
 	if err != nil || d != GenerationCreated || g != 1 {
 		t.Fatalf("first advance: disp=%v gen=%d err=%v", d, g, err)
 	}
-	d, g, err = s.CheckAndAdvance(ctx, "rm--demo", nil, 1)
+	d, g, err = s.CheckAndAdvance(ctx, "ocm-fleet--demo", nil, 1)
 	if err != nil || d != GenerationSame || g != 1 {
 		t.Fatalf("same: disp=%v gen=%d err=%v", d, g, err)
 	}
-	d, g, err = s.CheckAndAdvance(ctx, "rm--demo", nil, 3)
+	d, g, err = s.CheckAndAdvance(ctx, "ocm-fleet--demo", nil, 3)
 	if err != nil || d != GenerationAdvanced || g != 3 {
 		t.Fatalf("advance: disp=%v gen=%d err=%v", d, g, err)
 	}
-	d, g, err = s.CheckAndAdvance(ctx, "rm--demo", nil, 2)
+	d, g, err = s.CheckAndAdvance(ctx, "ocm-fleet--demo", nil, 2)
 	if err != nil || d != GenerationStale || g != 3 {
 		t.Fatalf("stale: disp=%v gen=%d err=%v", d, g, err)
 	}
@@ -33,9 +33,9 @@ func TestMemoryGenerationStore_CheckAndAdvance(t *testing.T) {
 func TestMemoryGenerationStore_ForgetClears(t *testing.T) {
 	s := NewMemoryGenerationStore()
 	ctx := context.Background()
-	_, _, _ = s.CheckAndAdvance(ctx, "rm--demo", nil, 2)
-	s.Forget("rm--demo")
-	_, found, err := s.Get(ctx, "rm--demo", nil)
+	_, _, _ = s.CheckAndAdvance(ctx, "ocm-fleet--demo", nil, 2)
+	s.Forget("ocm-fleet--demo")
+	_, found, err := s.Get(ctx, "ocm-fleet--demo", nil)
 	if err != nil || found {
 		t.Fatalf("after Forget: found=%v err=%v", found, err)
 	}
@@ -49,11 +49,11 @@ func TestMemoryGenerationStore_NeverMovesBackwardConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(g domain.Generation) {
 			defer wg.Done()
-			_, _, _ = s.CheckAndAdvance(ctx, "rm--demo", nil, g)
+			_, _, _ = s.CheckAndAdvance(ctx, "ocm-fleet--demo", nil, g)
 		}(gen)
 	}
 	wg.Wait()
-	recorded, found, err := s.Get(ctx, "rm--demo", nil)
+	recorded, found, err := s.Get(ctx, "ocm-fleet--demo", nil)
 	if err != nil || !found || recorded != 20 {
 		t.Fatalf("recorded=%d found=%v err=%v, want 20", recorded, found, err)
 	}

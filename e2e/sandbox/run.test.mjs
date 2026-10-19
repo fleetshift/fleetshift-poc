@@ -50,12 +50,12 @@ describe("buildTestEnvironment", () => {
 
 describe("kindNodeBelongsToRun", () => {
   it("is exact to the current run prefix", () => {
-    expect(kindNodeBelongsToRun("rm--kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
-      true,
-    );
-    expect(kindNodeBelongsToRun("rm--kind-e2e-other-a", "kind-e2e-abcd-")).toBe(
-      false,
-    );
+    expect(
+      kindNodeBelongsToRun("ocm-fleet--kind-e2e-abcd-a", "kind-e2e-abcd-"),
+    ).toBe(true);
+    expect(
+      kindNodeBelongsToRun("ocm-fleet--kind-e2e-other-a", "kind-e2e-abcd-"),
+    ).toBe(false);
     expect(kindNodeBelongsToRun("kind-e2e-abcd-a", "kind-e2e-abcd-")).toBe(
       false,
     );
@@ -64,15 +64,15 @@ describe("kindNodeBelongsToRun", () => {
 
 describe("parseOwnedKindNodes", () => {
   const prefix = "kind-e2e-abcd-";
-  const stdout = "abc123\trm--kind-e2e-abcd-n1";
+  const stdout = "abc123\tocm-fleet--kind-e2e-abcd-n1";
 
   it("parses id and cluster rows that belong to this run", () => {
     expect(parseOwnedKindNodes(stdout, prefix)).toEqual([
-      ["abc123", "rm--kind-e2e-abcd-n1"],
+      ["abc123", "ocm-fleet--kind-e2e-abcd-n1"],
     ]);
     expect(parseOwnedKindNodes("", prefix)).toEqual([]);
     expect(
-      parseOwnedKindNodes("deadbeef\trm--kind-e2e-other-n1", prefix),
+      parseOwnedKindNodes("deadbeef\tocm-fleet--kind-e2e-other-n1", prefix),
     ).toEqual([]);
   });
 
@@ -82,7 +82,7 @@ describe("parseOwnedKindNodes", () => {
         `${stdout}\ntime=".." level=warning msg="busy"`,
         prefix,
       ),
-    ).toEqual([["abc123", "rm--kind-e2e-abcd-n1"]]);
+    ).toEqual([["abc123", "ocm-fleet--kind-e2e-abcd-n1"]]);
   });
 });
 

@@ -133,6 +133,10 @@ removes the AIO plus Kind nodes carrying that run's unique cluster prefix. CI
 sets `OCM_FLEET_E2E_AIO_PREBUILT=1` after restoring the image; the runner then
 requires that image without rebuilding it.
 
+Host Kind cluster names are `ocm-fleet--<resource-id>`; resource IDs stay
+unprefixed in APIs. The 11-character ownership prefix leaves 39 characters for
+the resource ID under the addon's 50-character provider-name limit.
+
 The published-image workflow sets `OCM_FLEET_E2E_AIO_PULL=1` so the runner
 pulls `quay.io/stolostron/ocm-fleet:latest` instead of building, then runs a
 **sanity** (start, Dex login, console masthead/Clusters) — not the full UI

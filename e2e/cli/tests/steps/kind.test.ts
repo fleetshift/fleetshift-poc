@@ -87,16 +87,16 @@ describe("Kubernetes node parsing", () => {
         "items": [
           {
             "metadata": {
-              "name": "rm--a-control-plane",
+              "name": "ocm-fleet--a-control-plane",
               "labels": { "node-role.kubernetes.io/control-plane": "" }
             }
           },
-          { "metadata": { "name": "rm--a-worker", "labels": {} } }
+          { "metadata": { "name": "ocm-fleet--a-worker", "labels": {} } }
         ]
       }`),
     ).toEqual([
-      { name: "rm--a-control-plane", role: "control-plane" },
-      { name: "rm--a-worker", role: "worker" },
+      { name: "ocm-fleet--a-control-plane", role: "control-plane" },
+      { name: "ocm-fleet--a-worker", role: "worker" },
     ]);
   });
 

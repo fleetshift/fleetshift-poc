@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-// The Kind addon adds the `rm--` ownership prefix before handing this ID to
+// The Kind addon adds the `ocm-fleet--` ownership prefix before handing this ID to
 // Kind, whose practical cluster-name limit is 50 characters.
-export const MAX_KIND_RESOURCE_ID_LENGTH = 46;
+export const MAX_KIND_RESOURCE_ID_LENGTH = 39;
 
 const UNIQUE_SUFFIX_LENGTH = 8;
 const RFC1123_PREFIX = /^[a-z0-9]([a-z0-9-]*)?$/;

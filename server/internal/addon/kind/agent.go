@@ -3,7 +3,7 @@
 // cluster specifications; delivery creates or updates clusters, and
 // removal deletes them.
 //
-// Ownership is encoded in the kind/docker cluster name as rm--{resourceID}
+// Ownership is encoded in the kind/docker cluster name as ocm-fleet--{resourceID}
 // so provider.List recovers ownership across agent restarts (including
 // create-then-crash before the generation ConfigMap is written). The
 // last-accepted delivery generation is stored in a ConfigMap inside the
@@ -18,7 +18,7 @@
 // errors are terminal (do not treat as absent / succeed). Every
 // CheckAndAdvance that returns GenerationStale fails the delivery.
 //
-// Intentional toy limitations: rm-- is convention not proof of
+// Intentional toy limitations: ocm-fleet-- is convention not proof of
 // ownership; create-crash before ConfigMap write and tombstone gaps
 // after remove/failed recreation need an external journal; peek-then-
 // recreate has a concurrency gap; higher gen always recreates;
@@ -70,7 +70,7 @@ type ClusterSpec struct {
 
 	// Name is the platform resource ID (e.g. "demo" for clusters/demo).
 	// The kind/docker cluster name is the ownership-encoded form
-	// rm--{Name}; see encodeKindClusterName.
+	// ocm-fleet--{Name}; see encodeKindClusterName.
 	Name string `json:"name"`
 	// ResourceName is the full platform resource name (e.g.
 	// "clusters/foo"). Used for inventory reporting and display.

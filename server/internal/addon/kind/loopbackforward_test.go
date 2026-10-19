@@ -87,8 +87,8 @@ func TestAgent_EnsureCluster_CallsLoopbackForward(t *testing.T) {
 	if first.State != domain.DeliveryStateDelivered {
 		t.Fatalf("first State = %q (%s)", first.State, first.Message)
 	}
-	if len(fwd.ensured) != 1 || fwd.ensured[0] != "rm--forward-me" {
-		t.Fatalf("after create ensured = %v, want [rm--forward-me]", fwd.ensured)
+	if len(fwd.ensured) != 1 || fwd.ensured[0] != "ocm-fleet--forward-me" {
+		t.Fatalf("after create ensured = %v, want [ocm-fleet--forward-me]", fwd.ensured)
 	}
 
 	fwd.ensured = nil
@@ -99,8 +99,8 @@ func TestAgent_EnsureCluster_CallsLoopbackForward(t *testing.T) {
 	if second.State != domain.DeliveryStateDelivered {
 		t.Fatalf("second State = %q (%s)", second.State, second.Message)
 	}
-	if len(fwd.ensured) != 1 || fwd.ensured[0] != "rm--forward-me" {
-		t.Fatalf("after ensure ensured = %v, want [rm--forward-me]", fwd.ensured)
+	if len(fwd.ensured) != 1 || fwd.ensured[0] != "ocm-fleet--forward-me" {
+		t.Fatalf("after ensure ensured = %v, want [ocm-fleet--forward-me]", fwd.ensured)
 	}
 }
 
@@ -151,8 +151,8 @@ func TestAgent_Remove_CallsLoopbackForward(t *testing.T) {
 	if res := awaitDone(t, reporter.done); res.State != domain.DeliveryStateDelivered {
 		t.Fatalf("remove State = %q (%s)", res.State, res.Message)
 	}
-	if len(fwd.removed) != 1 || fwd.removed[0] != "rm--gone" {
-		t.Fatalf("removed = %v, want [rm--gone]", fwd.removed)
+	if len(fwd.removed) != 1 || fwd.removed[0] != "ocm-fleet--gone" {
+		t.Fatalf("removed = %v, want [ocm-fleet--gone]", fwd.removed)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestLoopbackForward_Ensure_InstallsSystemdProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x"); err != nil {
+	if err := fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "ocm-fleet--x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(node.cmds) != 1 {
@@ -211,7 +211,7 @@ func TestLoopbackForward_Ensure_MissingBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "ocm-fleet--x")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -226,7 +226,7 @@ func TestLoopbackForward_Remove_StopsUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fwd.Remove(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x"); err != nil {
+	if err := fwd.Remove(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "ocm-fleet--x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(node.cmds) != 1 {
@@ -250,7 +250,7 @@ func TestLoopbackForward_Ensure_NoControlPlane(t *testing.T) {
 		t.Fatal(err)
 	}
 	worker := &recordingKindNode{name: "w-1", role: "worker"}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{worker}}, "rm--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{worker}}, "ocm-fleet--x")
 	if err == nil || !strings.Contains(err.Error(), "no control-plane nodes") {
 		t.Fatalf("error = %v, want no control-plane nodes", err)
 	}
@@ -267,7 +267,7 @@ func TestLoopbackForward_Ensure_EmptyBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "ocm-fleet--x")
 	if err == nil || !strings.Contains(err.Error(), "is empty") {
 		t.Fatalf("error = %v, want empty helper", err)
 	}
@@ -284,7 +284,7 @@ func TestLoopbackForward_Ensure_CommandError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "ocm-fleet--x")
 	if err == nil || !strings.Contains(err.Error(), "ensure loopback forward on cp-1") || !strings.Contains(err.Error(), "systemctl failed") {
 		t.Fatalf("error = %v", err)
 	}
@@ -296,7 +296,7 @@ func TestLoopbackForward_Ensure_DefaultBinaryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "rm--x")
+	err = fwd.Ensure(context.Background(), &staticNodeProvider{nodes: []nodes.Node{node}}, "ocm-fleet--x")
 	if err != nil {
 		if !strings.Contains(err.Error(), "/usr/local/bin/kind-loopback-forward") {
 			t.Fatalf("error = %v, want default helper path", err)

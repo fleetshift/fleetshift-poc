@@ -47,7 +47,7 @@ export function buildTestEnvironment(base, sandbox) {
 }
 
 export function kindNodeBelongsToRun(hostClusterName, kindPrefix) {
-  return hostClusterName.startsWith(`rm--${kindPrefix}`);
+  return hostClusterName.startsWith(`ocm-fleet--${kindPrefix}`);
 }
 
 // Parse podman ps --format stdout, not the combined `output` diagnostics string.

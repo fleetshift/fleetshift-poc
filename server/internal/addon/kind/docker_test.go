@@ -163,7 +163,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 }
 
 // encodedKindName is the ownership-encoded kind/docker name for a
-// platform resource ID (rm--{id}).
+// platform resource ID (ocm-fleet--{id}).
 func encodedKindName(resourceID string) string {
-	return "rm--" + resourceID
+	return "ocm-fleet--" + resourceID
 }

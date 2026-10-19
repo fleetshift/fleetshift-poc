@@ -271,11 +271,11 @@ func (r *flakyReportResultReporter) ReportResult(
 
 func TestAgent_Remove_StopIndexer(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["rm--stop-me"] = nil
+	provider.clusters["ocm-fleet--stop-me"] = nil
 	reporter := newChannelReporter()
 	runtime := &recordingIndexingRuntime{stopErr: domain.ErrNotFound} // best-effort: Remove continues
 	agent, store := newTestAgent(reporter, provider, kind.WithIndexingRuntime(runtime))
-	store.SetForTest("rm--stop-me", 1)
+	store.SetForTest("ocm-fleet--stop-me", 1)
 
 	err := agent.Remove(
 		context.Background(),
@@ -301,18 +301,18 @@ func TestAgent_Remove_StopIndexer(t *testing.T) {
 	if len(stops) != 1 || stops[0] != "k8s-stop-me" {
 		t.Fatalf("StopIndexer calls = %v, want [k8s-stop-me]", stops)
 	}
-	if len(provider.deleted) != 1 || provider.deleted[0] != "rm--stop-me" {
-		t.Fatalf("deleted = %v, want [rm--stop-me]", provider.deleted)
+	if len(provider.deleted) != 1 || provider.deleted[0] != "ocm-fleet--stop-me" {
+		t.Fatalf("deleted = %v, want [ocm-fleet--stop-me]", provider.deleted)
 	}
 }
 
 func TestAgent_Remove_StaleGenerationDoesNotStopIndexer(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["rm--demo"] = nil
+	provider.clusters["ocm-fleet--demo"] = nil
 	reporter := newChannelReporter()
 	runtime := &recordingIndexingRuntime{}
 	agent, store := newTestAgent(reporter, provider, kind.WithIndexingRuntime(runtime))
-	store.SetForTest("rm--demo", 2)
+	store.SetForTest("ocm-fleet--demo", 2)
 
 	err := agent.Remove(
 		context.Background(),
@@ -337,19 +337,19 @@ func TestAgent_Remove_StaleGenerationDoesNotStopIndexer(t *testing.T) {
 	if len(runtime.stopIDs()) != 0 {
 		t.Fatalf("StopIndexer calls = %v, want none on stale remove", runtime.stopIDs())
 	}
-	if !provider.hasCluster("rm--demo") {
+	if !provider.hasCluster("ocm-fleet--demo") {
 		t.Fatal("cluster should remain after stale remove")
 	}
 }
 
 func TestAgent_Deliver_Recreate_StopIndexerBeforeDelete(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["rm--recreate-me"] = nil
+	provider.clusters["ocm-fleet--recreate-me"] = nil
 	reporter := newChannelReporter()
 	runtime := &recordingIndexingRuntime{}
 	agent, store := newTestAgent(reporter, provider, kind.WithIndexingRuntime(runtime))
 	// Lower stored generation forces recreateOwnedCluster on deliver gen 2.
-	store.SetForTest("rm--recreate-me", 1)
+	store.SetForTest("ocm-fleet--recreate-me", 1)
 
 	err := agent.Deliver(
 		context.Background(),

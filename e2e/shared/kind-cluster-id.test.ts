@@ -21,6 +21,13 @@ describe("uniqueKindClusterId", () => {
     ).toThrow(/too long/);
   });
 
+  it("accounts for the full ownership prefix at the provider name limit", () => {
+    const id = uniqueKindClusterId("a".repeat(31));
+
+    expect(`ocm-fleet--${id}`).toHaveLength(50);
+    expect(() => uniqueKindClusterId("a".repeat(32))).toThrow(/too long/);
+  });
+
   it("rejects a prefix that is not RFC1123-safe", () => {
     expect(() => uniqueKindClusterId("Kind-e2e-")).toThrow(/RFC1123-safe/);
     expect(() => uniqueKindClusterId("kind_e2e-")).toThrow(/RFC1123-safe/);

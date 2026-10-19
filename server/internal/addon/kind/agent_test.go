@@ -224,8 +224,8 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	}
 
 	<-provider.created
-	if !provider.hasCluster("rm--dev-cluster") {
-		t.Error("expected cluster 'rm--dev-cluster' to exist")
+	if !provider.hasCluster("ocm-fleet--dev-cluster") {
+		t.Error("expected cluster 'ocm-fleet--dev-cluster' to exist")
 	}
 }
 
@@ -282,7 +282,7 @@ func TestAgent_Deliver_SameGenerationRetrySkipsCreate(t *testing.T) {
 	if got := provider.createCount(); got != 1 {
 		t.Fatalf("Create called %d times after first deliver, want 1", got)
 	}
-	if g, found, _ := store.Get(context.Background(), "rm--dev-cluster", nil); !found || g != 1 {
+	if g, found, _ := store.Get(context.Background(), "ocm-fleet--dev-cluster", nil); !found || g != 1 {
 		t.Fatalf("store gen=%d found=%v, want 1 true", g, found)
 	}
 
@@ -422,10 +422,10 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 
 func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["rm--my-cluster"] = nil
+	provider.clusters["ocm-fleet--my-cluster"] = nil
 	reporter := newChannelReporter()
 	agent, store := newTestAgent(reporter, provider)
-	store.SetForTest("rm--my-cluster", 1)
+	store.SetForTest("ocm-fleet--my-cluster", 1)
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -442,8 +442,8 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
 	}
 
-	if len(provider.deleted) != 1 || provider.deleted[0] != "rm--my-cluster" {
-		t.Errorf("deleted = %v, want [rm--my-cluster]", provider.deleted)
+	if len(provider.deleted) != 1 || provider.deleted[0] != "ocm-fleet--my-cluster" {
+		t.Errorf("deleted = %v, want [ocm-fleet--my-cluster]", provider.deleted)
 	}
 }
 
@@ -521,10 +521,10 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 
 func TestAgent_Remove_WiresObserverLogger(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["rm--my-cluster"] = nil
+	provider.clusters["ocm-fleet--my-cluster"] = nil
 	reporter := newChannelReporter()
 	agent, store := newTestAgent(reporter, provider)
-	store.SetForTest("rm--my-cluster", 1)
+	store.SetForTest("ocm-fleet--my-cluster", 1)
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -1075,10 +1075,10 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 
 func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
 	fp := newFakeProvider()
-	fp.clusters["rm--rm-cluster"] = nil
+	fp.clusters["ocm-fleet--rm-cluster"] = nil
 	reporter := newChannelReporter()
 	store := kind.NewMemoryGenerationStore()
-	store.SetForTest("rm--rm-cluster", 1)
+	store.SetForTest("ocm-fleet--rm-cluster", 1)
 
 	bdp := &blockingDeleteProvider{
 		fakeProvider: fp,

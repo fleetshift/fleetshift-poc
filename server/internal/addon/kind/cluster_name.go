@@ -12,7 +12,7 @@ import (
 // resource manager server. This is a naming convention, not cryptographic proof of
 // ownership — an externally created name with this prefix may be
 // adopted as ours.
-const kindClusterNamePrefix = "rm--"
+const kindClusterNamePrefix = "ocm-fleet--"
 
 // maxKindClusterNameLen is kind's practical name length warning
 // threshold. Longer names are rejected before calling the provider.

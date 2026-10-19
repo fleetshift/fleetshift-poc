@@ -29,8 +29,8 @@ import (
 
 const clusterName = "ocm-fleet-k8s-e2e"
 
-// kindName is the ownership-encoded kind/docker cluster name (rm--{id}).
-const kindName = "rm--" + clusterName
+// kindName is the ownership-encoded kind/docker cluster name (ocm-fleet--{id}).
+const kindName = "ocm-fleet--" + clusterName
 
 var fixture *clusterFixture
 

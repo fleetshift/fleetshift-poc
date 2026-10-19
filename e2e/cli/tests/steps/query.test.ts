@@ -82,7 +82,7 @@ describe("query JSON parsing", () => {
             "kind": "Node",
             "cluster": "clusters/kind-e2e-abcd",
             "gvr": {"resource": "nodes"},
-            "metadata": {"name": "rm--kind-e2e-abcd-control-plane", "uid": "node-uid"},
+            "metadata": {"name": "ocm-fleet--kind-e2e-abcd-control-plane", "uid": "node-uid"},
             "extracted": {"kubeletVersion": "v1.31.0"}
           }
         }
@@ -101,7 +101,7 @@ describe("query JSON parsing", () => {
       extracted: { kubeletVersion: "v1.31.0" },
       kind: "Node",
       metadata: {
-        name: "rm--kind-e2e-abcd-control-plane",
+        name: "ocm-fleet--kind-e2e-abcd-control-plane",
         namespace: "",
       },
     });
