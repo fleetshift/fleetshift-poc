@@ -24,6 +24,8 @@ gRPC remains on `127.0.0.1:50051` (plaintext; known gap).
 - **kind** — for local cluster provisioning
 - `.env` file — copy from `.env.template`
 
+Complete the [repository setup](../../README.md#develop-in-this-repo) first.
+
 Create the kind network once: `podman network create kind`. Linux rootless:
 `systemctl --user enable --now podman.socket` and
 `export PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock`.
@@ -32,8 +34,8 @@ Create the kind network once: `podman network create kind`. Linux rootless:
 
 ```bash
 cp .env.template .env         # leave OIDC_ISSUER_URL unset for peer Dex
-  npx nx run cli:build          # build TypeScript fleetctl
-  npx nx run deploy:podman:dev             # build AIO from source and start
+npx nx run cli:build          # build TypeScript fleetctl
+npx nx run deploy:podman:dev  # build AIO from source and start
 ```
 
 Open https://ocm-fleet.localhost:8085 and accept the certificate
@@ -44,8 +46,8 @@ If `/data` was persisted from a pre-HTTPS AIO run, the AuthMethod issuer is
 still `https://127.0.0.1:5556/dex`. Reset once:
 
 ```bash
- npx nx run deploy:podman:clean
- npx nx run deploy:podman:dev
+npx nx run deploy:podman:clean
+npx nx run deploy:podman:dev
 ```
 
 `start.mjs` copies the sandbox CA to `deploy/podman/.certs/ca.crt` for fleetctl.
