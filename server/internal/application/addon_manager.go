@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // SchemaActivationID is an opaque token returned by

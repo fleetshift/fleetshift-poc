@@ -9,8 +9,8 @@ import (
 
 	"buf.build/go/protovalidate"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 // TestBuildHTTPHandler_UsesRegisteredPrefix proves that the prefix
@@ -24,8 +24,8 @@ func TestBuildHTTPHandler_UsesRegisteredPrefix(t *testing.T) {
 	_ = addr
 
 	const (
-		oldPrefix = "/apis/kind.fleetshift.io/v1/clusters"
-		newPrefix = "/apis/kindv2.fleetshift.io/v1/clusters"
+		oldPrefix = "/apis/kind.open-cluster-management.io/v1alpha/clusters"
+		newPrefix = "/apis/kindv2.open-cluster-management.io/v1alpha/clusters"
 		id        = "prefix-parse-id"
 	)
 
@@ -77,8 +77,8 @@ func buildInventoryOnlyNodeService(t *testing.T) *extensionresource.RegisteredSe
 			Singular:     "Node",
 			Plural:       "Nodes",
 		},
-		ResourceType: "test.fleetshift.io/Node",
-		ProtoPackage: "test.fleetshift.v1",
+		ResourceType: "test.open-cluster-management.io/Node",
+		ProtoPackage: "ocm.test.v1alpha",
 		Capabilities: extensionresource.ResourceCapabilities{
 			Inventory: &extensionresource.InventoryCapabilityConfig{},
 		},

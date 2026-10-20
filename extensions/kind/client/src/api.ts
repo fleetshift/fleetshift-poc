@@ -1,6 +1,6 @@
-import { createApiClient } from "@fleetshift/common";
+import { createApiClient } from "@ocm-fleet/common";
 
-const client = createApiClient("/apis/kind.fleetshift.io/v1");
+const client = createApiClient("/apis/kind.open-cluster-management.io/v1alpha");
 
 export interface KindNodeSpec {
   role: "control-plane" | "worker";

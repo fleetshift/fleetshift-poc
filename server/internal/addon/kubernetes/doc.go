@@ -1,4 +1,5 @@
-// Package kubernetes is the FleetShift addon for Kubernetes clusters.
+// Package kubernetes implements the Kubernetes target addon for the resource
+// manager server.
 //
 // It declares one AddonID with two independent capabilities:
 //

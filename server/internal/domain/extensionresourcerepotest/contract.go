@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // Factory creates a fresh [domain.Tx] for each test. The Tx is needed
@@ -123,17 +123,17 @@ func runTypeTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		def := sampleType("kind.fleetshift.io/Cluster")
+		def := sampleType("kind.open-cluster-management.io/Cluster")
 		if err := repo.CreateType(ctx, def); err != nil {
 			t.Fatalf("CreateType: %v", err)
 		}
 
-		got, err := repo.GetType(ctx, "kind.fleetshift.io/Cluster")
+		got, err := repo.GetType(ctx, "kind.open-cluster-management.io/Cluster")
 		if err != nil {
 			t.Fatalf("GetType: %v", err)
 		}
-		assertEqual(t, "ResourceType", got.ResourceType(), domain.ResourceType("kind.fleetshift.io/Cluster"))
-		assertEqual(t, "APIServiceName", got.APIServiceName(), domain.ServiceName("kind.fleetshift.io"))
+		assertEqual(t, "ResourceType", got.ResourceType(), domain.ResourceType("kind.open-cluster-management.io/Cluster"))
+		assertEqual(t, "APIServiceName", got.APIServiceName(), domain.ServiceName("kind.open-cluster-management.io"))
 		assertEqual(t, "APIVersion", got.APIVersion(), domain.APIVersion("v1"))
 		assertEqual(t, "CollectionID", got.CollectionID(), domain.CollectionID("clusters"))
 		if !got.CreatedAt().Equal(fixedTime) {
@@ -155,7 +155,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		def := sampleType("kind.fleetshift.io/Cluster")
+		def := sampleType("kind.open-cluster-management.io/Cluster")
 		if err := repo.CreateType(ctx, def); err != nil {
 			t.Fatalf("first: %v", err)
 		}
@@ -180,7 +180,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		for _, rt := range []domain.ResourceType{"test.fleetshift.io/Alpha", "test.fleetshift.io/Beta"} {
+		for _, rt := range []domain.ResourceType{"test.open-cluster-management.io/Alpha", "test.open-cluster-management.io/Beta"} {
 			if err := repo.CreateType(ctx, sampleType(rt)); err != nil {
 				t.Fatalf("CreateType %s: %v", rt, err)
 			}
@@ -199,7 +199,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		rt := domain.ResourceType("test.fleetshift.io/Deletable")
+		rt := domain.ResourceType("test.open-cluster-management.io/Deletable")
 		if err := repo.CreateType(ctx, sampleType(rt)); err != nil {
 			t.Fatalf("CreateType: %v", err)
 		}
@@ -226,7 +226,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
-		rt := domain.ResourceType("test.fleetshift.io/Widget")
+		rt := domain.ResourceType("test.open-cluster-management.io/Widget")
 		def := domain.NewExtensionResourceType(rt, "v1", "widgets", fixedTime)
 		if err := repo.CreateType(ctx, def); err != nil {
 			t.Fatalf("CreateType: %v", err)
@@ -260,12 +260,12 @@ func runTypeTests(t *testing.T, factory Factory) {
 		repo := tx.ExtensionResources()
 
 		def := domain.NewExtensionResourceType(
-			"inv.fleetshift.io/Node", "v1", "nodes", fixedTime,
+			"inv.open-cluster-management.io/Node", "v1", "nodes", fixedTime,
 		)
 		if err := repo.CreateType(ctx, def); err != nil {
 			t.Fatalf("CreateType: %v", err)
 		}
-		got, err := repo.GetType(ctx, "inv.fleetshift.io/Node")
+		got, err := repo.GetType(ctx, "inv.open-cluster-management.io/Node")
 		if err != nil {
 			t.Fatalf("GetType: %v", err)
 		}
@@ -287,23 +287,23 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-er-create")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/prod", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/prod", fID)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/prod")
+		got, err := repo.Get(ctx, "//test.open-cluster-management.io/clusters/prod")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
 		if got.UID().IsZero() {
 			t.Error("UID is zero, want non-zero")
 		}
-		assertEqual(t, "ResourceType", got.ResourceType(), domain.ResourceType("test.fleetshift.io/Cluster"))
+		assertEqual(t, "ResourceType", got.ResourceType(), domain.ResourceType("test.open-cluster-management.io/Cluster"))
 		assertEqual(t, "Name", got.Name(), domain.ResourceName("clusters/prod"))
 		if got.Managed() == nil {
 			t.Fatal("Managed is nil, want non-nil")
@@ -317,11 +317,11 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-er-uid")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/by-uid", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/by-uid", fID)
 		uid := r.UID()
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -349,15 +349,15 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-er-dup")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r1 := newER("test.fleetshift.io/Cluster", "clusters/dup", fID)
+		r1 := newER("test.open-cluster-management.io/Cluster", "clusters/dup", fID)
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("first: %v", err)
 		}
-		r2 := newER("test.fleetshift.io/Cluster", "clusters/dup", fID)
+		r2 := newER("test.open-cluster-management.io/Cluster", "clusters/dup", fID)
 		err := repo.Create(ctx, r2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("second: got %v, want ErrAlreadyExists", err)
@@ -372,18 +372,18 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
-		seedType(t, tx, "test.fleetshift.io/Database")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Database")
 
 		fID := domain.FulfillmentID("f-er-cross")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r1 := newER("test.fleetshift.io/Cluster", "resources/shared-name", fID)
+		r1 := newER("test.open-cluster-management.io/Cluster", "resources/shared-name", fID)
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("first (Cluster): %v", err)
 		}
 
-		r2 := newER("test.fleetshift.io/Database", "resources/shared-name", fID)
+		r2 := newER("test.open-cluster-management.io/Database", "resources/shared-name", fID)
 		err := repo.Create(ctx, r2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("second (Database, same name): got %v, want ErrAlreadyExists", err)
@@ -395,17 +395,17 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		for i, name := range []domain.ResourceName{"clusters/a", "clusters/b"} {
 			fID := domain.FulfillmentID(fmt.Sprintf("f-list-%d", i))
 			seedFulfillment(t, tx, fID, fixedTime)
-			r := newER("test.fleetshift.io/Cluster", name, fID)
+			r := newER("test.open-cluster-management.io/Cluster", name, fID)
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create %s: %v", name, err)
 			}
 		}
 
-		list, err := repo.ListByResourceType(ctx, "test.fleetshift.io/Cluster")
+		list, err := repo.ListByResourceType(ctx, "test.open-cluster-management.io/Cluster")
 		if err != nil {
 			t.Fatalf("ListByResourceType: %v", err)
 		}
@@ -418,7 +418,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ExtensionResources().Get(ctx, "//test.fleetshift.io/clusters/ghost")
+		_, err := tx.ExtensionResources().Get(ctx, "//test.open-cluster-management.io/clusters/ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -429,18 +429,18 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-er-del")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/del", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/del", fID)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if err := repo.Delete(ctx, "//test.fleetshift.io/clusters/del"); err != nil {
+		if err := repo.Delete(ctx, "//test.open-cluster-management.io/clusters/del"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		_, err := repo.Get(ctx, "//test.fleetshift.io/clusters/del")
+		_, err := repo.Get(ctx, "//test.open-cluster-management.io/clusters/del")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 		}
@@ -450,7 +450,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		err := tx.ExtensionResources().Delete(ctx, "//test.fleetshift.io/clusters/ghost")
+		err := tx.ExtensionResources().Delete(ctx, "//test.open-cluster-management.io/clusters/ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -461,16 +461,16 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-er-managed")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/managed", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/managed", fID)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/managed")
+		got, err := repo.Get(ctx, "//test.open-cluster-management.io/clusters/managed")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -489,7 +489,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		rt := domain.ResourceType("inv.fleetshift.io/Node")
+		rt := domain.ResourceType("inv.open-cluster-management.io/Node")
 		if err := repo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
 			t.Fatalf("CreateType: %v", err)
 		}
@@ -555,13 +555,13 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-er-labels")
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		r := domain.NewExtensionResource(
 			domain.NewExtensionResourceUID(),
-			"test.fleetshift.io/Cluster", "clusters/labeled", fixedTime,
+			"test.open-cluster-management.io/Cluster", "clusters/labeled", fixedTime,
 			domain.WithManagedState(fID),
 			domain.WithExtensionLabels(map[string]string{"env": "prod", "tier": "1"}),
 		)
@@ -570,7 +570,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/labeled")
+		got, err := repo.Get(ctx, "//test.open-cluster-management.io/clusters/labeled")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -591,11 +591,11 @@ func runIntentTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-intent")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/intent", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/intent", fID)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -627,16 +627,16 @@ func runIntentTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-intent-del")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/intent-del", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/intent-del", fID)
 		uid := r.UID()
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if err := repo.Delete(ctx, "//test.fleetshift.io/clusters/intent-del"); err != nil {
+		if err := repo.Delete(ctx, "//test.open-cluster-management.io/clusters/intent-del"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
@@ -659,16 +659,16 @@ func runViewTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		fID := domain.FulfillmentID("f-view")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		r := newER("test.fleetshift.io/Cluster", "clusters/view", fID)
+		r := newER("test.open-cluster-management.io/Cluster", "clusters/view", fID)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		v, err := repo.GetView(ctx, "//test.fleetshift.io/clusters/view")
+		v, err := repo.GetView(ctx, "//test.open-cluster-management.io/clusters/view")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -690,7 +690,7 @@ func runViewTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ExtensionResources().GetView(ctx, "//test.fleetshift.io/clusters/ghost")
+		_, err := tx.ExtensionResources().GetView(ctx, "//test.open-cluster-management.io/clusters/ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -701,17 +701,17 @@ func runViewTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
 
-		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.open-cluster-management.io/Cluster")
 		for i, name := range []domain.ResourceName{"clusters/lv-a", "clusters/lv-b"} {
 			fID := domain.FulfillmentID(fmt.Sprintf("f-lv-%d", i))
 			seedFulfillment(t, tx, fID, fixedTime)
-			r := newER("test.fleetshift.io/Cluster", name, fID)
+			r := newER("test.open-cluster-management.io/Cluster", name, fID)
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create %s: %v", name, err)
 			}
 		}
 
-		views, err := repo.ListViewsByType(ctx, "test.fleetshift.io/Cluster")
+		views, err := repo.ListViewsByType(ctx, "test.open-cluster-management.io/Cluster")
 		if err != nil {
 			t.Fatalf("ListViewsByType: %v", err)
 		}
@@ -757,12 +757,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			def := sampleInventoryType("inv.fleetshift.io/Node")
+			def := sampleInventoryType("inv.open-cluster-management.io/Node")
 			if err := repo.CreateType(ctx, def); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			got, err := repo.GetType(ctx, "inv.fleetshift.io/Node")
+			got, err := repo.GetType(ctx, "inv.open-cluster-management.io/Node")
 			if err != nil {
 				t.Fatalf("GetType: %v", err)
 			}
@@ -780,7 +780,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			repo := tx.ExtensionResources()
 
 			def := domain.NewExtensionResourceType(
-				"combo.fleetshift.io/Widget", "v1", "widgets", fixedTime,
+				"combo.open-cluster-management.io/Widget", "v1", "widgets", fixedTime,
 				domain.WithManagement(
 					domain.NewRegisteredSelfTarget("target-widget", "api.test.widget"),
 					domain.Signature{
@@ -795,7 +795,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			got, err := repo.GetType(ctx, "combo.fleetshift.io/Widget")
+			got, err := repo.GetType(ctx, "combo.open-cluster-management.io/Widget")
 			if err != nil {
 				t.Fatalf("GetType: %v", err)
 			}
@@ -814,16 +814,16 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/n1")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/n1")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 
-			got, err := repo.Get(ctx, "//inv.fleetshift.io/nodes/n1")
+			got, err := repo.Get(ctx, "//inv.open-cluster-management.io/nodes/n1")
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -838,7 +838,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			rt := domain.ResourceType("combo.fleetshift.io/Gadget")
+			rt := domain.ResourceType("combo.open-cluster-management.io/Gadget")
 			def := domain.NewExtensionResourceType(
 				rt, "v1", "gadgets", fixedTime,
 				domain.WithManagement(
@@ -888,10 +888,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace1")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace1")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -910,7 +910,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace1")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace1")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -946,10 +946,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace2")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace2")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -976,7 +976,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace2")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace2")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -991,11 +991,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r1 := newInventoryER("inv.fleetshift.io/Node", "nodes/batch1")
-			r2 := newInventoryER("inv.fleetshift.io/Node", "nodes/batch2")
+			r1 := newInventoryER("inv.open-cluster-management.io/Node", "nodes/batch1")
+			r2 := newInventoryER("inv.open-cluster-management.io/Node", "nodes/batch2")
 			for _, r := range []*domain.ExtensionResource{r1, r2} {
 				if err := repo.Create(ctx, r); err != nil {
 					t.Fatalf("Create %s: %v", r.Name(), err)
@@ -1020,7 +1020,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				{"nodes/batch1", `{"n":1}`},
 				{"nodes/batch2", `{"n":2}`},
 			} {
-				view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", tc.name))
+				view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", tc.name))
 				if err != nil {
 					t.Fatalf("GetView %s: %v", tc.name, err)
 				}
@@ -1048,10 +1048,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-remove-cond")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace-remove-cond")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1079,7 +1079,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-remove-cond")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace-remove-cond")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1094,10 +1094,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-remove-label")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace-remove-label")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1122,7 +1122,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-remove-label")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace-remove-label")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1141,10 +1141,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-nil-obs")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace-nil-obs")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1170,7 +1170,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory (nil observation): %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-nil-obs")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace-nil-obs")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1182,10 +1182,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-null-literal-obs")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace-null-literal-obs")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1214,7 +1214,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory (null literal observation): %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-null-literal-obs")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace-null-literal-obs")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1233,7 +1233,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// resource type that was never registered.
 			now := fixedTime.Add(time.Minute)
 			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Unregistered",
+				ResourceType: "inv.open-cluster-management.io/Unregistered",
 				Name:         "nodes/unregistered",
 				CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt:   now,
@@ -1249,10 +1249,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-receivedat")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/replace-receivedat")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1270,7 +1270,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-receivedat")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/replace-receivedat")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1286,10 +1286,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-labels")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-labels")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1314,7 +1314,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceLabels ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-labels")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-labels")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1335,7 +1335,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("DeleteLabels ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err = repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-labels")
+			view, err = repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-labels")
 			if err != nil {
 				t.Fatalf("GetView after DeleteLabels: %v", err)
 			}
@@ -1351,10 +1351,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-labels-upsert")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-labels-upsert")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1378,7 +1378,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("UpsertLabels/DeleteLabels ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-labels-upsert")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-labels-upsert")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1399,10 +1399,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-labels-clear")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-labels-clear")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1425,7 +1425,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-labels-clear")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-labels-clear")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1439,10 +1439,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-replace-conds")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-replace-conds")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1470,7 +1470,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-replace-conds")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-replace-conds")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1488,10 +1488,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-conds-clear")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-conds-clear")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1514,7 +1514,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-conds-clear")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-conds-clear")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1528,10 +1528,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-unchanged")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-obs-unchanged")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1558,7 +1558,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-obs-unchanged")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-obs-unchanged")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1570,10 +1570,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-replace")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-obs-replace")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1600,7 +1600,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-obs-replace")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-obs-replace")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1612,10 +1612,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-null-literal")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-obs-null-literal")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1644,7 +1644,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-obs-null-literal")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-obs-null-literal")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1656,10 +1656,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-conditions")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-conditions")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1689,7 +1689,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-conditions")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-conditions")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1720,10 +1720,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-heartbeat")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-heartbeat")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1747,7 +1747,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("heartbeat ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-heartbeat")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-heartbeat")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1769,7 +1769,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// why this is the delta-side equivalent of "unknown UID".
 			now := fixedTime.Add(time.Minute)
 			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Unregistered",
+				ResourceType: "inv.open-cluster-management.io/Unregistered",
 				Name:         "nodes/delta-unregistered",
 				CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt:   now,
@@ -1794,10 +1794,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-label-contradiction")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-label-contradiction")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1832,7 +1832,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas (Replace+Upsert) err = %v, want ErrInvalidArgument", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-label-contradiction")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-label-contradiction")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1846,10 +1846,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-label-upsert-delete")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-label-upsert-delete")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1873,7 +1873,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-label-upsert-delete")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-label-upsert-delete")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1887,10 +1887,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-replace-cond-contradiction")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-replace-cond-contradiction")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1914,7 +1914,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-replace-cond-contradiction")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-replace-cond-contradiction")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1929,10 +1929,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-condition-contradiction")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-condition-contradiction")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1956,7 +1956,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-condition-contradiction")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-condition-contradiction")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1979,10 +1979,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-delete-unimplemented")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-alias-delete-unimplemented")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2024,10 +2024,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-replace-unimplemented")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-alias-replace-unimplemented")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2048,10 +2048,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-receivedat")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/delta-receivedat")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2069,7 +2069,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-receivedat")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/delta-receivedat")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -2085,10 +2085,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/view1")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/view1")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2104,7 +2104,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/view1")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/view1")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -2126,17 +2126,17 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			for _, name := range []domain.ResourceName{"nodes/lv1", "nodes/lv2"} {
-				r := newInventoryER("inv.fleetshift.io/Node", name)
+				r := newInventoryER("inv.open-cluster-management.io/Node", name)
 				if err := repo.Create(ctx, r); err != nil {
 					t.Fatalf("Create %s: %v", name, err)
 				}
 			}
 
-			views, err := repo.ListViewsByType(ctx, "inv.fleetshift.io/Node")
+			views, err := repo.ListViewsByType(ctx, "inv.open-cluster-management.io/Node")
 			if err != nil {
 				t.Fatalf("ListViewsByType: %v", err)
 			}
@@ -2158,7 +2158,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			rt := domain.ResourceType("combo.fleetshift.io/Thing")
+			rt := domain.ResourceType("combo.open-cluster-management.io/Thing")
 			def := domain.NewExtensionResourceType(
 				rt, "v1", "things", fixedTime,
 				domain.WithManagement(
@@ -2215,16 +2215,16 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			seedType(t, tx, "test.fleetshift.io/Cluster")
+			seedType(t, tx, "test.open-cluster-management.io/Cluster")
 			fID := domain.FulfillmentID("f-managed-view")
 			seedFulfillment(t, tx, fID, fixedTime)
 
-			r := newER("test.fleetshift.io/Cluster", "clusters/managed-v", fID)
+			r := newER("test.open-cluster-management.io/Cluster", "clusters/managed-v", fID)
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//test.fleetshift.io/clusters/managed-v")
+			view, err := repo.GetView(ctx, "//test.open-cluster-management.io/clusters/managed-v")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -2261,10 +2261,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/history-replace")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/history-replace")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2319,10 +2319,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/history-delta")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/history-delta")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2379,11 +2379,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r1 := newInventoryER("inv.fleetshift.io/Node", "nodes/multi-a")
-			r2 := newInventoryER("inv.fleetshift.io/Node", "nodes/multi-b")
+			r1 := newInventoryER("inv.open-cluster-management.io/Node", "nodes/multi-a")
+			r2 := newInventoryER("inv.open-cluster-management.io/Node", "nodes/multi-b")
 			if err := repo.Create(ctx, r1); err != nil {
 				t.Fatalf("Create r1: %v", err)
 			}
@@ -2410,7 +2410,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			v1, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-a"))
+			v1, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", "nodes/multi-a"))
 			if err != nil {
 				t.Fatalf("GetView r1: %v", err)
 			}
@@ -2425,7 +2425,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "r1.Condition.Message", v1.Resource.Inventory().Conditions()[0].Message(), "node is healthy")
 			assertEqual(t, "r1.Condition.LastTransitionTime", v1.Resource.Inventory().Conditions()[0].LastTransitionTime(), t1)
 
-			v2, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-b"))
+			v2, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", "nodes/multi-b"))
 			if err != nil {
 				t.Fatalf("GetView r2: %v", err)
 			}
@@ -2453,10 +2453,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/cross-path")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/cross-path")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2490,7 +2490,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("final replace: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/cross-path")
+			view, err := repo.GetView(ctx, "//inv.open-cluster-management.io/nodes/cross-path")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -2513,7 +2513,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -2524,7 +2524,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         "nodes/lazy-create",
 				CandidateUID: candidateUID,
 				Observation:  &obs,
@@ -2550,10 +2550,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/already-exists")
+			r := newInventoryER("inv.open-cluster-management.io/Node", "nodes/already-exists")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2592,10 +2592,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			existing := newInventoryER("inv.fleetshift.io/Node", "nodes/mix-existing")
+			existing := newInventoryER("inv.open-cluster-management.io/Node", "nodes/mix-existing")
 			if err := repo.Create(ctx, existing); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -2611,7 +2611,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 					ReceivedAt:   now,
 				},
 				{
-					ResourceType: "inv.fleetshift.io/Node",
+					ResourceType: "inv.open-cluster-management.io/Node",
 					Name:         "nodes/mix-new",
 					CandidateUID: newCandidateUID,
 					ObservedAt:   now,
@@ -2661,7 +2661,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -2673,7 +2673,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			instanceID, _ := domain.NewAlias("gcp", "instance_id", "alias-canonical-instance")
 			now := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      aliasSet(zone, instanceID),
@@ -2683,7 +2683,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -2695,14 +2695,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
 			name := domain.ResourceName("nodes/alias-none")
 			now := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt:   now,
@@ -2711,7 +2711,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -2734,14 +2734,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
 			name := domain.ResourceName("nodes/delta-created-alias-payload")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				ReplaceLabels: map[string]string{"env": "prod"},
@@ -2750,7 +2750,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -2767,7 +2767,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// succeeds and inventory freshness still moves.
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt:   t2, ReceivedAt: t2,
@@ -2775,7 +2775,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			got2, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got2, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -2801,7 +2801,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -2809,7 +2809,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-payload-skip-1")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      aliasSet(alias),
@@ -2819,7 +2819,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 
-			afterFirst, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			afterFirst, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get after first: %v", err)
 			}
@@ -2830,7 +2830,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// total no-op.
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:       map[string]string{"zone": "us-east-1"},
@@ -2841,7 +2841,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			afterSecond, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			afterSecond, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get after second: %v", err)
 			}
@@ -2850,7 +2850,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 			assertAliasesEqual(t, "ReportedAliases()", afterSecond.ReportedAliases(), []domain.Alias{alias})
 
-			view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -2864,7 +2864,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -2872,7 +2872,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			first, _ := domain.NewAlias("gcp", "instance_id", "alias-changed-v1")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      aliasSet(first),
@@ -2885,7 +2885,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			second, _ := domain.NewAlias("gcp", "instance_id", "alias-changed-v2")
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      aliasSet(second),
@@ -2895,7 +2895,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -2921,7 +2921,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -2931,7 +2931,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			now := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
 				{
-					ResourceType: "inv.fleetshift.io/Node",
+					ResourceType: "inv.open-cluster-management.io/Node",
 					Name:         nameA,
 					CandidateUID: domain.NewExtensionResourceUID(),
 					Aliases:      aliasSet(alias),
@@ -2939,7 +2939,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 					ReceivedAt:   now,
 				},
 				{
-					ResourceType: "inv.fleetshift.io/Node",
+					ResourceType: "inv.open-cluster-management.io/Node",
 					Name:         nameB,
 					CandidateUID: domain.NewExtensionResourceUID(),
 					Aliases:      aliasSet(alias),
@@ -2950,13 +2950,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			gotA, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", nameA))
+			gotA, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", nameA))
 			if err != nil {
 				t.Fatalf("Get(A): %v", err)
 			}
 			assertAliasesEqual(t, "A.ReportedAliases()", gotA.ReportedAliases(), []domain.Alias{alias})
 
-			gotB, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", nameB))
+			gotB, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", nameB))
 			if err != nil {
 				t.Fatalf("Get(B): %v", err)
 			}
@@ -2967,7 +2967,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// conflict is tolerated" grace period.
 			later := fixedTime.Add(2 * time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         nameB,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      aliasSet(alias),
@@ -2983,7 +2983,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -2991,7 +2991,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-removed-1")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      aliasSet(alias),
@@ -3007,7 +3007,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// absent from the report.
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
+				ResourceType: "inv.open-cluster-management.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt:   t2,
@@ -3016,7 +3016,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second ReplaceInventory (no aliases): %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -3037,7 +3037,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -3045,7 +3045,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			instanceIDv1, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-upsert-instance-v1")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: aliasSet(instanceIDv1),
@@ -3060,7 +3060,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			zone, _ := domain.NewAlias("gcp", "zone", "alias-delta-upsert-zone")
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: aliasSet(zone),
@@ -3076,7 +3076,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			instanceIDv2, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-upsert-instance-v2")
 			t3 := fixedTime.Add(3 * time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: aliasSet(instanceIDv2),
@@ -3086,7 +3086,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("third ApplyInventoryDeltas: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -3105,7 +3105,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -3113,7 +3113,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-unchanged-fp-value")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: aliasSet(alias),
@@ -3123,7 +3123,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
 			}
 
-			afterSeed, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			afterSeed, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get after seed: %v", err)
 			}
@@ -3133,7 +3133,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// identical, so the alias payload write should be skipped.
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: aliasSet(alias),
@@ -3143,7 +3143,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("repeat ApplyInventoryDeltas: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -3166,7 +3166,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 
@@ -3174,7 +3174,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-omitted-1")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: aliasSet(alias),
@@ -3183,7 +3183,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}}); err != nil {
 				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
 			}
-			seeded, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			seeded, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get after seed: %v", err)
 			}
@@ -3191,7 +3191,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
+				ResourceType:  "inv.open-cluster-management.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				ReplaceLabels: map[string]string{"zone": "us-east-1"},
@@ -3201,7 +3201,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("label-only ApplyInventoryDeltas: %v", err)
 			}
 
-			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -3230,23 +3230,23 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			name := domain.ResourceName("nodes/del1")
 			now := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt: now, ReceivedAt: now,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
-			del := domain.InventoryReplacement{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true}
+			del := domain.InventoryReplacement{ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true}
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{del}); err != nil {
 				t.Fatalf("ReplaceInventory IsDelete: %v", err)
 			}
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name)); !errors.Is(err, domain.ErrNotFound) {
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name)); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 			}
 
@@ -3256,7 +3256,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{del}); err != nil {
 				t.Fatalf("ReplaceInventory IsDelete (repeat): %v", err)
 			}
-			ghost := domain.InventoryReplacement{ResourceType: "inv.fleetshift.io/Node", Name: "nodes/ghost", IsDelete: true}
+			ghost := domain.InventoryReplacement{ResourceType: "inv.open-cluster-management.io/Node", Name: "nodes/ghost", IsDelete: true}
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{ghost}); err != nil {
 				t.Fatalf("ReplaceInventory IsDelete (never existed): %v", err)
 			}
@@ -3274,7 +3274,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			now := fixedTime.Add(time.Minute)
@@ -3283,7 +3283,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			c := domain.ResourceName("nodes/batch-c")
 			for _, name := range []domain.ResourceName{a, b, c} {
 				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 					ObservedAt: now, ReceivedAt: now,
 				}}); err != nil {
 					t.Fatalf("seed ReplaceInventory(%s): %v", name, err)
@@ -3291,19 +3291,19 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{ResourceType: "inv.fleetshift.io/Node", Name: a, IsDelete: true},
-				{ResourceType: "inv.fleetshift.io/Node", Name: b, IsDelete: true},
+				{ResourceType: "inv.open-cluster-management.io/Node", Name: a, IsDelete: true},
+				{ResourceType: "inv.open-cluster-management.io/Node", Name: b, IsDelete: true},
 			}); err != nil {
 				t.Fatalf("ReplaceInventory IsDelete batch: %v", err)
 			}
 
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", a)); !errors.Is(err, domain.ErrNotFound) {
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", a)); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("Get(a) after batch delete: got %v, want ErrNotFound", err)
 			}
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", b)); !errors.Is(err, domain.ErrNotFound) {
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", b)); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("Get(b) after batch delete: got %v, want ErrNotFound", err)
 			}
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", c)); err != nil {
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", c)); err != nil {
 				t.Fatalf("Get(c) after batch delete: %v (must not be touched)", err)
 			}
 		})
@@ -3313,7 +3313,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			now := fixedTime.Add(time.Minute)
@@ -3322,7 +3322,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			fresh := domain.ResourceName("nodes/fresh")
 			for _, name := range []domain.ResourceName{keep, gone} {
 				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 					Labels: map[string]string{"phase": "seed"}, ObservedAt: now, ReceivedAt: now,
 				}}); err != nil {
 					t.Fatalf("seed ReplaceInventory(%s): %v", name, err)
@@ -3332,29 +3332,29 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			later := now.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
 				{
-					ResourceType: "inv.fleetshift.io/Node", Name: keep, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: keep, CandidateUID: domain.NewExtensionResourceUID(),
 					Labels: map[string]string{"phase": "updated"}, ObservedAt: later, ReceivedAt: later,
 				},
-				{ResourceType: "inv.fleetshift.io/Node", Name: gone, IsDelete: true},
+				{ResourceType: "inv.open-cluster-management.io/Node", Name: gone, IsDelete: true},
 				{
-					ResourceType: "inv.fleetshift.io/Node", Name: fresh, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: fresh, CandidateUID: domain.NewExtensionResourceUID(),
 					Labels: map[string]string{"phase": "new"}, ObservedAt: later, ReceivedAt: later,
 				},
 			}); err != nil {
 				t.Fatalf("mixed ReplaceInventory: %v", err)
 			}
 
-			keepView, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", keep))
+			keepView, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", keep))
 			if err != nil {
 				t.Fatalf("GetView(keep): %v", err)
 			}
 			if keepView.Resource.Inventory() == nil || keepView.Resource.Inventory().Labels()["phase"] != "updated" {
 				t.Fatalf("keep labels = %v, want phase=updated", keepView.Resource.Inventory())
 			}
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", gone)); !errors.Is(err, domain.ErrNotFound) {
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", gone)); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("Get(gone) after mixed batch: got %v, want ErrNotFound", err)
 			}
-			freshView, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", fresh))
+			freshView, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", fresh))
 			if err != nil {
 				t.Fatalf("GetView(fresh): %v", err)
 			}
@@ -3368,29 +3368,29 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			now := fixedTime.Add(time.Minute)
 			name := domain.ResourceName("nodes/atomic")
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 				Labels: map[string]string{"phase": "seed"}, ObservedAt: now, ReceivedAt: now,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
 			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true},
+				{ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true},
 				{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 					Labels: map[string]string{"phase": "should-not-write"}, ObservedAt: now, ReceivedAt: now,
 				},
 			})
 			if !errors.Is(err, domain.ErrInvalidArgument) {
 				t.Fatalf("contradictory mixed batch: got %v, want ErrInvalidArgument", err)
 			}
-			view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name))
 			if err != nil {
 				t.Fatalf("GetView after rejected batch: %v", err)
 			}
@@ -3404,7 +3404,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			name := domain.ResourceName("nodes/reject-payload")
@@ -3419,27 +3419,27 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				rep  domain.InventoryReplacement
 			}{
 				{"aliases", domain.InventoryReplacement{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true,
 					Aliases: domain.NewAliasSet([]domain.Alias{alias}),
 				}},
 				{"labels", domain.InventoryReplacement{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true,
 					Labels: map[string]string{"k": "v"},
 				}},
 				{"observation", domain.InventoryReplacement{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true,
 					Observation: &obs,
 				}},
 				{"conditions", domain.InventoryReplacement{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true,
 					Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "r", "m", now)},
 				}},
 				{"timestamps", domain.InventoryReplacement{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true,
 					ObservedAt: now, ReceivedAt: now,
 				}},
 				{"candidateUID", domain.InventoryReplacement{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true,
 					CandidateUID: domain.NewExtensionResourceUID(),
 				}},
 			}
@@ -3457,15 +3457,15 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			name := domain.ResourceName("nodes/dup")
 			now := fixedTime.Add(time.Minute)
 
 			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true},
-				{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true},
+				{ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true},
+				{ResourceType: "inv.open-cluster-management.io/Node", Name: name, IsDelete: true},
 			})
 			if !errors.Is(err, domain.ErrInvalidArgument) {
 				t.Fatalf("duplicate deletes: got %v, want ErrInvalidArgument", err)
@@ -3473,11 +3473,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			err = repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
 				{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 					ObservedAt: now, ReceivedAt: now,
 				},
 				{
-					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 					ObservedAt: now, ReceivedAt: now,
 				},
 			})
@@ -3497,24 +3497,24 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.open-cluster-management.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
 			name := domain.ResourceName("nodes/typed")
 			now := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ResourceType: "inv.open-cluster-management.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt: now, ReceivedAt: now,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Pod", Name: name, IsDelete: true,
+				ResourceType: "inv.open-cluster-management.io/Pod", Name: name, IsDelete: true,
 			}}); err != nil {
 				t.Fatalf("ReplaceInventory IsDelete differing type_name: %v", err)
 			}
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name)); !errors.Is(err, domain.ErrNotFound) {
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.open-cluster-management.io", name)); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("Get after differing-type delete: got %v, want ErrNotFound", err)
 			}
 		})

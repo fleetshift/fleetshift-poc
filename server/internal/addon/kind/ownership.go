@@ -13,11 +13,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 const (
-	ownershipConfigMapName      = "fleetshift-kind-ownership"
+	ownershipConfigMapName      = "resource-manager-kind-ownership"
 	ownershipConfigMapNamespace = "kube-system"
 	ownershipGenerationKey      = "generation"
 )
@@ -65,7 +65,7 @@ func (d GenerationDisposition) String() string {
 // CheckAndAdvance as a hard failure on every path.
 //
 // Intentional toy limitations:
-//   - fs-- naming is convention, not proof of ownership.
+//   - ocm-fleet-- naming is convention, not proof of ownership.
 //   - Create-crash or persist failure before the ConfigMap write: the
 //     next delivery sees a missing ConfigMap, treats configuration as
 //     unknown, and recreates (possible recreation loop until persist

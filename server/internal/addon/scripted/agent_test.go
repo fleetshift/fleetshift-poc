@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 var testLogger = slog.Default()

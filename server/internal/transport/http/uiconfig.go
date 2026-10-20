@@ -297,7 +297,7 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 
 	for _, entry := range registry.Plugins {
 		for _, ext := range entry.PluginManifest.Extensions {
-			if ext.Type != "fleetshift.module" {
+			if ext.Type != "ocm-fleet.module" {
 				continue
 			}
 
@@ -359,7 +359,7 @@ func collectModuleGroups(registry pluginRegistry) map[string]moduleGroupMeta {
 	groups := make(map[string]moduleGroupMeta)
 	for _, entry := range registry.Plugins {
 		for _, ext := range entry.PluginManifest.Extensions {
-			if ext.Type != "fleetshift.module-group" {
+			if ext.Type != "ocm-fleet.module-group" {
 				continue
 			}
 			id, _ := ext.Properties["id"].(string)
@@ -385,7 +385,7 @@ func generateNavLayout(registry pluginRegistry, pages []pluginPage) []navLayoutE
 
 	for _, entry := range registry.Plugins {
 		for _, ext := range entry.PluginManifest.Extensions {
-			if ext.Type != "fleetshift.module" {
+			if ext.Type != "ocm-fleet.module" {
 				continue
 			}
 			group, _ := ext.Properties["group"].(string)

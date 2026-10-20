@@ -4,19 +4,19 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestCreateManagedResourceWorkflowID_UsesFullResourceName(t *testing.T) {
-	a := domain.CreateManagedResourceWorkflowID("//test.fleetshift.io/clusters/prod")
-	b := domain.CreateManagedResourceWorkflowID("//test.fleetshift.io/databases/prod")
+	a := domain.CreateManagedResourceWorkflowID("//test.open-cluster-management.io/clusters/prod")
+	b := domain.CreateManagedResourceWorkflowID("//test.open-cluster-management.io/databases/prod")
 
 	if a == b {
 		t.Fatalf("workflow IDs must differ for different full resource names: %q", a)
 	}
 
 	// Same full name should produce the same workflow ID.
-	c := domain.CreateManagedResourceWorkflowID("//test.fleetshift.io/clusters/prod")
+	c := domain.CreateManagedResourceWorkflowID("//test.open-cluster-management.io/clusters/prod")
 	if a != c {
 		t.Fatalf("same full name should produce same workflow ID: got %q and %q", a, c)
 	}

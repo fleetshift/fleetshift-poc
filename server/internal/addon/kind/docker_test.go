@@ -12,12 +12,12 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // TestKindAddon_RealDocker exercises the full addon lifecycle against
@@ -31,7 +31,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 
-	const resourceID = "fleetshift-test"
+	const resourceID = "ocm-fleet-test"
 	kindName := encodedKindName(resourceID)
 
 	t.Cleanup(func() {
@@ -163,7 +163,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 }
 
 // encodedKindName is the ownership-encoded kind/docker name for a
-// platform resource ID (fs--{id}).
+// platform resource ID (ocm-fleet--{id}).
 func encodedKindName(resourceID string) string {
-	return "fs--" + resourceID
+	return "ocm-fleet--" + resourceID
 }

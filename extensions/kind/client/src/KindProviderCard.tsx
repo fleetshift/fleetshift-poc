@@ -1,4 +1,4 @@
-import type { ClusterProviderCardProps } from "@fleetshift/common";
+import type { ClusterProviderCardProps } from "@ocm-fleet/common";
 import {
   Card,
   CardBody,

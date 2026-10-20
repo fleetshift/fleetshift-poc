@@ -1,6 +1,6 @@
 {
-  "name": "@fleetshift/build-utils",
-  "description": "Shared rspack helpers — PatternFly dynamic module sharing and FleetShift extension plugin.",
+  "name": "@ocm-fleet/build-utils",
+  "description": "Shared rspack helpers for PatternFly modules and OCM Fleet extensions.",
   "version": "0.0.0",
   "private": true,
   "type": "module",

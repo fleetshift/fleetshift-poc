@@ -7,19 +7,19 @@ describe("parseResourceTypeRows", () => {
   it("reads type, singular, and service from table rows", () => {
     expect(
       parseResourceTypeRows(`TYPE  SINGULAR  SERVICE
-kind.fleetshift.v1/clusters  Cluster  kind.fleetshift.v1.ClusterService
-kind.fleetshift.v1/nodes\tNode\tkind.fleetshift.v1.NodeService
+ocm.kind.v1alpha/clusters  Cluster  ocm.kind.v1alpha.ClusterService
+ocm.kind.v1alpha/nodes\tNode\tocm.kind.v1alpha.NodeService
 `),
     ).toEqual([
       {
-        service: "kind.fleetshift.v1.ClusterService",
+        service: "ocm.kind.v1alpha.ClusterService",
         singular: "Cluster",
-        type: "kind.fleetshift.v1/clusters",
+        type: "ocm.kind.v1alpha/clusters",
       },
       {
-        service: "kind.fleetshift.v1.NodeService",
+        service: "ocm.kind.v1alpha.NodeService",
         singular: "Node",
-        type: "kind.fleetshift.v1/nodes",
+        type: "ocm.kind.v1alpha/nodes",
       },
     ]);
   });
@@ -33,10 +33,9 @@ kind.fleetshift.v1/nodes\tNode\tkind.fleetshift.v1.NodeService
 
 describe("parseResourceDescribe", () => {
   it("extracts methods, spec type, and nested field names from sections", () => {
-    const described =
-      parseResourceDescribe(`Type:     kind.fleetshift.v1/clusters
+    const described = parseResourceDescribe(`Type:     ocm.kind.v1alpha/clusters
 Singular: Cluster
-Service:  kind.fleetshift.v1.ClusterService
+Service:  ocm.kind.v1alpha.ClusterService
 
 Methods:
   CreateCluster
@@ -44,7 +43,7 @@ Methods:
   ListClusters
   DeleteCluster
 
-Spec (addons.kind.v1.KindClusterSpec):
+Spec (ocm.kind.v1alpha.KindClusterSpec):
   string name = 1
   repeated Node nodes = 2 {
     string role = 1
@@ -57,8 +56,8 @@ Spec (addons.kind.v1.KindClusterSpec):
     string username_claim = 1
   }
 `);
-    expect(described.type).toBe("kind.fleetshift.v1/clusters");
-    expect(described.specType).toBe("addons.kind.v1.KindClusterSpec");
+    expect(described.type).toBe("ocm.kind.v1alpha/clusters");
+    expect(described.specType).toBe("ocm.kind.v1alpha.KindClusterSpec");
     expect(described.methods).toEqual([
       "CreateCluster",
       "GetCluster",

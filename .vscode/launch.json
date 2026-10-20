@@ -2,26 +2,78 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "fleetshift serve",
+      "name": "resource-manager serve",
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/fleetshift-server/cmd/fleetshift",
+      "program": "${workspaceFolder}/server/cmd/resource-manager",
       "preLaunchTask": "make-debug-tmpdir",
-      "args": ["serve", "--log-level", "debug", "--db", "${workspaceFolder}/.vscode/.debug-tmpdir/fleetshift-debug.db", "--http-addr", ":8090"],
-      "cwd": "${workspaceFolder}/fleetshift-server",
+      "args": [
+        "serve",
+        "--log-level",
+        "debug",
+        "--db",
+        "${workspaceFolder}/.vscode/.debug-tmpdir/resource-manager-debug.db",
+        "--http-addr",
+        "127.0.0.1:8090",
+        "--grpc-addr",
+        "127.0.0.1:50052",
+        "--oidc-issuer",
+        "${input:oidcIssuer}",
+        "--oidc-resource-audience",
+        "resource-manager",
+        "--oidc-ca-file",
+        "${input:oidcCAFile}"
+      ],
+      "cwd": "${workspaceFolder}/server",
+      "env": {
+        "DATABASE_URL": "",
+        "DATABASE_URL_FILE": ""
+      },
       "console": "integratedTerminal"
     },
     {
-      "name": "fleetshift serve (info)",
+      "name": "resource-manager serve (info)",
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/fleetshift-server/cmd/fleetshift",
+      "program": "${workspaceFolder}/server/cmd/resource-manager",
       "preLaunchTask": "make-debug-tmpdir",
-      "args": ["serve", "--db", "${workspaceFolder}/.vscode/.debug-tmpdir/fleetshift-debug.db", "--http-addr", ":8090"],
-      "cwd": "${workspaceFolder}/fleetshift-server",
+      "args": [
+        "serve",
+        "--db",
+        "${workspaceFolder}/.vscode/.debug-tmpdir/resource-manager-debug.db",
+        "--http-addr",
+        "127.0.0.1:8090",
+        "--grpc-addr",
+        "127.0.0.1:50052",
+        "--oidc-issuer",
+        "${input:oidcIssuer}",
+        "--oidc-resource-audience",
+        "resource-manager",
+        "--oidc-ca-file",
+        "${input:oidcCAFile}"
+      ],
+      "cwd": "${workspaceFolder}/server",
+      "env": {
+        "DATABASE_URL": "",
+        "DATABASE_URL_FILE": ""
+      },
       "console": "integratedTerminal"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "oidcIssuer",
+      "type": "promptString",
+      "description": "OIDC issuer URL (the identity provider must already be running)",
+      "default": "https://ocm-fleet.localhost:8085/idp"
+    },
+    {
+      "id": "oidcCAFile",
+      "type": "promptString",
+      "description": "Issuer CA PEM path, relative to server/ or absolute (empty uses system trust)",
+      "default": "../deploy/podman/.certs/ca.crt"
     }
   ]
 }

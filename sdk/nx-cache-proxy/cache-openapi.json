@@ -6,7 +6,7 @@
     "version": "1.0.0"
   },
   "paths": {
-    "/v1/cache/{hash}": {
+    "/v1alpha/cache/{hash}": {
       "put": {
         "description": "Upload a task output",
         "operationId": "put",

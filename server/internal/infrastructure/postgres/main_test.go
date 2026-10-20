@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 func TestMain(m *testing.M) {

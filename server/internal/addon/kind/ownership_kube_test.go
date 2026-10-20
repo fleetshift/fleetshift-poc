@@ -63,7 +63,7 @@ func TestKubeGenerationStore_GetAppliesTimeout(t *testing.T) {
 	}
 
 	start := time.Now()
-	_, _, err := s.Get(context.Background(), "fs--demo", nil)
+	_, _, err := s.Get(context.Background(), "ocm-fleet--demo", nil)
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Get err=%v, want deadline exceeded", err)
@@ -88,7 +88,7 @@ func TestKubeGenerationStore_CheckAndAdvanceAppliesTimeout(t *testing.T) {
 		},
 	}
 
-	_, _, err := s.CheckAndAdvance(context.Background(), "fs--demo", nil, 1)
+	_, _, err := s.CheckAndAdvance(context.Background(), "ocm-fleet--demo", nil, 1)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("CheckAndAdvance err=%v, want deadline exceeded", err)
 	}
@@ -108,7 +108,7 @@ func TestKubeGenerationStore_GetPreservesParentCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := s.Get(ctx, "fs--demo", nil)
+	_, _, err := s.Get(ctx, "ocm-fleet--demo", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Get err=%v, want canceled", err)
 	}
@@ -121,19 +121,19 @@ func TestKubeGenerationStore_CheckAndAdvanceSucceeds(t *testing.T) {
 			return client, nil
 		},
 	}
-	d, g, err := s.CheckAndAdvance(context.Background(), "fs--demo", nil, 3)
+	d, g, err := s.CheckAndAdvance(context.Background(), "ocm-fleet--demo", nil, 3)
 	if err != nil || d != GenerationCreated || g != 3 {
 		t.Fatalf("create: disp=%v gen=%d err=%v", d, g, err)
 	}
-	d, g, err = s.CheckAndAdvance(context.Background(), "fs--demo", nil, 3)
+	d, g, err = s.CheckAndAdvance(context.Background(), "ocm-fleet--demo", nil, 3)
 	if err != nil || d != GenerationSame || g != 3 {
 		t.Fatalf("same: disp=%v gen=%d err=%v", d, g, err)
 	}
-	d, g, err = s.CheckAndAdvance(context.Background(), "fs--demo", nil, 5)
+	d, g, err = s.CheckAndAdvance(context.Background(), "ocm-fleet--demo", nil, 5)
 	if err != nil || d != GenerationAdvanced || g != 5 {
 		t.Fatalf("advance: disp=%v gen=%d err=%v", d, g, err)
 	}
-	recorded, found, err := s.Get(context.Background(), "fs--demo", nil)
+	recorded, found, err := s.Get(context.Background(), "ocm-fleet--demo", nil)
 	if err != nil || !found || recorded != 5 {
 		t.Fatalf("Get: gen=%d found=%v err=%v", recorded, found, err)
 	}

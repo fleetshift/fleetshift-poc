@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/field_behavior.proto";
+import "ocm/v1alpha/string_list.proto";
+
+// SubjectClaims represents the identity claims of an authenticated subject.
+message SubjectClaims {
+  // Unique identifier of the subject.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Issuer URL that authenticated this subject.
+  string issuer = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Additional claims (groups, email, custom claims) keyed by claim name.
+  map<string, StringList> extra = 3;
+}

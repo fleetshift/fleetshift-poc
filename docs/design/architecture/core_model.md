@@ -18,7 +18,7 @@ Read this when you need the platform's core mental model before diving into exec
 ## What is intentionally elsewhere
 
 - Execution semantics, invalidation, rollout planning, and `DeploymentGroup`: [orchestration.md](orchestration.md)
-- Fleetlets, channels, and platform routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
+- Fleetlet instances, channels, and platform routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
 - Credential presentation and `PausedAuth`: [../authentication.md](../authentication.md)
 - Authority configuration, provenance profiles, and trust updates: [provenance.md](provenance.md)
 - Managed resources: [../managed_resources.md](../managed_resources.md)
@@ -177,7 +177,7 @@ This matters because the platform is recursively instantiable. A parent platform
 Concretely:
 
 - **Storage is pluggable.** Embedded SQLite serves small instances; external Postgres serves larger ones behind the same interface.
-- **Peer mesh is optional.** Single-replica instances skip peer discovery and forwarding entirely.
+- **Peer mesh is optional.** A single resource manager server replica within a platform instance skips peer discovery and forwarding entirely.
 - **All core subsystems work with a single writer.** Multi-writer support is an optimization, not a correctness requirement.
 - **No external service dependencies are required for core function.** External IdPs, object stores, or managed databases remain integrations rather than prerequisites.
 
@@ -189,7 +189,7 @@ A target is any endpoint that maintains the delivery contract. Internally, targe
 2. **Apply it.** The delivery agent makes reality match the declared intent.
 3. **Continuously report health.** Health is a streaming signal used for rollout progression, placement decisions, and user-visible status.
 
-How those requirements are implemented is target-specific. Kubernetes targets use Server-Side Apply and resource watches. Platform targets create child deployments through the FleetShift API. Addon-defined targets implement domain-specific apply and health behavior.
+How those requirements are implemented is target-specific. Kubernetes targets use Server-Side Apply and resource watches. Platform targets create child deployments through the child resource manager's API. Addon-defined targets implement domain-specific apply and health behavior.
 
 When a delivery agent supports provenance verification, it can independently verify that a real user authorized the operation before applying. Provenance verification is a target capability, not a universal requirement of the delivery contract.
 
@@ -201,7 +201,7 @@ The detailed target-side protocol — reliability guarantees, generation orderin
 
 **`kubernetes`**: a Kubernetes API server. The delivery agent uses Server-Side Apply, watches resource conditions for health, and prunes removed resources.
 
-**`platform`**: a FleetShift platform instance. The delivery agent is a FleetShift API client that creates, updates, and deletes deployments on the child platform. This makes recursive deployment a direct consequence of the target model rather than a separate system.
+**`platform`**: an OCM Fleet platform instance. The delivery agent is an API client that creates, updates, and deletes deployments through the child resource manager. This makes recursive deployment a direct consequence of the target model rather than a separate system.
 
 **`local`**: the platform itself, resolved by the `local` placement strategy. This is the degenerate in-process form of a platform target and is used for platform-local orchestration such as `DeploymentGroup` and provisioning flows.
 

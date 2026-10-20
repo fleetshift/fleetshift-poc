@@ -1,7 +1,7 @@
 // Command aio-init is the AIO packaging initialization helper.
 // It selects Dex-on vs Dex-off by issuer presence, renders sandbox PKI and
 // peer Dex when needed (or forwards an external issuer/CA on Dex-off), and
-// writes the ordinary fleetshift serve argv for s6 to exec.
+// writes the ordinary resource-manager serve argv for s6 to exec.
 package main
 
 import (
@@ -9,21 +9,21 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioinit"
 )
 
 const (
-	fleetshiftUID = 1000
-	fleetshiftGID = 1000
-	dexUID        = 1001
-	dexGID        = 1001
-	proxyUID      = 1002
-	proxyGID      = 1002
+	resourceManagerUID = 1000
+	resourceManagerGID = 1000
+	dexUID             = 1001
+	dexGID             = 1001
+	proxyUID           = 1002
+	proxyGID           = 1002
 
 	// dexEnabledFlag is written on Dex-on so the s6-rc dex longrun execs Dex
 	// instead of parking on s6-pause (Dex-off).
-	dexEnabledFlag = "/run/fleetshift/dex.enabled"
-	runDir         = "/run/fleetshift"
+	dexEnabledFlag = "/run/ocm-fleet/dex.enabled"
+	runDir         = "/run/ocm-fleet"
 	hostsPath      = "/etc/hosts"
 )
 
@@ -34,7 +34,7 @@ func main() {
 	}
 }
 
-// run performs packaging init and writes /run/fleetshift/exec-serve.
+// run performs packaging init and writes /run/ocm-fleet/exec-serve.
 func run() error {
 	if err := os.MkdirAll(runDir, 0755); err != nil {
 		return err
@@ -65,7 +65,7 @@ func run() error {
 		RegistryExpr:       strings.TrimSpace(os.Getenv("OIDC_REGISTRY_SUBJECT_EXPRESSION")),
 		PublicKeyExpr:      strings.TrimSpace(os.Getenv("OIDC_PUBLIC_KEY_CLAIM_EXPRESSION")),
 		LogLevel:           logLevel,
-		Addons:             strings.TrimSpace(os.Getenv("FLEETSHIFT_SERVER_ADDONS")),
+		Addons:             strings.TrimSpace(os.Getenv("OCM_RM_SERVER_ADDONS")),
 	}
 
 	sandboxPKI := aioinit.DefaultSandboxPKIPaths()
@@ -117,10 +117,10 @@ func enableDex() error {
 	return os.WriteFile(dexEnabledFlag, []byte("1\n"), 0644)
 }
 
-// prepareDataLayout ensures /data is writable by FleetShift and /data/sandbox
+// prepareDataLayout ensures /data is writable by the resource manager server and /data/sandbox
 // remains root-owned after volume mounts replace image contents.
 func prepareDataLayout() error {
-	if err := ensureOwnedDir("/data", fleetshiftUID, fleetshiftGID); err != nil {
+	if err := ensureOwnedDir("/data", resourceManagerUID, resourceManagerGID); err != nil {
 		return fmt.Errorf("data dir: %w", err)
 	}
 	if err := ensureOwnedDir("/data/sandbox", 0, 0); err != nil {
@@ -130,7 +130,7 @@ func prepareDataLayout() error {
 }
 
 // ensureOwnedDir creates path and, when running as root, sets ownership to uid:gid.
-// aio-init runs as root under s6 (then fleetshift/dex/aio-proxy drop privileges); chown only
+// aio-init runs as root under s6 (then ocm-fleet/dex/aio-proxy drop privileges); chown only
 // works in that case. Non-root callers (e.g. unit tests) still get the directory
 // but skip chown, which would fail with EPERM.
 func ensureOwnedDir(path string, uid, gid int) error {

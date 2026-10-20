@@ -1,21 +1,25 @@
-# fleetshift-poc
+# OCM Fleet
 
-This repository represents both a **prototype** for a next generation Kubernetes cluster management vision, alongside **individual POCs** for exploration of isolated concepts.
+OCM Fleet is an experimental variant of Open Cluster Management (OCM). The OCM Fleet architecture is a resource manager architecture, built around a dedicated resource manager server. The project includes the server, console, `fleetctl` CLI, fleetlet, and addon/extension interfaces. Addons participate in platform deployments through API, UI, orchestration, and delivery capabilities. Kubernetes is the primary built-in target; addon interfaces support additional target types. Standalone proofs of concept explore individual parts of the design.
+
+The resource manager server owns domain APIs and persistence directly in SQLite or PostgreSQL, providing the foundation for consolidated management and inventory. Native multitenancy and role-based access control are architectural goals. This differs from OCM's Kubernetes API-based management plane; standalone operation itself is already supported by OCM. This experiment is preparation for OCM upstream discussions, without a claim of formal acceptance or complete component compatibility.
+
+See the [architecture](docs/design/architecture.md), [architecture glossary](docs/design/glossary.md), and [contributor acknowledgment](docs/contributors.md).
 
 ## Start here
 
 ### Podman
 
-One way to try FleetShift is the all-in-one image (API, UI, and peer
+One way to try OCM Fleet is the all-in-one image (API, UI, and peer
 Dex in one container). Needs **podman**. Sandbox only — not a production
 deployment.
 
-Open https://fleetshift-sandbox.localhost:8085 (redirects to `/app`) and accept
+Open https://ocm-fleet.localhost:8085 (redirects to `/app`) and accept
 the browser certificate warning (unknown sandbox CA — Advanced/Proceed or
 Accept Risk). Publish ports on `127.0.0.1` only.
 
-Demo users (login is the email): `ops@fleetshift.local` / `fleetshift-ops` and
-`dev@fleetshift.local` / `fleetshift-dev`.
+Demo users (login is the email): `ops@ocm-fleet.local` / `ocm-fleet-ops` and
+`dev@ocm-fleet.local` / `ocm-fleet-dev`.
 
 #### Bare run (peer Dex)
 
@@ -25,13 +29,13 @@ No OIDC flags. Packaging starts Dex and fills AuthMethod/UI defaults.
 podman run \
   -p 127.0.0.1:8085:8085 \
   -p 127.0.0.1:50051:50051 \
-  quay.io/stolostron/fleetshift:latest
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 #### With kind
 
 Privileged + host engine socket (local/dev only). Create the network once:
-`podman network create kind`. The `fleetshift` network alias is required.
+`podman network create kind`. The `ocm-fleet` network alias is required.
 Linux rootless: `systemctl --user enable --now podman.socket` and
 `export PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock` (not
 `/var/run/docker.sock`).
@@ -43,13 +47,17 @@ podman run \
   -p 127.0.0.1:50051:50051 \
   -v /tmp:/tmp \
   -v ${PODMAN_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock \
-  --network kind:alias=fleetshift \
-  quay.io/stolostron/fleetshift:latest
+  --network kind:alias=ocm-fleet \
+  quay.io/stolostron/ocm-fleet:latest
 ```
 
 Build the image from this repo with `npx nx run image:aio`. Env defaults, Dex-off,
 fleetctl, and packaging internals:
 [deploy/aio/README.md](deploy/aio/README.md).
+
+Use fresh data volumes and client state for this prototype, then set up
+authentication and re-enroll signing keys using the [CLI guide](client/cli/README.md)
+or console. Remove any previous development clusters and volumes explicitly.
 
 ### Other ways to run
 
@@ -114,6 +122,18 @@ Builds are cached — unchanged sources skip recompilation entirely.
 
 CLI guide: [client/cli/README.md](client/cli/README.md).
 
+### Server debugging in VS Code
+
+Select `resource-manager serve` (debug logging) or `resource-manager serve (info)`
+in Run and Debug. Both launch the API server with a fresh temporary SQLite
+database, HTTP on `127.0.0.1:8090`, and gRPC on `127.0.0.1:50052`.
+
+The fresh database requires a running OIDC issuer. The launch prompts for its URL
+and CA file; defaults use the [local Podman stack](deploy/podman/README.md), which
+must be started first. CA paths are relative to `server/` or absolute; leave the
+CA input empty for an issuer trusted by the system. These profiles serve the API
+only; the Podman stack continues to serve its own API and console.
+
 ### UI development
 
 `web:dev` is **not** a standalone TLS origin — it rebuilds the SPA shell and
@@ -129,7 +149,7 @@ npx nx run web:dev                 # terminal 2: full build, then watch-rebuild
 npx nx run web:dev:watch           # terminal 2 alt: watch only (skip initial build)
 ```
 
-Then open **https://fleetshift-sandbox.localhost:8085** (redirects to `/app`)
+Then open **https://ocm-fleet.localhost:8085** (redirects to `/app`)
 and accept the browser certificate warning. Dex is same-origin under `/idp`.
 
 #### Component tests
@@ -156,7 +176,7 @@ npx nx test:e2e e2e-cli      # Playwright CLI journeys (fleetctl, Kind, delivery
 ```
 
 Frontend e2e expects the sandbox origin
-(`https://fleetshift-sandbox.localhost:8085`). Playwright flags after `--`,
+(`https://ocm-fleet.localhost:8085`). Playwright flags after `--`,
 for example `npx nx test:e2e e2e-web -- --ui` — see
 [e2e/web/README.md](e2e/web/README.md). CLI e2e builds fleetctl and starts
 the same shared sandbox runner. How to add tests, Kind pool usage, and CI:
@@ -178,7 +198,7 @@ compose and is documented in [deploy/podman/README.md](deploy/podman/README.md).
 Copy `.env.template` to `.env` first. Commands are also available through Nx;
 env vars (`LOCAL_WEB`, `DEV`, `BUILD`, `NX_CACHE`) pass through to deployment scripts.
 
-Open https://fleetshift-sandbox.localhost:8085 after `deploy:podman:up` / `deploy:podman:dev`. If a
+Open https://ocm-fleet.localhost:8085 after `deploy:podman:up` / `deploy:podman:dev`. If a
 persisted volume still has the old `https://127.0.0.1:5556/dex` issuer, run
 `npx nx run deploy:podman:clean` once.
 

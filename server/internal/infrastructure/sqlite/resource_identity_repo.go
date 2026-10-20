@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // ResourceIdentityRepo implements [domain.ResourceIdentityRepository]

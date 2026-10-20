@@ -79,7 +79,7 @@ To run integration tests explicitly (requires Docker or Podman):
 
 ### CI behavior
 
-CI runs the default suite (`go test ./...`) first. A separate step runs the integration tests with `-tags integration` for the `fleetshift-server` module. This avoids Docker resource contention between the two sets.
+CI runs the default suite (`go test ./...`) first. A separate step runs the integration tests with `-tags integration` for the `server/` module. This avoids Docker resource contention between the two sets.
 
 ### Why build tags instead of `-short`?
 

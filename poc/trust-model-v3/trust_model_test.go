@@ -11,17 +11,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/client"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/deliveryagent"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/testoidc"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/resourcemanager"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/client"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/deliveryagent"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/testoidc"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/protocol"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/resourcemanager"
 )
 
 const (
 	testTenant      = "tenant-acme"
 	testTarget      = "target-east"
-	testOIDCClient  = "fleetshift-enrollment"
+	testOIDCClient  = "ocm-fleet-enrollment"
 	testRedirectURI = "https://client.example.test/oidc/callback"
 )
 

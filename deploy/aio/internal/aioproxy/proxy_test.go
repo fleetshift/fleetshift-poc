@@ -26,21 +26,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioproxy"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioproxy"
 )
 
 const (
-	publicOrigin  = "https://fleetshift-sandbox.localhost:8085"
-	canonicalHost = "fleetshift-sandbox.localhost:8085"
+	publicOrigin  = "https://ocm-fleet.localhost:8085"
+	canonicalHost = "ocm-fleet.localhost:8085"
 )
 
 func TestProxy_New_PublicOrigin(t *testing.T) {
 	dex := mustURL(t, "http://127.0.0.1:1")
-	fleetshift := mustURL(t, "http://127.0.0.1:1")
+	resourceManager := mustURL(t, "http://127.0.0.1:1")
 	p, err := aioproxy.New(aioproxy.Config{
-		PublicOrigin:  publicOrigin + "/",
-		DexURL:        dex,
-		FleetShiftURL: fleetshift,
+		PublicOrigin:       publicOrigin + "/",
+		DexURL:             dex,
+		ResourceManagerURL: resourceManager,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestProxy_New_PublicOrigin(t *testing.T) {
 
 func TestProxy_New_RejectsBadConfig(t *testing.T) {
 	dex := mustURL(t, "http://127.0.0.1:1")
-	fleetshift := mustURL(t, "http://127.0.0.1:1")
+	resourceManager := mustURL(t, "http://127.0.0.1:1")
 	tests := []struct {
 		name string
 		cfg  aioproxy.Config
@@ -64,97 +64,97 @@ func TestProxy_New_RejectsBadConfig(t *testing.T) {
 	}{
 		{
 			name: "missing origin",
-			cfg:  aioproxy.Config{DexURL: dex, FleetShiftURL: fleetshift},
+			cfg:  aioproxy.Config{DexURL: dex, ResourceManagerURL: resourceManager},
 			want: "public origin is required",
 		},
 		{
 			name: "origin path",
 			cfg: aioproxy.Config{
-				PublicOrigin:  publicOrigin + "/idp",
-				DexURL:        dex,
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       publicOrigin + "/idp",
+				DexURL:             dex,
+				ResourceManagerURL: resourceManager,
 			},
 			want: "path must be empty",
 		},
 		{
 			name: "origin userinfo",
 			cfg: aioproxy.Config{
-				PublicOrigin:  "https://u:p@" + canonicalHost,
-				DexURL:        dex,
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       "https://u:p@" + canonicalHost,
+				DexURL:             dex,
+				ResourceManagerURL: resourceManager,
 			},
 			want: "userinfo",
 		},
 		{
 			name: "origin scheme",
 			cfg: aioproxy.Config{
-				PublicOrigin:  "ftp://" + canonicalHost,
-				DexURL:        dex,
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       "ftp://" + canonicalHost,
+				DexURL:             dex,
+				ResourceManagerURL: resourceManager,
 			},
 			want: "scheme must be http or https",
 		},
 		{
 			name: "origin query",
 			cfg: aioproxy.Config{
-				PublicOrigin:  publicOrigin + "?x=1",
-				DexURL:        dex,
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       publicOrigin + "?x=1",
+				DexURL:             dex,
+				ResourceManagerURL: resourceManager,
 			},
 			want: "query or fragment",
 		},
 		{
 			name: "origin fragment",
 			cfg: aioproxy.Config{
-				PublicOrigin:  publicOrigin + "#x",
-				DexURL:        dex,
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       publicOrigin + "#x",
+				DexURL:             dex,
+				ResourceManagerURL: resourceManager,
 			},
 			want: "query or fragment",
 		},
 		{
 			name: "origin host",
 			cfg: aioproxy.Config{
-				PublicOrigin:  "https://",
-				DexURL:        dex,
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       "https://",
+				DexURL:             dex,
+				ResourceManagerURL: resourceManager,
 			},
 			want: "host is required",
 		},
 		{
 			name: "nil dex",
-			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, FleetShiftURL: fleetshift},
+			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, ResourceManagerURL: resourceManager},
 			want: "dex upstream is required",
 		},
 		{
-			name: "nil fleetshift",
+			name: "nil resource-manager",
 			cfg:  aioproxy.Config{PublicOrigin: publicOrigin, DexURL: dex},
-			want: "fleetshift upstream is required",
+			want: "resource-manager upstream is required",
 		},
 		{
 			name: "dex userinfo",
 			cfg: aioproxy.Config{
-				PublicOrigin:  publicOrigin,
-				DexURL:        mustURL(t, "http://u:p@127.0.0.1:1"),
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       publicOrigin,
+				DexURL:             mustURL(t, "http://u:p@127.0.0.1:1"),
+				ResourceManagerURL: resourceManager,
 			},
 			want: "userinfo",
 		},
 		{
 			name: "dex scheme",
 			cfg: aioproxy.Config{
-				PublicOrigin:  publicOrigin,
-				DexURL:        mustURL(t, "ftp://127.0.0.1:1"),
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       publicOrigin,
+				DexURL:             mustURL(t, "ftp://127.0.0.1:1"),
+				ResourceManagerURL: resourceManager,
 			},
 			want: "scheme must be http or https",
 		},
 		{
 			name: "dex host",
 			cfg: aioproxy.Config{
-				PublicOrigin:  publicOrigin,
-				DexURL:        mustURL(t, "http://"),
-				FleetShiftURL: fleetshift,
+				PublicOrigin:       publicOrigin,
+				DexURL:             mustURL(t, "http://"),
+				ResourceManagerURL: resourceManager,
 			},
 			want: "host is required",
 		},
@@ -169,9 +169,9 @@ func TestProxy_New_RejectsBadConfig(t *testing.T) {
 	}
 }
 
-func TestProxy_RoutesDexAndFleetShift(t *testing.T) {
-	dex, fleetshift := recordingUpstreams(t)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+func TestProxy_RoutesDexAndResourceManager(t *testing.T) {
+	dex, resourceManager := recordingUpstreams(t)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 
 	tests := []struct {
 		path string
@@ -181,12 +181,12 @@ func TestProxy_RoutesDexAndFleetShift(t *testing.T) {
 		{path: "/idp/", want: "dex"},
 		{path: "/idp/.well-known/openid-configuration", want: "dex"},
 		{path: "/idp/auth", want: "dex"},
-		{path: "/idpevil", want: "fleetshift"},
-		{path: "/", want: "fleetshift"},
-		{path: "/app/", want: "fleetshift"},
-		{path: "/api/ui/config", want: "fleetshift"},
-		{path: "/app/auth/callback", want: "fleetshift"},
-		{path: "/app/assets/app.js", want: "fleetshift"},
+		{path: "/idpevil", want: "resource-manager"},
+		{path: "/", want: "resource-manager"},
+		{path: "/app/", want: "resource-manager"},
+		{path: "/api/ui/config", want: "resource-manager"},
+		{path: "/app/auth/callback", want: "resource-manager"},
+		{path: "/app/assets/app.js", want: "resource-manager"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -214,11 +214,11 @@ func TestProxy_PreservesQueryPOSTCookiesRedirects(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	}))
 	t.Cleanup(dex.Close)
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("fleetshift should not be called")
+	resourceManager := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("resource-manager should not be called")
 	}))
-	t.Cleanup(fleetshift.Close)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	t.Cleanup(resourceManager.Close)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 
 	rr := doProxy(t, p, http.MethodPost, "/idp/token", strings.NewReader("a=1&b=2"), map[string]string{
 		"Content-Type": "application/x-www-form-urlencoded",
@@ -246,11 +246,11 @@ func TestProxy_PreservesEncodedPath(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(dex.Close)
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("fleetshift should not be called")
+	resourceManager := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("resource-manager should not be called")
 	}))
-	t.Cleanup(fleetshift.Close)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	t.Cleanup(resourceManager.Close)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 
 	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/idp/foo%2Fbar", nil)
 	req.Host = canonicalHost
@@ -261,9 +261,9 @@ func TestProxy_PreservesEncodedPath(t *testing.T) {
 	}
 }
 
-func TestProxy_EncodedIdpSlashStaysOnFleetShift(t *testing.T) {
-	dex, fleetshift := recordingUpstreams(t)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+func TestProxy_EncodedIdpSlashStaysOnResourceManager(t *testing.T) {
+	dex, resourceManager := recordingUpstreams(t)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 
 	req := httptest.NewRequest(http.MethodGet, "https://"+canonicalHost+"/idp%2Fauth", nil)
 	req.Host = canonicalHost
@@ -272,8 +272,8 @@ func TestProxy_EncodedIdpSlashStaysOnFleetShift(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.Bytes())
 	}
-	if got := rr.Header().Get("X-Upstream"); got != "fleetshift" {
-		t.Fatalf("X-Upstream = %q, want fleetshift", got)
+	if got := rr.Header().Get("X-Upstream"); got != "resource-manager" {
+		t.Fatalf("X-Upstream = %q, want resource-manager", got)
 	}
 }
 
@@ -286,7 +286,7 @@ func TestProxy_DropsSpoofedForwardingHeaders(t *testing.T) {
 		"X-Forwarded-Proto",
 	}
 	dropped := append(append([]string{}, rewriteDropped...), aioproxy.ForwardingHeaders...)
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	resourceManager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, h := range dropped {
 			if v := r.Header.Get(h); v != "" {
 				t.Errorf("upstream saw %s=%q", h, v)
@@ -297,12 +297,12 @@ func TestProxy_DropsSpoofedForwardingHeaders(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	t.Cleanup(fleetshift.Close)
+	t.Cleanup(resourceManager.Close)
 	dex := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("dex should not be called")
 	}))
 	t.Cleanup(dex.Close)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 
 	headers := make(map[string]string, len(dropped))
 	for _, h := range dropped {
@@ -332,14 +332,14 @@ func TestProxy_WrongHost421(t *testing.T) {
 }
 
 func TestProxy_StripsHSTS(t *testing.T) {
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	resourceManager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		w.WriteHeader(http.StatusOK)
 	}))
-	t.Cleanup(fleetshift.Close)
+	t.Cleanup(resourceManager.Close)
 	dex := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(dex.Close)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 	rr := doProxy(t, p, http.MethodGet, "/", nil, nil)
 	if rr.Header().Get("Strict-Transport-Security") != "" {
 		t.Fatalf("HSTS leaked: %q", rr.Header().Get("Strict-Transport-Security"))
@@ -404,7 +404,7 @@ func TestProxy_LogsUnexpectedUpstreamError(t *testing.T) {
 func TestProxy_StreamsResponse(t *testing.T) {
 	firstSent := make(chan struct{})
 	releaseSecond := make(chan struct{})
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	resourceManager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fl, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "no flush", http.StatusInternalServerError)
@@ -424,10 +424,10 @@ func TestProxy_StreamsResponse(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, "chunk2")
 	}))
-	t.Cleanup(fleetshift.Close)
+	t.Cleanup(resourceManager.Close)
 	dex := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(dex.Close)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 
 	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Host = canonicalHost
@@ -534,8 +534,8 @@ func TestProxy_WebSocketOrigin(t *testing.T) {
 }
 
 func TestProxy_UpgradeWithoutConnectionIsNotWebSocket(t *testing.T) {
-	dex, fleetshift := recordingUpstreams(t)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	dex, resourceManager := recordingUpstreams(t)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 	rr := doProxy(t, p, http.MethodGet, "/api/ui/events/ws", nil, map[string]string{
 		"Upgrade": "websocket",
 		"Origin":  "https://evil.example",
@@ -543,8 +543,8 @@ func TestProxy_UpgradeWithoutConnectionIsNotWebSocket(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (origin check applies only to websocket upgrades)", rr.Code)
 	}
-	if got := rr.Header().Get("X-Upstream"); got != "fleetshift" {
-		t.Fatalf("X-Upstream = %q, want fleetshift", got)
+	if got := rr.Header().Get("X-Upstream"); got != "resource-manager" {
+		t.Fatalf("X-Upstream = %q, want resource-manager", got)
 	}
 }
 
@@ -552,13 +552,13 @@ func TestProxy_IgnoresHTTPProxyEnv(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("http_proxy", "http://127.0.0.1:1")
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
-	fleetshift := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	resourceManager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	t.Cleanup(fleetshift.Close)
+	t.Cleanup(resourceManager.Close)
 	dex := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(dex.Close)
-	p := newTestProxy(t, dex.URL, fleetshift.URL)
+	p := newTestProxy(t, dex.URL, resourceManager.URL)
 	rr := doProxy(t, p, http.MethodGet, "/", nil, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("HTTP_PROXY redirected loopback upstream: status=%d", rr.Code)
@@ -593,7 +593,7 @@ func TestProxy_ListenAndServeTLS(t *testing.T) {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				RootCAs:    caPool,
-				ServerName: "fleetshift-sandbox.localhost",
+				ServerName: "ocm-fleet.localhost",
 			},
 		},
 	}
@@ -650,7 +650,7 @@ func TestProxy_TLSHandshakeErrorLog(t *testing.T) {
 
 	untrusted := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{ServerName: "fleetshift-sandbox.localhost"},
+			TLSClientConfig: &tls.Config{ServerName: "ocm-fleet.localhost"},
 		},
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -718,7 +718,7 @@ func (w lockedWriter) Write(p []byte) (int, error) {
 	return w.w.Write(p)
 }
 
-func recordingUpstreams(t *testing.T) (dex, fleetshift *httptest.Server) {
+func recordingUpstreams(t *testing.T) (dex, resourceManager *httptest.Server) {
 	t.Helper()
 	handler := func(name string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -728,10 +728,10 @@ func recordingUpstreams(t *testing.T) (dex, fleetshift *httptest.Server) {
 		})
 	}
 	dex = httptest.NewServer(handler("dex"))
-	fleetshift = httptest.NewServer(handler("fleetshift"))
+	resourceManager = httptest.NewServer(handler("resource-manager"))
 	t.Cleanup(dex.Close)
-	t.Cleanup(fleetshift.Close)
-	return dex, fleetshift
+	t.Cleanup(resourceManager.Close)
+	return dex, resourceManager
 }
 
 func captureLogs(t *testing.T) *bytes.Buffer {
@@ -742,12 +742,12 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func newTestProxy(t *testing.T, dexURL, fleetshiftURL string) *aioproxy.Proxy {
+func newTestProxy(t *testing.T, dexURL, resourceManagerURL string) *aioproxy.Proxy {
 	t.Helper()
 	p, err := aioproxy.New(aioproxy.Config{
-		PublicOrigin:  publicOrigin,
-		DexURL:        mustURL(t, dexURL),
-		FleetShiftURL: mustURL(t, fleetshiftURL),
+		PublicOrigin:       publicOrigin,
+		DexURL:             mustURL(t, dexURL),
+		ResourceManagerURL: mustURL(t, resourceManagerURL),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -755,13 +755,13 @@ func newTestProxy(t *testing.T, dexURL, fleetshiftURL string) *aioproxy.Proxy {
 	return p
 }
 
-func startTLSProxy(t *testing.T, dex, fleetshift http.Handler) (addr, certFile string) {
+func startTLSProxy(t *testing.T, dex, resourceManager http.Handler) (addr, certFile string) {
 	t.Helper()
 	certFile, keyFile := writeGatewayCert(t, t.TempDir())
 	dexSrv := httptest.NewServer(dex)
 	t.Cleanup(dexSrv.Close)
-	fsSrv := httptest.NewServer(fleetshift)
-	t.Cleanup(fsSrv.Close)
+	rmSrv := httptest.NewServer(resourceManager)
+	t.Cleanup(rmSrv.Close)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -771,12 +771,12 @@ func startTLSProxy(t *testing.T, dex, fleetshift http.Handler) (addr, certFile s
 	_ = ln.Close()
 
 	p, err := aioproxy.New(aioproxy.Config{
-		ListenAddr:    addr,
-		CertFile:      certFile,
-		KeyFile:       keyFile,
-		PublicOrigin:  publicOrigin,
-		DexURL:        mustURL(t, dexSrv.URL),
-		FleetShiftURL: mustURL(t, fsSrv.URL),
+		ListenAddr:         addr,
+		CertFile:           certFile,
+		KeyFile:            keyFile,
+		PublicOrigin:       publicOrigin,
+		DexURL:             mustURL(t, dexSrv.URL),
+		ResourceManagerURL: mustURL(t, rmSrv.URL),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -890,14 +890,14 @@ func writeGatewayCert(t *testing.T, dir string) (certFile, keyFile string) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "FleetShift AIO Gateway"},
+		Subject:               pkix.Name{CommonName: "OCM Fleet AIO gateway"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		DNSNames:              []string{"fleetshift-sandbox.localhost"},
+		DNSNames:              []string{"ocm-fleet.localhost"},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {

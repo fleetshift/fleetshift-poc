@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
 )
 
 // membershipRecorder records presence and JSON-membership calls so
@@ -51,7 +51,7 @@ func TestCompileFilter_MembershipOrchestration(t *testing.T) {
 			InventoryObservationDescriptor: desc,
 		},
 	}
-	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
+	guard := `resourceType == "kind.open-cluster-management.io/Cluster" && `
 
 	t.Run("resource root delegates to presence with key", func(t *testing.T) {
 		rec := &membershipRecorder{}

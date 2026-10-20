@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 
 import type { OutputFormat } from "./argv";
@@ -42,5 +42,14 @@ export function JsonOutput({ value }: { value: unknown }): React.ReactElement {
   React.useLayoutEffect(() => {
     process.stdout.write(`${serialized}\n`);
   }, [serialized]);
+  return React.createElement(React.Fragment);
+}
+
+/** Write schema text without terminal wrapping that would split identifiers. */
+export function PlainOutput({ value }: { value: string }): React.ReactElement {
+  const { stdout } = useStdout();
+  React.useLayoutEffect(() => {
+    stdout.write(`${value}\n`);
+  }, [stdout, value]);
   return React.createElement(React.Fragment);
 }

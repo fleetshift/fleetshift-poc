@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestEnsureCallerAdminBinding_Creates(t *testing.T) {
@@ -27,7 +27,7 @@ func TestEnsureCallerAdminBinding_Creates(t *testing.T) {
 	if err := ensureCallerAdminBinding(context.Background(), client, caller.Issuer, caller); err != nil {
 		t.Fatalf("ensureCallerAdminBinding: %v", err)
 	}
-	got, err := client.RbacV1().ClusterRoleBindings().Get(context.Background(), "fleetshift-admin-alice", metav1.GetOptions{})
+	got, err := client.RbacV1().ClusterRoleBindings().Get(context.Background(), "ocm-fleet-admin-alice", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Get binding: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestEnsureCallerAdminBinding_AlreadyExistsSucceeds(t *testing.T) {
 		},
 	}
 	existing := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleetshift-admin-alice"},
+		ObjectMeta: metav1.ObjectMeta{Name: "ocm-fleet-admin-alice"},
 		Subjects: []rbacv1.Subject{{
 			Kind:     "User",
 			Name:     "https://issuer.example#alice",
@@ -73,7 +73,7 @@ func TestEnsureCallerAdminBinding_ReconcilesDriftedSubjects(t *testing.T) {
 		},
 	}
 	existing := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleetshift-admin-alice"},
+		ObjectMeta: metav1.ObjectMeta{Name: "ocm-fleet-admin-alice"},
 		Subjects: []rbacv1.Subject{{
 			Kind:     "User",
 			Name:     "stale-user",
@@ -89,7 +89,7 @@ func TestEnsureCallerAdminBinding_ReconcilesDriftedSubjects(t *testing.T) {
 	if err := ensureCallerAdminBinding(context.Background(), client, caller.Issuer, caller); err != nil {
 		t.Fatalf("ensureCallerAdminBinding: %v", err)
 	}
-	got, err := client.RbacV1().ClusterRoleBindings().Get(context.Background(), "fleetshift-admin-alice", metav1.GetOptions{})
+	got, err := client.RbacV1().ClusterRoleBindings().Get(context.Background(), "ocm-fleet-admin-alice", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

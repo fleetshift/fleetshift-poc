@@ -76,7 +76,7 @@ def test_agent_rejects_tuf_rollback_after_advancing() -> None:
 def test_agent_rejects_tuf_target_tampering() -> None:
     env = PoCEnvironment()
     delivery = _delivery(env)
-    delivery.trust_update.targets["fleetshift-trust-policy.json"] = b"{}"
+    delivery.trust_update.targets["ocm-resource-manager-trust-policy.json"] = b"{}"
     result = env.delivery_agent().verify(delivery)
     assert not result.valid
     assert "tuf" in str(result).lower()
@@ -99,7 +99,7 @@ def test_cross_tenant_package_is_rejected_before_evidence() -> None:
     tenant_a = PoCEnvironment(tenant_id="tenant-a")
     tenant_b = PoCEnvironment(
         tenant_id="tenant-b",
-        user_issuer="https://idp.fleetshift.local/tenants/tenant-b",
+        user_issuer="https://idp.ocm-fleet.local/tenants/tenant-b",
         user_subject_regexp=r".*@tenant-b\.example",
     )
     result = tenant_a.delivery_agent().verify(_delivery(tenant_b))
@@ -111,7 +111,7 @@ def test_cross_tenant_relabel_cannot_replace_provisioned_tuf_root() -> None:
     tenant_a = PoCEnvironment(tenant_id="tenant-a")
     tenant_b = PoCEnvironment(
         tenant_id="tenant-b",
-        user_issuer="https://idp.fleetshift.local/tenants/tenant-b",
+        user_issuer="https://idp.ocm-fleet.local/tenants/tenant-b",
     )
     package = _delivery(tenant_b)
     package.tenant_id = "tenant-a"
@@ -176,6 +176,6 @@ def test_fulcio_leaf_expiry_after_signing_does_not_invalidate_timestamped_bundle
     env = PoCEnvironment()
     package = _delivery(env)
     # Sigstore checks the short-lived certificate at trusted signing time. The
-    # separate FleetShift authorization validity remains enforced at use time.
+    # separate OCM Fleet authorization validity remains enforced at use time.
     result = env.delivery_agent().verify(package, now=time.time() + 15 * 60)
     assert result.valid, result

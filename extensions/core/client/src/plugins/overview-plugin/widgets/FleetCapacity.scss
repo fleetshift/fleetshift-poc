@@ -1,4 +1,4 @@
-.ome-overview-capacity-wrap {
+.ocm-fleet-overview-capacity-wrap {
   padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--lg);
 
   .pf-v6-l-stack__item:last-child {
@@ -6,7 +6,7 @@
   }
 }
 
-.ome-overview-capacity-row {
+.ocm-fleet-overview-capacity-row {
   &__name {
     font-weight: var(--pf-t--global--font--weight--heading--bold);
     color: var(--pf-t--global--text--color--regular);

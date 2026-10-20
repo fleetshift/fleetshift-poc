@@ -1,4 +1,4 @@
-import { useExtensionInstall } from "@fleetshift/common";
+import { useExtensionInstall } from "@ocm-fleet/common";
 import { Button, Content, PageSection, Title } from "@patternfly/react-core";
 import { useCallback } from "react";
 

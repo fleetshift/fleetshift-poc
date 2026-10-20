@@ -44,7 +44,7 @@ export async function clientForArgs(
   return createCliClient(
     server,
     tokens?.access_token,
-    authConfig?.oidc_ca_file ?? process.env.FLEETSHIFT_CA_FILE,
+    authConfig?.oidc_ca_file ?? process.env.OCM_RM_CA_FILE,
   );
 }
 
@@ -52,6 +52,6 @@ export function serverForArgs(args: Parameters<typeof flagString>[0]): string {
   return flagString(
     args,
     "server",
-    process.env.FLEETCTL_SERVER || "https://fleetshift-sandbox.localhost:8085",
+    process.env.FLEETCTL_SERVER || "https://ocm-fleet.localhost:8085",
   );
 }

@@ -27,20 +27,20 @@ spec:
             - containerPort: 5432
           env:
             - name: POSTGRES_USER_FILE
-              value: /run/secrets/fleetshift/postgres-user
+              value: /run/secrets/resource-manager/postgres-user
             - name: POSTGRES_PASSWORD_FILE
-              value: /run/secrets/fleetshift/postgres-password
+              value: /run/secrets/resource-manager/postgres-password
             - name: POSTGRES_DB_FILE
-              value: /run/secrets/fleetshift/postgres-db
+              value: /run/secrets/resource-manager/postgres-db
           volumeMounts:
             - name: pg-credentials
-              mountPath: /run/secrets/fleetshift
+              mountPath: /run/secrets/resource-manager
               readOnly: true
             - name: postgres-data
               mountPath: /var/lib/postgresql
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "fleetshift"]
+              command: ["pg_isready", "-U", "ocm-fleet"]
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:

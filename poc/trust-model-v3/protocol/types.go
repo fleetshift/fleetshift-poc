@@ -13,8 +13,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/merklelog"
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/internal/sparsemap"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/merklelog"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/internal/sparsemap"
 	"github.com/transparency-dev/merkle/proof"
 	"github.com/transparency-dev/merkle/rfc6962"
 )
@@ -22,13 +22,13 @@ import (
 const (
 	// EnrollmentProtocol is the design's user-key-enrollment-v1 identifier.
 	EnrollmentProtocol      = "user-key-enrollment-v1"
-	ContinuityStateProtocol = "fleetshift.dev/trust-v3/continuity-state/v1"
-	RotationProtocol        = "fleetshift.dev/trust-v3/rotation/v1"
-	DeliveryProtocol        = "fleetshift.dev/trust-v3/content-delivery/v1"
-	KeyHistoryHeadProtocol  = "fleetshift.dev/trust-v3/key-history-head/v1"
-	KeyHistoryMapProtocol   = "fleetshift.dev/trust-v3/key-history-map/v1"
-	TrustManifestProtocol   = "fleetshift.dev/trust-v3/trust-manifest/v1"
-	IdentityProtocol        = "fleetshift.dev/trust-v3/identity/v1"
+	ContinuityStateProtocol = "resource-manager.open-cluster-management.io/trust-v3/continuity-state/v1"
+	RotationProtocol        = "resource-manager.open-cluster-management.io/trust-v3/rotation/v1"
+	DeliveryProtocol        = "resource-manager.open-cluster-management.io/trust-v3/content-delivery/v1"
+	KeyHistoryHeadProtocol  = "resource-manager.open-cluster-management.io/trust-v3/key-history-head/v1"
+	KeyHistoryMapProtocol   = "resource-manager.open-cluster-management.io/trust-v3/key-history-map/v1"
+	TrustManifestProtocol   = "resource-manager.open-cluster-management.io/trust-v3/trust-manifest/v1"
+	IdentityProtocol        = "resource-manager.open-cluster-management.io/trust-v3/identity/v1"
 
 	TrustUpdatePolicyProvisioned = "provisioned"
 
@@ -1065,7 +1065,7 @@ func keyHistoryMapValueHash(head KeyHistoryHead) ([]byte, error) {
 		Protocol string         `json:"protocol"`
 		Head     KeyHistoryHead `json:"head"`
 	}{
-		Protocol: "fleetshift.dev/trust-v3/key-history-map-value/v1",
+		Protocol: "resource-manager.open-cluster-management.io/trust-v3/key-history-map-value/v1",
 		Head:     head,
 	}
 	encoded, err := json.Marshal(material)
@@ -1082,7 +1082,7 @@ func keyHistoryMapKey(tenantID, identityID string) [sha256.Size]byte {
 		TenantID   string `json:"tenant_id"`
 		IdentityID string `json:"identity_id"`
 	}{
-		Protocol:   "fleetshift.dev/trust-v3/key-history-map-key/v1",
+		Protocol:   "resource-manager.open-cluster-management.io/trust-v3/key-history-map-key/v1",
 		TenantID:   tenantID,
 		IdentityID: identityID,
 	}
@@ -1156,7 +1156,7 @@ func signaturePayload(purpose string, value any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode signed object: %w", err)
 	}
-	prefix := []byte("fleetshift.dev/trust-v3/signature/" + purpose + "\x00")
+	prefix := []byte("resource-manager.open-cluster-management.io/trust-v3/signature/" + purpose + "\x00")
 	return append(prefix, encoded...), nil
 }
 
@@ -1164,7 +1164,7 @@ func deliveryRecordMaterial(record DeliveryRecord) any {
 	return struct {
 		Protocol string           `json:"protocol"`
 		Event    DeliveryLogEvent `json:"event"`
-	}{"fleetshift.dev/trust-v3/delivery-log-leaf/v1", record.Event}
+	}{"resource-manager.open-cluster-management.io/trust-v3/delivery-log-leaf/v1", record.Event}
 }
 
 func keyEventRecordMaterial(record KeyEventRecord) any {
@@ -1174,7 +1174,7 @@ func keyEventRecordMaterial(record KeyEventRecord) any {
 		Sequence             uint64   `json:"sequence"`
 		Event                KeyEvent `json:"event"`
 		ResultingStateDigest string   `json:"resulting_state_digest"`
-	}{"fleetshift.dev/trust-v3/key-history-leaf/v1", record.IdentityID, record.Sequence, record.Event, record.ResultingStateDigest}
+	}{"resource-manager.open-cluster-management.io/trust-v3/key-history-leaf/v1", record.IdentityID, record.Sequence, record.Event, record.ResultingStateDigest}
 }
 
 func cloneKeyEventRecord(in KeyEventRecord) KeyEventRecord {

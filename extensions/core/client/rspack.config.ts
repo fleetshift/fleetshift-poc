@@ -10,10 +10,10 @@ import {
   createPfTransformImport,
   createSearchResultRenderer,
   createSetup,
-  FleetshiftPlugin,
+  FleetPlugin,
   getCommonDynamicModules,
   getDynamicModules,
-} from "@fleetshift/build-utils";
+} from "@ocm-fleet/build-utils";
 import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
 import type { Configuration } from "@rspack/core";
 import rspack from "@rspack/core";
@@ -76,7 +76,7 @@ const mfOverride = {
 
 const p = (rel: string) => path.resolve(configDir, rel);
 
-const ManagementPlugin = new FleetshiftPlugin({
+const ManagementPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "targets",
@@ -101,7 +101,7 @@ const ManagementPlugin = new FleetshiftPlugin({
   },
 });
 
-const CorePlugin = new FleetshiftPlugin({
+const CorePlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "clusters",
@@ -113,11 +113,11 @@ const CorePlugin = new FleetshiftPlugin({
       extensionPoints: {
         providers: {
           description: "Cluster providers available in the creation wizard",
-          type: "fleetshift.cluster-provider",
+          type: "ocm-fleet.cluster-provider",
         },
         detailTabs: {
           description: "Tabs shown on the cluster detail page",
-          type: "fleetshift.cluster-detail-tab",
+          type: "ocm-fleet.cluster-detail-tab",
         },
       },
     }),
@@ -148,7 +148,7 @@ const CorePlugin = new FleetshiftPlugin({
     createSearchResultRenderer({
       id: "k8s-object-renderer",
       label: "K8s Object",
-      resourceType: "kubernetes.fleetshift.io/Object",
+      resourceType: "kubernetes.open-cluster-management.io/Object",
       resolve: { $codeRef: "K8sObjectSearchResult.resolveK8sObject" },
       icon: { $codeRef: "K8sObjectSearchResult.K8sObjectIcon" },
     }),
@@ -205,7 +205,7 @@ const CorePlugin = new FleetshiftPlugin({
   },
 });
 
-const SigningPlugin = new FleetshiftPlugin({
+const SigningPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "signing-keys",
@@ -244,7 +244,7 @@ const SigningPlugin = new FleetshiftPlugin({
   },
 });
 
-const RoutingPlugin = new FleetshiftPlugin({
+const RoutingPlugin = new FleetPlugin({
   extensions: [],
   sharedModules,
   entryScriptFilename: "plugins/routing/routing-plugin.[contenthash].js",
@@ -263,7 +263,7 @@ const RoutingPlugin = new FleetshiftPlugin({
   },
 });
 
-const OverviewPlugin = new FleetshiftPlugin({
+const OverviewPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "overview",
@@ -290,7 +290,7 @@ const OverviewPlugin = new FleetshiftPlugin({
   },
 });
 
-const SettingsPlugin = new FleetshiftPlugin({
+const SettingsPlugin = new FleetPlugin({
   extensions: [
     createModuleGroup({
       id: "settings",
@@ -339,7 +339,7 @@ const SettingsPlugin = new FleetshiftPlugin({
   },
 });
 
-const SetupPlugin = new FleetshiftPlugin({
+const SetupPlugin = new FleetPlugin({
   extensions: [
     createSetup({
       id: "whats-next",
@@ -366,7 +366,7 @@ const SetupPlugin = new FleetshiftPlugin({
   },
 });
 
-const ConfigurationPlugin = new FleetshiftPlugin({
+const ConfigurationPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "configuration",
@@ -398,7 +398,7 @@ const ConfigurationPlugin = new FleetshiftPlugin({
   },
 });
 
-const VirtualizationPlugin = new FleetshiftPlugin({
+const VirtualizationPlugin = new FleetPlugin({
   extensions: [
     createModule({
       id: "virtualization",
@@ -436,7 +436,7 @@ const VirtualizationPlugin = new FleetshiftPlugin({
   },
 });
 
-const AddonDemoPlugin = new FleetshiftPlugin({
+const AddonDemoPlugin = new FleetPlugin({
   extensions: [
     // --- Cluster providers ---
     createClusterProvider({
@@ -472,7 +472,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       icon: { $codeRef: "EksIcon.default" },
       card: { $codeRef: "EksOnboarding.EksOnboardingCard" },
       form: { $codeRef: "EksOnboarding.EksOnboardingForm" },
-      category: "fleetshift.cluster-provider",
+      category: "ocm-fleet.cluster-provider",
     }),
     createOnboardingAction({
       id: "vsphere-connect",
@@ -482,7 +482,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       icon: { $codeRef: "VsphereIcon.default" },
       card: { $codeRef: "VsphereOnboarding.VsphereOnboardingCard" },
       form: { $codeRef: "VsphereOnboarding.VsphereOnboardingForm" },
-      category: "fleetshift.cluster-provider",
+      category: "ocm-fleet.cluster-provider",
     }),
     createOnboardingAction({
       id: "kind-connect",
@@ -492,7 +492,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       icon: { $codeRef: "KindOnboardingIcon.default" },
       card: { $codeRef: "KindOnboarding.KindOnboardingCard" },
       form: { $codeRef: "KindOnboarding.KindOnboardingForm" },
-      category: "fleetshift.cluster-provider",
+      category: "ocm-fleet.cluster-provider",
     }),
 
     // --- Module pages ---
@@ -548,7 +548,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       icon: { $codeRef: "SecurityIcon.default" },
       card: { $codeRef: "SecurityOnboardingCard.SecurityOnboardingCard" },
       form: { $codeRef: "SecurityOnboardingForm.default" },
-      category: "fleetshift.module",
+      category: "ocm-fleet.module",
     }),
     createOnboardingAction({
       id: "observability-enable",
@@ -559,7 +559,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
         $codeRef: "ObservabilityOnboardingCard.ObservabilityOnboardingCard",
       },
       form: { $codeRef: "ObservabilityOnboardingForm.default" },
-      category: "fleetshift.module",
+      category: "ocm-fleet.module",
     }),
     createOnboardingAction({
       id: "compliance-enable",
@@ -568,7 +568,7 @@ const AddonDemoPlugin = new FleetshiftPlugin({
       icon: { $codeRef: "ComplianceIcon.default" },
       card: { $codeRef: "ComplianceOnboardingCard.ComplianceOnboardingCard" },
       form: { $codeRef: "ComplianceOnboardingForm.default" },
-      category: "fleetshift.module",
+      category: "ocm-fleet.module",
     }),
   ],
   sharedModules,

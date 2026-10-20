@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 func TestResourceRepresentationsSchema_DoesNotExposeLegacyDeletedAt(t *testing.T) {
@@ -39,7 +39,7 @@ func TestExtensionResourcesReportedAliases_StoredAsObjectPayload(t *testing.T) {
 	db := postgres.OpenTestDB(t)
 	repo := postgres.ExtensionResourceRepo{DB: db}
 
-	rt := domain.ResourceType("shape.fleetshift.io/Node")
+	rt := domain.ResourceType("shape.open-cluster-management.io/Node")
 	if err := repo.CreateType(ctx, domain.NewExtensionResourceType(
 		rt, "v1", "nodes", time.Unix(0, 0).UTC(), domain.WithInventory(),
 	)); err != nil {

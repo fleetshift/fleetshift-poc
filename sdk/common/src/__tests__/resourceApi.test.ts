@@ -19,8 +19,8 @@ function makeResult(
   overrides: Partial<ResourceResult<TestProps>> = {},
 ): ResourceResult<TestProps> {
   return {
-    name: "//kind.fleetshift.io/clusters/prod",
-    resourceType: "kind.fleetshift.io/Cluster",
+    name: "//kind.open-cluster-management.io/clusters/prod",
+    resourceType: "kind.open-cluster-management.io/Cluster",
     resource: {
       name: "clusters/prod",
       uid: "550e8400-e29b-41d4-a716-446655440000",
@@ -74,7 +74,9 @@ describe("createResourceApi", () => {
       expect(res.resources[0].resource.apiUrl).toBe("https://prod.example.com");
 
       const calledUrl = spy.mock.calls[0][0] as string;
-      expect(calledUrl).toBe("/apis/fleetshift.io/v1/-:queryResources");
+      expect(calledUrl).toBe(
+        "/apis/open-cluster-management.io/v1alpha/-:queryResources",
+      );
     });
 
     it("passes filter, pageSize, and pageToken as query params", async () => {
@@ -82,15 +84,17 @@ describe("createResourceApi", () => {
       const api = createResourceApi("-");
 
       await api.search({
-        filter: 'resource_type == "kind.fleetshift.io/Cluster"',
+        filter: 'resource_type == "kind.open-cluster-management.io/Cluster"',
         pageSize: 25,
         pageToken: "tok123",
       });
 
       const { path, params } = parseRelativeUrl(spy.mock.calls[0][0] as string);
-      expect(path).toBe("/apis/fleetshift.io/v1/-:queryResources");
+      expect(path).toBe(
+        "/apis/open-cluster-management.io/v1alpha/-:queryResources",
+      );
       expect(params.get("filter")).toBe(
-        'resource_type == "kind.fleetshift.io/Cluster"',
+        'resource_type == "kind.open-cluster-management.io/Cluster"',
       );
       expect(params.get("pageSize")).toBe("25");
       expect(params.get("pageToken")).toBe("tok123");
@@ -114,7 +118,7 @@ describe("createResourceApi", () => {
 
       const calledUrl = spy.mock.calls[0][0] as string;
       expect(calledUrl).toBe(
-        "/apis/fleetshift.io/v1/workspace%2Ffoo:queryResources",
+        "/apis/open-cluster-management.io/v1alpha/workspace%2Ffoo:queryResources",
       );
     });
 
@@ -169,7 +173,9 @@ describe("createResourceApi", () => {
       mockFetch({ resources: [result], nextPageToken: "" });
       const api = createResourceApi<TestProps>("-");
 
-      const found = await api.get("//kind.fleetshift.io/clusters/prod");
+      const found = await api.get(
+        "//kind.open-cluster-management.io/clusters/prod",
+      );
 
       expect(found).toEqual(result);
     });
@@ -235,7 +241,7 @@ describe("createResourceApi", () => {
 
       const api = createResourceApi<TestProps>("-");
       const results = await api.searchAll({
-        filter: 'resource_type == "kind.fleetshift.io/Cluster"',
+        filter: 'resource_type == "kind.open-cluster-management.io/Cluster"',
       });
 
       expect(results).toHaveLength(2);
@@ -285,13 +291,13 @@ describe("createResourceApi", () => {
 describe("createApiClient", () => {
   it("GET appends query params", async () => {
     const spy = mockFetch({ id: "1" });
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     const res = await client.get<{ id: string }>("/items", { foo: "bar" });
 
     expect(res).toEqual({ id: "1" });
     const calledUrl = spy.mock.calls[0][0] as string;
-    expect(calledUrl).toBe("/v1/items?foo=bar");
+    expect(calledUrl).toBe("/v1alpha/items?foo=bar");
   });
 
   it("GET without params omits query string", async () => {
@@ -305,12 +311,12 @@ describe("createApiClient", () => {
 
   it("POST sends JSON body", async () => {
     const spy = mockFetch({ name: "new" });
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     await client.post("/items", { name: "new" });
 
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/v1/items");
+    expect(url).toBe("/v1alpha/items");
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ "Content-Type": "application/json" });
     expect(JSON.parse(init.body as string)).toEqual({ name: "new" });
@@ -318,7 +324,7 @@ describe("createApiClient", () => {
 
   it("POST without body omits Content-Type", async () => {
     const spy = mockFetch({});
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     await client.post("/actions/trigger");
 
@@ -329,36 +335,36 @@ describe("createApiClient", () => {
 
   it("PUT sends JSON body", async () => {
     const spy = mockFetch({ updated: true });
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     await client.put("/items/1", { name: "updated" });
 
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/v1/items/1");
+    expect(url).toBe("/v1alpha/items/1");
     expect(init.method).toBe("PUT");
     expect(JSON.parse(init.body as string)).toEqual({ name: "updated" });
   });
 
   it("PATCH sends JSON body", async () => {
     const spy = mockFetch({ patched: true });
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     await client.patch("/items/1", { name: "patched" });
 
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/v1/items/1");
+    expect(url).toBe("/v1alpha/items/1");
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(init.body as string)).toEqual({ name: "patched" });
   });
 
   it("DELETE sends method only", async () => {
     const spy = mockFetch({});
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     await client.delete("/items/1");
 
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/v1/items/1");
+    expect(url).toBe("/v1alpha/items/1");
     expect(init.method).toBe("DELETE");
   });
 
@@ -370,7 +376,7 @@ describe("createApiClient", () => {
       json: () => Promise.reject(new SyntaxError("Unexpected end of input")),
     } as unknown as Response);
 
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
     const result = await client.delete("/items/1");
 
     expect(result).toBeUndefined();
@@ -378,7 +384,7 @@ describe("createApiClient", () => {
 
   it("throws ResourceApiError on non-OK response", async () => {
     mockFetch({ code: 5, message: "Not found" }, 404);
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
 
     await expect(client.get("/missing")).rejects.toThrow(ResourceApiError);
     await expect(client.get("/missing")).rejects.toMatchObject({
@@ -395,7 +401,7 @@ describe("createApiClient", () => {
       json: () => Promise.reject(new SyntaxError("Unexpected token")),
     } as unknown as Response);
 
-    const client = createApiClient("/v1");
+    const client = createApiClient("/v1alpha");
     const err = await client.get("/broken").catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(ResourceApiError);

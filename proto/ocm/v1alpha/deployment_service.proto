@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "ocm/v1alpha/deployment.proto";
+import "ocm/v1alpha/create_deployment_request.proto";
+import "ocm/v1alpha/get_deployment_request.proto";
+import "ocm/v1alpha/list_deployments_request.proto";
+import "ocm/v1alpha/list_deployments_response.proto";
+import "ocm/v1alpha/resume_deployment_request.proto";
+import "ocm/v1alpha/delete_deployment_request.proto";
+
+// DeploymentService manages deployment resources.
+service DeploymentService {
+  // CreateDeployment creates a new deployment and begins orchestration.
+  rpc CreateDeployment(CreateDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      post: "/v1alpha/deployments"
+      body: "deployment"
+    };
+    option (google.api.method_signature) = "deployment,deployment_id";
+  }
+
+  // GetDeployment retrieves a deployment by resource name.
+  rpc GetDeployment(GetDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      get: "/v1alpha/{name=deployments/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // ListDeployments lists deployments.
+  rpc ListDeployments(ListDeploymentsRequest) returns (ListDeploymentsResponse) {
+    option (google.api.http) = {
+      get: "/v1alpha/deployments"
+    };
+  }
+
+  // ResumeDeployment resumes a deployment that is paused for authentication.
+  // The caller's fresh Bearer token is captured and used for subsequent
+  // deliveries. Any authorized user may resume; this gives approval-gate
+  // semantics for free.
+  rpc ResumeDeployment(ResumeDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      post: "/v1alpha/{name=deployments/*}:resume"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // DeleteDeployment marks a deployment for deletion and begins teardown.
+  rpc DeleteDeployment(DeleteDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      delete: "/v1alpha/{name=deployments/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+}

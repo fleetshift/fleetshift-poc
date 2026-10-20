@@ -11,10 +11,10 @@ export default function SloErrorBudgets(_props: { widgetId: string }) {
   const liveSlos = useLiveSlos();
 
   return (
-    <div className="ome-overview-slo">
+    <div className="ocm-fleet-overview-slo">
       {liveSlos.map((slo) => (
-        <div key={slo.service} className="ome-overview-slo__item">
-          <div className="ome-overview-slo__chart">
+        <div key={slo.service} className="ocm-fleet-overview-slo__item">
+          <div className="ocm-fleet-overview-slo__chart">
             <ChartDonutUtilization
               data={{ x: "Budget used", y: 100 - slo.budgetRemaining }}
               height={150}
@@ -26,14 +26,16 @@ export default function SloErrorBudgets(_props: { widgetId: string }) {
                 datum.x ? `${datum.x}: ${datum.y.toFixed(0)}%` : null
               }
             />
-            <div className="ome-overview-slo__overlay">
-              <span className="ome-overview-slo__value">
+            <div className="ocm-fleet-overview-slo__overlay">
+              <span className="ocm-fleet-overview-slo__value">
                 {Math.round(slo.budgetRemaining)}%
               </span>
-              <span className="ome-overview-slo__subtitle">remaining</span>
+              <span className="ocm-fleet-overview-slo__subtitle">
+                remaining
+              </span>
             </div>
           </div>
-          <div className="ome-overview-slo__label">{slo.service}</div>
+          <div className="ocm-fleet-overview-slo__label">{slo.service}</div>
         </div>
       ))}
     </div>

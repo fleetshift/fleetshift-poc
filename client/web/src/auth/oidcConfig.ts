@@ -4,8 +4,8 @@ import type { NavigateFunction } from "react-router-dom";
 import {
   APP_BASENAME,
   AUTH_CALLBACK_PATH,
-  SILENT_RENEW_PATH,
   isAuthCallbackPath,
+  SILENT_RENEW_PATH,
   stripAppBasename,
   toBrowserPath,
 } from "../appBase";

@@ -24,7 +24,7 @@ resuming a fulfillment that lacks acceptable authorization material.
   [architecture/provenance.md](architecture/provenance.md)
 - Target apply, acknowledgement, generation, journaling, and recovery:
   [architecture/target_delivery_contract.md](architecture/target_delivery_contract.md)
-- Resource-manager tenant, workspace, and resource authorization:
+- Platform tenant, workspace, and resource authorization:
   [architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md)
 - The superseded raw-signature and JWT key-binding provenance design:
   [archive/jwt_and_raw_key_provenance.md](archive/jwt_and_raw_key_provenance.md)
@@ -39,7 +39,7 @@ resuming a fulfillment that lacks acceptable authorization material.
 
 ## Overview
 
-FleetShift separates two concerns in delivery authorization:
+The OCM Fleet architecture separates two concerns in delivery authorization:
 
 - **Provenance** is durable cryptographic proof of who authenticated an exact
   typed intent or supporting assertion.
@@ -247,27 +247,31 @@ Trade-offs:
 
 ### None (run as platform)
 
-This model relies on provenance, transport authentication, and the "fleetlet"
-delivery agent design to reduce the authority concentrated in the platform
-server, while supporting both time and space separation for deliveries.
+This model relies on provenance, transport authentication, and the proposed
+shared target-side delivery enforcement in the fleetlet to reduce the authority
+concentrated in the resource manager server, while supporting both time and
+space separation for deliveries.
 Provenance proves what an authentic user or workload signed, and the fleetlet
 has isolated authority for its target behind network separation that decouples
-it from the platform server. The delivery agent applies with a credential that
-never leaves the target, such as its in-cluster ServiceAccount. No user or
-cluster credential has to travel through the RM.
+it from the resource manager server. The fleetlet enforces the common
+application-authorization and provenance requirements selected by target policy
+before handing work to the addon delivery agent.
+The addon delivery agent applies with a credential that never leaves the target,
+such as its in-cluster ServiceAccount. No user or cluster credential has to
+travel through the RM.
 
 The local identity should have no more permission than the delivery contract
-requires. When policy requires provenance, the agent uses its local authority
-only after verifying the delivered assertions and constraints. The resource
-manager remains the primary tenant, workspace, and resource authorization
-boundary; target verification narrows what the agent will apply rather than
-reproducing all RM policy.
+requires. When policy requires provenance, the fleetlet verifies the delivered
+assertions and common constraints before the addon delivery agent uses its local
+authority. The resource manager remains the primary tenant, workspace, and
+resource authorization boundary; target verification narrows what the agent
+will apply rather than reproducing all RM policy.
 
 The local apply credential is highly available. Complete authorization still
 depends on whatever credential, provenance, proof material, and trust state
-delivery policy requires. If a target accepts RM-delivered commands without
-independently checking an applicable credential or provenance, compromise of
-the RM effectively gains the delivery agent's apply scope.
+delivery policy requires. If the fleetlet does not independently check the
+applicable credential or provenance requirements, compromise of the RM
+effectively gains the addon delivery agent's apply scope.
 
 ### Standalone service account
 
@@ -314,7 +318,7 @@ the relevant request components, destination or audience, body digest,
 freshness value, and replay protection.
 
 This is useful when an IdP issues only bearer tokens. Theft of the token alone
-is then insufficient to reproduce the signed FleetShift request. It can also
+is then insufficient to reproduce the signed platform API request. It can also
 protect operations that have no delivery or durable provenance, including
 read-only queries.
 
@@ -414,10 +418,10 @@ therefore largely reusable as another transport for the same signed
 assertions, with apply authority left intact. It does not need a
 GitOps-specific token-binding or authorization model. Ordinary git commit
 signing is independent unless a configured provenance profile explicitly
-defines how it authenticates FleetShift content.
+defines how it authenticates platform content.
 
 The credential-presentation modes above still apply. Details of GitOps as a
-FleetShift transport are left for later work.
+platform delivery transport are left for later work.
 
 ## Operational Concerns
 
@@ -458,7 +462,7 @@ the IdP is unavailable, compromised, or misconfigured. See
   provenance plus delegated or target-local apply identity?
 - How should user-permission changes reconcile existing delegated workload
   identities across target types?
-- Which CIBA, token-exchange, and DPoP capabilities can FleetShift rely on in
+- Which CIBA, token-exchange, and DPoP capabilities can the resource manager rely on in
   the first supported IdP integrations?
 - Which `PausedAuth` causes and requested repairs should be represented in the
   public API without exposing security-sensitive detail?

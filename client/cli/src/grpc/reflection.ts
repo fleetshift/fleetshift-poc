@@ -71,7 +71,7 @@ async function reflectionClient(args?: ParsedArgs): Promise<{
   ) as unknown as ReflectionPackage;
   const target =
     process.env.FLEETCTL_GRPC_SERVER ||
-    process.env.FLEETSHIFT_GRPC_TARGET ||
+    process.env.OCM_RM_GRPC_TARGET ||
     "localhost:50051";
   const loopback = isLoopbackTarget(target);
   const secure =
@@ -83,7 +83,7 @@ async function reflectionClient(args?: ParsedArgs): Promise<{
   const caFile =
     (args ? flagString(args, "server-ca-file") : "") ||
     authConfig?.oidc_ca_file ||
-    process.env.FLEETSHIFT_CA_FILE;
+    process.env.OCM_RM_CA_FILE;
   const credentials = secure
     ? grpc.credentials.createSsl(caFile ? readFileSync(caFile) : undefined)
     : grpc.credentials.createInsecure();
@@ -160,7 +160,7 @@ export async function listResourceTypes(
   return (response.listServicesResponse?.service ?? [])
     .map((service) => service.name ?? "")
     .filter((name) => name.endsWith("Service"))
-    .filter((name) => !name.startsWith("fleetshift.v1."))
+    .filter((name) => !name.startsWith("ocm.v1alpha."))
     .map(resourceTypeFromService)
     .filter((type): type is ReflectedResourceType => type !== undefined);
 }

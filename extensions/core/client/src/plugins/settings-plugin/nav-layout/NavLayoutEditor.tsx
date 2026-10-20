@@ -2,10 +2,10 @@ import "./NavLayoutEditor.scss";
 
 import type {
   FlatNode,
-  FleetShiftApi,
+  FleetApi,
   NavLayoutEntry,
   NavLayoutGroup,
-} from "@fleetshift/common";
+} from "@ocm-fleet/common";
 import {
   buildLayout,
   CUSTOM_GROUP_PREFIX,
@@ -17,7 +17,7 @@ import {
   normalizeOrder,
   slugify,
   useNavLayout,
-} from "@fleetshift/common";
+} from "@ocm-fleet/common";
 import {
   Button,
   Content,
@@ -45,9 +45,9 @@ import {
 import { SortableSection } from "./SortableSection";
 
 const NavLayoutEditor = () => {
-  const { api } = useScalprum<{ api: FleetShiftApi }>();
+  const { api } = useScalprum<{ api: FleetApi }>();
   const { override, loaded, setOverride, clearOverride } = useNavLayout(
-    api.fleetshift.extensionStore,
+    api.fleet.extensionStore,
   );
   const [resetItemId, setResetItemId] = useState<string | null>(null);
   const [showFullReset, setShowFullReset] = useState(false);
@@ -59,11 +59,11 @@ const NavLayoutEditor = () => {
     kind: NodeKind.Page | NodeKind.Group;
   } | null>(null);
 
-  const backendLayout = useMemo(() => api.fleetshift.getBackendLayout(), [api]);
+  const backendLayout = useMemo(() => api.fleet.getBackendLayout(), [api]);
 
   const pageMap = useMemo(() => {
     const map = new Map<string, { title: string; scope: string }>();
-    const pages = api.fleetshift.getNavPages();
+    const pages = api.fleet.getNavPages();
     for (const p of pages) {
       map.set(p.id, { title: p.title, scope: p.scope });
     }
@@ -475,10 +475,10 @@ const NavLayoutEditor = () => {
   const resetItemLabel = resetItemId ? resolveLabel(resetItemId, pageMap) : "";
 
   return (
-    <div className="ome-settings-nav-editor">
-      <div className="ome-settings-nav-editor__header">
+    <div className="ocm-fleet-settings-nav-editor">
+      <div className="ocm-fleet-settings-nav-editor__header">
         <Title headingLevel="h2">Navigation layout</Title>
-        <div className="ome-settings-nav-editor__header-actions">
+        <div className="ocm-fleet-settings-nav-editor__header-actions">
           <Button
             variant="link"
             icon={<PlusCircleIcon />}

@@ -29,7 +29,7 @@ Neither path is fully in place yet. Bootstrap via config is the one to build fir
 
 Supply the first IdP when the process starts, or through a later local control channel that proves process ownership. Examples:
 
-- Config / environment on `fleetshift serve` (issuer, audiences, clients as needed)
+- Config / environment on `resource-manager serve` (issuer, audiences, clients as needed)
 - A local socket, managed through the CLI (e.g. `podman exec … fleetctl bootstrap --issuer …)` (not required for the first cut)
 
 Bootstrap config is **first-trust-only**: it installs an IdP when none exists yet, and does not re-apply or overwrite on later restarts. Name flags and env vars accordingly (`initial`, `bootstrap`, and the like) so operators do not treat them as a standing source of truth.
@@ -101,7 +101,7 @@ Consequences:
 
 - Exact config surface for bootstrap (issuer only vs full auth-method fields, default auth method id, audience set). I'm not sure whether this should also include trust signature policy, or if that should come from later UI set up. Ideally, we would define that up front too, or at least support defining it. Or, we just default it to the "easy mode" out of the box and let you override as an advanced use case.
 - Shape of the eventual recovery channel when the configured IdP is wrong or unavailable (ties to the "root user / out-of-band trust" note in [authentication.md](authentication.md#idp-bootstrap-and-recovery)).
-- How provider-tenant bootstrap composes with later consumer-tenant IdPs under multitenancy ([OME-53](https://redhat.atlassian.net/browse/OME-53)).
+- How provider-tenant bootstrap composes with later consumer-tenant IdPs under multitenancy (OME-53).
 
 
 

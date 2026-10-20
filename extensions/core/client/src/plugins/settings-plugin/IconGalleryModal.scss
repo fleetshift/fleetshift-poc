@@ -1,4 +1,4 @@
-.ome-settings-icon-grid {
+.ocm-fleet-settings-icon-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: var(--pf-t--global--spacer--xs);
@@ -8,7 +8,7 @@
   padding: var(--pf-t--global--spacer--sm);
 }
 
-.ome-settings-icon-cell {
+.ocm-fleet-settings-icon-cell {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -35,7 +35,7 @@
   }
 }
 
-.ome-settings-icon-preview {
+.ocm-fleet-settings-icon-preview {
   display: flex;
   align-items: center;
   gap: var(--pf-t--global--spacer--sm);

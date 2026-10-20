@@ -1,8 +1,10 @@
 # Plugin Discovery
 
+> **Draft / early prototype notes.** This document describes prototype behavior and open questions to revisit; it is not a settled OCM Fleet discovery contract.
+
 Distribution-specific integrations, including OpenShift ConsolePlugins, are optional signals under the common capability model.
 
-FleetShift dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
+OCM Fleet dynamically determines which UI plugins to enable for each connected cluster. Discovery produces a `plugins: string[]` list stored on the cluster object. The GUI uses this list to decide which plugin UIs to load and which nav items to show.
 
 ## Overview
 
@@ -43,7 +45,7 @@ These plugins are enabled for every cluster unconditionally. They rely on core K
 
 ### 2. CRD-based Discovery
 
-FleetShift lists all CustomResourceDefinitions on the cluster (`apiextensions.k8s.io/v1`) and matches their API group against a known map:
+The platform lists all CustomResourceDefinitions on the cluster (`apiextensions.k8s.io/v1`) and matches their API group against a known map:
 
 | CRD API Group | Plugin Key | What it enables |
 |---------------|------------|-----------------|
@@ -59,28 +61,28 @@ In the current prototype, if the CRD listing fails, CRD-based discovery is skipp
 
 ### 3. API Group Discovery (prototype only)
 
-As a prototyping convenience, FleetShift queries the cluster's aggregated API groups (`/apis`) to get a rough idea of cluster capabilities. API aggregation is **not** a problem this project is trying to solve — this check exists only to bootstrap the UI during development.
+As a prototyping convenience, the platform queries the cluster's aggregated API groups (`/apis`) to get a rough idea of cluster capabilities. API aggregation is **not** a problem this project is trying to solve — this check exists only to bootstrap the UI during development.
 
 - **Metrics API** (`metrics.k8s.io`): If present, enables the `observability` plugin. This API group is registered by the Metrics Server and provides pod/node resource usage data.
 
-In production, the plugin list should come from an authoritative source (CRDs, ConsolePlugins, or explicit configuration) rather than probing API groups.
+The API-group probe is only a rough prototype signal; the production discovery source remains to be defined for OCM Fleet.
 
 ### 4. OpenShift ConsolePlugin Discovery (OpenShift only)
 
-On OpenShift clusters, FleetShift also queries `console.openshift.io/v1` ConsolePlugin resources. This allows plugins that are deployed as OpenShift console plugins to be discovered:
+On OpenShift clusters, the platform also queries `console.openshift.io/v1` ConsolePlugin resources. This can provide one optional signal that an OpenShift console plugin is available to evaluate for reuse:
 
 - If a ConsolePlugin named `clowder-plugin` exists → enables the `clowder` plugin
 
-This check silently fails on vanilla Kubernetes clusters where the `console.openshift.io` API group does not exist.
+This check silently fails on vanilla Kubernetes clusters where the `console.openshift.io` API group does not exist. ConsolePlugin presence does not establish compatibility with OCM Fleet's extension contract.
 
 ## Platform Detection
 
-During connection, FleetShift also determines whether the cluster is OpenShift or vanilla Kubernetes by checking API groups:
+During connection, the platform also determines whether the cluster is OpenShift or vanilla Kubernetes by checking API groups:
 
 - If `route.openshift.io` or `apps.openshift.io` is present → `platform: "openshift"`
 - Otherwise → `platform: "kubernetes"`
 
-This is stored on the cluster object and available to the GUI for platform-specific UI decisions.
+This is stored on the cluster object and available to the GUI for platform-specific UI decisions. This binary OpenShift/Kubernetes distinction is historical prototype behavior, not a final distribution taxonomy.
 
 ## Connection (current prototype)
 
@@ -129,9 +131,9 @@ The current graceful-degradation approach (silently falling back to always-on pl
 
 ### Re-use of existing OpenShift console plugins
 
-Re-using existing OpenShift console plugins (`ConsolePlugin` resources from `console.openshift.io/v1`) is an optional integration for connected OpenShift clusters. These plugins are the authoritative source of UI extensions on OpenShift clusters.
+Re-using existing OpenShift console plugins (`ConsolePlugin` resources from `console.openshift.io/v1`) is an optional integration for connected OpenShift clusters. A ConsolePlugin can be one optional signal that an OpenShift plugin is available to evaluate for reuse; it is not an authoritative source of OCM Fleet UI extensions, and its presence does not establish compatibility with OCM Fleet's extension contract.
 
-This will require some updates on the existing OCP plugin side as well — details will be covered in a separate OCP plugin re-use document.
+If reuse is pursued, an existing OCP plugin may still require changes to satisfy OCM Fleet contracts — details are discussed in the separate OCP plugin re-use document.
 
 ### Discoverability of cluster capabilities is critical
 
@@ -141,4 +143,4 @@ Discovery must not silently fall back to a minimal plugin set. If capabilities c
 
 ### Plugin list must react to changes
 
-When a cluster is added, updated, or a plugin is installed or removed, FleetShift must be notified so it can adjust the environment accordingly. A full page refresh in the UI is acceptable if needed, but restarting the server from which the data is sourced must not be required.
+When a cluster is added, updated, or a plugin is installed or removed, the platform must be notified so it can adjust the environment accordingly. A full page refresh in the UI is acceptable if needed, but restarting the server from which the data is sourced must not be required.

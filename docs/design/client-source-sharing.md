@@ -29,12 +29,12 @@ client/
 
 This separates two different decisions:
 
-- Code is shared by FleetShift clients.
+- Code is shared by OCM Fleet clients.
 - Code is stable and intentionally exposed to community plugin or SDK users.
 
 The first does not require the second.
 
-Each Rspack configuration resolves `@fleetshift/client-shared/*` to `client/shared/src/*`. Rspack transpiles and bundles imported code into each consuming artifact. It watches imported shared files in watch mode.
+Each Rspack configuration resolves `@ocm-fleet/client-shared/*` to `client/shared/src/*`. Rspack transpiles and bundles imported code into each consuming artifact. It watches imported shared files in watch mode.
 
 TypeScript mirrors this alias with `paths`. Since shared files sit outside an application's `src` directory, each client `rootDir` must include the `client` directory. TypeScript 6 does not require `baseUrl` for `paths`; do not use it.
 

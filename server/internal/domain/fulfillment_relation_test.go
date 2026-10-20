@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestNewTargetID(t *testing.T) {
@@ -128,7 +128,7 @@ func TestFulfillmentRelation_UnmarshalRejectsEmptyFields(t *testing.T) {
 func TestSignedRelation_JSONRoundTrip(t *testing.T) {
 	rel := domain.NewRegisteredSelfTarget("addon-cluster-mgmt", "api.kind.cluster")
 	original := domain.SignedRelation{
-		ResourceType: "test.fleetshift.io/Cluster",
+		ResourceType: "test.open-cluster-management.io/Cluster",
 		Relation:     rel,
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.example"},
@@ -147,8 +147,8 @@ func TestSignedRelation_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if got.ResourceType != "test.fleetshift.io/Cluster" {
-		t.Errorf("ResourceType = %q, want %q", got.ResourceType, "test.fleetshift.io/Cluster")
+	if got.ResourceType != "test.open-cluster-management.io/Cluster" {
+		t.Errorf("ResourceType = %q, want %q", got.ResourceType, "test.open-cluster-management.io/Cluster")
 	}
 	rst, ok := got.Relation.(domain.RegisteredSelfTarget)
 	if !ok {

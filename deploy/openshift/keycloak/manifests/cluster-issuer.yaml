@@ -3,7 +3,7 @@ kind: ClusterIssuer
 metadata:
   name: letsencrypt-prod
   labels:
-    app.kubernetes.io/managed-by: fleetshift-keycloak
+    app.kubernetes.io/managed-by: ocm-fleet-keycloak
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory

@@ -1,5 +1,5 @@
-import type { ClusterProviderWizardProps } from "@fleetshift/common";
-import { usePluginNavigate } from "@fleetshift/common";
+import type { ClusterProviderWizardProps } from "@ocm-fleet/common";
+import { usePluginNavigate } from "@ocm-fleet/common";
 import { Alert, Wizard, WizardStep } from "@patternfly/react-core";
 import { useCallback, useState } from "react";
 

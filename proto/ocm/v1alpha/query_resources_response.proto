@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "ocm/v1alpha/resource_result.proto";
+
+// Response message for
+// [ResourceQueryService.QueryResources][ocm.v1alpha.ResourceQueryService.QueryResources].
+message QueryResourcesResponse {
+  // The resources matching the query, in the applied order.
+  repeated ResourceResult resources = 1;
+
+  // A token for the next page. If empty, there are no more results.
+  string next_page_token = 2;
+}

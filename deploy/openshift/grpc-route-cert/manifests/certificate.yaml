@@ -1,7 +1,7 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: fleetshift-grpc-route
+  name: ocm-fleet-grpc-route
   namespace: __NAMESPACE__
 spec:
   secretName: __TLS_SECRET_NAME__

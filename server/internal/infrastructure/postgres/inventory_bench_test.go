@@ -40,7 +40,7 @@ package postgres
 //
 // Run with:
 //
-//	FLEETSHIFT_INVENTORY_BENCH=1 go test ./internal/infrastructure/postgres/ -run TestInventoryWritePathBenchmark -v -timeout 20m
+//	OCM_RM_INVENTORY_BENCH=1 go test ./internal/infrastructure/postgres/ -run TestInventoryWritePathBenchmark -v -timeout 20m
 //
 // (skipped by default -- it spins up its own Postgres container,
 // separate from the contract tests' shared one, and seeds a
@@ -58,9 +58,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func aliasSet(aliases ...domain.Alias) domain.AliasSet {
@@ -72,7 +72,7 @@ func aliasSet(aliases ...domain.Alias) domain.AliasSet {
 // ---------------------------------------------------------------------------
 
 const (
-	ipbServiceName    = "bench.fleetshift.io"
+	ipbServiceName    = "bench.open-cluster-management.io"
 	ipbTypeName       = "Widget"
 	ipbCollectionName = "widgets"
 
@@ -943,8 +943,8 @@ func timeACMUpsert(t *testing.T, db *sql.DB, scenario string, batchSize int, bui
 // ---------------------------------------------------------------------------
 
 func TestInventoryWritePathBenchmark(t *testing.T) {
-	if os.Getenv("FLEETSHIFT_INVENTORY_BENCH") == "" {
-		t.Skip("set FLEETSHIFT_INVENTORY_BENCH=1 to run (spins up a dedicated Postgres container and seeds a ~100k-resource corpus)")
+	if os.Getenv("OCM_RM_INVENTORY_BENCH") == "" {
+		t.Skip("set OCM_RM_INVENTORY_BENCH=1 to run (spins up a dedicated Postgres container and seeds a ~100k-resource corpus)")
 	}
 
 	db := openBenchDB(t)

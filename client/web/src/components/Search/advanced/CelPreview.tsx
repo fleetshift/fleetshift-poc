@@ -13,12 +13,12 @@ interface CelPreviewProps {
 }
 
 const TOKEN_CLASSES: Record<string, string> = {
-  field: "ome-search__cel-token--field",
-  operator: "ome-search__cel-token--operator",
-  value: "ome-search__cel-token--value",
-  combinator: "ome-search__cel-token--combinator",
-  "dot-call": "ome-search__cel-token--operator",
-  paren: "ome-search__cel-token--paren",
+  field: "ocm-fleet-search__cel-token--field",
+  operator: "ocm-fleet-search__cel-token--operator",
+  value: "ocm-fleet-search__cel-token--value",
+  combinator: "ocm-fleet-search__cel-token--combinator",
+  "dot-call": "ocm-fleet-search__cel-token--operator",
+  paren: "ocm-fleet-search__cel-token--paren",
 };
 
 export default function CelPreview({
@@ -30,15 +30,15 @@ export default function CelPreview({
   if (!expression.trim()) return null;
 
   return (
-    <div className="ome-search__cel-preview">
-      <div className="ome-search__cel-preview-status">
+    <div className="ocm-fleet-search__cel-preview">
+      <div className="ocm-fleet-search__cel-preview-status">
         {validation.valid ? (
-          <CheckCircleIcon className="ome-search__cel-preview-icon--valid" />
+          <CheckCircleIcon className="ocm-fleet-search__cel-preview-icon--valid" />
         ) : (
-          <ExclamationCircleIcon className="ome-search__cel-preview-icon--invalid" />
+          <ExclamationCircleIcon className="ocm-fleet-search__cel-preview-icon--invalid" />
         )}
       </div>
-      <code className="ome-search__cel-preview-expression">
+      <code className="ocm-fleet-search__cel-preview-expression">
         {tokens.map((token, i) => (
           <span key={i} className={TOKEN_CLASSES[token.type] ?? ""}>
             {token.value}
@@ -46,7 +46,7 @@ export default function CelPreview({
         ))}
       </code>
       {!validation.valid && validation.error && (
-        <span className="ome-search__cel-preview-error">
+        <span className="ocm-fleet-search__cel-preview-error">
           {validation.error}
         </span>
       )}

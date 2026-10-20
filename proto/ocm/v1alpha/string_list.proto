@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+// StringList is a wrapper for a repeated string value, used as a map
+// value type where proto maps do not support repeated values directly.
+message StringList {
+  repeated string values = 1;
+}

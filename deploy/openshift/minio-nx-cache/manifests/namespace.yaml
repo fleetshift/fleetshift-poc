@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: minio-nx-cache
   labels:
-    app.kubernetes.io/part-of: fleetshift
+    app.kubernetes.io/part-of: ocm-fleet

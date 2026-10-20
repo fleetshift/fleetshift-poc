@@ -1,4 +1,4 @@
-import { createResourceApi, type ResourceResult } from "@fleetshift/common";
+import { createResourceApi, type ResourceResult } from "@ocm-fleet/common";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface K8sObservationMetadata {
@@ -60,11 +60,13 @@ export function useClusterResources(
     setError(null);
     try {
       const kind = GVR_TO_KIND[gvrKey];
-      const parts = [`resourceType == "kubernetes.fleetshift.io/Object"`];
+      const parts = [
+        `resourceType == "kubernetes.open-cluster-management.io/Object"`,
+      ];
       if (clusterId) {
         const escaped = clusterId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         parts.push(
-          `name.startsWith("//kubernetes.fleetshift.io/clusters/${escaped}/")`,
+          `name.startsWith("//kubernetes.open-cluster-management.io/clusters/${escaped}/")`,
         );
         if (kind) parts.push(`resource.observation.kind == "${kind}"`);
       } else if (kind) {
@@ -100,7 +102,7 @@ export function useClusterResources(
 }
 
 const CANONICAL_RE =
-  /\/\/kubernetes\.fleetshift\.io\/clusters\/([^/]+)\/apiResources\/[^/]+\/objects\/[^/]+/;
+  /\/\/kubernetes\.ocm-fleet\.io\/clusters\/([^/]+)\/apiResources\/[^/]+\/objects\/[^/]+/;
 
 export function extractClusterId(resourceName: string): string {
   const m = CANONICAL_RE.exec(resourceName);

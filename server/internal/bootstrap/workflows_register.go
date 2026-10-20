@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
-	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/observability"
+	transporthttp "github.com/stolostron/ocm-fleet/server/internal/transport/http"
 )
 
 // registeredWorkflows are workflow handles and shared deps registered before

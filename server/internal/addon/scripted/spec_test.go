@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/scripted"
 )
 
 func mustCodec(t *testing.T) *scripted.Codec {

@@ -1,11 +1,11 @@
 // Package test locks AIO packaging contracts that live outside Go types.
 //
-// CI tests here compare this repo's Dockerfile.fleetshift with ci-operator
+// CI tests here compare this repo's Dockerfile.aio with ci-operator
 // and Prow YAML in github.com/openshift/release (not this tree). A failure
 // is cross-repo drift or a live GitHub fetch error:
 //
-//   - TestDockerfileFleetshiftOpenShiftRewriteContract: local Dockerfile
-//     FROM text vs OpenShift rewrite rules. Patch Dockerfile.fleetshift,
+//   - TestDockerfileResourceManagerOpenShiftRewriteContract: local Dockerfile
+//     FROM text vs OpenShift rewrite rules. Patch Dockerfile.aio,
 //     then matching from:/inputs.*.as in openshift/release.
 //   - TestOpenShiftReleaseAIOImageGraphContract: HTTP GET of
 //     openshift/release master. Inspect the GET URL in the failure (network,
@@ -32,26 +32,26 @@ import (
 
 const (
 	// releaseRawBase is github.com/openshift/release@master as raw GitHub
-	// content. These files are not in fleetshift-poc.
+	// content. These files are not in ocm-fleet.
 	releaseRawBase = "https://raw.githubusercontent.com/openshift/release/master/"
 	// ciConfigPath is the ci-operator config that owns the AIO image graph.
 	// Generated Prow jobs must stay in sync with this file.
-	ciConfigPath = "ci-operator/config/fleetshift/fleetshift-poc/fleetshift-fleetshift-poc-main.yaml"
+	ciConfigPath = "ci-operator/config/stolostron/ocm-fleet/stolostron-ocm-fleet-main.yaml"
 	// presubmitsPath is the generated PR jobs for that config.
-	presubmitsPath = "ci-operator/jobs/fleetshift/fleetshift-poc/fleetshift-fleetshift-poc-main-presubmits.yaml"
+	presubmitsPath = "ci-operator/jobs/stolostron/ocm-fleet/stolostron-ocm-fleet-main-presubmits.yaml"
 	// postsubmitsPath is the generated merge jobs for that config.
-	postsubmitsPath = "ci-operator/jobs/fleetshift/fleetshift-poc/fleetshift-fleetshift-poc-main-postsubmits.yaml"
+	postsubmitsPath = "ci-operator/jobs/stolostron/ocm-fleet/stolostron-ocm-fleet-main-postsubmits.yaml"
 
 	// webFromArg is the Dockerfile FROM text ci-operator must match in
-	// inputs.fleetshift-web.as (exact string, before ARG expansion).
+	// inputs.ocm-fleet-web.as (exact string, before ARG expansion).
 	webFromArg = "${WEB_IMAGE}"
 	// serverFromArg is the last Dockerfile FROM. ci-operator from: rewrites
-	// that instruction to the pipeline image named in fleetshift.from.
+	// that instruction to the pipeline image named in ocm-fleet.from.
 	serverFromArg = "${SERVER_IMAGE}"
 )
 
-// TestDockerfileFleetshiftOpenShiftRewriteContract locks FROM names in this
-// repo's Dockerfile.fleetshift as OpenShift's builder sees them, before ARG
+// TestDockerfileResourceManagerOpenShiftRewriteContract locks FROM names in this
+// repo's Dockerfile.aio as OpenShift's builder sees them, before ARG
 // expansion.
 //
 // ci-operator rewrites the last FROM via from: (any text works) and
@@ -62,16 +62,16 @@ const (
 // A failure is this repo's Dockerfile. Changing FROM text requires a matching
 // openshift/release change to from: / inputs.*.as or the live graph test
 // fails next.
-func TestDockerfileFleetshiftOpenShiftRewriteContract(t *testing.T) {
-	froms := dockerfileFROMImages(t, readDockerfileFleetshift(t))
+func TestDockerfileResourceManagerOpenShiftRewriteContract(t *testing.T) {
+	froms := dockerfileFROMImages(t, readDockerfileResourceManager(t))
 	if len(froms) < 2 {
-		t.Fatalf("Dockerfile.fleetshift: need at least web + server FROM, got %q", froms)
+		t.Fatalf("Dockerfile.aio: need at least web + server FROM, got %q", froms)
 	}
 	if !contains(froms, webFromArg) {
-		t.Fatalf("Dockerfile.fleetshift: missing FROM %s (ci-operator inputs.fleetshift-web.as must match this text; got %q)", webFromArg, froms)
+		t.Fatalf("Dockerfile.aio: missing FROM %s (ci-operator inputs.ocm-fleet-web.as must match this text; got %q)", webFromArg, froms)
 	}
 	if got := froms[len(froms)-1]; got != serverFromArg {
-		t.Fatalf("Dockerfile.fleetshift: last FROM must be %s so it stays the runtime base `from:` rewrites; got %q", serverFromArg, got)
+		t.Fatalf("Dockerfile.aio: last FROM must be %s so it stays the runtime base `from:` rewrites; got %q", serverFromArg, got)
 	}
 }
 
@@ -80,12 +80,12 @@ func TestDockerfileFleetshiftOpenShiftRewriteContract(t *testing.T) {
 // against this repo's Dockerfile FROM list.
 //
 // It does not re-check last-FROM / ${SERVER_IMAGE} (that is
-// TestDockerfileFleetshiftOpenShiftRewriteContract) and it does not verify
+// TestDockerfileResourceManagerOpenShiftRewriteContract) and it does not verify
 // a git SHA; pipeline image names imply this-SHA builds.
 //
 // A failure is a GET error (network, 404) or openshift/release drift.
 func TestOpenShiftReleaseAIOImageGraphContract(t *testing.T) {
-	froms := dockerfileFROMImages(t, readDockerfileFleetshift(t))
+	froms := dockerfileFROMImages(t, readDockerfileResourceManager(t))
 	cfg := fetchOpenShiftReleaseYAML[ciOperatorConfig](t, releaseRawBase+ciConfigPath)
 	presubmits := fetchOpenShiftReleaseYAML[presubmitsFile](t, releaseRawBase+presubmitsPath)
 	postsubmits := fetchOpenShiftReleaseYAML[postsubmitsFile](t, releaseRawBase+postsubmitsPath)
@@ -96,13 +96,13 @@ func TestOpenShiftReleaseAIOImageGraphContract(t *testing.T) {
 // already-parsed YAML. froms is Dockerfile FROM text in order.
 //
 // Owned by openshift/release ci-operator config unless noted:
-//   - images.to includes fleetshift-server, fleetshift-server-local,
-//     fleetshift-web, and fleetshift (one pipeline)
+//   - images.to includes ocm-fleet-server, ocm-fleet-server-local,
+//     ocm-fleet-web, and ocm-fleet (one pipeline)
 //   - those images.dockerfile_path values are Dockerfile, Dockerfile.local,
-//     Dockerfile.web, and Dockerfile.fleetshift
-//   - fleetshift-server-local.from is fleetshift-server (this-SHA server)
-//   - fleetshift.from is fleetshift-server-local (from: rewrites last FROM)
-//   - fleetshift.inputs.fleetshift-web.as matches a Dockerfile FROM string
+//     Dockerfile.web, and Dockerfile.aio
+//   - ocm-fleet-server-local.from is ocm-fleet-server (this-SHA server)
+//   - ocm-fleet.from is ocm-fleet-server-local (from: rewrites last FROM)
+//   - ocm-fleet.inputs.ocm-fleet-web.as matches a Dockerfile FROM string
 //     (web substitution + wait). Prefer ${WEB_IMAGE}; if that FROM is
 //     missing, compare against froms[0] so a Dockerfile edit still fails
 //     as an as: mismatch rather than a skipped check
@@ -130,10 +130,10 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		byTo[img.To] = img
 	}
 	for _, w := range []struct{ to, path string }{
-		{"fleetshift-server", "Dockerfile"},
-		{"fleetshift-server-local", "Dockerfile.local"},
-		{"fleetshift-web", "Dockerfile.web"},
-		{"fleetshift", "Dockerfile.fleetshift"},
+		{"ocm-fleet-server", "Dockerfile"},
+		{"ocm-fleet-server-local", "Dockerfile.local"},
+		{"ocm-fleet-web", "Dockerfile.web"},
+		{"ocm-fleet", "Dockerfile.aio"},
 	} {
 		t.Run("images/"+w.to, func(t *testing.T) {
 			img, ok := byTo[w.to]
@@ -146,28 +146,28 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 			}
 		})
 	}
-	if img, ok := byTo["fleetshift-server-local"]; ok {
-		t.Run("fleetshift-server-local.from", func(t *testing.T) {
-			if img.From != "fleetshift-server" {
-				t.Errorf("fleetshift-server-local.from = %q, want fleetshift-server", img.From)
+	if img, ok := byTo["ocm-fleet-server-local"]; ok {
+		t.Run("ocm-fleet-server-local.from", func(t *testing.T) {
+			if img.From != "ocm-fleet-server" {
+				t.Errorf("ocm-fleet-server-local.from = %q, want ocm-fleet-server", img.From)
 			}
 		})
 	}
-	aio, aioOK := byTo["fleetshift"]
+	aio, aioOK := byTo["ocm-fleet"]
 	if aioOK {
-		t.Run("fleetshift.from", func(t *testing.T) {
-			if aio.From != "fleetshift-server-local" {
-				t.Errorf("fleetshift.from = %q, want fleetshift-server-local (`from:` rewrites last FROM)", aio.From)
+		t.Run("ocm-fleet.from", func(t *testing.T) {
+			if aio.From != "ocm-fleet-server-local" {
+				t.Errorf("ocm-fleet.from = %q, want ocm-fleet-server-local (`from:` rewrites last FROM)", aio.From)
 			}
 		})
-		t.Run("fleetshift.inputs", func(t *testing.T) {
-			webIn, ok := aio.Inputs["fleetshift-web"]
+		t.Run("ocm-fleet.inputs", func(t *testing.T) {
+			webIn, ok := aio.Inputs["ocm-fleet-web"]
 			if !ok {
-				t.Error("fleetshift.inputs: missing fleetshift-web (AIO would not wait for web, and would not substitute it)")
+				t.Error("ocm-fleet.inputs: missing ocm-fleet-web (AIO would not wait for web, and would not substitute it)")
 				return
 			}
 			if !contains(webIn.As, webFROM) {
-				t.Errorf("fleetshift.inputs.fleetshift-web.as = %q, want %q (must match Dockerfile FROM text before ARG expansion)", webIn.As, webFROM)
+				t.Errorf("ocm-fleet.inputs.ocm-fleet-web.as = %q, want %q (must match Dockerfile FROM text before ARG expansion)", webIn.As, webFROM)
 			}
 		})
 	}
@@ -177,14 +177,14 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		tests[test.As] = test
 	}
 	for _, w := range []struct{ name, image string }{
-		{"pr-image-mirror-server", "fleetshift-server"},
-		{"pr-image-mirror-local", "fleetshift-server-local"},
-		{"pr-image-mirror-web", "fleetshift-web"},
-		{"pr-image-mirror-aio", "fleetshift"},
-		{"pr-merge-image-mirror-server", "fleetshift-server"},
-		{"pr-merge-image-mirror-local", "fleetshift-server-local"},
-		{"pr-merge-image-mirror-web", "fleetshift-web"},
-		{"pr-merge-image-mirror-aio", "fleetshift"},
+		{"pr-image-mirror-server", "ocm-fleet-server"},
+		{"pr-image-mirror-local", "ocm-fleet-server-local"},
+		{"pr-image-mirror-web", "ocm-fleet-web"},
+		{"pr-image-mirror-aio", "ocm-fleet"},
+		{"pr-merge-image-mirror-server", "ocm-fleet-server"},
+		{"pr-merge-image-mirror-local", "ocm-fleet-server-local"},
+		{"pr-merge-image-mirror-web", "ocm-fleet-web"},
+		{"pr-merge-image-mirror-aio", "ocm-fleet"},
 	} {
 		t.Run("tests/"+w.name, func(t *testing.T) {
 			test, ok := tests[w.name]
@@ -205,7 +205,7 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		})
 	}
 
-	jobs := presubmits.Presubmits["fleetshift/fleetshift-poc"]
+	jobs := presubmits.Presubmits["stolostron/ocm-fleet"]
 	for _, ctx := range []string{
 		"ci/prow/images",
 		"ci/prow/pr-image-mirror-server",
@@ -225,12 +225,12 @@ func assertAIOReleaseContract(t *testing.T, froms []string, cfg ciOperatorConfig
 		})
 	}
 
-	post := postsubmits.Postsubmits["fleetshift/fleetshift-poc"]
+	post := postsubmits.Postsubmits["stolostron/ocm-fleet"]
 	for _, name := range []string{
-		"branch-ci-fleetshift-fleetshift-poc-main-pr-merge-image-mirror-server",
-		"branch-ci-fleetshift-fleetshift-poc-main-pr-merge-image-mirror-local",
-		"branch-ci-fleetshift-fleetshift-poc-main-pr-merge-image-mirror-web",
-		"branch-ci-fleetshift-fleetshift-poc-main-pr-merge-image-mirror-aio",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-server",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-local",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-web",
+		"branch-ci-stolostron-ocm-fleet-main-pr-merge-image-mirror-aio",
 	} {
 		t.Run("postsubmits/"+name, func(t *testing.T) {
 			job := findProwJobByName(post, name)
@@ -264,12 +264,12 @@ func dockerfileFROMImages(t *testing.T, dockerfile string) []string {
 	return froms
 }
 
-// readDockerfileFleetshift reads repo-root Dockerfile.fleetshift (the AIO
+// readDockerfileResourceManager reads repo-root Dockerfile.aio (the AIO
 // assembly file), resolving the root by walking from the test cwd.
-func readDockerfileFleetshift(t *testing.T) string {
+func readDockerfileResourceManager(t *testing.T) string {
 	t.Helper()
 	root := findRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.fleetshift"))
+	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.aio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func fetchOpenShiftReleaseYAML[T any](t *testing.T, url string) T {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("User-Agent", "fleetshift-poc-aio-ci-contract-test")
+	req.Header.Set("User-Agent", "ocm-fleet-aio-ci-contract-test")
 	res, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)

@@ -1,4 +1,4 @@
-import { MORE_ENTRY_ID, type NavLayoutMore } from "@fleetshift/common";
+import { MORE_ENTRY_ID, type NavLayoutMore } from "@ocm-fleet/common";
 import { NavExpandable } from "@patternfly/react-core";
 import type { ComponentType } from "react";
 import { useMemo } from "react";

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
@@ -83,7 +83,7 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 		t.Fatalf("begin tx: %v", err)
 	}
 	now := time.Now().UTC()
-	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
+	rt := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	typeDef := domain.NewExtensionResourceType(rt, "v1alpha1", "clusters", now)
 	if err := tx.ExtensionResources().CreateType(ctx, typeDef); err != nil {
 		tx.Rollback()
@@ -107,8 +107,8 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 	if len(reps) != 1 {
 		t.Fatalf("Representations len = %d, want 1", len(reps))
 	}
-	if reps[0].ServiceName() != "kind.fleetshift.io" {
-		t.Errorf("ServiceName = %q, want %q", reps[0].ServiceName(), "kind.fleetshift.io")
+	if reps[0].ServiceName() != "kind.open-cluster-management.io" {
+		t.Errorf("ServiceName = %q, want %q", reps[0].ServiceName(), "kind.open-cluster-management.io")
 	}
 	if reps[0].Version() != "v1alpha1" {
 		t.Errorf("Version = %q, want %q", reps[0].Version(), "v1alpha1")

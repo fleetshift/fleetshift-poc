@@ -12,7 +12,7 @@ class ModuleFederationPlugin extends BaseMFPlugin {
   }
 }
 
-import * as buildUtils from "@fleetshift/build-utils";
+import * as buildUtils from "@ocm-fleet/build-utils";
 
 import { APP_BASENAME } from "./src/appBase";
 
@@ -86,7 +86,7 @@ const config: Configuration = {
   },
   plugins: [
     new ModuleFederationPlugin({
-      name: "fleetshift_shell",
+      name: "ocm-fleet_shell",
       remotes: {},
       shared: {
         react: { singleton: true, requiredVersion: "^19" },
@@ -97,7 +97,7 @@ const config: Configuration = {
         "@scalprum/core": { singleton: true },
         "@scalprum/react-core": { singleton: true },
         "@openshift/dynamic-plugin-sdk": { singleton: true },
-        "@fleetshift/common": { requiredVersion: "*", version: "*" },
+        "@ocm-fleet/common": { requiredVersion: "*", version: "*" },
         "oidc-client-ts": { singleton: true, requiredVersion: "*" },
         "react-oidc-context": { singleton: true, requiredVersion: "*" },
         ...pfSharedModules,

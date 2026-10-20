@@ -16,11 +16,11 @@ import (
 	"github.com/cschleiden/go-workflows/worker"
 	"github.com/cschleiden/go-workflows/workflow"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/scripted"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/addon/scripted"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/goworkflows"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 // ---------------------------------------------------------------------------

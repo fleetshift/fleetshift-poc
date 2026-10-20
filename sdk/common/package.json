@@ -1,6 +1,6 @@
 {
-  "name": "@fleetshift/common",
-  "description": "Shared types and fetch helpers for FleetShift packages.",
+  "name": "@ocm-fleet/common",
+  "description": "Shared types and fetch helpers for OCM Fleet packages.",
   "version": "0.0.0",
   "private": true,
   "sideEffects": false,

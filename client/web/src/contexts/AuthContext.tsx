@@ -147,7 +147,7 @@ export function AuthProvider({
   if (error) {
     if (requireAuth) {
       return (
-        <div className="ome-oidc-error">
+        <div className="ocm-fleet-oidc-error">
           Failed to load OIDC config: {error}
         </div>
       );

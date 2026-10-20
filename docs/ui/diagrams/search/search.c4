@@ -1,4 +1,4 @@
-// FleetShift UI — Search Architecture
+// OCM Fleet UI — Search Architecture
 // Source of truth: web/src/components/Search/
 //
 // How global search leverages the feature contract to automatically
@@ -90,7 +90,7 @@ model {
       See: feature-contract.c4
     '''
 
-    modules = component 'Modules (fleetshift.module)' {
+    modules = component 'Modules (ocm-fleet.module)' {
       description '''
         The primary units of search. Each module declares id, label,
         description, keywords, and a component CodeRef. Modules are
@@ -105,7 +105,7 @@ model {
     extensionPoints = component 'Extension Points' {
       description '''
         Declared on modules via extensionPoints: Record<name, { type, description }>.
-        Each extension point advertises a type string (e.g. "fleetshift.cluster-provider").
+        Each extension point advertises a type string (e.g. "ocm-fleet.cluster-provider").
 
         Search builds a typeToFeatureId map from these declarations:
         type string → global feature ID of the declaring module.
@@ -128,7 +128,7 @@ model {
         for custom rendering. The to property provides a relative
         navigation target composed with the parent module's base path.
 
-        Examples: fleetshift.cluster-provider, fleetshift.setup,
+        Examples: ocm-fleet.cluster-provider, ocm-fleet.setup,
         or any addon-defined type — search treats them all the same.
       '''
     }
@@ -176,7 +176,7 @@ model {
         Runs once when all extensions are resolved. Two-phase process:
 
         Phase 1 — Module scan:
-        Iterates fleetshift.module extensions. For each module:
+        Iterates ocm-fleet.module extensions. For each module:
         • Resolves its route via pluginPages (label → page → basePath)
         • Composes global feature ID: {pluginKey}.{extensionId}
         • Inserts into Orama with title, description, keywords
@@ -329,8 +329,8 @@ views {
       it never hard-codes knowledge of specific extension types.
 
       Example: the "Clusters" module declares an extensionPoint
-      with type "fleetshift.cluster-provider". Any plugin registering a
-      fleetshift.cluster-provider extension automatically appears as a
+      with type "ocm-fleet.cluster-provider". Any plugin registering a
+      ocm-fleet.cluster-provider extension automatically appears as a
       child of "Clusters" in search results.
     '''
 

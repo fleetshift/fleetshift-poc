@@ -11,7 +11,7 @@ export const getCommand: CommandSpec = {
     if (!name) throw new Error("deployment name is required");
     const response = await (
       await deploymentClient(args)
-    ).request(`/v1/${deploymentName(name)}`);
+    ).request(`/v1alpha/${deploymentName(name)}`);
     return <JsonOutput value={response} />;
   },
 };

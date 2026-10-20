@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/deploy/aio/internal/aioinit"
+	"github.com/stolostron/ocm-fleet/deploy/aio/internal/aioinit"
 )
 
 // TestServeArgs_PeerDexDefaultsForbidSandboxFlags checks Dex-on packaging
@@ -23,9 +23,9 @@ func TestServeArgs_PeerDexDefaultsForbidSandboxFlags(t *testing.T) {
 	for _, want := range []string{
 		"serve",
 		"--http-addr\x00127.0.0.1:8086",
-		"--oidc-issuer\x00https://fleetshift-sandbox.localhost:8085/idp",
-		"--oidc-resource-audience\x00fleetshift",
-		"--oidc-ui-client-id\x00fleetshift-ui",
+		"--oidc-issuer\x00https://ocm-fleet.localhost:8085/idp",
+		"--oidc-resource-audience\x00resource-manager",
+		"--oidc-ui-client-id\x00ocm-fleet-console",
 		"--oidc-ui-scope\x00" + aioinit.DefaultPeerDexUIScope,
 		"--oidc-registry-id\x00github.com",
 		"--oidc-registry-subject-expression\x00claims.preferred_username",
@@ -54,7 +54,7 @@ func TestApplyServeDefaults_ExplicitAddonsWin(t *testing.T) {
 func TestApplyServeDefaults_ExternalIssuerUsesPortableUIScope(t *testing.T) {
 	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
 		Endpoints: aioinit.FixedEndpoints,
-		Issuer:    "https://keycloak.example/realms/fleetshift",
+		Issuer:    "https://keycloak.example/realms/ocm-fleet",
 	})
 	if in.UIScope != aioinit.DefaultExternalIssuerUIScope {
 		t.Fatalf("UIScope = %q, want %q", in.UIScope, aioinit.DefaultExternalIssuerUIScope)
@@ -73,7 +73,7 @@ func TestApplyServeDefaults_ExternalIssuerUsesPortableUIScope(t *testing.T) {
 func TestApplyServeDefaults_ExplicitUIScopeWinsOnExternalIssuer(t *testing.T) {
 	in := aioinit.ApplyServeDefaults(aioinit.ServeConfig{
 		Endpoints: aioinit.FixedEndpoints,
-		Issuer:    "https://keycloak.example/realms/fleetshift",
+		Issuer:    "https://keycloak.example/realms/ocm-fleet",
 		UIScope:   "openid profile email groups",
 	})
 	if in.UIScope != "openid profile email groups" {
@@ -188,7 +188,7 @@ func TestWriteServeExecScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "exec /usr/local/bin/fleetshift 'serve'") {
+	if !strings.Contains(body, "exec /usr/local/bin/resource-manager 'serve'") {
 		t.Fatalf("unexpected script: %s", raw)
 	}
 	if !strings.Contains(body, " '--oidc-ui-scope' 'a b'") {

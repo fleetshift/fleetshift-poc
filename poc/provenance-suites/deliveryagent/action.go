@@ -1,6 +1,6 @@
 package deliveryagent
 
-import "github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+import "github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 
 // AuthorizedAction is the ordinary delivery value derived by common semantics
 // after successful authentication, scope validation, and all required premises.

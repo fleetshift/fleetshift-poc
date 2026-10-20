@@ -7,7 +7,7 @@ export interface SetupComponentProps {
 }
 
 export type SetupExtension = Extension<
-  "fleetshift.setup",
+  "ocm-fleet.setup",
   {
     id: string;
     label: string;
@@ -21,5 +21,5 @@ export type SetupExtension = Extension<
 >;
 
 export function isSetupExtension(e: Extension): e is SetupExtension {
-  return e.type === "fleetshift.setup";
+  return e.type === "ocm-fleet.setup";
 }

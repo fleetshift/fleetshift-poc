@@ -202,7 +202,7 @@ type TemporalPreparation struct {
 
 // VerifiedProvenanceTemporalInputs is the verified forms of
 // provenance-specific inputs returned by Prepare. It deliberately
-// excludes FleetShift evidence-log occurrences.
+// excludes resource manager evidence-log occurrences.
 type VerifiedProvenanceTemporalInputs struct {
 	Timestamps []VerifiedTimeObservation
 }

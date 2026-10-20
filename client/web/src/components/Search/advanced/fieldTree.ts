@@ -56,9 +56,9 @@ function conditionNode(name: string): FieldNode {
 }
 
 const RESOURCE_TYPE_VALUES = [
-  "kind.fleetshift.io/Cluster",
-  "kind.fleetshift.io/Node",
-  "kubernetes.fleetshift.io/Object",
+  "kind.open-cluster-management.io/Cluster",
+  "kind.open-cluster-management.io/Node",
+  "kubernetes.open-cluster-management.io/Object",
 ];
 
 const KIND_VALUES = [
@@ -132,7 +132,7 @@ export const FIELD_TREE: FieldNode[] = [
     segment: "resourceType",
     path: "resourceType",
     label: "Resource Type",
-    description: "FleetShift resource type",
+    description: "Platform resource type",
     type: "string",
     enumValues: RESOURCE_TYPE_VALUES,
   },
@@ -380,7 +380,7 @@ const TOP_LEVEL_SHORTCUTS: FieldNode[] = [
     segment: "resourceType",
     path: "resourceType",
     label: "Resource Type",
-    description: "FleetShift resource type",
+    description: "Platform resource type",
     type: "string",
     enumValues: RESOURCE_TYPE_VALUES,
   },

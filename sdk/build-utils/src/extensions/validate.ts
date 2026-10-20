@@ -14,14 +14,14 @@ import {
   type BaseExtensionProperties,
   type ClusterProviderProperties,
   type EncodedCodeRef,
-  type FleetshiftExtension,
+  type FleetExtension,
   type ModuleGroupProperties,
   type ModuleProperties,
   type OnboardingActionProperties,
   type SetupProperties,
 } from "./types";
 
-const TAG = chalk.red("[FleetshiftPlugin]");
+const TAG = chalk.red("[FleetPlugin]");
 
 function isCodeRef(value: unknown): value is EncodedCodeRef {
   return (
@@ -88,7 +88,7 @@ function validateBaseProperties(
 }
 
 export function validateModuleProperties(props: ModuleProperties): string[] {
-  const ctx = `fleetshift.module "${props.id || "(no id)"}"`;
+  const ctx = `ocm-fleet.module "${props.id || "(no id)"}"`;
   return [
     ...validateBaseProperties(props, ctx),
     ...validateCodeRef(props.component, "component", ctx),
@@ -99,12 +99,12 @@ export function validateModuleProperties(props: ModuleProperties): string[] {
 export function validateModuleGroupProperties(
   props: ModuleGroupProperties,
 ): string[] {
-  const ctx = `fleetshift.module-group "${props.id || "(no id)"}"`;
+  const ctx = `ocm-fleet.module-group "${props.id || "(no id)"}"`;
   return [...validateBaseProperties(props, ctx)];
 }
 
 export function validateSetupProperties(props: SetupProperties): string[] {
-  const ctx = `fleetshift.setup "${props.id || "(no id)"}"`;
+  const ctx = `ocm-fleet.setup "${props.id || "(no id)"}"`;
   const errors = [
     ...validateBaseProperties(props, ctx),
     ...validateCodeRef(props.component, "component", ctx),
@@ -137,7 +137,7 @@ export function validateSetupProperties(props: SetupProperties): string[] {
 export function validateClusterProviderProperties(
   props: ClusterProviderProperties,
 ): string[] {
-  const ctx = `fleetshift.cluster-provider "${props.id || "(no id)"}"`;
+  const ctx = `ocm-fleet.cluster-provider "${props.id || "(no id)"}"`;
   const errors = [
     ...validateBaseProperties(props, ctx),
     ...validateCodeRef(props.icon, "icon", ctx),
@@ -157,7 +157,7 @@ export function validateClusterProviderProperties(
 export function validateOnboardingActionProperties(
   props: OnboardingActionProperties,
 ): string[] {
-  const ctx = `fleetshift.onboarding-action "${props.id || "(no id)"}"`;
+  const ctx = `ocm-fleet.onboarding-action "${props.id || "(no id)"}"`;
   return [
     ...validateBaseProperties(props, ctx),
     ...validateCodeRef(props.icon, "icon", ctx),
@@ -172,7 +172,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function validateSingleExtension(ext: FleetshiftExtension): string[] {
+function validateSingleExtension(ext: FleetExtension): string[] {
   const props = asRecord(ext.properties);
   if (!props) {
     return [`${ext.type}: "properties" must be an object`];
@@ -185,19 +185,19 @@ function validateSingleExtension(ext: FleetshiftExtension): string[] {
         `${RENDER_SEARCH_TYPE} "${id}"`,
       );
     }
-    case "fleetshift.module-group":
+    case "ocm-fleet.module-group":
       return validateModuleGroupProperties(
         props as unknown as ModuleGroupProperties,
       );
-    case "fleetshift.module":
+    case "ocm-fleet.module":
       return validateModuleProperties(props as unknown as ModuleProperties);
-    case "fleetshift.setup":
+    case "ocm-fleet.setup":
       return validateSetupProperties(props as unknown as SetupProperties);
-    case "fleetshift.cluster-provider":
+    case "ocm-fleet.cluster-provider":
       return validateClusterProviderProperties(
         props as unknown as ClusterProviderProperties,
       );
-    case "fleetshift.onboarding-action":
+    case "ocm-fleet.onboarding-action":
       return validateOnboardingActionProperties(
         props as unknown as OnboardingActionProperties,
       );
@@ -231,7 +231,7 @@ function extractCodeRefs(
 }
 
 export function validateExtensionSet(
-  extensions: FleetshiftExtension[],
+  extensions: FleetExtension[],
   exposedModules: Record<string, string>,
 ): void {
   const errors: string[] = [];
@@ -248,7 +248,7 @@ export function validateExtensionSet(
 
     if (typeof props.id === "string" && props.id.length > 0) {
       const group =
-        ext.type === "fleetshift.module"
+        ext.type === "ocm-fleet.module"
           ? (props.group as string | undefined)
           : undefined;
       const dedupKey = group ? `${group}.${props.id}` : props.id;
@@ -274,7 +274,7 @@ export function validateExtensionSet(
 
   const groupIds = new Set<string>();
   for (const ext of extensions) {
-    if (ext.type === "fleetshift.module-group") {
+    if (ext.type === "ocm-fleet.module-group") {
       const id = (ext.properties as { id?: string }).id;
       if (typeof id === "string" && id.length > 0) {
         groupIds.add(id);
@@ -284,7 +284,7 @@ export function validateExtensionSet(
 
   const moduleIdsPerGroup = new Map<string, string[]>();
   for (const ext of extensions) {
-    if (ext.type !== "fleetshift.module") continue;
+    if (ext.type !== "ocm-fleet.module") continue;
     const props = asRecord(ext.properties);
     if (!props) continue;
     const group = props.group as string | undefined;

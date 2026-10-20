@@ -10,7 +10,7 @@ Example: imagine a full featured cluster management addon. It should handle many
 - Provision & configure clusters through native self managed options (e.g. bootstrapping nodes with kubeadm)
 - Provision & configure clusters through operators like CAPI
 - Import existing clusters
-- Upgrade these clusters (either individually or through a campaign, see [https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81](https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81) )
+- Upgrade these clusters (either individually or through a campaign, see FM-81)
 - Full exploitation of the core placement and rollout strategy abstractions for progressive delivery, maintenance windows, etc., encoding specific cluster management best practices
 - Assist in knowable operational issues in the course of provisioning, upgrades, or other configuration changes
 - Manage cluster pooling strategies
@@ -24,7 +24,7 @@ You could imagine similar domain specific experiences for other managed resource
 - Model serving
 - ...
 
-These are the consumer-facing "nouns" of the platform, in contrast to the addon-facing core abstractions. In some sense, the whole interesting architecture of FleetShift is getting these two competing halves right:
+These are the consumer-facing "nouns" of the platform, in contrast to the addon-facing core abstractions. In some sense, the central challenge of the OCM Fleet architecture is getting these two competing halves right:
 
 - An agnostic "fleet core" that encodes only the most generic, consistent, "meta" or cross cutting best practices. Things like durability, resilience, extensibility, pooling, fleet-awareness, placement and rollout control, inventory, IAM, metering, ...
 - Thoroughly domain specific "nouns" that are opinionated and encode all of the best practice and real world experience we can muster
@@ -35,12 +35,12 @@ These are the consumer-facing "nouns" of the platform, in contrast to the addon-
 
 Managed resources are driven by the core Fulfillment abstraction. A managed resource is a *registered resource type* (as in, a manifest resource type). An addon defines how Fulfillments are derived from managed resources. In a typical case, a managed resource maps to a single, immediate placement with the addon itself as the target.
 
-Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a managed Kubernetes cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1/clusters`, while the shared platform identity lives separately at `//fleetshift.io/clusters/{id}`.**)
+Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a managed Kubernetes cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1alpha/clusters`, while the shared platform identity lives separately at `//open-cluster-management.io/clusters/{id}`.**)
 
 #### Consumer-facing managed resource
 
 ```json
-POST /apis/kind.fleetshift.io/v1/clusters
+POST /apis/kind.open-cluster-management.io/v1alpha/clusters
 {
   "name": "prod-us-east-1",
   "spec": {
@@ -100,7 +100,7 @@ The consumer's agent signs this request. The platform validates the spec against
 
 The `spec` is entirely addon-defined — the platform stores it opaquely but validates it against the addon's registered schema. The `state`, `reconciling`, `conditions`, `provenance`, and timestamps are platform-managed, following the same patterns as Deployment (AIP-128 declarative-friendly).
 
-Within the extension API, the `name` field remains the relative resource name (`clusters/prod-us-east-1`). The corresponding full resource names are `//{addon_service}/clusters/prod-us-east-1` for the extension API and `//fleetshift.io/clusters/prod-us-east-1` for the shared platform identity.
+Within the extension API, the `name` field remains the relative resource name (`clusters/prod-us-east-1`). The corresponding full resource names are `//{addon_service}/clusters/prod-us-east-1` for the extension API and `//open-cluster-management.io/clusters/prod-us-east-1` for the shared platform identity.
 
 > [!NOTE]
 > **Resolved.** Extensions define their own gRPC services in addon-specific proto packages. Resource type names do not collide because each extension's service is differentiated at the transport level (gRPC package, HTTP path prefix). Multiple extensions can model the same logical resource identity through the two-layer API model. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the full design.
@@ -115,7 +115,7 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
   "manifest_strategy": {
     "type": "MANAGED_RESOURCE",
     "managed_resource": {
-      "resource_type": "kind.fleetshift.io/Cluster",
+      "resource_type": "kind.open-cluster-management.io/Cluster",
       "resource_name": "clusters/dev-cluster"
     }
   },
@@ -150,11 +150,11 @@ The addon first declares its capabilities at enable time:
 
 ```go
 domain.AddonDescriptor{
-    ID:   "kind.fleetshift.io",
+    ID:   "kind.open-cluster-management.io",
     Name: "Kind Cluster Provider",
     Capabilities: []domain.Capability{
         domain.DeliveryCapability{TargetType: "kind"},
-        domain.ManagedResourceCapability{ResourceType: "kind.fleetshift.io/Cluster"},
+        domain.ManagedResourceCapability{ResourceType: "kind.open-cluster-management.io/Cluster"},
     },
 }
 ```
@@ -163,22 +163,22 @@ Then at connect time, the workload provides the full schema:
 
 ```go
 domain.ManagedResourceSchema{
-    ResourceType: "kind.fleetshift.io/Cluster",
-    ServiceName:  "kind.fleetshift.io",
+    ResourceType: "kind.open-cluster-management.io/Cluster",
+    ServiceName:  "kind.open-cluster-management.io",
     Singular:     "Cluster",
     Plural:       "clusters",
-    ProtoPackage: "kind.fleetshift.v1",
+    ProtoPackage: "ocm.kind.v1alpha",
     ProtoFiles: map[string]string{
-        "addons/kind/v1/kind_cluster_spec.proto": kindClusterSpecProto,
+        "ocm/kind/v1alpha/kind_cluster_spec.proto": kindClusterSpecProto,
     },
-    SpecMessage: "kind.fleetshift.v1.ClusterSpec",
+    SpecMessage: "ocm.kind.v1alpha.ClusterSpec",
     Relation:    domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 }
 ```
 
-- `**ServiceName**`: the AIP-122 service name (versionless) used in full resource names (e.g. `//kind.fleetshift.io/clusters/dev-cluster`). The addon chooses this; the platform imposes no naming convention beyond uniqueness.
-- `**ProtoPackage**`: the versioned proto package for gRPC service registration (e.g. `kind.fleetshift.v1.ClusterService`). This replaces the previous hardcoded `fleetshift.v1` package.
-- `**Singular**` / `**Plural**`: `Singular` names the gRPC service and singular RPCs (e.g. `CreateCluster`). `Plural` is the shared AIP collection identifier used in relative resource names and HTTP paths (e.g. `clusters/dev-cluster`, `POST /apis/kind.fleetshift.io/v1/clusters`, `GET /apis/kind.fleetshift.io/v1/clusters/{id}`). Keeping the same collection identifier across extension and platform services preserves identity equivalence for `clusters/foo`.
+- `**ServiceName**`: the AIP-122 service name (versionless) used in full resource names (e.g. `//kind.open-cluster-management.io/clusters/dev-cluster`). The addon chooses this; the platform imposes no naming convention beyond uniqueness.
+- `**ProtoPackage**`: the versioned proto package for gRPC service registration (e.g. `ocm.kind.v1alpha.ClusterService`). This replaces the previous hardcoded `ocm.v1alpha` package.
+- `**Singular**` / `**Plural**`: `Singular` names the gRPC service and singular RPCs (e.g. `CreateCluster`). `Plural` is the shared AIP collection identifier used in relative resource names and HTTP paths (e.g. `clusters/dev-cluster`, `POST /apis/kind.open-cluster-management.io/v1alpha/clusters`, `GET /apis/kind.open-cluster-management.io/v1alpha/clusters/{id}`). Keeping the same collection identifier across extension and platform services preserves identity equivalence for `clusters/foo`.
 - `**ProtoFiles**`: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
 - `**SpecMessage**`: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
 - `**Relation**`: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.
@@ -210,7 +210,7 @@ sequenceDiagram
     participant Cloud as Cloud Provider API
 
     User->>User: Sign managed resource spec
-    User->>Platform: POST /apis/kind.fleetshift.io/v1/clusters (signed)
+    User->>Platform: POST /apis/kind.open-cluster-management.io/v1alpha/clusters (signed)
     Platform->>Platform: Validate spec against<br/>addon-registered schema
     Platform->>Store: Store managed resource<br/>with provenance
 
@@ -242,7 +242,7 @@ sequenceDiagram
     Fleetlet-->>Pipeline: Index channel
     Pipeline-->>Store: Update inventory item properties
 
-    User->>Platform: GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
+    User->>Platform: GET /apis/kind.open-cluster-management.io/v1alpha/clusters/prod-us-east-1
     Platform-->>User: state: ACTIVE,<br/>properties: {api_url: https://...,<br/>console_url: https://...}
 ```
 
@@ -381,7 +381,7 @@ The managed resource consumer view projects from several kinds of data. The poin
 Management and inventory are composable type capabilities: a type may declare either or both. That does not change the data kinds above; it only means observed-state fields appear when inventory is in play, and management fields when management is.
 
 ```
-GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
+GET /apis/kind.open-cluster-management.io/v1alpha/clusters/prod-us-east-1
   spec:         → from resource_intents @current_version (managed resource HEAD)
   state:        → from Fulfillment (PROVISIONING/ACTIVE/FAILED/DELETING)
   properties:   → from inventory item (if present)
@@ -398,7 +398,7 @@ A thin identity/HEAD table provides the entry point for all managed resource que
 
 The unique key is `(service_name, resource_name)` — i.e. the full resource name. A resource name is unique within a service regardless of type; the type name is metadata about the resource, not a namespace for it.
 
-The extension resource is the query entry point, not the Fulfillment. Listing all resources of a type (for example `GET /apis/kind.fleetshift.io/v1/clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state.
+The extension resource is the query entry point, not the Fulfillment. Listing all resources of a type (for example `GET /apis/kind.open-cluster-management.io/v1alpha/clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state.
 
 
 State is not denormalized — the Fulfillment join is already required for lifecycle state. Conditions are sourced from both the Fulfillment (always) and a matching inventory item (if present); how those compose for the consumer is still open. Properties and observations come from inventory.
@@ -463,10 +463,10 @@ Managed resource types extend both the gRPC and HTTP API surface at runtime. Sch
 When a schema is activated, the platform:
 
 1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/`*, `google/protobuf/`*) from a built-in registry.
-2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the addon's proto package: `{proto_package}.{Singular}Service` (e.g. `kind.fleetshift.v1.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
+2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the addon's proto package: `{proto_package}.{Singular}Service` (e.g. `ocm.kind.v1alpha.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
 3. **Registers** the service in the `DynamicServiceMux`, which is wired as the gRPC server's `UnknownServiceHandler`. Requests to services not registered at server creation time are routed here instead of being rejected. Composite reflection merges dynamic services with static ones so they are discoverable via `grpcurl`.
 4. **Registers HTTP routes** in the `DynamicHTTPMux` — a wrapper around `http.ServeMux` that uses handler indirection for zero-downtime replacement. HTTP handlers proxy to the gRPC service, providing REST access at `/apis/{service_name}/{version}/{plural}` and `/apis/{service_name}/{version}/{plural}/{id}`.
-5. **Registers the platform resource type** in the platform API layer (generic schema), enabling the canonical identity surface at `/apis/fleetshift.io/v1/{plural}/{id}`. For a cluster-capable addon this means the extension API is at `/apis/kind.fleetshift.io/v1/clusters/{id}`, while the shared identity surface is at `/apis/fleetshift.io/v1/clusters/{id}`.
+5. **Registers the platform resource type** in the platform API layer (generic schema), enabling the canonical identity surface at `/apis/open-cluster-management.io/v1alpha/{plural}/{id}`. For a cluster-capable addon this means the extension API is at `/apis/kind.open-cluster-management.io/v1alpha/clusters/{id}`, while the shared identity surface is at `/apis/open-cluster-management.io/v1alpha/clusters/{id}`.
 
 Atomic replacement is a first-class operation. When an addon reconnects with a changed schema, the `DynamicSchemaActivator` detects the change via content hashing (SHA-256 over proto files, spec message, singular, plural, proto package, and service name), recompiles, and atomically swaps both the gRPC and HTTP service entries. In-flight requests that already resolved the old entry complete normally; new requests route to the replacement immediately. Unchanged schemas skip recompilation entirely.
 

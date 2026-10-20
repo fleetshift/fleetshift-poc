@@ -18,7 +18,7 @@ Read this when you need to understand how the platform computes target sets, pla
 ## What is intentionally elsewhere
 
 - Core vocabulary, targets, and delivery contract: [core_model.md](core_model.md)
-- Fleetlets, channels, and request routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
+- Fleetlet instances, channels, and request routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
 - Addon contracts such as `ManifestGenerator` and `InvalidateManifests`: [addon_integration.md](addon_integration.md)
 - Platform hierarchy and provisioning flows: [platform_hierarchy.md](platform_hierarchy.md)
 

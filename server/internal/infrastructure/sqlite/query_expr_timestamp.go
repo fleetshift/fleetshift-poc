@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
 )
 
 // conditionLastTransitionTimeNormJSONKey is the storage-only sibling of

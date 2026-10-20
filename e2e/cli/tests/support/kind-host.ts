@@ -51,7 +51,7 @@ export function parsePodmanPort(raw: string): string {
 }
 
 export function hostKindClusterName(clusterId: string): string {
-  return `fs--${clusterId}`;
+  return `ocm-fleet--${clusterId}`;
 }
 
 async function containerIDs(filters: readonly string[]): Promise<string[]> {

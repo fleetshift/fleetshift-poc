@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/deliveryagent"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/producer"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/deliveryagent"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/producer"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/resourcemanager"
 )
 
 const (
@@ -22,15 +22,15 @@ const (
 	testIssuer               = protocol.Authority("https://issuer.example.test")
 	testReplicasMediaType    = protocol.MediaType("application/vnd.example.replicas+json")
 	testClusterSpecMediaType = protocol.MediaType("application/vnd.example.cluster-spec+json")
-	testResourceType         = "kind.fleetshift.io/Cluster"
+	testResourceType         = "kind.open-cluster-management.io/Cluster"
 )
 
 func deploymentName(id string) protocol.FullResourceName {
-	return protocol.FullResourceName("//fleetshift.io/deployments/" + id)
+	return protocol.FullResourceName("//open-cluster-management.io/deployments/" + id)
 }
 
 func clusterName(id string) protocol.FullResourceName {
-	return protocol.FullResourceName("//kind.fleetshift.io/clusters/" + id)
+	return protocol.FullResourceName("//kind.open-cluster-management.io/clusters/" + id)
 }
 
 func TestEnrollmentAndSignedDelivery(t *testing.T) {

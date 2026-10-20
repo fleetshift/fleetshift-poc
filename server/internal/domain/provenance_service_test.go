@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // fakeRegistryClient is a minimal in-memory RegistryClient for tests.
@@ -225,7 +225,7 @@ func TestProvenanceService_BuildManagedResourceProvenance(t *testing.T) {
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
-	resourceType := domain.ResourceType("kind.fleetshift.io/Cluster")
+	resourceType := domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	resourceName := domain.ResourceName("test-cluster")
 	spec := json.RawMessage(`{"replicas":3}`)
 	validUntil := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)

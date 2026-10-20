@@ -1,6 +1,6 @@
 {
-  "name": "@fleetshift/cli",
-  "description": "FleetShift TypeScript command-line client.",
+  "name": "@ocm-fleet/cli",
+  "description": "TypeScript command-line client for OCM Fleet.",
   "version": "0.0.0",
   "private": true,
   "type": "module",

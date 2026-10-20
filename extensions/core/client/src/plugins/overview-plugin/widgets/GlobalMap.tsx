@@ -92,5 +92,5 @@ export default function GlobalMap(_props: { widgetId: string }) {
     }
   }, [clusters]);
 
-  return <div ref={containerRef} className="ome-overview-global-map" />;
+  return <div ref={containerRef} className="ocm-fleet-overview-global-map" />;
 }

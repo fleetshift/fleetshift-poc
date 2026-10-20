@@ -34,13 +34,17 @@ Read this when you are working on the kubernetes addon, extending its delivery o
 
 ## Overview
 
-The kubernetes addon is a delivery agent and indexer for Kubernetes clusters. It implements the delivery contract via server-side apply and the indexing contract via LIST+WATCH against the cluster's API server, reporting observed objects into the platform inventory model under one generic extension resource type: `kubernetes.fleetshift.io/Object`.
+The kubernetes addon is a delivery agent and indexer for Kubernetes clusters. It implements the delivery contract via server-side apply and the indexing contract via LIST+WATCH against the cluster's API server, reporting observed objects into the platform inventory model under one generic extension resource type: `kubernetes.open-cluster-management.io/Object`.
 
 Delivery and indexing are independent. A stateless delivery agent handles apply/remove. Per-target indexing runs as a long-lived indexer hosted by an in-process indexing runtime. The two do not share a long-lived per-target "Agent" process: delivery is request-scoped, indexing is long-lived per target when started.
 
 The indexer watches all non-denied resources on the cluster by default, collecting base metadata and conditions for every resource. Resources with enriched schema entries get additional field extractions, computed properties via hooks, and edge computation. Topology edges (`ownedBy`, `runsOn`, `attachedTo`, `selects`) remain part of the indexing core, but the in-process path disables edge persistence — edges are not written to the platform in the current integration.
 
-The addon supports two deployment models: in-process within the platform server and as an external agent. The reusable indexing core (discovery, filtering, informers, extraction, writer, inventory reporting) is shared across both. What changes between models is the wiring — who starts indexers, how credentials are supplied, and how inventory reports reach the platform.
+The addon supports two deployment models: in-process within the resource manager
+server and as an external agent. The reusable indexing core (discovery,
+filtering, informers, extraction, writer, inventory reporting) is shared across
+both. What changes between models is the wiring — who starts indexers, how
+credentials are supplied, and how inventory reports reach the platform.
 
 ## Addon descriptor and capabilities
 
@@ -48,22 +52,22 @@ The addon declares two capabilities: delivery for the `kubernetes` target type, 
 
 ```go
 AddonDescriptor{
-    ID:   "kubernetes.fleetshift.io",
+    ID:   "kubernetes.open-cluster-management.io",
     Name: "Kubernetes Agent",
     Capabilities: []Capability{
         DeliveryCapability{TargetType: "kubernetes"},
-        InventoryResourceCapability{ResourceType: "kubernetes.fleetshift.io/Object"},
+        InventoryResourceCapability{ResourceType: "kubernetes.open-cluster-management.io/Object"},
     },
 }
 ```
 
-Delivery capability means the addon can apply and remove manifests via server-side apply. Inventory resource capability means the addon is authorized to report inventory for `kubernetes.fleetshift.io/Object`. These are independent: an addon could declare one without the other.
+Delivery capability means the addon can apply and remove manifests via server-side apply. Inventory resource capability means the addon is authorized to report inventory for `kubernetes.open-cluster-management.io/Object`. These are independent: an addon could declare one without the other.
 
 At Connect time, the addon provides its delivery agent and the inventory-only schema for `Object`. The platform validates delivery and registers the schema for reporting authorization. Indexing runtime lifecycle is **not** part of Connect: the addon manager does not start or stop indexers.
 
 In the current POC, the descriptor is compiled into the server binary. Enable and Connect happen at startup. The in-process indexing runtime is composed in server wiring and injected into producers (Kind) that start and stop indexers. In a future external agent model, the same inventory report contract would be used over a transport, and an agent pod on the target cluster would own its own lifecycle rather than being hosted in-process.
 
-The addon does not declare a managed resource capability for watched cluster objects. Kubernetes delivery targets are registered through the platform's target management / delivery-output path. Watched objects are inventory-only extension resources under `kubernetes.fleetshift.io/Object`.
+The addon does not declare a managed resource capability for watched cluster objects. Kubernetes delivery targets are registered through the platform's target management / delivery-output path. Watched objects are inventory-only extension resources under `kubernetes.open-cluster-management.io/Object`.
 
 ## Agent
 
@@ -94,7 +98,9 @@ The reusable indexing core is shared. How indexers get created and wired depends
 
 ### In-process
 
-In the in-process model, the platform server hosts multiple per-target indexers — one per Kubernetes target that a producer (or startup replay) has ensured:
+In the in-process model, the resource manager server hosts multiple per-target
+indexers — one per Kubernetes target that a producer (or startup replay) has
+ensured:
 
 - **Indexer registry**: tracks running indexers by target ID (generation, fingerprint, readiness, restart metadata)
 - **Ensure / start**: starts or replaces an indexer after discovery readiness; joins in-flight matching starts; generation-fenced
@@ -146,7 +152,7 @@ When no attestation is provided, the delivery falls through to passthrough mode.
 
 ### Server-side apply
 
-Both modes use the same apply path. Manifests are applied sequentially via server-side apply with field manager `fleetshift`. Progress events are reported per manifest. A failure on any manifest stops the delivery. Kubernetes 401/403 errors map to `AuthFailed`; all other errors map to `Failed`.
+Both modes use the same apply path. Manifests are applied sequentially via server-side apply with field manager `resource-manager`. Progress events are reported per manifest. A failure on any manifest stops the delivery. Kubernetes 401/403 errors map to `AuthFailed`; all other errors map to `Failed`.
 
 ### Removal
 
@@ -349,12 +355,12 @@ The inventory reporter is the addon-to-platform direction of the indexing protoc
 
 There are no separate platform resync/collection-delete/subtree-delete methods on this boundary. Same-process LIST omission reconciliation is expressed as ordinary deletes computed from the in-memory acknowledged-UID set. Target-wide subtree cleanup is deferred and not exposed here.
 
-In-process, a direct adapter always reports under `kubernetes.fleetshift.io/Object` and maps both upserts and deletes into one platform replacement batch. In the external model, a transport adapter would implement the same report shape.
+In-process, a direct adapter always reports under `kubernetes.open-cluster-management.io/Object` and maps both upserts and deletes into one platform replacement batch. In the external model, a transport adapter would implement the same report shape.
 
 Object identity uses one generic type and scope-dependent resource-name patterns:
 
 ```text
-ResourceType: kubernetes.fleetshift.io/Object
+ResourceType: kubernetes.open-cluster-management.io/Object
 
 # Namespaced (discovery APIResource.Namespaced=true)
 ResourceName: clusters/{clusterResourceID}/namespaces/{namespace}/apiResources/{groupResourceKey}/objects/{uid}
@@ -390,7 +396,7 @@ Every watched resource gets the following projected into the inventory report, w
 | --- | --- |
 | Resource name | namespaced: `clusters/{cluster}/namespaces/{ns}/apiResources/{groupResourceKey}/objects/{uid}`; cluster-scoped omits `namespaces/{ns}` |
 | Labels | Kubernetes `metadata.labels` (complete latest set; empty map clears) |
-| Conditions | Kubernetes `status.conditions` projected to FleetShift conditions (True/False/Unknown only; empty type dropped; missing transition time falls back to observed-at) |
+| Conditions | Kubernetes `status.conditions` projected to platform conditions (True/False/Unknown only; empty type dropped; missing transition time falls back to observed-at) |
 | Observation GVR | group, version, resource, scope |
 | Observation apiVersion / kind | from the object |
 | Observation metadata | uid, namespace, name, resourceVersion, generation, creationTimestamp, deletionTimestamp, annotations, ownerReferences |
@@ -412,7 +418,7 @@ Resources with a schema entry get additional extraction into `observation.extrac
 
 ### Schema model
 
-The indexing schema defines how to enrich extraction beyond the base tier. It does not control which resources are watched — that is determined by resource discovery and filtering. It is also distinct from the platform extension resource schema registered at Connect (the inventory-only marker for `kubernetes.fleetshift.io/Object`).
+The indexing schema defines how to enrich extraction beyond the base tier. It does not control which resources are watched — that is determined by resource discovery and filtering. It is also distinct from the platform extension resource schema registered at Connect (the inventory-only marker for `kubernetes.open-cluster-management.io/Object`).
 
 - **Schema entry**: enrichment rules for one watched GVR — field extractions, annotation extraction flags, and optional hooks for computed properties and edge building.
 - **Field extraction**: a named field with a JSONPath expression and a data type for coercion.
@@ -478,7 +484,7 @@ When a GVR leaves the desired set, or when an indexer is stopped / a target is d
 
 ### Producer indexing handshake durability
 
-Producers call `EnsureIndexer` before reporting `Delivered`, and a one-shot startup replay recovers indexers after server restart from persisted targets with resolvable vault credentials. The happy path and the ordinary failure path are sound: if `EnsureIndexer` fails, the producer reports `Failed` and FleetShift's durable workflow redelivers. That is not the open gap.
+Producers call `EnsureIndexer` before reporting `Delivered`, and a one-shot startup replay recovers indexers after server restart from persisted targets with resolvable vault credentials. The happy path and the ordinary failure path are sound: if `EnsureIndexer` fails, the producer reports `Failed` and the resource manager's durable workflow redelivers. That is not the open gap.
 
 What remains open are crash and signal windows around that handshake:
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
 )
 
 // dollarTestParams is a test-local $N binder so querysql tests do not
@@ -92,7 +92,7 @@ func TestCompileFilter_ParamBinderControlsPlaceholders(t *testing.T) {
 	t.Run("nil Params required", func(t *testing.T) {
 		c := querysql.Compiler{Fields: stubResolver{}}
 		_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-			Filter: `resourceType == "kind.fleetshift.io/Cluster"`,
+			Filter: `resourceType == "kind.open-cluster-management.io/Cluster"`,
 		})
 		if err == nil {
 			t.Fatal("CompileFilter: got nil error, want Params required")

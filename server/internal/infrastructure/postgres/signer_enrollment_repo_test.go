@@ -3,9 +3,9 @@ package postgres_test
 import (
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/signerenrollmentrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain/signerenrollmentrepotest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 func TestSignerEnrollmentRepo(t *testing.T) {

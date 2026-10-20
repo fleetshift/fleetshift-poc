@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // buildReporter constructs a [application.DeliveryReportService] wired
@@ -138,8 +138,8 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 
 	<-provider.created
-	if !provider.hasCluster("fs--dev-cluster") {
-		t.Error("expected kind cluster 'fs--dev-cluster' to be created by the provider")
+	if !provider.hasCluster("ocm-fleet--dev-cluster") {
+		t.Error("expected kind cluster 'ocm-fleet--dev-cluster' to be created by the provider")
 	}
 }
 
@@ -241,11 +241,11 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	<-provider.created
-	// The kind/docker cluster name is ownership-encoded as fs--{resourceID}
-	// ("fs--mr-cluster"), not the full resource name ("clusters/mr-cluster")
+	// The kind/docker cluster name is ownership-encoded as ocm-fleet--{resourceID}
+	// ("ocm-fleet--mr-cluster"), not the full resource name ("clusters/mr-cluster")
 	// -- docker/podman reject "/" in container names.
-	if !provider.hasCluster("fs--mr-cluster") {
-		t.Error("expected kind cluster 'fs--mr-cluster' to be created by the provider")
+	if !provider.hasCluster("ocm-fleet--mr-cluster") {
+		t.Error("expected kind cluster 'ocm-fleet--mr-cluster' to be created by the provider")
 	}
 }
 

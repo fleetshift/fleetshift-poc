@@ -1,4 +1,4 @@
-.ome-settings-nav-editor {
+.ocm-fleet-settings-nav-editor {
   max-width: 560px;
 
   &__header {
@@ -50,7 +50,7 @@
 }
 
 // TreeItem styles — visual parity with @patternfly/react-drag-drop
-.ome-settings-tree-item {
+.ocm-fleet-settings-tree-item {
   list-style: none;
   margin-bottom: 2px;
   touch-action: none;
@@ -84,12 +84,12 @@
   &--hidden {
     opacity: 0.6;
 
-    .ome-settings-tree-item__row {
+    .ocm-fleet-settings-tree-item__row {
       border: 1px dashed var(--pf-t--global--border--color--default);
       border-radius: var(--pf-t--global--border--radius--small);
     }
 
-    .ome-settings-tree-item__label {
+    .ocm-fleet-settings-tree-item__label {
       color: var(--pf-t--global--text--color--subtle);
     }
   }
@@ -174,12 +174,12 @@
 
   // Drop target — highlights a group/section when an item will nest into it
   &--drop-target {
-    .ome-settings-tree-item__row {
+    .ocm-fleet-settings-tree-item__row {
       background-color: var(--pf-t--global--background--color--brand--default);
       border-radius: var(--pf-t--global--border--radius--small);
     }
 
-    .ome-settings-tree-item__empty-group {
+    .ocm-fleet-settings-tree-item__empty-group {
       background-color: var(--pf-t--global--background--color--brand--default);
       border-color: var(--pf-t--global--border--color--brand--default);
       color: var(--pf-t--global--text--color--inverse);
@@ -197,12 +197,12 @@
   }
 }
 
-.ome-settings-tree-item--drop-target {
-   .ome-settings-tree-item__row {
+.ocm-fleet-settings-tree-item--drop-target {
+   .ocm-fleet-settings-tree-item__row {
      &--section {
         background-color: var(--pf-t--global--icon--color--brand--default);
 
-        .ome-settings-tree-item__label {
+        .ocm-fleet-settings-tree-item__label {
           color: var(--pf-t--global--text--color--inverse) !important;
         }
       }

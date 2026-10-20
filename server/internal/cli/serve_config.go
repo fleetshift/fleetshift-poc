@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
 )
 
 // serveSelections records which flags were explicitly set via the CLI

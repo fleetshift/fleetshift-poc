@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 type staticAuthMethodLister struct {
@@ -24,11 +24,11 @@ func TestUIAuthFunc(t *testing.T) {
 	oidcReady := domain.NewOIDCAuthMethod("default", &domain.OIDCConfig{
 		IssuerURL:             "https://issuer.example/dex",
 		AuthorizationEndpoint: "https://issuer.example/dex/auth",
-		Audience:              "fleetshift",
+		Audience:              "resource-manager",
 	})
 	oidcMissingAuthz := domain.NewOIDCAuthMethod("default", &domain.OIDCConfig{
 		IssuerURL: "https://issuer.example/dex",
-		Audience:  "fleetshift",
+		Audience:  "resource-manager",
 	})
 
 	tests := []struct {

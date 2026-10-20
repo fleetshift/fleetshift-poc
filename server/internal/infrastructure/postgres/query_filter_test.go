@@ -18,9 +18,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // staticQuerySchemas is a minimal [domain.QuerySchemaProvider] for
@@ -79,51 +79,51 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 	}{
 		{
 			name:     "name equality special-cases to constituent columns",
-			filter:   `name == "//kind.fleetshift.io/clusters/managed"`,
-			wantArgs: []any{"kind.fleetshift.io", "clusters", "managed"},
+			filter:   `name == "//kind.open-cluster-management.io/clusters/managed"`,
+			wantArgs: []any{"kind.open-cluster-management.io", "clusters", "managed"},
 			wantSQL:  []string{"er.service_name =", "er.collection_name =", "er.resource_id ="},
 		},
 		{
 			name:     "resourceType equality special-cases to constituent columns",
-			filter:   `resourceType == "kind.fleetshift.io/Cluster"`,
-			wantArgs: []any{"kind.fleetshift.io", "Cluster"},
+			filter:   `resourceType == "kind.open-cluster-management.io/Cluster"`,
+			wantArgs: []any{"kind.open-cluster-management.io", "Cluster"},
 			wantSQL:  []string{"er.service_name =", "er.type_name ="},
 			denySQL:  []string{"er.service_name || '/' || er.type_name"},
 		},
 		{
 			name:     "resourceType inequality keeps concatenated expression",
-			filter:   `resourceType != "kind.fleetshift.io/Cluster"`,
-			wantArgs: []any{"kind.fleetshift.io/Cluster"},
+			filter:   `resourceType != "kind.open-cluster-management.io/Cluster"`,
+			wantArgs: []any{"kind.open-cluster-management.io/Cluster"},
 			wantSQL:  []string{"er.service_name || '/' || er.type_name"},
 		},
 		{
 			name:     "resourceType in special-cases to constituent-column tuples",
-			filter:   `resourceType in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
-			wantArgs: []any{"kind.fleetshift.io", "Cluster", "kubernetes.fleetshift.io", "Node"},
+			filter:   `resourceType in ["kind.open-cluster-management.io/Cluster", "kubernetes.open-cluster-management.io/Node"]`,
+			wantArgs: []any{"kind.open-cluster-management.io", "Cluster", "kubernetes.open-cluster-management.io", "Node"},
 			wantSQL:  []string{"(er.service_name, er.type_name) IN", "($1, $2)", "($3, $4)"},
 			denySQL:  []string{"er.service_name || '/' || er.type_name"},
 		},
 		{
 			name:     "name in special-cases to constituent-column tuples",
-			filter:   `name in ["//kind.fleetshift.io/clusters/managed", "//kubernetes.fleetshift.io/nodes/n1"]`,
-			wantArgs: []any{"kind.fleetshift.io", "clusters", "managed", "kubernetes.fleetshift.io", "nodes", "n1"},
+			filter:   `name in ["//kind.open-cluster-management.io/clusters/managed", "//kubernetes.open-cluster-management.io/nodes/n1"]`,
+			wantArgs: []any{"kind.open-cluster-management.io", "clusters", "managed", "kubernetes.open-cluster-management.io", "nodes", "n1"},
 			wantSQL:  []string{"(er.service_name, er.collection_name, er.resource_id) IN", "($1, $2, $3)", "($4, $5, $6)"},
 		},
 		{
 			name:     "and",
-			filter:   `resourceType == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
-			wantArgs: []any{"kind.fleetshift.io", "Cluster", "kind.fleetshift.io", "clusters", "managed"},
+			filter:   `resourceType == "kind.open-cluster-management.io/Cluster" && name == "//kind.open-cluster-management.io/clusters/managed"`,
+			wantArgs: []any{"kind.open-cluster-management.io", "Cluster", "kind.open-cluster-management.io", "clusters", "managed"},
 		},
 		{
 			name:     "name startsWith uses concatenated expression",
-			filter:   `name.startsWith("//kind.fleetshift.io/")`,
-			wantArgs: []any{`//kind.fleetshift.io/%`},
+			filter:   `name.startsWith("//kind.open-cluster-management.io/")`,
+			wantArgs: []any{`//kind.open-cluster-management.io/%`},
 			wantSQL:  []string{`COLLATE "C" LIKE`, "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id", `ESCAPE '\'`},
 		},
 		{
 			name:     "resourceType startsWith uses concatenated expression",
-			filter:   `resourceType.startsWith("kind.fleetshift.io/")`,
-			wantArgs: []any{`kind.fleetshift.io/%`},
+			filter:   `resourceType.startsWith("kind.open-cluster-management.io/")`,
+			wantArgs: []any{`kind.open-cluster-management.io/%`},
 			wantSQL:  []string{`COLLATE "C" LIKE`, "er.service_name || '/' || er.type_name", `ESCAPE '\'`},
 		},
 	}
@@ -160,7 +160,7 @@ func TestQueryFieldResolver_OldPOCEnvelopeFieldsRejected(t *testing.T) {
 	for _, filter := range []string{
 		`kind == "extension"`,
 		`platform_name == "clusters/managed"`,
-		`service_name == "kind.fleetshift.io"`,
+		`service_name == "kind.open-cluster-management.io"`,
 		`api_version == "v1"`,
 		`collection_name == "clusters"`,
 		`resource_id == "managed"`,
@@ -373,7 +373,7 @@ func TestQueryFieldResolver_TimestampOnConditionLastTransitionTime(t *testing.T)
 }
 
 func TestQueryFieldResolver_SpecGuardedByResourceType(t *testing.T) {
-	pred := compile(t, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws"`)
+	pred := compile(t, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.provider == "aws"`)
 	if !strings.Contains(pred.SQL, "ri.spec") || !strings.Contains(pred.SQL, "->") {
 		t.Errorf("SQL = %q, want a ri.spec -> extraction", pred.SQL)
 	}
@@ -399,7 +399,7 @@ func TestQueryFieldResolver_ObservationWithoutGuardCompiles(t *testing.T) {
 func TestQueryFieldResolver_OrOfTypedSpecBranchesCompiles(t *testing.T) {
 	// Each branch carries its own resourceType == in the SQL; a
 	// root-level guard is not required to compile type-shaped paths.
-	pred := compile(t, `(resourceType == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws") || (resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4)`)
+	pred := compile(t, `(resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.provider == "aws") || (resourceType == "kubernetes.open-cluster-management.io/Node" && resource.observation.capacity.cpu > 4)`)
 	if !strings.Contains(pred.SQL, " OR ") {
 		t.Errorf("SQL = %q, want an OR of the two typed branches", pred.SQL)
 	}
@@ -412,7 +412,7 @@ func TestQueryFieldResolver_OrOfTypedSpecBranchesCompiles(t *testing.T) {
 }
 
 func TestQueryFieldResolver_ObservationGuardedByResourceType(t *testing.T) {
-	pred := compile(t, `resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`)
+	pred := compile(t, `resourceType == "kubernetes.open-cluster-management.io/Node" && resource.observation.capacity.cpu > 4`)
 	if !strings.Contains(pred.SQL, "::numeric") {
 		t.Errorf("SQL = %q, want a numeric cast for the int literal comparison", pred.SQL)
 	}
@@ -431,12 +431,12 @@ func TestQueryFieldResolver_NumericJSONPreservesJSONTypes(t *testing.T) {
 	}{
 		{
 			name:    "observation numeric comparison",
-			filter:  `resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`,
+			filter:  `resourceType == "kubernetes.open-cluster-management.io/Node" && resource.observation.capacity.cpu > 4`,
 			sqlType: "number",
 		},
 		{
 			name:    "spec numeric comparison",
-			filter:  `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.count > 4`,
+			filter:  `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.count > 4`,
 			sqlType: "number",
 		},
 	} {
@@ -455,7 +455,7 @@ func TestQueryFieldResolver_NumericJSONPreservesJSONTypes(t *testing.T) {
 	}
 
 	t.Run("observation boolean equality uses typed jsonb", func(t *testing.T) {
-		pred := compile(t, `resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.healthy == true`)
+		pred := compile(t, `resourceType == "kubernetes.open-cluster-management.io/Node" && resource.observation.healthy == true`)
 		if !strings.Contains(pred.SQL, "to_jsonb(") {
 			t.Errorf("SQL = %q, want to_jsonb typed equality", pred.SQL)
 		}
@@ -470,7 +470,7 @@ func TestQueryFieldResolver_NumericJSONPreservesJSONTypes(t *testing.T) {
 }
 
 func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T) {
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	schemas := staticQuerySchemas{
 		rt: {
 			ResourceType:   rt,
@@ -482,12 +482,12 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 
 	// Spec itself is a google.protobuf.Timestamp (ProtoJSON string):
 	// nested protobuf fields like seconds must be rejected.
-	err := compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.seconds == 5`)
+	err := compileWithResolverErr(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.seconds == 5`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("CompileFilter traversing Timestamp.seconds: err = %v, want ErrInvalidArgument", err)
 	}
 
-	err = compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.bogus_field == 5`)
+	err = compileWithResolverErr(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.bogus_field == 5`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("CompileFilter with an unknown field: err = %v, want ErrInvalidArgument", err)
 	}
@@ -495,13 +495,13 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 
 func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
 	desc := specWithTimestampField(t)
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	schemas := staticQuerySchemas{
 		rt: {ResourceType: rt, APIVersion: "v1", SpecDescriptor: desc},
 	}
 	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 
-	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
+	pred := compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
 	if !strings.Contains(pred.SQL, "ri.spec") {
 		t.Errorf("SQL = %q, want resource.spec.when extraction", pred.SQL)
 	}
@@ -509,7 +509,7 @@ func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
 		t.Errorf("Args = %v, want bound JSON key \"when\"", pred.Args)
 	}
 
-	err := compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when.seconds == 5`)
+	err := compileWithResolverErr(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.when.seconds == 5`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("traversing Timestamp.seconds: err = %v, want ErrInvalidArgument", err)
 	}
@@ -552,7 +552,7 @@ message SpecWithWhen {
 }
 
 func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	schemas := staticQuerySchemas{
 		rt: {
 			ResourceType:   rt,
@@ -564,8 +564,8 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 
 	t.Run("JSON camelCase accepted", func(t *testing.T) {
 		for _, filter := range []string{
-			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.apiServerPort == "6443"`,
-			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec["apiServerPort"] == "6443"`,
+			`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.apiServerPort == "6443"`,
+			`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec["apiServerPort"] == "6443"`,
 		} {
 			pred := compileWithResolver(t, c, filter)
 			if !argsContain(pred.Args, "apiServerPort") {
@@ -579,8 +579,8 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 
 	t.Run("proto snake_case rejected", func(t *testing.T) {
 		for _, filter := range []string{
-			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == "6443"`,
-			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec["api_server_port"] == "6443"`,
+			`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.api_server_port == "6443"`,
+			`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec["api_server_port"] == "6443"`,
 		} {
 			err := compileWithResolverErr(t, c, filter)
 			if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -590,15 +590,15 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 	})
 
 	t.Run("custom json_name accepted; proto name rejected", func(t *testing.T) {
-		pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.title == "x"`)
+		pred := compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.title == "x"`)
 		if !argsContain(pred.Args, "title") {
 			t.Errorf("Args = %v, want bound custom json_name \"title\"", pred.Args)
 		}
-		err := compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.display_name == "x"`)
+		err := compileWithResolverErr(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.display_name == "x"`)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("display_name: err = %v, want ErrInvalidArgument", err)
 		}
-		err = compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.displayName == "x"`)
+		err = compileWithResolverErr(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.displayName == "x"`)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("displayName: err = %v, want ErrInvalidArgument", err)
 		}
@@ -640,7 +640,7 @@ message NestedSpec {
 }
 
 func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	schemas := staticQuerySchemas{
 		rt: {
 			ResourceType:   rt,
@@ -650,19 +650,19 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 	}
 	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
 
-	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
+	pred := compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.nested.value == "x"`)
 	if !argsContain(pred.Args, "nested") || !argsContain(pred.Args, "value") {
 		t.Errorf("Args = %v, want nested and value keys", pred.Args)
 	}
 
 	// Terminal selection of a repeated/map field is still allowed.
-	compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.items == "x"`)
-	compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels == "x"`)
+	compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.items == "x"`)
+	compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.labels == "x"`)
 
 	// String-keyed map: exact key, then resume message JSON names.
 	for _, filter := range []string{
-		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels["team"].name == "x"`,
-		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels.team.name == "x"`,
+		`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.labels["team"].name == "x"`,
+		`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.labels.team.name == "x"`,
 	} {
 		pred := compileWithResolver(t, c, filter)
 		if !argsContain(pred.Args, "labels") || !argsContain(pred.Args, "team") || !argsContain(pred.Args, "name") {
@@ -671,15 +671,15 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 	}
 
 	// Struct field: remaining segments are exact literal keys.
-	pred = compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.metadata["node-role"] == "worker"`)
+	pred = compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.metadata["node-role"] == "worker"`)
 	if !argsContain(pred.Args, "metadata") || !argsContain(pred.Args, "node-role") {
 		t.Errorf("Args = %v, want metadata and exact Struct key", pred.Args)
 	}
 
 	for _, filter := range []string{
-		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.items.name == "x"`,
-		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.byId["1"].name == "x"`, // non-string map key
-		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels["team"].bogus == "x"`,
+		`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.items.name == "x"`,
+		`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.byId["1"].name == "x"`, // non-string map key
+		`resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.labels["team"].bogus == "x"`,
 	} {
 		err := compileWithResolverErr(t, c, filter)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -690,7 +690,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 
 func TestQueryFieldResolver_SpecPermissiveExactKeysWhenSchemaAbsent(t *testing.T) {
 	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: staticQuerySchemas{}}
-	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == 5`)
+	pred := compileWithResolver(t, c, `resourceType == "kind.open-cluster-management.io/Cluster" && resource.spec.api_server_port == 5`)
 	if !argsContain(pred.Args, "api_server_port") {
 		t.Errorf("Args = %v, want exact open-map key preserved (no camelCase rewrite)", pred.Args)
 	}
@@ -737,7 +737,7 @@ func argsContain(args []any, want any) bool {
 }
 
 func TestQueryFieldResolver_SpecOnOneSideOfOrCompiles(t *testing.T) {
-	pred := compile(t, `(resourceType == "kind.fleetshift.io/Cluster") || resource.spec.provider == "aws"`)
+	pred := compile(t, `(resourceType == "kind.open-cluster-management.io/Cluster") || resource.spec.provider == "aws"`)
 	if !strings.Contains(pred.SQL, " OR ") {
 		t.Errorf("SQL = %q, want OR", pred.SQL)
 	}
@@ -1004,7 +1004,7 @@ func TestDescriptorContainerKind(t *testing.T) {
 // known list → specialized list predicate, known scalar → reject, and
 // open Struct tails stay on the schema-free dynamic dispatcher.
 func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	desc := nestedSpecTestDescriptor(t)
 	schemas := staticQuerySchemas{
 		rt: {
@@ -1014,7 +1014,7 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 		},
 	}
 	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: schemas}
-	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
+	guard := `resourceType == "kind.open-cluster-management.io/Cluster" && `
 
 	t.Run("known message uses object-key presence", func(t *testing.T) {
 		// Key must be a JSON field name on the typed message; unknown
@@ -1117,7 +1117,7 @@ func TestQueryFieldResolver_SchemaSpecializedMembership(t *testing.T) {
 // dynamic / object membership reuse one schema fetch per compilation
 // (classification + presence validation share the compiler cache).
 func TestQueryFieldResolver_MembershipSingleSchemaLookup(t *testing.T) {
-	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	const rt = domain.ResourceType("kind.open-cluster-management.io/Cluster")
 	desc := nestedSpecTestDescriptor(t)
 	inner := staticQuerySchemas{
 		rt: {
@@ -1128,7 +1128,7 @@ func TestQueryFieldResolver_MembershipSingleSchemaLookup(t *testing.T) {
 	}
 	counting := &countingQuerySchemas{inner: inner}
 	c := querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}, Schemas: counting}
-	guard := `resourceType == "kind.fleetshift.io/Cluster" && `
+	guard := `resourceType == "kind.open-cluster-management.io/Cluster" && `
 
 	_ = compileWithResolver(t, c, guard+`"k" in resource.observation.tags`)
 	if counting.gets != 1 {

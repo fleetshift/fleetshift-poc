@@ -1,4 +1,4 @@
-module github.com/fleetshift/fleetshift-poc/fleetshift-server
+module github.com/stolostron/ocm-fleet/server
 
 go 1.26.0
 

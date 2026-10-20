@@ -12,9 +12,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // RegisteredService is a fully built dynamic gRPC service for
@@ -70,7 +70,7 @@ func BuildService(cfg *Config, deps Deps) (*RegisteredService, error) {
 			},
 		},
 		Streams:  []grpc.StreamDesc{},
-		Metadata: "dynamic/fleetshift/v1/platform_" + strings.ToLower(singular[:1]) + singular[1:] + "_service.proto",
+		Metadata: "dynamic/ocm/v1alpha/platform_" + strings.ToLower(singular[:1]) + singular[1:] + "_service.proto",
 	}
 
 	return &RegisteredService{

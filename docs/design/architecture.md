@@ -2,6 +2,19 @@
 
 This document is the entry point for the architecture. It is intentionally short: it gives the system's core mental model, names the major subsystems, and points to the deeper design documents that describe each area in detail.
 
+OCM Fleet is an experimental variant of Open Cluster Management (OCM). The OCM Fleet architecture is a resource manager architecture, as defined in the [glossary](glossary.md). Its resource manager server owns domain APIs and database persistence directly. References to OCM controllers, ManifestWork, and klusterlets describe existing OCM components and their Kubernetes API-based architecture.
+
+## Vocabulary
+
+The [architecture glossary](glossary.md) defines the high-level names used here,
+including OCM, OCM Fleet, platform instance, management plane, and
+resource manager server. Use it when deciding which scope a passage describes.
+
+The console, `fleetctl`, and addons are distinct components of the platform.
+Addons extend platform contracts and may span API, UI, orchestration, and delivery
+capabilities with their own execution and trust boundaries. Their scope is not
+limited to plugins inside the resource manager server.
+
 ## What this doc covers
 
 - What the management plane is and is not
@@ -12,13 +25,15 @@ This document is the entry point for the architecture. It is intentionally short
 
 ## System model
 
-The management plane (or "platform") is a URL-addressable service, not a cluster.
-Its customer-facing, stateful center is the **resource manager (RM)**, which
+The management plane exposes URL-addressable APIs; it is not a cluster.
+Its customer-facing, stateful center is the **resource manager server (RM)**, which
 authenticates and authorizes requests, retains desired state, and coordinates
 orchestration and delivery. The management plane provides:
 
 - the orchestration pipeline
-- the fleetlet, a transport-agnostic, channel-based message broker
+- the fleetlet, a transport-agnostic, channel-based component for shared
+  connectivity and cross-cutting services, including delivery authorization
+  and provenance verification
 - the platform APIs and contracts used by addons, targets, and users
 
 Zero infrastructure coupling remains a core property: no addon or fleetlet inherently depends on Kubernetes or any other specific infrastructure just to integrate with the platform. An addon may be a Kubernetes operator. It may be a standalone application. Kubernetes is the primary built-in target type, but the system is target-agnostic. Any endpoint that satisfies the delivery contract is a valid target.
@@ -63,7 +78,7 @@ A target is any endpoint that can:
 Target types can be things like:
 
 - `kubernetes`: manifests are applied against a Kubernetes API server
-- `platform`: manifests are FleetShift API objects delivered to a child platform
+- `platform`: manifests are platform API objects delivered to a child platform
 - `local`: the platform itself, addressed in-process
 
 Addons can register their own target types and delivery agents while still participating in the same orchestration pipeline.
@@ -90,21 +105,29 @@ The detailed orchestration semantics, including pools, invalidation, durable exe
 
 > NOTE: This design is unproven and may change arbitrarily!
 
-All addon-platform communication goes through the fleetlet. Local processes connect to a local fleetlet over UDS or TCP; the fleetlet connects outward to the platform. Channels are the unit of multiplexing, routing, and access control.
+All addon-platform communication goes through the fleetlet. Local processes
+connect to a local fleetlet over UDS or TCP; the fleetlet connects outward to
+the platform. Channels are the unit of multiplexing, routing, and access control.
+In this design, the fleetlet enforces shared application-authorization and
+provenance checks selected by target delivery policy before handing work to
+addon agents, so addons do not each need to implement the same cross-cutting
+checks. Addon agents enforce domain- or resource-specific constraints before
+applying resources; the resource manager server remains the primary stateful
+authorizer.
 
 This same model covers:
 
 - control traffic such as registration, delivery, status, access, and indexing
 - addon-defined channels such as API proxying, generation, and strategy-specific traffic
 - proxy delivery for remote targets
-- peer-mesh routing between platform replicas
+- peer-mesh routing between resource manager server replicas within one platform instance
 - the choice between addon-managed and fleetlet-channeled data paths
 
 The detailed design lives in [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md).
 
 ### Kernel constraints
 
-The platform kernel must remain correct as a single pod with an embedded database. Single-pod viability is a design invariant, not a degraded mode. Multi-replica deployments with external Postgres are important for larger instances, but new kernel features should not require extra services or multiple replicas just to function.
+The resource manager server's kernel must remain correct as a single pod with an embedded database. Single-pod viability is a design invariant, not a degraded mode. Multiple resource manager server replicas within one platform instance, backed by external Postgres, are important for larger platform instances, but new kernel features should not require extra services or multiple replicas just to function.
 
 This invariant is specified in [docs/design/architecture/core_model.md](architecture/core_model.md) and shapes the design of orchestration, routing, and indexing.
 
@@ -142,7 +165,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 - Read [docs/design/authentication.md](authentication.md) for live credential verification and presentation, request signing, target credential exchange, and `PausedAuth`.
 - Read [docs/design/architecture/provenance.md](architecture/provenance.md) for authenticated authority configuration, provenance profiles, attestation semantics, trust updates, historical verification, and evidence-log integration.
 - Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
-- Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
+- Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlet instances, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.
 - Read [docs/design/architecture/addon_integration.md](architecture/addon_integration.md) for capability registration, addon strategy contracts, managed-resource bridging, and UI/API extension points.
 - Read [docs/design/architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the two-layer API model, resource identity, platform resources, extension API packages, and how multiple extensions model the same logical resource.

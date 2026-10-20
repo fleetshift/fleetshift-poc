@@ -1,5 +1,5 @@
-import type { FlatNode } from "@fleetshift/common";
-import { NodeKind } from "@fleetshift/common";
+import type { FlatNode } from "@ocm-fleet/common";
+import { NodeKind } from "@ocm-fleet/common";
 import { describe, expect, it } from "vitest";
 
 import { computeKbMove, getBlockLength } from "../dragTreeHelpers";

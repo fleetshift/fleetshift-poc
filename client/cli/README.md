@@ -1,6 +1,6 @@
 # TypeScript Fleetctl CLI
 
-TypeScript `fleetctl` CLI for FleetShift. The local setup examples below use
+TypeScript `fleetctl` CLI for OCM Fleet. The local setup examples below use
 the [Podman AIO stack](../../deploy/podman/README.md).
 
 ## Prerequisites
@@ -45,18 +45,18 @@ npx nx run deploy:podman:status
 
 Expected endpoints:
 
-- UI/API: `https://fleetshift-sandbox.localhost:8085`
+- UI/API: `https://ocm-fleet.localhost:8085`
 - gRPC: `127.0.0.1:50051`
-- Dex: `https://fleetshift-sandbox.localhost:8085/idp`
+- Dex: `https://ocm-fleet.localhost:8085/idp`
 
 Demo credentials:
 
-- Operator: `ops@fleetshift.local` / `fleetshift-ops`
-- Developer: `dev@fleetshift.local` / `fleetshift-dev`
+- Operator: `ops@ocm-fleet.local` / `ocm-fleet-ops`
+- Developer: `dev@ocm-fleet.local` / `ocm-fleet-dev`
 
 ## Prepare CLI
 
-Run following commands from repository root, `fleetshift-poc/`.
+Run following commands from repository root, `ocm-fleet/`.
 
 Build executable and update top-level `bin/fleetctl` symlink:
 
@@ -82,15 +82,15 @@ fleetctl --help
 For a persistent npm-style global link instead:
 
 ```bash
-npm link --workspace=@fleetshift/cli
+npm link --workspace=@ocm-fleet/cli
 fleetctl --help
 ```
 
 To test installation flow closer to published npm usage:
 
 ```bash
-npm pack --workspace=@fleetshift/cli --pack-destination /tmp
-npm install --global /tmp/fleetshift-cli-0.0.0.tgz
+npm pack --workspace=@ocm-fleet/cli --pack-destination /tmp
+npm install --global /tmp/ocm-fleet-cli-0.0.0.tgz
 fleetctl --help
 ```
 
@@ -108,7 +108,7 @@ PODMAN_SOCKET="${PODMAN_SOCKET:-/var/run/docker.sock}" \
   podman compose \
   -f deploy/podman/compose.yaml \
   --env-file .env \
-  cp fleetshift-server:/data/sandbox/pki/ca.crt \
+  cp ocm-fleet-server:/data/sandbox/pki/ca.crt \
   deploy/podman/.certs/ca.crt
 ```
 
@@ -116,7 +116,7 @@ Verify discovery before configuring CLI:
 
 ```bash
 curl --cacert deploy/podman/.certs/ca.crt \
-  https://fleetshift-sandbox.localhost:8085/idp/.well-known/openid-configuration
+  https://ocm-fleet.localhost:8085/idp/.well-known/openid-configuration
 ```
 
 `502` from `/idp` means AIO is Dex-off or Dex is not ready. Check `npx nx run deploy:podman:logs` and verify `OIDC_ISSUER_URL` is unset for built-in Dex.
@@ -133,14 +133,14 @@ TS CLI writes Go-compatible files:
 To connect to the Podman AIO stack, use a separate config directory while validating TS CLI:
 
 ```bash
-export FLEETCTL_CONFIG_DIR=/tmp/fleetshift-ts
+export FLEETCTL_CONFIG_DIR=/tmp/ocm-fleet-ts
 
 fleetctl auth setup \
-  --issuer-url https://fleetshift-sandbox.localhost:8085/idp \
-  --client-id fleetshift-cli \
-  --key-enrollment-client-id fleetshift-signing \
+  --issuer-url https://ocm-fleet.localhost:8085/idp \
+  --client-id fleetctl \
+  --key-enrollment-client-id resource-manager-signing \
   --oidc-ca-file deploy/podman/.certs/ca.crt \
-  --scopes 'openid,profile,email,audience:server:client_id:fleetshift'
+  --scopes 'openid,profile,email,audience:server:client_id:resource-manager'
 
 fleetctl auth login
 ```
@@ -151,8 +151,8 @@ The login flow opens a browser and starts a loopback callback listener. Use the 
 
 CLI defaults (the server URL matches the Podman AIO stack):
 
-- Server: `https://fleetshift-sandbox.localhost:8085`
-- Config directory: `FLEETCTL_CONFIG_DIR`, or `~/.config/fleetshift`
+- Server: `https://ocm-fleet.localhost:8085`
+- Config directory: `FLEETCTL_CONFIG_DIR`, or `~/.config/ocm-fleet`
 
 Set `FLEETCTL_SERVER` only when targeting another runtime. Set `FLEETCTL_CONFIG_DIR` when isolating credentials. Both command flags are optional and override these defaults.
 
@@ -161,7 +161,7 @@ Explicit `--server` and `--config-dir` values override environment defaults. Use
 ### Podman
 
 ```bash
-export FLEETCTL_SERVER=https://fleetshift-sandbox.localhost:8085
+export FLEETCTL_SERVER=https://ocm-fleet.localhost:8085
 
 fleetctl deployment list
 fleetctl resource query
@@ -239,12 +239,12 @@ rm -rf "$FLEETCTL_CONFIG_DIR"
 rm -rf client/cli/bin
 ```
 
-If `FLEETCTL_CONFIG_DIR` is unset, remove the default `~/.config/fleetshift` only when no other FleetShift CLI setup uses it. Do not print or commit `credentials.json`.
+If `FLEETCTL_CONFIG_DIR` is unset, remove the default `~/.config/ocm-fleet` only when no other OCM Fleet CLI setup uses it. Do not print or commit `credentials.json`.
 
 Remove global npm link, if created:
 
 ```bash
-npm unlink --global @fleetshift/cli
+npm unlink --global @ocm-fleet/cli
 ```
 
 Remove current-shell PATH override by opening a new shell or exporting the previous `PATH` value.

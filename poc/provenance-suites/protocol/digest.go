@@ -17,12 +17,12 @@ type Digest string
 type Purpose string
 
 const (
-	purposeTypedEvidenceIdentity    Purpose = "fleetshift.dev/provenance/typed-evidence-identity/v1"
-	purposeContentDigest            Purpose = "fleetshift.dev/provenance/content-digest/v1"
-	purposeAuthorityConfig          Purpose = "fleetshift.dev/provenance/authority-config/v1"
-	purposeProfileConfig            Purpose = "fleetshift.dev/provenance/profile-config/v1"
-	purposeTrustConfiguration       Purpose = "fleetshift.dev/provenance/trust-configuration/v1"
-	purposeTimestampBindingIdentity Purpose = "fleetshift.dev/provenance/timestamp-binding-identity/v1"
+	purposeTypedEvidenceIdentity    Purpose = "resource-manager.open-cluster-management.io/provenance/typed-evidence-identity/v1"
+	purposeContentDigest            Purpose = "resource-manager.open-cluster-management.io/provenance/content-digest/v1"
+	purposeAuthorityConfig          Purpose = "resource-manager.open-cluster-management.io/provenance/authority-config/v1"
+	purposeProfileConfig            Purpose = "resource-manager.open-cluster-management.io/provenance/profile-config/v1"
+	purposeTrustConfiguration       Purpose = "resource-manager.open-cluster-management.io/provenance/trust-configuration/v1"
+	purposeTimestampBindingIdentity Purpose = "resource-manager.open-cluster-management.io/provenance/timestamp-binding-identity/v1"
 )
 
 // DigestBytes returns the canonical digest of raw bytes with no extra wrapping.

@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	pgstore "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	pgstore "github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
 // persistence holds opened storage dependencies for Start.

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 type recordingProvisionWF struct {
@@ -36,7 +36,7 @@ func TestAuthMethodService_PublicCreateRejected(t *testing.T) {
 	svc := &application.AuthMethodService{Methods: authRepo}
 	_, err := svc.Create(ctx, "default", domain.NewOIDCAuthMethod("default", &domain.OIDCConfig{
 		IssuerURL: "https://example.com",
-		Audience:  "fleetshift",
+		Audience:  "resource-manager",
 	}))
 	if err == nil {
 		t.Fatal("expected public Create rejection on empty store")
@@ -74,7 +74,7 @@ func TestAuthMethodService_InstallFirst_RejectsNonEmptyStore(t *testing.T) {
 	authRepo := &sqlite.AuthMethodRepo{DB: sqlDB}
 	existing := domain.NewOIDCAuthMethod("default", &domain.OIDCConfig{
 		IssuerURL: "https://example.com",
-		Audience:  "fleetshift",
+		Audience:  "resource-manager",
 	})
 	if err := authRepo.Save(ctx, existing); err != nil {
 		t.Fatal(err)
@@ -109,11 +109,11 @@ func TestAuthMethodService_InstallFirst_Success(t *testing.T) {
 
 	input := domain.NewOIDCAuthMethod("default", &domain.OIDCConfig{
 		IssuerURL: "https://example.com",
-		Audience:  "fleetshift",
+		Audience:  "resource-manager",
 	})
 	want := domain.NewOIDCAuthMethod("default", &domain.OIDCConfig{
 		IssuerURL:             "https://example.com",
-		Audience:              "fleetshift",
+		Audience:              "resource-manager",
 		AuthorizationEndpoint: "https://example.com/auth",
 		TokenEndpoint:         "https://example.com/token",
 		JWKSURI:               "https://example.com/keys",

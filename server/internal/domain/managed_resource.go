@@ -8,7 +8,7 @@ import (
 )
 
 // ResourceType identifies a kind of managed resource as registered by
-// an addon (e.g. "kind.fleetshift.io/Cluster"). Per AIP-123, resource
+// an addon (e.g. "kind.open-cluster-management.io/Cluster"). Per AIP-123, resource
 // types follow the pattern {ServiceName}/{Type} where ServiceName is
 // the AIP-122 service name and Type is the PascalCase singular proto
 // message name.

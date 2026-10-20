@@ -12,7 +12,7 @@ if (!(await $`oc get keycloak/keycloak -n keycloak-prod`.nothrow()).ok)
   throw new Error(
     "Keycloak CR 'keycloak' not found in namespace 'keycloak-prod'. Is Keycloak deployed?",
   );
-console.log("This will delete and re-import FleetShift realm state.");
+console.log("This will delete and re-import OCM Fleet realm state.");
 if (!/^y$/i.test(await question("Continue? (y/N): "))) process.exit(0);
 const ns = "keycloak-prod";
 const domain = (
@@ -31,16 +31,16 @@ const token = JSON.parse(
   ).stdout,
 ).access_token;
 if (!token) throw new Error("Failed to obtain admin token");
-await $`oc delete keycloakrealmimport fleetshift-realm -n ${ns} --ignore-not-found`;
-await $`oc wait --for=delete keycloakrealmimport/fleetshift-realm -n ${ns} --timeout=60s`.nothrow();
+await $`oc delete keycloakrealmimport ocm-fleet-realm -n ${ns} --ignore-not-found`;
+await $`oc wait --for=delete keycloakrealmimport/ocm-fleet-realm -n ${ns} --timeout=60s`.nothrow();
 const deleted =
-  await $`curl -sk -o /dev/null -w %{http_code} -X DELETE ${host}/admin/realms/fleetshift -H ${`Authorization: Bearer ${token}`}`;
+  await $`curl -sk -o /dev/null -w %{http_code} -X DELETE ${host}/admin/realms/ocm-fleet -H ${`Authorization: Bearer ${token}`}`;
 if (!/^2|404$/.test(deleted.stdout.trim()))
   throw new Error(`Failed to delete realm (HTTP ${deleted.stdout.trim()})`);
 await $`oc wait --for=condition=Ready keycloak/keycloak -n ${ns} --timeout=300s`;
 const realm = JSON.parse(
   await readFile(
-    resolve(import.meta.dirname, "../fleetshift-realm.json"),
+    resolve(import.meta.dirname, "../ocm-fleet-realm.json"),
     "utf8",
   ),
 );
@@ -55,11 +55,11 @@ await $({
   input: JSON.stringify({
     apiVersion: "k8s.keycloak.org/v2alpha1",
     kind: "KeycloakRealmImport",
-    metadata: { name: "fleetshift-realm" },
+    metadata: { name: "ocm-fleet-realm" },
     spec: { keycloakCRName: "keycloak", realm },
   }),
 })`oc apply -n ${ns} -f -`;
-await $`oc wait --for=condition=Done keycloakrealmimport/fleetshift-realm -n ${ns} --timeout=120s`.nothrow();
+await $`oc wait --for=condition=Done keycloakrealmimport/ocm-fleet-realm -n ${ns} --timeout=120s`.nothrow();
 await $`oc wait --for=condition=Ready keycloak/keycloak -n ${ns} --timeout=300s`;
 const refreshed = JSON.parse(
   (
@@ -67,7 +67,7 @@ const refreshed = JSON.parse(
   ).stdout,
 ).access_token;
 if (!refreshed) throw new Error("Failed to obtain refreshed admin token");
-const profileUrl = `${host}/admin/realms/fleetshift/users/profile`;
+const profileUrl = `${host}/admin/realms/ocm-fleet/users/profile`;
 const profile = JSON.parse(
   (await $`curl -sk ${profileUrl} -H ${`Authorization: Bearer ${refreshed}`}`)
     .stdout,
@@ -86,7 +86,7 @@ if (!profile.attributes?.some((entry) => entry.name === "github_username")) {
   ];
   await $`curl -sk -X PUT ${profileUrl} -H ${`Authorization: Bearer ${refreshed}`} -H Content-Type:application/json -d ${JSON.stringify(profile)}`;
 }
-const clientUrl = `${host}/admin/realms/fleetshift/clients`;
+const clientUrl = `${host}/admin/realms/ocm-fleet/clients`;
 const clientId = JSON.parse(
   (
     await $`curl -sk ${clientUrl}?clientId=ocp-console -H ${`Authorization: Bearer ${refreshed}`}`

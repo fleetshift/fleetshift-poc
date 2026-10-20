@@ -1,4 +1,4 @@
-module github.com/fleetshift/fleetshift-poc/poc/inventory-write-path
+module github.com/stolostron/ocm-fleet/poc/inventory-write-path
 
 go 1.26.0
 toolchain go1.26.6

@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 type scanner interface {

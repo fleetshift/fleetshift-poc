@@ -24,7 +24,7 @@ type TenantPartition string
 // Tenant is the external tenant identity established by a provenance profile.
 // Its partition is scoped by principal authority, just like a subject. An
 // empty partition denotes the unpartitioned tenant under that authority.
-// Internal FleetShift routing IDs remain local to the resource manager.
+// Internal platform routing IDs remain local to the resource manager.
 type Tenant struct {
 	PrincipalAuthority
 	Partition TenantPartition `json:"partition,omitempty"`
@@ -37,8 +37,8 @@ func (p Principal) Tenant() Tenant {
 
 // FullResourceName is an AIP-122 full resource name of the form
 // "//{service}/{collection}/{id}", for example
-// "//fleetshift.io/deployments/web" or
-// "//kind.fleetshift.io/clusters/prod". It is the producer-defined unique
+// "//open-cluster-management.io/deployments/web" or
+// "//kind.open-cluster-management.io/clusters/prod". It is the producer-defined unique
 // identity of a Deployment or ManagedResource. That resource is 1-1 with
 // its underlying fulfillment; producers do not know an RM-assigned
 // fulfillment ID.

@@ -1,14 +1,14 @@
 import type {
   ClusterProviderCardProps,
   ClusterProviderWizardProps,
-} from "@fleetshift/common";
+} from "@ocm-fleet/common";
 import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
 import type { ComponentType } from "react";
 
 import type { SearchReservedProperties } from "./searchTypes";
 
 export type ClusterProviderExtension = Extension<
-  "fleetshift.cluster-provider",
+  "ocm-fleet.cluster-provider",
   {
     id: string;
     label: string;
@@ -24,5 +24,5 @@ export type ClusterProviderExtension = Extension<
 export function isClusterProviderExtension(
   e: Extension,
 ): e is ClusterProviderExtension {
-  return e.type === "fleetshift.cluster-provider";
+  return e.type === "ocm-fleet.cluster-provider";
 }

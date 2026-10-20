@@ -1,6 +1,6 @@
 import "./setup-checklist.scss";
 
-import { PluginLink } from "@fleetshift/common";
+import { PluginLink } from "@ocm-fleet/common";
 import type { Extension } from "@openshift/dynamic-plugin-sdk";
 import {
   useExtensions,
@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getSetupProgressStore } from "../setup-plugin/setupProgress";
 
-const DISMISS_KEY = "fleetshift:setup-checklist-dismissed";
+const DISMISS_KEY = "ocm-fleet:setup-checklist-dismissed";
 
 const SETUP_STEPS = [
   {
@@ -38,17 +38,17 @@ const SETUP_STEPS = [
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
-  "fleetshift.cluster-provider": "Configure a cluster provider",
+  "ocm-fleet.cluster-provider": "Configure a cluster provider",
 };
 
 const CATEGORY_CTA: Record<string, string> = {
-  "fleetshift.cluster-provider": "Configure a provider",
+  "ocm-fleet.cluster-provider": "Configure a provider",
 };
 
-const HIDDEN_CATEGORIES = new Set(["fleetshift.module"]);
+const HIDDEN_CATEGORIES = new Set(["ocm-fleet.module"]);
 
 type OnboardingActionExtension = Extension<
-  "fleetshift.onboarding-action",
+  "ocm-fleet.onboarding-action",
   {
     id: string;
     label: string;
@@ -58,7 +58,7 @@ type OnboardingActionExtension = Extension<
 >;
 
 function isOnboardingAction(e: Extension): e is OnboardingActionExtension {
-  return e.type === "fleetshift.onboarding-action";
+  return e.type === "ocm-fleet.onboarding-action";
 }
 
 function useSetupProgressReadonly() {
@@ -182,7 +182,7 @@ export default function SetupChecklist() {
   }
 
   return (
-    <Card className="ome-overview-checklist">
+    <Card className="ocm-fleet-overview-checklist">
       <CardHeader
         actions={{
           actions: (
@@ -205,9 +205,9 @@ export default function SetupChecklist() {
         </CardTitle>
       </CardHeader>
       <CardBody>
-        <ul className="ome-overview-checklist__list">
+        <ul className="ocm-fleet-overview-checklist__list">
           {items.map((item) => (
-            <li key={item.id} className="ome-overview-checklist__item">
+            <li key={item.id} className="ocm-fleet-overview-checklist__item">
               <Icon size="md" status={item.completed ? "success" : undefined}>
                 {item.completed ? <CheckCircleIcon /> : <CircleIcon />}
               </Icon>

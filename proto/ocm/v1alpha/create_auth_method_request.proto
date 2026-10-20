@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/field_behavior.proto";
+import "ocm/v1alpha/auth_method.proto";
+
+// Request message for
+// [AuthMethodService.CreateAuthMethod][ocm.v1alpha.AuthMethodService.CreateAuthMethod].
+message CreateAuthMethodRequest {
+  // The ID to use for the auth method, which becomes the final component
+  // of the auth method's resource name.
+  string auth_method_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The auth method to create.
+  AuthMethod auth_method = 2 [(google.api.field_behavior) = REQUIRED];
+}

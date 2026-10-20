@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 var _ protocol.TargetAPI = (*Target)(nil)
@@ -79,7 +79,7 @@ func principalHints(principal protocol.Principal, assertion protocol.TypedAssert
 }
 
 // RequiresEvidenceLog implements protocol.TargetAPI. Direct-key/v1 does
-// not evaluate FleetShift log positions as cutoffs. A matched delivery policy
+// not evaluate resource manager log positions as cutoffs. A matched delivery policy
 // can independently require occurrence verification in common selection.
 func (t *Target) RequiresEvidenceLog() bool {
 	return false

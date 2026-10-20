@@ -1,4 +1,4 @@
-import type { OnboardingActionCardProps } from "@fleetshift/common";
+import type { OnboardingActionCardProps } from "@ocm-fleet/common";
 import {
   Button,
   Card,

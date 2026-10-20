@@ -56,7 +56,7 @@ type PendingSet struct {
 	committed    bool
 }
 
-// New returns an empty sparse map separated by domain. FleetShift passes the
+// New returns an empty sparse map separated by domain. The resource manager passes the
 // tenant ID as the domain so otherwise identical maps have different roots.
 func New(domain string) *Tree {
 	treeID := deriveTreeID(domain)
@@ -433,9 +433,9 @@ func keyID(domain string, key []byte) (node.ID, error) {
 	if len(key) != sha256.Size {
 		return node.ID{}, fmt.Errorf("sparse-map key has length %d, want %d", len(key), sha256.Size)
 	}
-	domainHash := sha256.Sum256([]byte("fleetshift.dev/trust-v3/sparse-map-domain/v1\x00" + domain))
-	material := make([]byte, 0, len("fleetshift.dev/trust-v3/sparse-map-key/v1\x00")+len(domainHash)+len(key))
-	material = append(material, "fleetshift.dev/trust-v3/sparse-map-key/v1\x00"...)
+	domainHash := sha256.Sum256([]byte("resource-manager.open-cluster-management.io/trust-v3/sparse-map-domain/v1\x00" + domain))
+	material := make([]byte, 0, len("resource-manager.open-cluster-management.io/trust-v3/sparse-map-key/v1\x00")+len(domainHash)+len(key))
+	material = append(material, "resource-manager.open-cluster-management.io/trust-v3/sparse-map-key/v1\x00"...)
 	material = append(material, domainHash[:]...)
 	material = append(material, key...)
 	id := sha256.Sum256(material)
@@ -443,7 +443,7 @@ func keyID(domain string, key []byte) (node.ID, error) {
 }
 
 func deriveTreeID(domain string) int64 {
-	digest := sha256.Sum256([]byte("fleetshift.dev/trust-v3/key-history-map-tree/v1\x00" + domain))
+	digest := sha256.Sum256([]byte("resource-manager.open-cluster-management.io/trust-v3/key-history-map-tree/v1\x00" + domain))
 	return int64(binary.BigEndian.Uint64(digest[:8]))
 }
 

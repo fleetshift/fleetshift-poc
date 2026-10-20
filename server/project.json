@@ -8,7 +8,7 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "go build -o ../bin/fleetshift ./cmd/fleetshift",
+        "command": "go build -o ../bin/resource-manager ./cmd/resource-manager",
         "cwd": "server"
       },
       "inputs": [
@@ -16,7 +16,7 @@
         "{projectRoot}/go.mod",
         "{projectRoot}/go.sum"
       ],
-      "outputs": ["{workspaceRoot}/bin/fleetshift"]
+      "outputs": ["{workspaceRoot}/bin/resource-manager"]
     },
     "test": {
       "executor": "nx:run-commands",

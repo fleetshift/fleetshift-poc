@@ -1,11 +1,11 @@
 import type {
   BaseExtensionProperties,
   EncodedCodeRef,
-  FleetshiftExtension,
+  FleetExtension,
 } from "./types";
 import { validateCodeRef } from "./validate";
 
-export const RENDER_SEARCH_TYPE = "fleetshift.render-search" as const;
+export const RENDER_SEARCH_TYPE = "ocm-fleet.render-search" as const;
 
 export type SearchResultRendererExtras = {
   resourceType: string;
@@ -72,7 +72,7 @@ function throwOnErrors(errors: string[], type: string): void {
 
 export function createSearchResultRenderer(
   properties: SearchResultRendererInput,
-): FleetshiftExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
+): FleetExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
   const ctx = `${RENDER_SEARCH_TYPE} "${properties.id || "(no id)"}"`;
   throwOnErrors(
     validateSearchResultRendererProperties(properties, ctx),

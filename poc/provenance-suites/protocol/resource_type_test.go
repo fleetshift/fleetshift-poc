@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseResourceType(t *testing.T) {
-	for _, value := range []string{"kind.fleetshift.io/Cluster", "OtherService/Cluster", "addon/OwnType", "extension.example/Type-v2"} {
+	for _, value := range []string{"kind.open-cluster-management.io/Cluster", "OtherService/Cluster", "addon/OwnType", "extension.example/Type-v2"} {
 		got, err := ParseResourceType(value)
 		if err != nil || got.String() != value {
 			t.Errorf("parse %q: %v, %v", value, got, err)

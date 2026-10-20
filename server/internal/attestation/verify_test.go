@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/attestation"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/keyregistry"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
 )
 
 type testHarness struct {
@@ -31,7 +31,7 @@ type testHarness struct {
 func setupHarness(t *testing.T) *testHarness {
 	t.Helper()
 
-	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
+	provider := oidctest.Start(t, oidctest.WithAudience("ocm-fleet-enroll"))
 
 	signerID := domain.SubjectID("test-user")
 	issuer := provider.IssuerURL()
@@ -44,7 +44,7 @@ func setupHarness(t *testing.T) *testHarness {
 
 	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(signerID),
-		Audience: "fleetshift-enroll",
+		Audience: "ocm-fleet-enroll",
 		Extra:    map[string]any{"preferred_username": registrySubject},
 	})
 
@@ -63,7 +63,7 @@ func setupHarness(t *testing.T) *testHarness {
 		map[domain.IssuerURL]attestation.TrustedIssuer{
 			issuer: {
 				JWKSURI:  domain.EndpointURL(jwksURI),
-				Audience: "fleetshift-enroll",
+				Audience: "ocm-fleet-enroll",
 				RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 					RegistryID: "github.com",
 					Expression: `claims.preferred_username`,
@@ -188,7 +188,7 @@ func TestVerifyAttestation_ExpiredIdentityToken_StillPasses(t *testing.T) {
 
 	expiredToken := h.provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(h.signerID),
-		Audience: "fleetshift-enroll",
+		Audience: "ocm-fleet-enroll",
 		Expiry:   -time.Hour,
 		Extra:    map[string]any{"preferred_username": h.registrySubject},
 	})
@@ -321,7 +321,7 @@ func TestVerifyAttestation_IdentityTokenSubjectMismatch(t *testing.T) {
 
 	wrongToken := h.provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  "wrong-user",
-		Audience: "fleetshift-enroll",
+		Audience: "ocm-fleet-enroll",
 		Extra:    map[string]any{"preferred_username": h.registrySubject},
 	})
 	att.Input.Signer.IdentityToken = domain.RawToken(wrongToken)
@@ -344,14 +344,14 @@ func TestVerifyAttestation_ContentHashMismatch(t *testing.T) {
 }
 
 func TestVerifyAttestation_NoKeyResolver(t *testing.T) {
-	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
+	provider := oidctest.Start(t, oidctest.WithAudience("ocm-fleet-enroll"))
 	issuer := provider.IssuerURL()
 
 	verifier := attestation.NewVerifier(
 		map[domain.IssuerURL]attestation.TrustedIssuer{
 			issuer: {
 				JWKSURI:  domain.EndpointURL(string(issuer) + "/jwks"),
-				Audience: "fleetshift-enroll",
+				Audience: "ocm-fleet-enroll",
 			},
 		},
 		attestation.WithHTTPClient(provider.HTTPClient()),

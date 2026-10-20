@@ -117,7 +117,7 @@ type DeleteManagedResourceCleanupInput struct {
 
 // CreateManagedResourceWorkflowID returns the deterministic workflow
 // instance ID for creating a managed resource. It embeds the full
-// resource name (e.g. "//kind.fleetshift.io/clusters/prod") for
+// resource name (e.g. "//kind.open-cluster-management.io/clusters/prod") for
 // readability in tracing and debugging.
 func CreateManagedResourceWorkflowID(name FullResourceName) string {
 	return fmt.Sprintf("create-mr-%s", name)

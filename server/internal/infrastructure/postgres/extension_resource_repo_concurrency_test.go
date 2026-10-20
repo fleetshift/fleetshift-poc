@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/postgres"
 )
 
 // TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates
@@ -44,7 +44,7 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 	ctx := context.Background()
 	db := postgres.OpenTestDB(t)
 
-	rt := domain.ResourceType("inv.fleetshift.io/Node")
+	rt := domain.ResourceType("inv.open-cluster-management.io/Node")
 	name := domain.ResourceName("nodes/concurrent-delta")
 	seedRepo := postgres.ExtensionResourceRepo{DB: db}
 	if err := seedRepo.CreateType(ctx, domain.NewExtensionResourceType(
@@ -150,7 +150,7 @@ func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.
 	ctx := context.Background()
 	db := postgres.OpenTestDB(t)
 
-	rt := domain.ResourceType("inv.fleetshift.io/Node")
+	rt := domain.ResourceType("inv.open-cluster-management.io/Node")
 	name := domain.ResourceName("nodes/concurrent-alias")
 	seedRepo := postgres.ExtensionResourceRepo{DB: db}
 	if err := seedRepo.CreateType(ctx, domain.NewExtensionResourceType(

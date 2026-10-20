@@ -2,7 +2,7 @@ import { useScalprum } from "@scalprum/react-core";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-import type { FleetShiftApi } from "./scalprum.js";
+import type { FleetApi } from "./scalprum.js";
 
 export interface PluginNavigateTo {
   pathname?: string;
@@ -10,15 +10,15 @@ export interface PluginNavigateTo {
 }
 
 const usePluginNavigate = (scope: string, module: string) => {
-  const { api } = useScalprum<{ api: FleetShiftApi }>();
+  const { api } = useScalprum<{ api: FleetApi }>();
   const navigate = useNavigate();
 
-  const basePath = api.fleetshift.getPluginPagePath(scope, module);
+  const basePath = api.fleet.getPluginPagePath(scope, module);
   const available = basePath !== undefined;
 
   const navigateFn = useCallback(
     (to?: string | PluginNavigateTo) => {
-      const resolvedBase = api.fleetshift.getPluginPagePath(scope, module);
+      const resolvedBase = api.fleet.getPluginPagePath(scope, module);
       if (!resolvedBase) return;
 
       if (!to) {

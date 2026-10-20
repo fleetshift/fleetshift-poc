@@ -17,7 +17,7 @@ function nx(target) {
 }
 
 // Always rebuild common — it's fast (tsc only) and rspack depends on its dist
-console.log("Building @fleetshift/common...");
+console.log("Building @ocm-fleet/common...");
 nx("common:build");
 
 function merge() {
@@ -34,7 +34,7 @@ function merge() {
 if (!watchOnly) {
   console.log("Running initial build...");
   nx("plugins:build");
-  nx("@fleetshift/kind-plugin:build");
+  nx("@ocm-fleet/kind-plugin:build");
   nx("web:generate-registry");
   nx("web:build");
   nx("web:merge");

@@ -22,16 +22,16 @@ func findAIORoot(t *testing.T) string {
 }
 
 // findRepoRoot walks from the test cwd to the monorepo root
-// (Dockerfile.fleetshift). That file is the AIO assembly Dockerfile, not
+// (Dockerfile.aio). That file is the AIO assembly Dockerfile, not
 // under deploy/aio.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir := walkUp(t, func(dir string) bool {
-		_, err := os.Stat(filepath.Join(dir, "Dockerfile.fleetshift"))
+		_, err := os.Stat(filepath.Join(dir, "Dockerfile.aio"))
 		return err == nil
 	})
 	if dir == "" {
-		t.Fatal("repo root not found (expected Dockerfile.fleetshift)")
+		t.Fatal("repo root not found (expected Dockerfile.aio)")
 	}
 	return dir
 }

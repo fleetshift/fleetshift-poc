@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
+	transporthttp "github.com/stolostron/ocm-fleet/server/internal/transport/http"
 )
 
 func TestHealthRoutes_LivenessAlwaysOK(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package testserver provides a fully wired in-process FleetShift gRPC
+// Package testserver provides a fully wired in-process resource manager gRPC
 // server for integration testing. The server uses SQLite in-memory storage
 // and the in-memory workflow engine, making tests fast and deterministic.
 package testserver
@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // stubVerifier returns a fixed test identity for any token.
@@ -47,22 +47,22 @@ func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL
 	}, nil
 }
 
-// Start launches an in-process FleetShift server via bootstrap and returns
+// Start launches an in-process resource manager server via bootstrap and returns
 // its gRPC dial address. The server is stopped when the test finishes.
 func Start(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "fleetshift.db")
+	dbPath := filepath.Join(dir, "resource-manager.db")
 	// TODO: shared-cache in-memory SQLite once bootstrap keeps an OpenMemory
-	// sentinel. See docs/fleetshift/e2e-testing/2026-09-03-testserver-in-memory-sqlite.md.
+	// sentinel. See docs/ocm-fleet/e2e-testing/2026-09-03-testserver-in-memory-sqlite.md.
 
 	cfg, err := bootstrap.NewConfig(bootstrap.ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 		// Kind drives trust-bundle placement for provision-IdP.
 		Addons: "kind",
 	})

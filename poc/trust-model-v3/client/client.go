@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/fleetshift/fleetshift-poc/poc/trust-model-v3/protocol"
+	"github.com/stolostron/ocm-fleet/poc/trust-model-v3/protocol"
 )
 
 type Config struct {

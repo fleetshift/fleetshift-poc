@@ -21,6 +21,13 @@ describe("uniqueKindClusterId", () => {
     ).toThrow(/too long/);
   });
 
+  it("accounts for the full ownership prefix at the provider name limit", () => {
+    const id = uniqueKindClusterId("a".repeat(31));
+
+    expect(`ocm-fleet--${id}`).toHaveLength(50);
+    expect(() => uniqueKindClusterId("a".repeat(32))).toThrow(/too long/);
+  });
+
   it("rejects a prefix that is not RFC1123-safe", () => {
     expect(() => uniqueKindClusterId("Kind-e2e-")).toThrow(/RFC1123-safe/);
     expect(() => uniqueKindClusterId("kind_e2e-")).toThrow(/RFC1123-safe/);
@@ -33,13 +40,13 @@ describe("uniqueKindClusterIdFromEnv", () => {
     vi.unstubAllEnvs();
   });
 
-  it("reads FLEETSHIFT_KIND_PREFIX from the environment", () => {
-    vi.stubEnv("FLEETSHIFT_KIND_PREFIX", "kind-e2e-env-");
+  it("reads OCM_RM_KIND_PREFIX from the environment", () => {
+    vi.stubEnv("OCM_RM_KIND_PREFIX", "kind-e2e-env-");
     expect(uniqueKindClusterIdFromEnv()).toMatch(/^kind-e2e-env-[a-f0-9]{8}$/);
   });
 
-  it("fails when FLEETSHIFT_KIND_PREFIX is unset", () => {
-    vi.stubEnv("FLEETSHIFT_KIND_PREFIX", undefined);
+  it("fails when OCM_RM_KIND_PREFIX is unset", () => {
+    vi.stubEnv("OCM_RM_KIND_PREFIX", undefined);
     expect(() => uniqueKindClusterIdFromEnv()).toThrow(/unset/);
   });
 });

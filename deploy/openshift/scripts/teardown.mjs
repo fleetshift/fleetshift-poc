@@ -6,11 +6,11 @@ importKeyValueArgs(process.argv.slice(2));
 const k8sDir = resolve(import.meta.dirname, "..");
 
 // Preconditions: fail early with actionable errors before changing resources.
-console.log("=== FleetShift Kubernetes Teardown ===");
+console.log("=== OCM Fleet Kubernetes Teardown ===");
 await $`command -v oc`;
-await requireOcCluster("OME_CLUSTER_API");
-if (!(await $`oc get namespace fleetshift`.nothrow()).ok) {
-  console.log("Namespace 'fleetshift' not found. Nothing to tear down.");
+await requireOcCluster("OCM_FLEET_CLUSTER_API");
+if (!(await $`oc get namespace ocm-fleet`.nothrow()).ok) {
+  console.log("Namespace 'ocm-fleet' not found. Nothing to tear down.");
   process.exit(0);
 }
 
@@ -20,5 +20,5 @@ await $`oc delete -k ${k8sDir} --ignore-not-found=true`;
 
 // Step 2: delete namespace after its workloads and services are removed.
 console.log("Deleting namespace...");
-await $`oc delete namespace fleetshift --ignore-not-found=true`;
+await $`oc delete namespace ocm-fleet --ignore-not-found=true`;
 console.log("\n=== Teardown Complete ===");

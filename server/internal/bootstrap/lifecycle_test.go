@@ -19,11 +19,11 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
@@ -54,13 +54,13 @@ func TestLifecycle_DynamicEndpointsDialable(t *testing.T) {
 		t.Fatalf("ListDeployments via resolved dial: %v (want Unauthenticated)", err)
 	}
 
-	resp, err := http.Get("http://" + ep.HTTP.Dial + "/v1/deployments")
+	resp, err := http.Get("http://" + ep.HTTP.Dial + "/v1alpha/deployments")
 	if err != nil {
 		t.Fatalf("http get via gateway: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		t.Fatal("gateway /v1/deployments not found; dial target mismatch?")
+		t.Fatal("gateway /v1alpha/deployments not found; dial target mismatch?")
 	}
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("gateway status = %d, want 401 after initial AuthMethod install", resp.StatusCode)
@@ -74,9 +74,9 @@ func TestLifecycle_GatewaySurvivesStartContextCancel(t *testing.T) {
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
-		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		DBPath:               filepath.Join(t.TempDir(), "resource-manager.db"),
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -97,13 +97,13 @@ func TestLifecycle_GatewaySurvivesStartContextCancel(t *testing.T) {
 
 	startCancel()
 
-	resp, err := http.Get("http://" + srv.Endpoints().HTTP.Dial + "/v1/deployments")
+	resp, err := http.Get("http://" + srv.Endpoints().HTTP.Dial + "/v1alpha/deployments")
 	if err != nil {
 		t.Fatalf("gateway after start ctx cancel: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		t.Fatal("gateway /v1/deployments missing after start ctx cancel")
+		t.Fatal("gateway /v1alpha/deployments missing after start ctx cancel")
 	}
 	if resp.StatusCode >= 500 {
 		t.Fatalf("gateway status %d after start ctx cancel; loopback conn likely closed", resp.StatusCode)
@@ -122,9 +122,9 @@ func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr:             grpcAddr,
 		HTTPAddr:             heldHTTP.Addr().String(),
-		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		DBPath:               filepath.Join(t.TempDir(), "resource-manager.db"),
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -150,14 +150,14 @@ func TestLifecycle_SecondListenerFailureUnwinds(t *testing.T) {
 func TestLifecycle_ConnectFailureUnwinds(t *testing.T) {
 	grpcAddr := freeLocalAddr(t)
 	httpAddr := freeLocalAddr(t)
-	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr:             grpcAddr,
 		HTTPAddr:             httpAddr,
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -196,9 +196,9 @@ func TestLifecycle_NilClaimedDeliveryAgentRejected(t *testing.T) {
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
-		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		DBPath:               filepath.Join(t.TempDir(), "resource-manager.db"),
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -227,7 +227,7 @@ func TestStart_FailClosedEmptyStoreWithoutOIDC(t *testing.T) {
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr: "127.0.0.1:0",
 		HTTPAddr: "127.0.0.1:0",
-		DBPath:   filepath.Join(t.TempDir(), "fleetshift.db"),
+		DBPath:   filepath.Join(t.TempDir(), "resource-manager.db"),
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -247,13 +247,13 @@ func TestStart_FailClosedEmptyStoreWithoutOIDC(t *testing.T) {
 }
 
 func TestStart_InstallsDefaultAuthMethodWhenStoreEmpty(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://test-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -304,7 +304,7 @@ func TestStart_InstallsDefaultAuthMethodWhenStoreEmpty(t *testing.T) {
 }
 
 func TestStart_SkipsBootstrapWhenAuthMethodExists(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "fleetshift.db")
+	dbPath := filepath.Join(t.TempDir(), "resource-manager.db")
 	startOpts := []Option{
 		WithWorkflowRegistry(NewMemWorkflowRegistry()),
 		WithOIDCDeps(OIDCDeps{Discovery: testDiscovery{}, Verifier: testVerifier{}}),
@@ -316,7 +316,7 @@ func TestStart_SkipsBootstrapWhenAuthMethodExists(t *testing.T) {
 		HTTPAddr:             "127.0.0.1:0",
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://first-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig (first): %v", err)
@@ -348,7 +348,7 @@ func TestStart_SkipsBootstrapWhenAuthMethodExists(t *testing.T) {
 		HTTPAddr:             "127.0.0.1:0",
 		DBPath:               dbPath,
 		OIDCIssuer:           "https://other-issuer.example",
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 	})
 	if err != nil {
 		t.Fatalf("NewConfig (second): %v", err)
@@ -373,8 +373,8 @@ func TestStart_SkipsBootstrapWhenAuthMethodExists(t *testing.T) {
 }
 
 func TestStart_MiddlewareAcceptsOIDCAccessToken(t *testing.T) {
-	idp := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
-	other := oidctest.Start(t, oidctest.WithAudience("fleetshift"))
+	idp := oidctest.Start(t, oidctest.WithAudience("resource-manager"))
+	other := oidctest.Start(t, oidctest.WithAudience("resource-manager"))
 
 	oidcDeps, err := NewProductionOIDCDeps(context.Background(), idp.HTTPClient())
 	if err != nil {
@@ -384,9 +384,9 @@ func TestStart_MiddlewareAcceptsOIDCAccessToken(t *testing.T) {
 	cfg, err := NewConfig(ConfigInput{
 		GRPCAddr:             "127.0.0.1:0",
 		HTTPAddr:             "127.0.0.1:0",
-		DBPath:               filepath.Join(t.TempDir(), "fleetshift.db"),
+		DBPath:               filepath.Join(t.TempDir(), "resource-manager.db"),
 		OIDCIssuer:           string(idp.IssuerURL()),
-		OIDCResourceAudience: "fleetshift",
+		OIDCResourceAudience: "resource-manager",
 		OIDCCABundle:         idp.CACertPEM(),
 	})
 	if err != nil {

@@ -179,5 +179,5 @@ for (const [dynamicPath, exports] of byFile) {
 const count = Object.keys(moduleMap).length;
 const files = byFile.size;
 console.log(
-  `@fleetshift/common: generated ${count} module entries across ${files} dynamic entry points`,
+  `@ocm-fleet/common: generated ${count} module entries across ${files} dynamic entry points`,
 );

@@ -23,15 +23,15 @@ export interface Persona {
 
 export const OPERATOR: Persona = {
   id: "ops",
-  email: "ops@fleetshift.local",
-  password: "fleetshift-ops",
+  email: "ops@ocm-fleet.local",
+  password: "ocm-fleet-ops",
   usernameLabel: "Ops-user",
 };
 
 export const DEVELOPER: Persona = {
   id: "dev",
-  email: "dev@fleetshift.local",
-  password: "fleetshift-dev",
+  email: "dev@ocm-fleet.local",
+  password: "ocm-fleet-dev",
   usernameLabel: "Dev-user",
 };
 

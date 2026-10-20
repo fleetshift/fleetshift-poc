@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/field_behavior.proto";
+
+// Request message for
+// [SignerEnrollmentService.CreateSignerEnrollment][ocm.v1alpha.SignerEnrollmentService.CreateSignerEnrollment].
+//
+// The caller provides a purpose-scoped ID token. The server verifies
+// the token, evaluates the configured CEL claim mapping to derive the
+// registry subject, and persists the enrollment.
+message CreateSignerEnrollmentRequest {
+  // Client-assigned ID for the signer enrollment, which becomes
+  // the final component of the resource name.
+  string signer_enrollment_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Purpose-scoped ID token from the tenant IdP, obtained via a
+  // dedicated OIDC client for signer enrollment.
+  string identity_token = 2 [(google.api.field_behavior) = REQUIRED];
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   ClusterProviderProperties,
-  FleetshiftExtension,
+  FleetExtension,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
@@ -324,7 +324,7 @@ describe("validateExtensionSet", () => {
   it("accepts valid extension set", () => {
     expect(() =>
       validateExtensionSet(
-        [{ type: "fleetshift.module", properties: validModule }],
+        [{ type: "ocm-fleet.module", properties: validModule }],
         exposedModules,
       ),
     ).not.toThrow();
@@ -334,9 +334,9 @@ describe("validateExtensionSet", () => {
     expect(() =>
       validateExtensionSet(
         [
-          { type: "fleetshift.module", properties: validModule },
+          { type: "ocm-fleet.module", properties: validModule },
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: { ...validModule, label: "Different" },
           },
         ],
@@ -350,7 +350,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               component: { $codeRef: "MissingModule.default" },
@@ -367,7 +367,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "acme.custom-widget" as unknown as FleetshiftExtension["type"],
+            type: "acme.custom-widget" as unknown as FleetExtension["type"],
             properties: { id: "my-widget", label: "My Widget" },
           },
         ],
@@ -381,7 +381,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "acme.custom" as unknown as FleetshiftExtension["type"],
+            type: "acme.custom" as unknown as FleetExtension["type"],
             properties: { id: "", label: "" },
           },
         ],
@@ -395,8 +395,8 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module",
-            properties: null as unknown as FleetshiftExtension["properties"],
+            type: "ocm-fleet.module",
+            properties: null as unknown as FleetExtension["properties"],
           },
         ],
         {},
@@ -409,11 +409,11 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module-group",
+            type: "ocm-fleet.module-group",
             properties: validModuleGroup,
           },
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "navigation",
@@ -431,7 +431,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "navigation",
@@ -449,11 +449,11 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module-group",
+            type: "ocm-fleet.module-group",
             properties: validModuleGroup,
           },
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "nav",
@@ -462,7 +462,7 @@ describe("validateExtensionSet", () => {
             },
           },
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "nav",
@@ -481,11 +481,11 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module-group",
+            type: "ocm-fleet.module-group",
             properties: { ...validModuleGroup, id: "group-a" },
           },
           {
-            type: "fleetshift.module-group",
+            type: "ocm-fleet.module-group",
             properties: {
               ...validModuleGroup,
               id: "group-b",
@@ -493,7 +493,7 @@ describe("validateExtensionSet", () => {
             },
           },
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "overview",
@@ -502,7 +502,7 @@ describe("validateExtensionSet", () => {
             },
           },
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "overview",
@@ -521,7 +521,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "fleetshift.module",
+            type: "ocm-fleet.module",
             properties: {
               ...validModule,
               id: "",

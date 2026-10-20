@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/internal/merklelog"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/internal/merklelog"
 )
 
 func TestSelectAndVerifyAcceptsFirstMatchingProfile(t *testing.T) {

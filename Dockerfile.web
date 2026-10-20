@@ -54,15 +54,15 @@ ENV NX_SELF_HOSTED_REMOTE_CACHE_SERVER=${NX_SELF_HOSTED_REMOTE_CACHE_SERVER} \
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/build/node_modules \
     npm install --include-workspace-root \
-    -w @fleetshift/common \
-    -w @fleetshift/build-utils \
-    -w @fleetshift/web \
-    -w @fleetshift/mock-ui-plugins \
-    -w @fleetshift/kind-plugin \
+    -w @ocm-fleet/common \
+    -w @ocm-fleet/build-utils \
+    -w @ocm-fleet/web \
+    -w @ocm-fleet/mock-ui-plugins \
+    -w @ocm-fleet/kind-plugin \
     && ulimit -n 65536 \
     && NX=./node_modules/.bin/nx \
     && export NX_SELF_HOSTED_REMOTE_CACHE_SERVER="${NX_SELF_HOSTED_REMOTE_CACHE_SERVER/localhost/host.containers.internal}" \
-    && $NX run-many --target=build --projects=plugins,@fleetshift/kind-plugin \
+    && $NX run-many --target=build --projects=plugins,@ocm-fleet/kind-plugin \
     && node tools/generate-plugin-registry.mjs \
     && $NX run web:build \
     && node tools/merge-web.mjs

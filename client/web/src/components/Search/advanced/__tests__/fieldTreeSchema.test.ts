@@ -6,9 +6,9 @@ import { validateFieldTree } from "../fieldTreeSchema";
 describe("fieldTree schema", () => {
   it("suggests retained resource types and neutral namespace defaults", () => {
     expect(getNodeAt("resourceType")?.enumValues).toEqual([
-      "kind.fleetshift.io/Cluster",
-      "kind.fleetshift.io/Node",
-      "kubernetes.fleetshift.io/Object",
+      "kind.open-cluster-management.io/Cluster",
+      "kind.open-cluster-management.io/Node",
+      "kubernetes.open-cluster-management.io/Object",
     ]);
     expect(
       getNodeAt("resource.observation.metadata.namespace")?.enumValues,

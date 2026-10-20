@@ -33,7 +33,7 @@ export const CORE_EXTENSION_META: Record<string, CoreExtensionMeta> = {
 
 // --- IndexedDB stores via createIDBStore ---
 
-const EXTENSION_DB_NAME = "ome-extensions";
+const EXTENSION_DB_NAME = "ocm-fleet-extensions";
 const EXTENSION_DB_VERSION = 3;
 
 const INSTALL_STATE_STORE = "install-state";

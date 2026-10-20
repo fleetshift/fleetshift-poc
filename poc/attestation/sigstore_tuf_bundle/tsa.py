@@ -37,8 +37,8 @@ def _run_openssl(*args: str) -> bytes:
 class RFC3161TimestampAuthority:
     """Memory-scoped external-TSA analogue backed by OpenSSL RFC 3161."""
 
-    def __init__(self, name: str = "fleetshift external TSA") -> None:
-        self._tempdir = tempfile.TemporaryDirectory(prefix="fleetshift-tsa-")
+    def __init__(self, name: str = "ocm-fleet external TSA") -> None:
+        self._tempdir = tempfile.TemporaryDirectory(prefix="ocm-fleet-tsa-")
         self._path = Path(self._tempdir.name)
         self._lock = threading.Lock()
         root_key = ec.generate_private_key(ec.SECP256R1())
@@ -204,7 +204,7 @@ def verify_rfc3161_timestamp(
 ) -> dt.datetime:
     """Verify the token, its PKI, and message imprint; return trusted time."""
 
-    with tempfile.TemporaryDirectory(prefix="fleetshift-ts-verify-") as tempdir:
+    with tempfile.TemporaryDirectory(prefix="ocm-fleet-ts-verify-") as tempdir:
         directory = Path(tempdir)
         token_path = directory / "response.tsr"
         signature_path = directory / "signature.bin"

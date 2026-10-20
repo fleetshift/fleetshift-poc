@@ -12,8 +12,8 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // awaitDoneCtx waits for a delivery result until ctx is done.
@@ -37,7 +37,7 @@ func TestKindAgent_Docker_IndexingRuntimeEnsureAndStop(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 
-	const resourceID = "fleetshift-idx-lifecycle"
+	const resourceID = "ocm-fleet-idx-lifecycle"
 	kindName := encodedKindName(resourceID)
 	t.Cleanup(func() {
 		_ = checker.Delete(kindName, "")

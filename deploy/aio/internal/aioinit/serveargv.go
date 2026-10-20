@@ -9,34 +9,34 @@ import (
 
 const (
 	// DefaultUIClientID is the browser OIDC client ID.
-	DefaultUIClientID = "fleetshift-ui"
+	DefaultUIClientID = "ocm-fleet-console"
 	// DefaultPeerDexUIScope is the Dex-on browser scope (Issuer == PeerDexIssuer).
-	// audience:server:client_id:fleetshift is Dex cross-client trust so access
-	// tokens include the fleetshift resource-server audience.
-	DefaultPeerDexUIScope = "openid profile email groups audience:server:client_id:fleetshift"
+	// audience:server:client_id:resource-manager is Dex cross-client trust so access
+	// tokens include the resource-manager audience.
+	DefaultPeerDexUIScope = "openid profile email groups audience:server:client_id:resource-manager"
 	// DefaultExternalIssuerUIScope is the Dex-off browser scope (any other Issuer).
 	// Standard OIDC only: Keycloak and other IdPs reject Dex's
 	// audience:server:client_id:… scope with invalid_scope.
 	DefaultExternalIssuerUIScope = "openid profile email"
 	// DefaultResourceAudience is the ordinary AuthMethod audience.
-	DefaultResourceAudience = "fleetshift"
+	DefaultResourceAudience = "resource-manager"
 	// DefaultEnrollmentAudience is the signing enrollment audience.
-	DefaultEnrollmentAudience = "fleetshift-signing"
+	DefaultEnrollmentAudience = "resource-manager-signing"
 	// DefaultRegistryID is the default external key registry.
 	DefaultRegistryID = "github.com"
 	// DefaultRegistrySubjectExpression maps preferred_username.
 	DefaultRegistrySubjectExpression = "claims.preferred_username"
 
-	defaultServeDB     = "/data/fleetshift.db"
+	defaultServeDB     = "/data/resource-manager.db"
 	defaultServeWebDir = "/srv/web"
 	// defaultServeLogLevel is the packaging default when a logger level is omitted.
 	defaultServeLogLevel = "error"
 
 	// ServeExecPath is where aio-init writes the executable serve wrapper.
-	ServeExecPath = "/run/fleetshift/exec-serve"
+	ServeExecPath = "/run/ocm-fleet/exec-serve"
 )
 
-// ServeConfig is packaging-resolved configuration for `fleetshift serve`.
+// ServeConfig is packaging-resolved configuration for `resource-manager serve`.
 type ServeConfig struct {
 	Endpoints          Endpoints
 	Issuer             string // peer or external
@@ -57,7 +57,7 @@ type ServeConfig struct {
 // ApplyServeDefaults fills packaging defaults for omitted serve fields.
 // Omitted UIScope uses DefaultPeerDexUIScope when Issuer is PeerDexIssuer,
 // otherwise DefaultExternalIssuerUIScope. OIDC wire invariants (issuer URL, CA,
-// registry pairing) are enforced by fleetshift serve when the generated argv
+// registry pairing) are enforced by resource-manager serve when the generated argv
 // runs.
 func ApplyServeDefaults(in ServeConfig) ServeConfig {
 	if in.UIClientID == "" {
@@ -95,7 +95,7 @@ func ApplyServeDefaults(in ServeConfig) ServeConfig {
 	return in
 }
 
-// ResolveLogLevel maps a LOG_LEVEL string to a FleetShift and Dex logger level.
+// ResolveLogLevel maps a LOG_LEVEL string to a logger level for the resource manager server and Dex.
 // Empty or whitespace becomes "error". Allowed values are debug, info, warn,
 // and error; any other value returns an error.
 func ResolveLogLevel(raw string) (string, error) {
@@ -119,7 +119,7 @@ func uiScopeForIssuer(issuer string) string {
 	return DefaultExternalIssuerUIScope
 }
 
-// ServeArgs returns the argv for `fleetshift` including the serve subcommand.
+// ServeArgs returns the argv for `resource-manager` including the serve subcommand.
 func ServeArgs(in ServeConfig) []string {
 	args := []string{
 		"serve",
@@ -154,14 +154,14 @@ func ServeArgs(in ServeConfig) []string {
 	return args
 }
 
-// WriteServeExecScript atomically writes an executable fleetshift serve wrapper at path.
+// WriteServeExecScript atomically writes an executable resource-manager serve wrapper at path.
 func WriteServeExecScript(path string, args []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	b.WriteString("exec /usr/local/bin/fleetshift")
+	b.WriteString("exec /usr/local/bin/resource-manager")
 	for _, a := range args {
 		b.WriteByte(' ')
 		b.WriteString(shellQuote(a))

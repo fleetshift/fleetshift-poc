@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/temporal"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/temporal"
 )
 
 // GenerationPrecheck optionally consults application progress for a validated

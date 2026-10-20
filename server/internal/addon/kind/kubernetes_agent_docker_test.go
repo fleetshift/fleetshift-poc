@@ -19,12 +19,12 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	kubeaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/keyregistry"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // kindClusterFixture is the shared state for a kind cluster created
@@ -47,7 +47,7 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 		t.Skipf("container runtime not available: %v", err)
 	}
 
-	const resourceID = "fleetshift-k8s-agent"
+	const resourceID = "ocm-fleet-k8s-agent"
 	kindName := encodedKindName(resourceID)
 
 	t.Cleanup(func() {
@@ -354,7 +354,7 @@ type testAttestationBundle struct {
 func buildTestAttestation(t *testing.T, name domain.ResourceName, manifests []domain.Manifest) testAttestationBundle {
 	t.Helper()
 
-	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
+	provider := oidctest.Start(t, oidctest.WithAudience("ocm-fleet-enroll"))
 	signerID := domain.SubjectID("integration-user")
 	issuer := provider.IssuerURL()
 	registrySubject := domain.RegistrySubject("gh-integration-user")
@@ -366,7 +366,7 @@ func buildTestAttestation(t *testing.T, name domain.ResourceName, manifests []do
 
 	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(signerID),
-		Audience: "fleetshift-enroll",
+		Audience: "ocm-fleet-enroll",
 		Extra:    map[string]any{"preferred_username": registrySubject},
 	})
 
@@ -432,7 +432,7 @@ func buildTestAttestation(t *testing.T, name domain.ResourceName, manifests []do
 	trustBundle := []domain.TrustBundleEntry{{
 		IssuerURL:          issuer,
 		JWKSURI:            domain.EndpointURL(jwksURI),
-		EnrollmentAudience: "fleetshift-enroll",
+		EnrollmentAudience: "ocm-fleet-enroll",
 		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 			RegistryID: "github.com",
 			Expression: `claims.preferred_username`,

@@ -20,7 +20,7 @@ interface CommonModuleEntry {
 function loadCommonModulesMap(): Record<string, CommonModuleEntry> {
   const req = createRequire(import.meta.url);
   const commonPkgDir = path.dirname(
-    req.resolve("@fleetshift/common/package.json"),
+    req.resolve("@ocm-fleet/common/package.json"),
   );
   const mapPath = path.resolve(commonPkgDir, "dist/common-modules.json");
   return JSON.parse(fs.readFileSync(mapPath, "utf-8"));
@@ -28,7 +28,7 @@ function loadCommonModulesMap(): Record<string, CommonModuleEntry> {
 
 /**
  * Returns a `transformImport` entry for `builtin:swc-loader` that
- * rewrites barrel imports from `@fleetshift/common` into per-file
+ * rewrites barrel imports from `@ocm-fleet/common` into per-file
  * deep imports under `dist/dynamic/`.
  *
  * The naive `{{ member }}` template is corrected at resolution time
@@ -36,8 +36,8 @@ function loadCommonModulesMap(): Record<string, CommonModuleEntry> {
  */
 export function createCommonTransformImport(): TransformImportEntry {
   return {
-    libraryName: "@fleetshift/common",
-    customName: "@fleetshift/common/dist/dynamic/{{ member }}",
+    libraryName: "@ocm-fleet/common",
+    customName: "@ocm-fleet/common/dist/dynamic/{{ member }}",
     transformToDefaultImport: false,
   };
 }
@@ -48,7 +48,7 @@ export function createCommonTransformImport(): TransformImportEntry {
  * `common-modules.json`.
  *
  * The transform emits paths like:
- *   `@fleetshift/common/dist/dynamic/loadPfIcon`
+ *   `@ocm-fleet/common/dist/dynamic/loadPfIcon`
  * but `loadPfIcon` lives in `dist/dynamic/pfIconLoader`.
  * This plugin intercepts those requests and rewrites them.
  */
@@ -57,8 +57,8 @@ export function createCommonModuleReplacementPlugin(): RspackPluginInstance {
 
   const corrections = new Map<string, string>();
   for (const [exportName, entry] of Object.entries(moduleMap)) {
-    const naivePath = `@fleetshift/common/dist/dynamic/${exportName}`;
-    const actualPath = `@fleetshift/common/${entry.path}`;
+    const naivePath = `@ocm-fleet/common/dist/dynamic/${exportName}`;
+    const actualPath = `@ocm-fleet/common/${entry.path}`;
     if (naivePath !== actualPath) {
       corrections.set(naivePath, actualPath);
     }

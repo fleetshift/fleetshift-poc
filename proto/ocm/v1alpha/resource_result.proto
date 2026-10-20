@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+
+// ResourceResult is one row returned by
+// [ResourceQueryService.QueryResources][ocm.v1alpha.ResourceQueryService.QueryResources].
+message ResourceResult {
+  // Canonical full resource name.
+  // Format: `//{service}/{collection}/{id}`.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Stable type identity.
+  // Format: `{service}/{type}` (e.g. `kind.open-cluster-management.io/Cluster`).
+  string resource_type = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Managed-resource Get/List body encoded as Struct. Field names follow
+  // the dynamic managed-resource message (protojson casing). This is not
+  // a typed AIP resource message; typed bodies are deferred.
+  google.protobuf.Struct resource = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

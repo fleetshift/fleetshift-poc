@@ -5,10 +5,10 @@ import {
   createPfModuleReplacementPlugin,
   createPfTransformImport,
   createSearchResultRenderer,
-  FleetshiftPlugin,
+  FleetPlugin,
   getCommonDynamicModules,
   getDynamicModules,
-} from "@fleetshift/build-utils";
+} from "@ocm-fleet/build-utils";
 import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
 import type { Configuration } from "@rspack/core";
 import rspack from "@rspack/core";
@@ -69,7 +69,7 @@ const mfOverride = {
 
 const p = (rel: string) => path.resolve(configDir, rel);
 
-const KindPlugin = new FleetshiftPlugin({
+const KindPlugin = new FleetPlugin({
   extensions: [
     createClusterProvider({
       id: "kind",
@@ -85,7 +85,7 @@ const KindPlugin = new FleetshiftPlugin({
     createSearchResultRenderer({
       id: "kind-cluster-renderer",
       label: "Kind Cluster",
-      resourceType: "kind.fleetshift.io/Cluster",
+      resourceType: "kind.open-cluster-management.io/Cluster",
       resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
       icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
     }),

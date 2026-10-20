@@ -62,7 +62,7 @@ import "fmt"
 // scope for now.
 //
 // See query_repo_bench_test.go's TestQueryResourcesExplainPlan
-// (FLEETSHIFT_QUERY_BENCH=1) for measured plans.
+// (OCM_RM_QUERY_BENCH=1) for measured plans.
 func buildQueryResourcesSQL(predicateSQL, keysetSQL string, order querySupportedOrder, limitPlaceholder int) string {
 	return fmt.Sprintf(`
 WITH filtered_page AS MATERIALIZED (

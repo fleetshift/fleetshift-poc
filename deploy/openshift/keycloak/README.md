@@ -1,6 +1,6 @@
 # OpenShift Keycloak
 
-This OpenShift example provides production-like Keycloak for OIDC integration testing and demos. It deploys RHBK (operator-managed), PostgreSQL, TLS via cert-manager, and the FleetShift realm.
+This OpenShift example provides production-like Keycloak for OIDC integration testing and demos. It deploys RHBK (operator-managed), PostgreSQL, TLS via cert-manager, and the OCM Fleet realm.
 
 Everything runs in the `keycloak-prod` namespace.
 
@@ -35,7 +35,7 @@ oc get secret ocp-console-client-secret -n keycloak-prod \
   -o jsonpath='{.data.clientSecret}' | base64 -d
 ```
 
-This is the `ocp-console` client secret (cluster console OIDC), not the FleetShift UI.
+This is the `ocp-console` client secret (cluster console OIDC), not the OCM Fleet UI.
 
 ## Add Users
 
@@ -60,8 +60,8 @@ oc get route -n keycloak-prod -o jsonpath='{.items[0].spec.host}'
 ```
 
 - **Admin console:** `https://<host>/admin`
-- **Realm account:** `https://<host>/realms/fleetshift/account`
-- **OIDC discovery:** `https://<host>/realms/fleetshift/.well-known/openid-configuration`
+- **Realm account:** `https://<host>/realms/ocm-fleet/account`
+- **OIDC discovery:** `https://<host>/realms/ocm-fleet/.well-known/openid-configuration`
 
 Admin credentials:
 
@@ -74,10 +74,10 @@ oc get secret keycloak-initial-admin -n keycloak-prod \
 
 | Client ID | Type | Purpose |
 |---|---|---|
-| `fleetshift` | Confidential (no flows) | Resource server — audience target and role container |
-| `fleetshift-ui` | Public | UI authentication |
-| `fleetshift-cli` | Public | CLI authentication + device auth |
-| `fleetshift-signing` | Public | Key enrollment / attestation |
+| `resource-manager` | Confidential (no flows) | Resource server — audience target and role container |
+| `ocm-fleet-console` | Public | UI authentication |
+| `fleetctl` | Public | CLI authentication + device auth |
+| `resource-manager-signing` | Public | Key enrollment / attestation |
 | `ocp-console` | Confidential | OCP console OIDC login |
 
 ## Realm Users

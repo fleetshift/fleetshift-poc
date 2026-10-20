@@ -1,4 +1,4 @@
-import type { SearchEntry } from "@fleetshift/common";
+import type { SearchEntry } from "@ocm-fleet/common";
 import type { Orama } from "@orama/orama";
 import { create, insert, search } from "@orama/orama";
 

@@ -2,7 +2,7 @@
 
 ## What this doc covers
 
-The trust machinery used to authenticate FleetShift delivery evidence:
+The trust machinery used to authenticate OCM Fleet delivery evidence:
 
 - bootstrapped and subsequently updated authority configuration
 - canonical principal identity and multi-tenant authority partitioning
@@ -52,7 +52,7 @@ root.
 
 ## Overview
 
-FleetShift deliveries often outlive the credential or interactive session that
+OCM Fleet deliveries often outlive the credential or interactive session that
 created them, and they cross a resource manager that the target should not have
 to trust as the author of user or workload intent. The target therefore needs
 durable cryptographic evidence answering three questions:
@@ -127,7 +127,7 @@ The broader delivery security model is defined in
 [security.md](../security.md). This section states the narrower guarantee and
 threat boundary of provenance verification.
 
-The resource manager remains FleetShift's primary API and authorization
+The resource manager server remains the platform's primary API and authorization
 engine. It authenticates callers, evaluates stateful permissions, stores
 intent and evidence, coordinates addons, builds deliveries, and routes them to
 targets. Reproducing all of that policy at every target is not a goal.
@@ -136,7 +136,7 @@ This is still a substantial change from the usual management-plane boundary.
 In many fleet and GitOps systems, the controller's accepted input and
 privileged apply path share one trust boundary: after controller compromise,
 the target cannot distinguish authentic user or workload intent from a
-fabricated command. FleetShift instead carries content-bound assertions
+fabricated command. The resource manager instead carries content-bound assertions
 through the management plane for independent verification at the target.
 
 The provenance design therefore adds a narrower end-to-end guarantee:
@@ -213,7 +213,7 @@ appropriate provider-wide scope.
 ### Authority registry
 
 Trust configuration is organized by canonical **principal authority**, not by
-FleetShift tenant and not by a globally named trust-domain object.
+OCM Fleet tenant and not by a globally named trust-domain object.
 
 Conceptually:
 
@@ -260,7 +260,7 @@ Credential methods under the authority describe validation of live JWTs,
 X.509 credentials, and request-signing key bindings independently from the
 provenance profiles used for durable evidence.
 
-One authority config may serve one FleetShift tenant or many tenant
+One authority config may serve one OCM Fleet tenant or many tenant
 partitions. A provider-operated multi-tenant IdP or CA therefore does not
 require every tenant to duplicate the same trust configuration.
 
@@ -281,10 +281,10 @@ the unpartitioned tenant under that authority.
 
 The configured credential or provenance implementation derives the partition
 from verified material: for example, a JWT claim, an X.509 OID or SAN component,
-or authenticated continuity state. It need not be a FleetShift-specific claim.
+or authenticated continuity state. It need not be an OCM Fleet-specific claim.
 Evidence hints and RM labels do not establish tenant identity.
 
-Internal FleetShift tenant IDs remain local to the resource manager for storage,
+Internal OCM Fleet tenant IDs remain local to the resource manager for storage,
 routing, and ordinary permission evaluation. The RM binds an external tenant
 identity to that local ID. Producer configuration, signed delivery scopes, and
 target provisioning use the external identity; a delivery agent does not need
@@ -716,7 +716,7 @@ locates the authority config. The target verifies the Fulcio chain and OIDC
 identity extensions, obtains Alice's canonical OIDC principal and tenant
 partition, rechecks the policy for that intent, and compares the external
 tenant identity with the signed scope and the target's provisioned tenant A.
-The target does not translate that identity to an internal FleetShift ID.
+The target does not translate that identity to an internal OCM Fleet ID.
 
 The signed intent names a provider addon as its manifest strategy. That addon
 signs the exact manifests using its provider workload authority, such as a
@@ -841,7 +841,16 @@ evidence-log position assigned at acceptance.
 
 ### Target
 
-The target or delivery agent:
+In the proposed OCM Fleet design, the fleetlet performs shared target-side
+credential and provenance verification and common attestation evaluation,
+including output and strategy-implied constraints, before handing work to an
+addon delivery agent. The delivery agent enforces addon-specific domain and
+resource constraints before applying authenticated content, so addons do not
+need to reimplement common checks. This describes a proposed component
+placement, not a claim that it is already implemented; the resource manager
+remains the primary stateful authorizer.
+
+The target-side delivery path:
 
 - begins from bootstrapped and subsequently authenticated trust state;
 - parses hints only to locate authenticated authority configuration;
@@ -887,7 +896,7 @@ See [target_delivery_contract.md](target_delivery_contract.md#generation-orderin
 
 ## Authority And Profile Lifecycle Operations
 
-Some provenance types and credential methods need FleetShift-mediated
+Some provenance types and credential methods need resource manager-mediated
 lifecycle operations; others do not. These APIs remain strongly typed per
 mechanism rather than being forced into a universal `RegisterKey` or opaque
 control payload.
@@ -900,9 +909,9 @@ Examples:
 - adapted TUF may define RM-mediated role/key initialization, metadata
   publication, or rotation when bootstrap does not wholly establish them; and
 - Fulcio keyless normally obtains a short-lived certificate externally during
-  signing and needs no FleetShift key-registration operation.
+  signing and needs no resource manager key-registration operation.
 
-Common FleetShift API conventions still apply: authenticate the caller,
+Common OCM Fleet API conventions still apply: authenticate the caller,
 perform RM authorization, route through authenticated authority config, use
 idempotency keys where needed, and integrate with durable workflows and the
 evidence log where ordering has security meaning. The provenance type or
@@ -1234,7 +1243,7 @@ in-toto statement.
 - Continuity/v3 uses the Bundle public-key identifier as an untrusted
   proof-selection hint, with a matching DSSE `keyid`. Authenticated history
   proofs remain separate support material and may be shared by many items.
-  FleetShift evidence-log inclusion is common couriered material, not profile
+  resource manager evidence-log inclusion is common couriered material, not profile
   support, and is assigned after production when the RM accepts the evidence.
 
 The selected profile validates the Bundle shape and accepts only its own
@@ -1278,7 +1287,7 @@ wall-clock time.
 ### Sigstore
 
 The initial Sigstore profile authenticates a standard Bundle v0.3 over the
-exact FleetShift assertion, as defined in
+exact OCM Fleet assertion, as defined in
 [Initial evidence encodings](#initial-evidence-encodings). A configured Fulcio
 CA authenticates the certificate and its OIDC identity extensions. A
 configured RFC 3161 TSA supplies trusted signing time for historical

@@ -1,4 +1,4 @@
-import type { OnboardingActionFormProps } from "@fleetshift/common";
+import type { OnboardingActionFormProps } from "@ocm-fleet/common";
 import {
   Button,
   EmptyState,
@@ -17,8 +17,8 @@ export function createModuleOnboardingForm(config: ModuleFormConfig) {
     onCancel,
   }: OnboardingActionFormProps) {
     return (
-      <div className="ome-setup-whats-next__body">
-        <div className="ome-setup-whats-next__inner">
+      <div className="ocm-fleet-setup-whats-next__body">
+        <div className="ocm-fleet-setup-whats-next__inner">
           <EmptyState
             headingLevel="h1"
             titleText={`Enable ${config.moduleLabel}`}

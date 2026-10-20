@@ -12,8 +12,8 @@ export type {
   ClusterDetailTabProperties,
   ClusterProviderProperties,
   EncodedCodeRef,
-  FleetshiftExtension,
-  FleetshiftPluginOptions,
+  FleetExtension,
+  FleetPluginOptions,
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
@@ -31,7 +31,7 @@ export {
   createOnboardingAction,
   createSearchResultRenderer,
   createSetup,
-  FleetshiftPlugin,
+  FleetPlugin,
   RENDER_SEARCH_TYPE,
 } from "./extensions";
 export { default as getCommonDynamicModules } from "./getCommonDynamicModules";

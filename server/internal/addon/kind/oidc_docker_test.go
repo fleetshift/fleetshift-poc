@@ -18,14 +18,14 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	kubeaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kubernetes"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/delivery"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/memworkflow"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/oidc/oidctest"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
 )
 
 // containerHostAddr returns the hostname (or IP) that kind containers
@@ -58,7 +58,7 @@ type oidcClusterResult struct {
 // the caller's identity. It starts a fake OIDC provider, delivers the
 // cluster via the kind agent, and returns the kubeconfig and provider.
 // resourceID is the platform resource ID; the kind/docker name is
-// ownership-encoded as fs--{resourceID}.
+// ownership-encoded as ocm-fleet--{resourceID}.
 func createOIDCCluster(t *testing.T, resourceID string, auth domain.DeliveryAuth) oidcClusterResult {
 	t.Helper()
 
@@ -173,9 +173,9 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		Caller: &domain.SubjectClaims{
 			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
 		},
-		Audience: []domain.Audience{"fleetshift"},
+		Audience: []domain.Audience{"resource-manager"},
 	}
-	res := createOIDCCluster(t, "fleetshift-oidc-test", auth)
+	res := createOIDCCluster(t, "ocm-fleet-oidc-test", auth)
 
 	t.Run("Auth", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -290,7 +290,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 					Issuer:  res.IssuerURL,
 				},
 			},
-			Audience: []domain.Audience{"fleetshift"},
+			Audience: []domain.Audience{"resource-manager"},
 			Token:    domain.RawToken(aliceToken),
 		}
 
@@ -325,7 +325,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 					Issuer:  res.IssuerURL,
 				},
 			},
-			Audience: []domain.Audience{"fleetshift"},
+			Audience: []domain.Audience{"resource-manager"},
 			Token:    domain.RawToken(bobToken),
 		}
 
@@ -379,7 +379,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 
-	const resourceID = "fleetshift-mr-oidc"
+	const resourceID = "ocm-fleet-mr-oidc"
 	kindName := encodedKindName(resourceID)
 
 	t.Cleanup(func() {
@@ -393,7 +393,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	hostAddr, extraSANIPs := containerHostAddr(t)
 	idp := oidctest.Start(t,
 		oidctest.WithListenAddress("0.0.0.0:0"),
-		oidctest.WithAudience("fleetshift"),
+		oidctest.WithAudience("resource-manager"),
 		oidctest.WithExtraSANIPs(extraSANIPs...),
 	)
 	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostAddr, idp.Port()))
@@ -480,7 +480,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 				Issuer:  dockerIssuer,
 			},
 		},
-		Audience: []domain.Audience{"fleetshift"},
+		Audience: []domain.Audience{"resource-manager"},
 		Token:    "platform-token",
 	})
 

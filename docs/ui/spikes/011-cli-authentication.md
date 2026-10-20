@@ -7,7 +7,7 @@
 
 ## Problem
 
-The CLI needs to authenticate the user against the same backend as the GUI. It also needs a way to authorize delegated actions — when the user asks FleetShift to act on their behalf against a cluster. In the GUI, this is handled with WebAuthn/passkeys (spike 004), but WebAuthn is a browser API. It requires a browser and a platform authenticator (biometric sensor, security key via the Web Authentication API). None of that is available in a terminal.
+The CLI needs to authenticate the user against the same backend as the GUI. It also needs a way to authorize delegated actions — when the user asks the resource manager server to act on their behalf against a cluster. In the GUI, this is handled with WebAuthn/passkeys (spike 004), but WebAuthn is a browser API. It requires a browser and a platform authenticator (biometric sensor, security key via the Web Authentication API). None of that is available in a terminal.
 
 The CLI needs both regular authentication (who are you) and step-up authentication (prove you are authorizing this specific action), using mechanisms that work in a Node.js environment.
 

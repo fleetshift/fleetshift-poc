@@ -16,10 +16,10 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	ocmv1alpha "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
 )
 
 // RegisteredService is a fully built dynamic gRPC service ready to be
@@ -496,9 +496,9 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 // marshalProvenance converts a domain Provenance to a protoreflect.Value
 // suitable for setting on the dynamic resource message's provenance field.
 func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance) (protoreflect.Value, error) {
-	pb := &fleetshiftv1.Provenance{
-		Signature: &fleetshiftv1.Signature{
-			Signer: &fleetshiftv1.FederatedIdentity{
+	pb := &ocmv1alpha.Provenance{
+		Signature: &ocmv1alpha.Signature{
+			Signer: &ocmv1alpha.FederatedIdentity{
 				Subject: string(p.Sig.Signer.Subject),
 				Issuer:  string(p.Sig.Signer.Issuer),
 			},
@@ -511,7 +511,7 @@ func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance)
 		pb.ValidUntil = timestamppb.New(p.ValidUntil)
 	}
 	for _, oc := range p.OutputConstraints {
-		pb.OutputConstraints = append(pb.OutputConstraints, &fleetshiftv1.OutputConstraint{
+		pb.OutputConstraints = append(pb.OutputConstraints, &ocmv1alpha.OutputConstraint{
 			Name:       oc.Name,
 			Expression: oc.Expression,
 		})

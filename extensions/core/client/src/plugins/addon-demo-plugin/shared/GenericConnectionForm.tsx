@@ -1,4 +1,4 @@
-import type { OnboardingActionFormProps } from "@fleetshift/common";
+import type { OnboardingActionFormProps } from "@ocm-fleet/common";
 import {
   Button,
   EmptyState,
@@ -17,16 +17,17 @@ export function createConnectionForm(config: ConnectionFormConfig) {
     onCancel,
   }: OnboardingActionFormProps) {
     return (
-      <div className="ome-setup-whats-next__body">
-        <div className="ome-setup-whats-next__inner">
+      <div className="ocm-fleet-setup-whats-next__body">
+        <div className="ocm-fleet-setup-whats-next__inner">
           <EmptyState
             headingLevel="h1"
             titleText={`Connect to ${config.providerLabel}`}
           >
             <EmptyStateBody>
-              {config.providerLabel} connection configuration is coming soon.
-              For now, click &quot;Complete&quot; to simulate a successful
-              connection.
+              This example shows the {config.providerLabel} connection step.
+              Clicking &quot;Complete&quot; simulates a successful connection.
+              It does not connect to {config.providerLabel} or provision
+              resources.
             </EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>

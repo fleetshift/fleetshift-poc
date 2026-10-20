@@ -1,5 +1,5 @@
-import type { FlatNode } from "@fleetshift/common";
-import { isCustomGroup, MORE_ENTRY_ID, NodeKind } from "@fleetshift/common";
+import type { FlatNode } from "@ocm-fleet/common";
+import { isCustomGroup, MORE_ENTRY_ID, NodeKind } from "@ocm-fleet/common";
 import {
   Dropdown,
   DropdownItem,
@@ -69,9 +69,11 @@ export function TreeItem({
     return (
       <li
         data-node-id={node.id}
-        className="ome-settings-tree-item ome-settings-tree-item--divider"
+        className="ocm-fleet-settings-tree-item ocm-fleet-settings-tree-item--divider"
       >
-        <div className="ome-settings-nav-editor__hidden-divider">Hidden</div>
+        <div className="ocm-fleet-settings-nav-editor__hidden-divider">
+          Hidden
+        </div>
       </li>
     );
   }
@@ -88,12 +90,12 @@ export function TreeItem({
     <motion.li
       data-node-id={node.id}
       className={clsx(
-        "ome-settings-tree-item",
-        node.depth === 1 && "ome-settings-tree-item--nested",
-        isElevated && "ome-settings-tree-item--elevated",
-        isGhost && !isElevated && "ome-settings-tree-item--ghost",
-        isHidden && !isElevated && "ome-settings-tree-item--hidden",
-        isDropTarget && "ome-settings-tree-item--drop-target",
+        "ocm-fleet-settings-tree-item",
+        node.depth === 1 && "ocm-fleet-settings-tree-item--nested",
+        isElevated && "ocm-fleet-settings-tree-item--elevated",
+        isGhost && !isElevated && "ocm-fleet-settings-tree-item--ghost",
+        isHidden && !isElevated && "ocm-fleet-settings-tree-item--hidden",
+        isDropTarget && "ocm-fleet-settings-tree-item--drop-target",
       )}
       layout={isKbDrag}
       initial={false}
@@ -106,12 +108,12 @@ export function TreeItem({
       }
     >
       <div
-        className={`ome-settings-tree-item__row ome-settings-tree-item__row--${kindClass}`}
+        className={`ocm-fleet-settings-tree-item__row ocm-fleet-settings-tree-item__row--${kindClass}`}
       >
         <button
           type="button"
           data-drag-handle
-          className="ome-settings-tree-item__handle"
+          className="ocm-fleet-settings-tree-item__handle"
           aria-label={`Reorder ${label}`}
           aria-roledescription="sortable"
         >
@@ -119,7 +121,7 @@ export function TreeItem({
         </button>
 
         <span
-          className={`ome-settings-tree-item__label ome-settings-tree-item__label--${kindClass}`}
+          className={`ocm-fleet-settings-tree-item__label ocm-fleet-settings-tree-item__label--${kindClass}`}
         >
           {label}
         </span>

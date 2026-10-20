@@ -1,9 +1,9 @@
-import type { SearchResultResolve } from "@fleetshift/common";
+import type { SearchResultResolve } from "@ocm-fleet/common";
 import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
 import type { ComponentType } from "react";
 
 export type SearchResultRendererExtension = Extension<
-  "fleetshift.render-search",
+  "ocm-fleet.render-search",
   {
     id: string;
     label: string;
@@ -17,5 +17,5 @@ export type SearchResultRendererExtension = Extension<
 export function isSearchResultRendererExtension(
   e: Extension,
 ): e is SearchResultRendererExtension {
-  return e.type === "fleetshift.render-search";
+  return e.type === "ocm-fleet.render-search";
 }

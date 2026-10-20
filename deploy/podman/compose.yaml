@@ -1,45 +1,45 @@
 # AIO image via compose. Public origin:
-#   https://fleetshift-sandbox.localhost:8085  (TLS edge; Dex under /idp)
+#   https://ocm-fleet.localhost:8085  (TLS edge; Dex under /idp)
 # Published: 127.0.0.1:8085 (HTTPS), 127.0.0.1:50051 (gRPC).
 # OIDC_ISSUER_URL unset → peer Dex; set → that issuer (Dex parks).
 # sqlite only. Use Nx deploy:podman:* targets — not podman compose directly.
 # If /data still has issuer https://127.0.0.1:5556/dex, run npx nx run deploy:podman:clean.
 
-x-fleetshift-aio: &fleetshift-aio
-  image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift:latest}
+x-ocm-fleet-aio: &ocm-fleet-aio
+  image: ${OCM_FLEET_IMAGE:-quay.io/stolostron/ocm-fleet:latest}
   restart: unless-stopped
   privileged: true
-  # s6 starts as root, then drops to fleetshift 1000 / dex 1001 / aio-proxy 1002.
+  # s6 starts as root, then drops to resource-manager 1000 / dex 1001 / aio-proxy 1002.
   user: "0:0"
-  # aio-init reads OIDC_* and FLEETSHIFT_* and ignores the rest.
+  # aio-init reads OIDC_* and OCM_RM_* and ignores the rest.
   env_file:
     - ../../.env
   ports:
-    - "127.0.0.1:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}:8085"
-    - "127.0.0.1:${FLEETSHIFT_SERVER_GRPC_PORT:-50051}:50051"
+    - "127.0.0.1:${OCM_RM_SERVER_HTTP_PORT:-8085}:8085"
+    - "127.0.0.1:${OCM_RM_SERVER_GRPC_PORT:-50051}:50051"
   volumes:
     - ${PODMAN_SOCKET}:/var/run/docker.sock
     - /tmp:/tmp
-    - fleetshift-data:/data
+    - ocm-fleet-data:/data
   networks:
     default: {}
     kind:
       aliases:
-        - fleetshift
+        - ocm-fleet
 
 services:
 
   # Compose service name for the AIO container (proxy + API + UI + Dex).
-  fleetshift-server:
-    <<: *fleetshift-aio
+  ocm-fleet:
+    <<: *ocm-fleet-aio
     # No command: s6 is PID 1.
 
 volumes:
-  fleetshift-data:
+  ocm-fleet-data:
 
 networks:
   default:
-    name: fleetshift
+    name: ocm-fleet
   kind:
     name: kind
     external: true

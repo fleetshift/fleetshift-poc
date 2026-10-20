@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package ocm.v1alpha;
+
+option go_package = "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha;ocmv1alpha";
+
+// TargetAccepted confirms that the platform has registered the target.
+message TargetAccepted {
+  // The target identifier that was registered.
+  string target_id = 1;
+}

@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 func TestIssuerHostname(t *testing.T) {
-	got, err := issuerHostname("https://fleetshift-sandbox.localhost:8085/idp")
+	got, err := issuerHostname("https://ocm-fleet.localhost:8085/idp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "fleetshift-sandbox.localhost" {
+	if got != "ocm-fleet.localhost" {
 		t.Fatalf("issuerHostname = %q", got)
 	}
 	if _, err := issuerHostname("https:///dex"); err == nil {
@@ -30,7 +30,7 @@ func TestIsLoopbackHostname(t *testing.T) {
 			t.Fatalf("isLoopbackHostname(%q) = false", host)
 		}
 	}
-	if isLoopbackHostname("fleetshift-sandbox.localhost") {
+	if isLoopbackHostname("ocm-fleet.localhost") {
 		t.Fatal("DNS .localhost name is not a loopback address")
 	}
 }
@@ -47,7 +47,7 @@ func TestApplyLoopbackIssuerHost_SkipsLoopback(t *testing.T) {
 
 func TestApplyLoopbackIssuerHost_AddsPatchForDNSHost(t *testing.T) {
 	cfg := toKindConfig(ClusterSpec{Name: "x", Nodes: []NodeSpec{{Role: "control-plane"}}})
-	if err := applyLoopbackIssuerHost(&cfg, "https://fleetshift-sandbox.localhost:8085/idp"); err != nil {
+	if err := applyLoopbackIssuerHost(&cfg, "https://ocm-fleet.localhost:8085/idp"); err != nil {
 		t.Fatal(err)
 	}
 	n := cfg.Nodes[0]
@@ -64,7 +64,7 @@ func TestApplyLoopbackIssuerHost_AddsPatchForDNSHost(t *testing.T) {
 		"name: kube-apiserver",
 		"namespace: kube-system",
 		`ip: "127.0.0.1"`,
-		"- fleetshift-sandbox.localhost",
+		"- ocm-fleet.localhost",
 		"hostAliases:",
 	} {
 		if !strings.Contains(body, want) {
@@ -88,10 +88,10 @@ func TestResolveConfig_LoopbackForwardAddsIssuerHost(t *testing.T) {
 		Caller: &domain.SubjectClaims{
 			FederatedIdentity: domain.FederatedIdentity{
 				Subject: "alice",
-				Issuer:  "https://fleetshift-sandbox.localhost:8085/idp",
+				Issuer:  "https://ocm-fleet.localhost:8085/idp",
 			},
 		},
-		Audience: []domain.Audience{"fleetshift"},
+		Audience: []domain.Audience{"resource-manager"},
 	}
 
 	t.Run("with loopback forward", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestApplyOIDCOverlay_CAMountCoexistsWithIssuerHost(t *testing.T) {
 		Name:  "oidc",
 		Nodes: []NodeSpec{{Role: "control-plane"}, {Role: "worker"}},
 	})
-	applyOIDCOverlay(&cfg, &OIDCSpec{}, "https://fleetshift-sandbox.localhost:8085/idp", "fleetshift", "/tmp/oidc-ca.pem")
+	applyOIDCOverlay(&cfg, &OIDCSpec{}, "https://ocm-fleet.localhost:8085/idp", "resource-manager", "/tmp/oidc-ca.pem")
 	applyIssuerHostOverlay(&cfg, "/tmp/kind-oidc-hostalias")
 
 	if len(cfg.KubeadmConfigPatches) != 1 || !strings.Contains(cfg.KubeadmConfigPatches[0], "oidc-issuer-url") {

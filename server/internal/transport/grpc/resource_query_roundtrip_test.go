@@ -17,13 +17,13 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
-	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
+	pb "github.com/stolostron/ocm-fleet/server/gen/ocm/v1alpha"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/sqlite"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
+	transportgrpc "github.com/stolostron/ocm-fleet/server/internal/transport/grpc"
 )
 
 // seedManagedCluster describes one managed extension resource to seed
@@ -290,7 +290,7 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 
 	all, err := h.client.QueryResources(ctx, &pb.QueryResourcesRequest{
 		Scope:    "-",
-		Filter:   `resourceType == "kind.fleetshift.io/Cluster"`,
+		Filter:   `resourceType == "kind.open-cluster-management.io/Cluster"`,
 		PageSize: 50,
 		OrderBy:  "resource_type,name",
 	})
@@ -377,7 +377,7 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 		// return an empty page that looks like "no matches."
 		_, err := h.client.QueryResources(context.Background(), &pb.QueryResourcesRequest{
 			Scope:  "-",
-			Filter: `resourceType in ["other.fleetshift.io/Widget"]`,
+			Filter: `resourceType in ["other.open-cluster-management.io/Widget"]`,
 		})
 		if status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("inactive type in-list: err = %v, want InvalidArgument", err)
@@ -479,7 +479,7 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 			t.Fatal("spec.name missing")
 		}
 		// Type-specific paths require a resourceType guard.
-		filter := `resourceType == "kind.fleetshift.io/Cluster" && ` +
+		filter := `resourceType == "kind.open-cluster-management.io/Cluster" && ` +
 			mustCelEq(t, "resource.spec.name", specName)
 		got := queryOne(t, h, filter)
 		gotSpec := structField(got.Resource, "spec").GetStructValue()
@@ -769,7 +769,7 @@ func TestResourceQuery_PresenceRoundTrip(t *testing.T) {
 	}
 
 	t.Run("managed_no_inventory", func(t *testing.T) {
-		results := query(t, `name == "//kind.fleetshift.io/clusters/presence"`)
+		results := query(t, `name == "//kind.open-cluster-management.io/clusters/presence"`)
 		if len(results) != 1 {
 			t.Fatalf("len=%d", len(results))
 		}
@@ -780,25 +780,25 @@ func TestResourceQuery_PresenceRoundTrip(t *testing.T) {
 		assertBodyKey(t, body, "localLabels", false)
 		assertBodyKey(t, body, "conditions", false)
 
-		if n := len(query(t, `has(resource.spec) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+		if n := len(query(t, `has(resource.spec) && name == "//kind.open-cluster-management.io/clusters/presence"`)); n != 1 {
 			t.Fatalf("has(spec)=%d", n)
 		}
-		if n := len(query(t, `"spec" in resource && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+		if n := len(query(t, `"spec" in resource && name == "//kind.open-cluster-management.io/clusters/presence"`)); n != 1 {
 			t.Fatalf("spec in resource=%d", n)
 		}
-		if n := len(query(t, `has(resource.pauseReason) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+		if n := len(query(t, `has(resource.pauseReason) && name == "//kind.open-cluster-management.io/clusters/presence"`)); n != 1 {
 			t.Fatalf("has(pauseReason)=%d", n)
 		}
-		if n := len(query(t, `has(resource.observation) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 0 {
+		if n := len(query(t, `has(resource.observation) && name == "//kind.open-cluster-management.io/clusters/presence"`)); n != 0 {
 			t.Fatalf("has(observation) on managed-only=%d", n)
 		}
-		if n := len(query(t, `!has(resource.observation) && name == "//kind.fleetshift.io/clusters/presence"`)); n != 1 {
+		if n := len(query(t, `!has(resource.observation) && name == "//kind.open-cluster-management.io/clusters/presence"`)); n != 1 {
 			t.Fatalf("!has(observation)=%d", n)
 		}
 	})
 
 	t.Run("inventory_condition_defaults", func(t *testing.T) {
-		results := query(t, `name == "//kind.fleetshift.io/clusters/with-inv"`)
+		results := query(t, `name == "//kind.open-cluster-management.io/clusters/with-inv"`)
 		if len(results) != 1 {
 			t.Fatalf("len=%d", len(results))
 		}
@@ -826,16 +826,16 @@ func TestResourceQuery_PresenceRoundTrip(t *testing.T) {
 			t.Fatal("zero lastTransitionTime should be omitted from projected Ready")
 		}
 
-		if n := len(query(t, `has(resource.conditions.Ready.status) && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 1 {
+		if n := len(query(t, `has(resource.conditions.Ready.status) && name == "//kind.open-cluster-management.io/clusters/with-inv"`)); n != 1 {
 			t.Fatalf("has(status)=%d", n)
 		}
-		if n := len(query(t, `has(resource.conditions.Ready.reason) && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 0 {
+		if n := len(query(t, `has(resource.conditions.Ready.reason) && name == "//kind.open-cluster-management.io/clusters/with-inv"`)); n != 0 {
 			t.Fatalf("has(reason) with empty=%d", n)
 		}
-		if n := len(query(t, `"reason" in resource.conditions.Ready && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 0 {
+		if n := len(query(t, `"reason" in resource.conditions.Ready && name == "//kind.open-cluster-management.io/clusters/with-inv"`)); n != 0 {
 			t.Fatalf("reason in Ready=%d", n)
 		}
-		if n := len(query(t, `has(resource.observation) && name == "//kind.fleetshift.io/clusters/with-inv"`)); n != 1 {
+		if n := len(query(t, `has(resource.observation) && name == "//kind.open-cluster-management.io/clusters/with-inv"`)); n != 1 {
 			t.Fatalf("has(empty observation)=%d", n)
 		}
 	})

@@ -28,7 +28,7 @@ function buildPreloadMap(
     if (entry.status !== "loaded") continue;
     const pluginName = entry.manifest.name;
     for (const ext of entry.manifest.extensions) {
-      if (ext.type !== "fleetshift.setup") continue;
+      if (ext.type !== "ocm-fleet.setup") continue;
       const props = ext.properties as Record<string, unknown>;
       const id = props.id as string | undefined;
       const codeRef = (props.component as { $codeRef?: string })?.$codeRef;

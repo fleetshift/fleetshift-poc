@@ -20,55 +20,55 @@ export default {
     {
       files: ["web/src/**/*.scss", "web/src/**/*.css"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-", "ome-search, ome-search__menu"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-", "ocm-fleet-search, ocm-fleet-search__menu"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/core-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-core-", "ome-core-clusters, ome-core-clusters__toolbar"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-core-", "ocm-fleet-core-clusters, ocm-fleet-core-clusters__toolbar"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/overview-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-overview-", "ome-overview-dashboard, ome-overview-capacity__bar"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-overview-", "ocm-fleet-overview-dashboard, ocm-fleet-overview-capacity__bar"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/day-one-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-day-one-", "ome-day-one-welcome, ome-day-one-welcome__card"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-day-one-", "ocm-fleet-day-one-welcome, ocm-fleet-day-one-welcome__card"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/signing-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-signing-", "ome-signing-keys, ome-signing-keys__form"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-signing-", "ocm-fleet-signing-keys, ocm-fleet-signing-keys__form"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/management-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-mgmt-", "ome-mgmt-targets, ome-mgmt-targets__row"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-mgmt-", "ocm-fleet-mgmt-targets, ocm-fleet-mgmt-targets__row"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/kind-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-kind-", "ome-kind-wizard, ome-kind-wizard__step"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-kind-", "ocm-fleet-kind-wizard, ocm-fleet-kind-wizard__step"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/settings-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-settings-", "ome-settings-nav-order, ome-settings-nav-order__item"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-settings-", "ocm-fleet-settings-nav-order, ocm-fleet-settings-nav-order__item"),
       },
     },
     {
       files: ["mock-ui-plugins/src/plugins/addon-demo-plugin/**/*.{scss,css}"],
       rules: {
-        "selector-class-pattern": pluginPattern("ome-addon-", "ome-addon-security, ome-addon-security__severity-badges"),
+        "selector-class-pattern": pluginPattern("ocm-fleet-addon-", "ocm-fleet-addon-security, ocm-fleet-addon-security__severity-badges"),
       },
     },
   ],

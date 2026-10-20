@@ -1,0 +1,54 @@
+#!/command/with-contenv sh
+# Resource manager server longrun. When peer Dex is enabled, wait for HTTPS discovery
+# through the AIO TLS edge so the serve bootstrap budget is not consumed by Dex boot.
+set -eu
+if [ -f /run/ocm-fleet/dex.enabled ]; then
+	# shellcheck disable=SC1091
+	. /run/ocm-fleet/public.env
+	i=0
+	ready=0
+	while [ "$i" -lt 30 ]; do
+		if curl -sf --max-time 2 \
+			--cacert /data/sandbox/pki/ca.crt \
+			--noproxy "${PUBLIC_HOST}" \
+			"${DEX_DISCOVERY_URL}" \
+			>/dev/null 2>&1; then
+			ready=1
+			break
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+	if [ "$ready" -ne 1 ]; then
+		echo "aio: peer Dex discovery was not ready at ${PUBLIC_ORIGIN}/idp" >&2
+		exit 1
+	fi
+fi
+# s6-setuidgid changes uid/gid only; keep HOME on the resource-manager home so
+# tools like podman do not probe /root.
+export HOME=/data
+
+# Optional kind packaging defaults (written by aio-init when a container
+# engine socket is mounted): KIND_EXPERIMENTAL_DOCKER_NETWORK and, on Dex-on,
+# KIND_LOOPBACK_FORWARD_TO for the control-plane loopback TCP proxy (which also
+# installs kube-apiserver hostAliases for the issuer hostname).
+if [ -f /run/ocm-fleet/kind.env ]; then
+	set -a
+	# shellcheck disable=SC1091
+	. /run/ocm-fleet/kind.env
+	set +a
+fi
+
+# Kind-capable launches mount an engine socket (CONTAINER_HOST). That socket is
+# often mode 0660; s6-setuidgid strips supplemental groups, so preserve the
+# socket's group via s6-applyuidgid without running the resource manager as root.
+sock="${CONTAINER_HOST-}"
+case "$sock" in
+	unix://*) sock=${sock#unix://} ;;
+	*) sock= ;;
+esac
+if [ -n "$sock" ] && [ -S "$sock" ]; then
+	sgid=$(stat -c %g "$sock")
+	exec s6-applyuidgid -u 1000 -g 1000 -G "$sgid" /run/ocm-fleet/exec-serve
+fi
+exec s6-setuidgid 1000:1000 /run/ocm-fleet/exec-serve

@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 type nodePhase uint8

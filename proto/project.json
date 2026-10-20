@@ -7,7 +7,7 @@
     "generate": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "buf generate --path proto/fleetshift"
+        "command": "buf generate --path proto/ocm"
       },
       "inputs": [
         "{projectRoot}/**/*.proto",

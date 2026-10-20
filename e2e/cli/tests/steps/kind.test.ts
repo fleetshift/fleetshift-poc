@@ -53,9 +53,9 @@ describe("kind JSON parsing", () => {
     expect(parseMetadataName('{"metadata":{"name":"e2e-abcd"}}')).toBe(
       "e2e-abcd",
     );
-    expect(
-      parseConfigMapData('{"data":{"from":"fleetshift-e2e-cli"}}'),
-    ).toEqual({ from: "fleetshift-e2e-cli" });
+    expect(parseConfigMapData('{"data":{"from":"ocm-fleet-e2e-cli"}}')).toEqual(
+      { from: "ocm-fleet-e2e-cli" },
+    );
   });
 
   it("reports invalid JSON", () => {
@@ -87,16 +87,16 @@ describe("Kubernetes node parsing", () => {
         "items": [
           {
             "metadata": {
-              "name": "fs--a-control-plane",
+              "name": "ocm-fleet--a-control-plane",
               "labels": { "node-role.kubernetes.io/control-plane": "" }
             }
           },
-          { "metadata": { "name": "fs--a-worker", "labels": {} } }
+          { "metadata": { "name": "ocm-fleet--a-worker", "labels": {} } }
         ]
       }`),
     ).toEqual([
-      { name: "fs--a-control-plane", role: "control-plane" },
-      { name: "fs--a-worker", role: "worker" },
+      { name: "ocm-fleet--a-control-plane", role: "control-plane" },
+      { name: "ocm-fleet--a-worker", role: "worker" },
     ]);
   });
 

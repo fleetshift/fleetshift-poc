@@ -1,5 +1,5 @@
 import { listResourceTypes } from "../../grpc/reflection";
-import { Output } from "../../ui";
+import { PlainOutput } from "../../ui";
 import type { CommandSpec } from "../types";
 
 export const typesCommand: CommandSpec = {
@@ -9,10 +9,10 @@ export const typesCommand: CommandSpec = {
   run: async ({ args }) => {
     const types = await listResourceTypes(args);
     if (types.length === 0) {
-      return <Output value="No extension resource types available." />;
+      return <PlainOutput value="No extension resource types available." />;
     }
     return (
-      <Output
+      <PlainOutput
         value={[
           "TYPE\tSINGULAR\tSERVICE",
           ...types.map(

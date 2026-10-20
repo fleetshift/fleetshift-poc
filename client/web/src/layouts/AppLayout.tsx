@@ -44,8 +44,15 @@ const AppMasthead = () => {
           </PageToggleButton>
         </MastheadToggle>
         <MastheadBrand>
-          <MastheadLogo component="a" href="/">
-            <img src={logo} alt="FleetShift" className="ome-masthead-logo" />
+          <MastheadLogo
+            component="a"
+            href="/"
+            className="ocm-fleet-masthead-brand"
+          >
+            <img src={logo} alt="" className="ocm-fleet-masthead-logo" />
+            <span>
+              OCM Fleet <small>Experimental</small>
+            </span>
           </MastheadLogo>
         </MastheadBrand>
       </MastheadMain>
@@ -114,7 +121,7 @@ export const AppLayout = () => (
       masthead={<AppMasthead />}
       sidebar={<Sidebar />}
       isManagedSidebar
-      className="ome-app"
+      className="ocm-fleet-app"
     >
       <PageSection isFilled hasOverflowScroll>
         <Outlet />

@@ -1,10 +1,10 @@
-import type { NavLayoutEntry, NavLayoutMore } from "@fleetshift/common";
+import type { NavLayoutEntry, NavLayoutMore } from "@ocm-fleet/common";
 import {
   CORE_EXTENSION_META,
   mergeLayout,
   orderByIds,
   useNavLayout,
-} from "@fleetshift/common";
+} from "@ocm-fleet/common";
 import {
   useExtensions,
   useResolvedExtensions,

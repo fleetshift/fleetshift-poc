@@ -1,7 +1,7 @@
-import { createIDBStore } from "@fleetshift/common";
+import { createIDBStore } from "@ocm-fleet/common";
 
 const setupStore = createIDBStore<boolean>({
-  db: "ome-setup-progress",
+  db: "ocm-fleet-setup-progress",
   version: 1,
   store: "steps",
   upgrade(db) {

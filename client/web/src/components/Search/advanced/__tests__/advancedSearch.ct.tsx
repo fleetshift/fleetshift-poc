@@ -14,7 +14,7 @@ interface SeedEntry {
 async function seedHistory(page: Page, entries: SeedEntry[]) {
   await page.evaluate((items) => {
     return new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open("fleetshift-search-history", 1);
+      const req = indexedDB.open("ocm-fleet-search-history", 1);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains("history"))
@@ -39,7 +39,7 @@ async function seedHistory(page: Page, entries: SeedEntry[]) {
 async function clearHistory(page: Page) {
   await page.evaluate(() => {
     return new Promise<void>((resolve) => {
-      const req = indexedDB.deleteDatabase("fleetshift-search-history");
+      const req = indexedDB.deleteDatabase("ocm-fleet-search-history");
       req.onsuccess = () => resolve();
       req.onerror = () => resolve();
       req.onblocked = () => resolve();
@@ -52,7 +52,7 @@ test.describe("Advanced CEL search", () => {
     const component = await mount(
       <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
     );
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu).toBeVisible();
     await expect(
       menu.getByRole("menuitem", { name: /^Resource Name/ }),
@@ -74,7 +74,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("resource.");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(
       menu.getByRole("menuitem", { name: /^Conditions/ }),
     ).toBeVisible();
@@ -89,7 +89,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("cluster");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu.getByText("Did you mean?")).toBeVisible();
   });
 
@@ -110,7 +110,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("resource.observation.kind == ");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu.getByText("Pod")).toBeVisible();
     await expect(menu.getByText("Deployment")).toBeVisible();
   });
@@ -121,10 +121,10 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill('resource.observation.kind == "Pod"');
-    const preview = component.locator(".ome-search__cel-preview-header");
+    const preview = component.locator(".ocm-fleet-search__cel-preview-header");
     await expect(preview).toBeVisible();
     await expect(
-      preview.locator(".ome-search__cel-preview-icon--valid"),
+      preview.locator(".ocm-fleet-search__cel-preview-icon--valid"),
     ).toBeVisible();
   });
 
@@ -136,10 +136,10 @@ test.describe("Advanced CEL search", () => {
     await input.fill('name == "test');
     // Wait for debounced validation (300ms debounce + margin)
     await component.page().waitForTimeout(500);
-    const preview = component.locator(".ome-search__cel-preview-header");
+    const preview = component.locator(".ocm-fleet-search__cel-preview-header");
     await expect(preview).toBeVisible();
     await expect(
-      preview.locator(".ome-search__cel-preview-icon--invalid"),
+      preview.locator(".ocm-fleet-search__cel-preview-icon--invalid"),
     ).toBeVisible();
   });
 
@@ -151,7 +151,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("resource.conditions.Ready.");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu.getByRole("menuitem", { name: /^Status/ })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: /^Reason/ })).toBeVisible();
     await expect(
@@ -184,7 +184,7 @@ test.describe("Advanced CEL search", () => {
         onExecute={noop}
       />,
     );
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
@@ -216,7 +216,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("resource.");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu).toBeVisible();
     await menu.getByRole("menuitem", { name: /^Observation/ }).click();
     await expect(menu).toBeVisible();
@@ -230,7 +230,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("resource.");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await menu.getByRole("menuitem", { name: /^Observation/ }).click();
     await menu.getByRole("menuitem", { name: /^Kind/ }).click();
     await menu.getByRole("button", { name: "==" }).click();
@@ -245,7 +245,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill("resource.observation.kind == ");
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await menu.getByRole("menuitem", { name: "Pod" }).click();
     await expect(menu).toBeVisible();
     const value = await input.inputValue();
@@ -267,7 +267,7 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill('resource.observation.kind == "Pod"');
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu).toBeVisible();
     await page.keyboard.press("Enter");
     expect(executed).toBe('resource.observation.kind == "Pod"');
@@ -288,7 +288,7 @@ test.describe("Advanced CEL search", () => {
         lastFilter="test"
       />,
     );
-    const menu = component.locator(".ome-search__autocomplete");
+    const menu = component.locator(".ocm-fleet-search__autocomplete");
     await expect(menu).toBeVisible();
     await menu.getByText("Result Item").click();
     await expect(menu).toBeHidden();
@@ -302,20 +302,24 @@ test.describe("Advanced CEL search", () => {
     );
     const input = component.getByLabel("Advanced CEL search");
     await input.fill('resource.observation.kind == "Pod"');
-    const mirror = component.locator(".ome-search__input-mirror");
+    const mirror = component.locator(".ocm-fleet-search__input-mirror");
     await expect(mirror).toBeVisible();
-    await expect(mirror.locator(".ome-search__cel-token--field")).toBeVisible();
     await expect(
-      mirror.locator(".ome-search__cel-token--operator"),
+      mirror.locator(".ocm-fleet-search__cel-token--field"),
     ).toBeVisible();
-    await expect(mirror.locator(".ome-search__cel-token--value")).toBeVisible();
+    await expect(
+      mirror.locator(".ocm-fleet-search__cel-token--operator"),
+    ).toBeVisible();
+    await expect(
+      mirror.locator(".ocm-fleet-search__cel-token--value"),
+    ).toBeVisible();
   });
 
   test("mirror overlay hidden when input is empty", async ({ mount }) => {
     const component = await mount(
       <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
     );
-    const mirror = component.locator(".ome-search__input-mirror");
+    const mirror = component.locator(".ocm-fleet-search__input-mirror");
     await expect(mirror).toBeHidden();
   });
 
@@ -346,7 +350,7 @@ test.describe("Advanced CEL search", () => {
       const component = await mount(
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu.getByText("Favorites")).toBeVisible();
       await expect(menu.getByText("Recent")).toBeVisible();
       await expect(
@@ -364,7 +368,7 @@ test.describe("Advanced CEL search", () => {
       const component = await mount(
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       // Wait for history to load from IDB
       await expect(menu.getByText("Favorites")).toBeVisible();
       // 4 field suggestions (Name, Type, Resource, has()), then favorites (1), then recent (1)
@@ -388,7 +392,7 @@ test.describe("Advanced CEL search", () => {
       const component = await mount(
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       // Wait for history to load from IDB
       await expect(menu.getByText("Recent")).toBeVisible();
       // ArrowUp from index 0 wraps to the last item (recent entry)
@@ -414,7 +418,7 @@ test.describe("Advanced CEL search", () => {
         />,
       );
       const input = component.getByLabel("Advanced CEL search");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       // Wait for history to load from IDB
       await expect(menu.getByText("Favorites")).toBeVisible();
       // Navigate to first history item (index 4 = past 4 suggestions)
@@ -442,7 +446,7 @@ test.describe("Advanced CEL search", () => {
         />,
       );
       const input = component.getByLabel("Advanced CEL search");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       // Wait for history to load from IDB
       await expect(menu.getByText("Favorites")).toBeVisible();
       // Navigate to first history item (index 4 = past 4 suggestions)
@@ -461,7 +465,7 @@ test.describe("Advanced CEL search", () => {
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
       const input = component.getByLabel("Advanced CEL search");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       // Wait for history to load from IDB
       await expect(menu.getByText("Favorites")).toBeVisible();
       await menu
@@ -482,7 +486,7 @@ test.describe("Advanced CEL search", () => {
       );
       const input = component.getByLabel("Advanced CEL search");
       await input.fill("resource.");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu).toBeVisible();
       const focused = menu.locator("li.pf-m-focus");
       // selectedIndex starts at 0 → Conditions
@@ -499,7 +503,7 @@ test.describe("Advanced CEL search", () => {
       );
       const input = component.getByLabel("Advanced CEL search");
       await input.fill("resource.");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu).toBeVisible();
       const focused = menu.locator("li.pf-m-focus");
       // ArrowUp from index 0 wraps to last (Updated)
@@ -516,7 +520,7 @@ test.describe("Advanced CEL search", () => {
       );
       const input = component.getByLabel("Advanced CEL search");
       await input.fill("resource.");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu).toBeVisible();
       // resource. has 6 children: Conditions, Observation, Labels, UID, Created, Updated
       for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowDown");
@@ -534,7 +538,7 @@ test.describe("Advanced CEL search", () => {
       );
       const input = component.getByLabel("Advanced CEL search");
       await input.fill("resource.");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu).toBeVisible();
       // ArrowDown twice → index 2 (Labels)
       await page.keyboard.press("ArrowDown");
@@ -572,7 +576,7 @@ test.describe("Advanced CEL search", () => {
       );
       const input = component.getByLabel("Advanced CEL search");
       await input.fill("resource.observation.kind ");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu.getByRole("button", { name: "==" })).toBeVisible();
       // selectedIndex starts at 0 (==), ArrowRight → index 1 (!=)
       await page.keyboard.press("ArrowRight");
@@ -595,7 +599,7 @@ test.describe("Advanced CEL search", () => {
       );
       const input = component.getByLabel("Advanced CEL search");
       await input.fill("resource.conditions.Ready.status == ");
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu).toBeVisible();
       await expect(menu.getByRole("menuitem", { name: "True" })).toBeVisible();
       const focused = menu.locator("li.pf-m-focus");
@@ -618,7 +622,7 @@ test.describe("Advanced CEL search", () => {
       const component = await mount(
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
-      const hints = component.locator(".ome-search__keyboard-hints");
+      const hints = component.locator(".ocm-fleet-search__keyboard-hints");
       await expect(hints).toBeVisible();
       await expect(hints).toContainText("navigate");
       await expect(hints).toContainText("accept");
@@ -640,13 +644,13 @@ test.describe("Advanced CEL search", () => {
       const input = component.getByLabel("Advanced CEL search");
       // Type a complete expression that won't produce suggestions or history
       await input.fill(
-        'name == "test" && resourceType == "kind.fleetshift.io/Cluster"',
+        'name == "test" && resourceType == "kind.open-cluster-management.io/Cluster"',
       );
       // Wait for suggestions to settle to combinator only
-      const menu = component.locator(".ome-search__autocomplete");
+      const menu = component.locator(".ocm-fleet-search__autocomplete");
       await expect(menu).toBeVisible();
       // The hints bar should appear since combinators ARE suggestions
-      const hints = component.locator(".ome-search__keyboard-hints");
+      const hints = component.locator(".ocm-fleet-search__keyboard-hints");
       await expect(hints).toBeVisible();
     });
 
@@ -657,7 +661,7 @@ test.describe("Advanced CEL search", () => {
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
       const input = component.getByLabel("Advanced CEL search");
-      const hints = component.locator(".ome-search__keyboard-hints");
+      const hints = component.locator(".ocm-fleet-search__keyboard-hints");
       // Field context — no operator chips
       await expect(hints).toBeVisible();
       await expect(hints).not.toContainText("operators");
@@ -670,7 +674,7 @@ test.describe("Advanced CEL search", () => {
       const component = await mount(
         <AdvancedSearchBar onDeactivate={noop} onExecute={noop} />,
       );
-      const hints = component.locator(".ome-search__keyboard-hints");
+      const hints = component.locator(".ocm-fleet-search__keyboard-hints");
       await expect(hints).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(hints).toBeHidden();

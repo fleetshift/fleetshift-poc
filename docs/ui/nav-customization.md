@@ -1,19 +1,19 @@
 # Navigation Customization — User-Created Groups and Full Layout Editing
 
-**Epic:** [OME-151 — Navigation Customization](https://redhat.atlassian.net/browse/OME-151)
-**Spike:** [OME-146 — Spike: Navigation customization design](https://redhat.atlassian.net/browse/OME-146)
+**Epic:** OME-151 — Navigation Customization
+**Spike:** OME-146 — Spike: Navigation customization design
 **Depends on:** [Module Groups](./module-groups.md) (implemented)
 **Status:** Draft
 
 **Phase stories:**
 | Phase | Story | Summary |
 |-------|-------|---------|
-| 1 | [OME-152](https://redhat.atlassian.net/browse/OME-152) | Storage and merge — NavLayoutOverride + reconciliation |
-| 2 | [OME-153](https://redhat.atlassian.net/browse/OME-153) | Tree editor — wire NavLayoutTree into settings |
-| 3 | [OME-154](https://redhat.atlassian.net/browse/OME-154) | Custom group CRUD — create, edit, delete |
-| 4 | [OME-155](https://redhat.atlassian.net/browse/OME-155) | PF Icon Gallery — manifest, Orama, virtualized grid |
-| 5 | [OME-156](https://redhat.atlassian.net/browse/OME-156) | "More" hidden items — ghost list, collapsed NavExpandable |
-| 6 | [OME-157](https://redhat.atlassian.net/browse/OME-157) | Search + AppNav updates — merged layout in search |
+| 1 | OME-152 | Storage and merge — NavLayoutOverride + reconciliation |
+| 2 | OME-153 | Tree editor — wire NavLayoutTree into settings |
+| 3 | OME-154 | Custom group CRUD — create, edit, delete |
+| 4 | OME-155 | PF Icon Gallery — manifest, Orama, virtualized grid |
+| 5 | OME-156 | "More" hidden items — ghost list, collapsed NavExpandable |
+| 6 | OME-157 | Search + AppNav updates — merged layout in search |
 
 ## Context
 
@@ -312,7 +312,7 @@ When a user moves modules into custom groups, search should reflect the customiz
 
 ```mermaid
 flowchart LR
-    BE["Backend API<br/>navLayout"] --> R["reconcile<br/>@fleetshift/common"]
+    BE["Backend API<br/>navLayout"] --> R["reconcile<br/>@ocm-fleet/common"]
     IDB[("IndexedDB<br/>override")] --> R
     R --> AN[AppNav]
     R --> S[Search]
@@ -320,14 +320,14 @@ flowchart LR
     T -- save --> IDB
 ```
 
-The reconciliation logic lives in `@fleetshift/common` so both AppNav and search consume the same merged layout.
+The reconciliation logic lives in `@ocm-fleet/common` so both AppNav and search consume the same merged layout.
 
 ## Implementation Phases
 
 ### Phase 1: Storage and Merge
 
 1. New IndexedDB store shape: `NavLayoutOverride` with full `NavLayoutEntry[]`.
-2. `mergeLayout(backend, override)` function in `@fleetshift/common`.
+2. `mergeLayout(backend, override)` function in `@ocm-fleet/common`.
 3. Migrate `useNavOrder` → `useNavLayout` (or extend it) to read/write the new shape.
 4. `AppNav` consumes merged layout instead of `orderByIds()`.
 5. Backward compat: if only a flat `string[]` exists in IndexedDB, treat it as ordering-only (no custom groups).
@@ -399,5 +399,5 @@ The reconciliation logic lives in `@fleetshift/common` so both AppNav and search
 ## Related
 
 - [Module Groups design](./module-groups.md) — plugin-defined groups (implemented)
-- [OME-123](https://redhat.atlassian.net/browse/OME-123) — Settings plugin with DnD navigation ordering (closed, current flat implementation)
+- OME-123 — Settings plugin with DnD navigation ordering (closed, current flat implementation)
 - [Feature Contracts](./feature-contracts.md) — extension model fundamentals

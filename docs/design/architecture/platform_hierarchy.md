@@ -160,7 +160,7 @@ Examples include:
 - Terraform-based flows
 - cloud-provider-specific APIs
 
-The delivery agent applies the provisioning manifests to a management target. The provisioner creates infrastructure, and newly created targets appear when their fleetlets connect to the platform.
+The delivery agent applies the provisioning manifests to a management target. The provisioner creates infrastructure, and newly created targets appear when their fleetlet instances connect to the platform.
 
 ### Target correlation
 
@@ -180,8 +180,8 @@ The bootstrap story is intentionally ambitious: a local ephemeral distribution c
 2. It deploys a provisioning addon such as CAPI
 3. It provisions a real cluster and obtains kubeconfig
 4. It deploys a proxy fleetlet so the new cluster can be managed before it can connect back on its own
-5. It deploys infrastructure management, FleetShift, configuration, and a co-located fleetlet to the remote cluster
-6. The co-located fleetlet connects to the production FleetShift
+5. It deploys infrastructure management, the resource manager server, configuration, and a co-located fleetlet to the remote cluster
+6. The co-located fleetlet connects to the production resource manager
 7. The local bootstrap instance is shut down
 
 This is a pivot from bootstrap control to self-management rather than a throwaway evaluation install.

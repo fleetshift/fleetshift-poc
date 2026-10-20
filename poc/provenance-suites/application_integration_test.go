@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/deliveryagent"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/producer"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/deliveryagent"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/producer"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
 )
 
 func TestCommonVerifierHasNoApplicationEffects(t *testing.T) {

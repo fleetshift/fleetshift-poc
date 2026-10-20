@@ -11,13 +11,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1"
 
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
+	kindaddon "github.com/stolostron/ocm-fleet/server/internal/addon/kind"
+	"github.com/stolostron/ocm-fleet/server/internal/application"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/dynamicapi"
+	"github.com/stolostron/ocm-fleet/server/internal/transport/extensionresource"
 )
 
-const kindClusterServiceName = "kind.fleetshift.v1.ClusterService"
+const kindClusterServiceName = "ocm.kind.v1alpha.ClusterService"
 
 func startReflectionServer(t *testing.T, activator *extensionresource.DynamicSchemaActivator, mux *dynamicapi.DynamicServiceMux, fileReg *dynamicapi.DynamicFileRegistry) *grpc.ClientConn {
 	t.Helper()
@@ -169,7 +169,7 @@ func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 	conn := startReflectionServer(t, activator, mux, fileReg)
 
 	// The resource message should also be resolvable.
-	resp := fileContainingSymbol(t, conn, "kind.fleetshift.v1.Cluster")
+	resp := fileContainingSymbol(t, conn, "ocm.kind.v1alpha.Cluster")
 	fdResp := resp.GetFileDescriptorResponse()
 	if fdResp == nil {
 		errResp := resp.GetErrorResponse()

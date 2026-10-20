@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // FieldPath is a CEL field-select/index chain flattened to its
@@ -44,7 +44,7 @@ const (
 
 // ComparisonOperator is the named comparison the compiler asks a
 // [SQLExpr.Compare] hook to handle. Using a named type (rather than
-// raw SQL operator strings) keeps the FleetShift field resolver from
+// raw SQL operator strings) keeps the platform field resolver from
 // depending on the compiler's SQL spelling of each operator.
 type ComparisonOperator int
 

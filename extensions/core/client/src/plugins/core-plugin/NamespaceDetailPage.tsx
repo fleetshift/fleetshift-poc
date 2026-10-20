@@ -2,7 +2,7 @@ import {
   createResourceApi,
   PluginLink,
   type ResourceResult,
-} from "@fleetshift/common";
+} from "@ocm-fleet/common";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 import {
   Breadcrumb,
@@ -52,7 +52,7 @@ export default function NamespaceDetailPage() {
     setError(null);
     k8sApi
       .get(
-        `//kubernetes.fleetshift.io/clusters/${clusterId}/apiResources/namespaces/objects/${nsUid}`,
+        `//kubernetes.open-cluster-management.io/clusters/${clusterId}/apiResources/namespaces/objects/${nsUid}`,
       )
       .then((result) => {
         if (stale) return;

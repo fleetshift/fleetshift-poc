@@ -1,5 +1,5 @@
 import { describeResourceType, listResourceTypes } from "../../grpc/reflection";
-import { Output } from "../../ui";
+import { PlainOutput } from "../../ui";
 import type { CommandSpec } from "../types";
 
 export const describeCommand: CommandSpec = {
@@ -17,7 +17,7 @@ export const describeCommand: CommandSpec = {
     if (!type) throw new Error(`unknown resource type ${requested}`);
     const description = await describeResourceType(type, args);
     return (
-      <Output
+      <PlainOutput
         value={[
           `Type:     ${type.qualifiedName}`,
           `Singular: ${type.singular}`,

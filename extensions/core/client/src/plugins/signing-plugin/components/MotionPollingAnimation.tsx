@@ -40,8 +40,8 @@ const blobTransition = (blob: (typeof blobs)[number]) => ({
 });
 
 const MotionPollingAnimation = ({ children }: MotionPollingAnimationProps) => (
-  <div className="ome-signing-poll">
-    <svg className="ome-signing-poll__svg-filters">
+  <div className="ocm-fleet-signing-poll">
+    <svg className="ocm-fleet-signing-poll__svg-filters">
       <defs>
         <filter id="goo">
           <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur" />
@@ -53,17 +53,17 @@ const MotionPollingAnimation = ({ children }: MotionPollingAnimationProps) => (
         </filter>
       </defs>
     </svg>
-    <div className="ome-signing-poll__bg" />
+    <div className="ocm-fleet-signing-poll__bg" />
     {/* Blurry copies — SVG gooey filter creates liquid bridges */}
-    <div className="ome-signing-poll__goo" aria-hidden="true">
-      <div className="ome-signing-poll__pool ome-signing-poll__pool--left" />
-      <div className="ome-signing-poll__pool ome-signing-poll__pool--right" />
-      <div className="ome-signing-poll__pool ome-signing-poll__pool--top" />
-      <div className="ome-signing-poll__pool ome-signing-poll__pool--bottom" />
+    <div className="ocm-fleet-signing-poll__goo" aria-hidden="true">
+      <div className="ocm-fleet-signing-poll__pool ocm-fleet-signing-poll__pool--left" />
+      <div className="ocm-fleet-signing-poll__pool ocm-fleet-signing-poll__pool--right" />
+      <div className="ocm-fleet-signing-poll__pool ocm-fleet-signing-poll__pool--top" />
+      <div className="ocm-fleet-signing-poll__pool ocm-fleet-signing-poll__pool--bottom" />
       {blobs.map((blob, i) => (
         <motion.div
           key={i}
-          className="ome-signing-poll__blob ome-signing-poll__blob--shadow"
+          className="ocm-fleet-signing-poll__blob ocm-fleet-signing-poll__blob--shadow"
           style={{ width: blob.size * 1.4, height: blob.size * 1.4 }}
           animate={{
             x: [-480, 480],
@@ -75,7 +75,7 @@ const MotionPollingAnimation = ({ children }: MotionPollingAnimationProps) => (
       {ghosts.map((ghost, i) => (
         <motion.div
           key={`ghost-${i}`}
-          className="ome-signing-poll__blob"
+          className="ocm-fleet-signing-poll__blob"
           style={{
             width: ghost.size,
             height: ghost.size,
@@ -91,11 +91,11 @@ const MotionPollingAnimation = ({ children }: MotionPollingAnimationProps) => (
       ))}
     </div>
     {/* Sharp blobs — crisp circles on top */}
-    <div className="ome-signing-poll__sharp" aria-hidden="true">
+    <div className="ocm-fleet-signing-poll__sharp" aria-hidden="true">
       {blobs.map((blob, i) => (
         <motion.div
           key={i}
-          className="ome-signing-poll__blob"
+          className="ocm-fleet-signing-poll__blob"
           style={{ width: blob.size, height: blob.size }}
           animate={{
             x: [-480, 480],
@@ -105,7 +105,7 @@ const MotionPollingAnimation = ({ children }: MotionPollingAnimationProps) => (
         />
       ))}
     </div>
-    {children && <div className="ome-signing-poll__text">{children}</div>}
+    {children && <div className="ocm-fleet-signing-poll__text">{children}</div>}
   </div>
 );
 

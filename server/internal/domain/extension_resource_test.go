@@ -42,12 +42,12 @@ func TestParseExtensionResourceUID_Invalid(t *testing.T) {
 
 func TestNewExtensionResourceType(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 
 	ert := NewExtensionResourceType(rt, "v1", "clusters", now)
 
 	assertEq(t, "ResourceType", ert.ResourceType(), rt)
-	assertEq(t, "APIServiceName (derived)", ert.APIServiceName(), ServiceName("kind.fleetshift.io"))
+	assertEq(t, "APIServiceName (derived)", ert.APIServiceName(), ServiceName("kind.open-cluster-management.io"))
 	assertEq(t, "APIVersion", ert.APIVersion(), APIVersion("v1"))
 	assertEq(t, "CollectionID", ert.CollectionID(), CollectionID("clusters"))
 	assertEq(t, "CreatedAt", ert.CreatedAt(), now)
@@ -59,7 +59,7 @@ func TestNewExtensionResourceType(t *testing.T) {
 
 func TestExtensionResourceType_WithManagement(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "https://issuer.example.com"}}
 
@@ -114,7 +114,7 @@ func TestNewManagementType_NilRelationRejected(t *testing.T) {
 func TestNewExtensionResource(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 	name := ResourceName("clusters/dev")
 
 	r := NewExtensionResource(uid, rt, name, now)
@@ -137,7 +137,7 @@ func TestExtensionResource_WithLabels(t *testing.T) {
 	uid := NewExtensionResourceUID()
 	labels := map[string]string{"env": "dev", "tier": "test"}
 
-	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+	r := NewExtensionResource(uid, "kind.open-cluster-management.io/Cluster", "clusters/dev", now,
 		WithExtensionLabels(labels),
 	)
 
@@ -149,7 +149,7 @@ func TestExtensionResource_SetLabels(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewExtensionResource(
 		NewExtensionResourceUID(),
-		"kind.fleetshift.io/Cluster",
+		"kind.open-cluster-management.io/Cluster",
 		"clusters/dev",
 		now,
 		WithExtensionLabels(map[string]string{"env": "dev"}),
@@ -177,7 +177,7 @@ func TestExtensionResource_WithManagedState(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
 
-	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+	r := NewExtensionResource(uid, "kind.open-cluster-management.io/Cluster", "clusters/dev", now,
 		WithManagedState("fulfillment-1"),
 	)
 
@@ -196,7 +196,7 @@ func TestExtensionResource_RecordIntent(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
 
-	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+	r := NewExtensionResource(uid, "kind.open-cluster-management.io/Cluster", "clusters/dev", now,
 		WithManagedState("fulfillment-1"),
 	)
 
@@ -216,7 +216,7 @@ func TestExtensionResource_RecordIntent_Increments(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
 
-	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+	r := NewExtensionResource(uid, "kind.open-cluster-management.io/Cluster", "clusters/dev", now,
 		WithManagedState("fulfillment-1"),
 	)
 
@@ -232,7 +232,7 @@ func TestExtensionResource_RecordIntent_WithoutManagedState(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
 
-	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
+	r := NewExtensionResource(uid, "kind.open-cluster-management.io/Cluster", "clusters/dev", now)
 
 	_, err := r.RecordIntent(json.RawMessage(`{}`), now)
 	if err == nil {
@@ -328,7 +328,7 @@ func TestNewInventoryType(t *testing.T) {
 
 func TestExtensionResourceType_WithInventory(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 
 	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
 		WithInventory(),
@@ -341,7 +341,7 @@ func TestExtensionResourceType_WithInventory(t *testing.T) {
 
 func TestExtensionResourceType_ManagedOnly_NoInventory(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "https://issuer.example.com"}}
 
@@ -356,7 +356,7 @@ func TestExtensionResourceType_ManagedOnly_NoInventory(t *testing.T) {
 
 func TestExtensionResourceType_InventoryOnly_NoManagement(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 
 	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
 		WithInventory(),
@@ -372,7 +372,7 @@ func TestExtensionResourceType_InventoryOnly_NoManagement(t *testing.T) {
 
 func TestExtensionResourceType_ManagedPlusInventory(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rt := ResourceType("kind.fleetshift.io/Cluster")
+	rt := ResourceType("kind.open-cluster-management.io/Cluster")
 	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "https://issuer.example.com"}}
 
@@ -399,7 +399,7 @@ func TestExtensionResourceType_JSONRoundTrip(t *testing.T) {
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "iss"}}
 
 	original := NewExtensionResourceType(
-		"kind.fleetshift.io/Cluster", "v1", "clusters", now,
+		"kind.open-cluster-management.io/Cluster", "v1", "clusters", now,
 		WithManagement(relation, sig),
 	)
 
@@ -432,7 +432,7 @@ func TestExtensionResourceType_JSONRoundTrip(t *testing.T) {
 
 func TestExtensionResourceType_JSONRoundTrip_NoManagement(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	original := NewExtensionResourceType("kind.fleetshift.io/Cluster", "v1", "clusters", now)
+	original := NewExtensionResourceType("kind.open-cluster-management.io/Cluster", "v1", "clusters", now)
 
 	data, err := json.Marshal(original)
 	if err != nil {

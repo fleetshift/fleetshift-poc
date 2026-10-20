@@ -24,7 +24,7 @@ export function configDirectory(value?: string): string {
   return (
     value ||
     process.env.FLEETCTL_CONFIG_DIR ||
-    join(homedir(), ".config", "fleetshift")
+    join(homedir(), ".config", "ocm-fleet")
   );
 }
 

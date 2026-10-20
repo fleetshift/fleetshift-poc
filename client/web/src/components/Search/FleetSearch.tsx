@@ -1,6 +1,6 @@
 import "./FleetSearch.scss";
 
-import { loadPfIcon, PluginLink } from "@fleetshift/common";
+import { loadPfIcon, PluginLink } from "@ocm-fleet/common";
 import {
   Button,
   Divider,
@@ -105,9 +105,9 @@ function MatchFields({
 }) {
   if (fields.length === 0) return null;
   return (
-    <div className="ome-search__match-fields">
+    <div className="ocm-fleet-search__match-fields">
       {fields.map((f) => (
-        <span key={f.path} className="ome-search__match-field">
+        <span key={f.path} className="ocm-fleet-search__match-field">
           {shortPath(f.path)}: <mark>{truncateValue(f.value)}</mark>
         </span>
       ))}
@@ -375,7 +375,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
           <HighlightedText html={item.title} />
           {item.status && (
             <span
-              className={`ome-search__status ome-search__status--${item.status}`}
+              className={`ocm-fleet-search__status ocm-fleet-search__status--${item.status}`}
             >
               {item.status}
             </span>
@@ -423,7 +423,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
         <HighlightedText html={item.title} />
         {item.status && (
           <span
-            className={`ome-search__status ome-search__status--${item.status}`}
+            className={`ocm-fleet-search__status ocm-fleet-search__status--${item.status}`}
           >
             {item.status}
           </span>
@@ -445,7 +445,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   );
 
   const menu = (
-    <Menu ref={menuRef} className="ome-search__menu">
+    <Menu ref={menuRef} className="ocm-fleet-search__menu">
       <MenuContent>
         <MenuList>
           {(() => {
@@ -495,14 +495,17 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
 
                 const wrapClass =
                   depth === 0
-                    ? "ome-search__tree-group"
-                    : `ome-search__tree-child${isLast ? " ome-search__tree-child--last" : ""}`;
+                    ? "ocm-fleet-search__tree-group"
+                    : `ocm-fleet-search__tree-child${isLast ? " ocm-fleet-search__tree-child--last" : ""}`;
 
                 return (
                   <div key={item.id} className={wrapClass}>
                     {renderItem(item)}
                     {hasChildren && (
-                      <div className="ome-search__tree-children" role="group">
+                      <div
+                        className="ocm-fleet-search__tree-children"
+                        role="group"
+                      >
                         {children.map((child, idx) =>
                           renderTree(
                             child,
@@ -605,7 +608,10 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
     <ToolbarItem style={{ width: "100%" }}>
       <div
         ref={containerRef}
-        className={clsx("ome-search", isAdvanced && "ome-search--advanced")}
+        className={clsx(
+          "ocm-fleet-search",
+          isAdvanced && "ocm-fleet-search--advanced",
+        )}
       >
         {isAdvanced ? (
           <AdvancedSearchBar
@@ -631,7 +637,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
             variant="plain"
             onClick={handleAdvancedToggle}
             aria-label="Toggle advanced search"
-            className="ome-search__advanced-toggle"
+            className="ocm-fleet-search__advanced-toggle"
           >
             <CodeIcon />
           </Button>

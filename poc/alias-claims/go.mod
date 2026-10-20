@@ -1,4 +1,4 @@
-module github.com/fleetshift/fleetshift-poc/poc/alias-claims
+module github.com/stolostron/ocm-fleet/poc/alias-claims
 
 go 1.26.0
 toolchain go1.26.6

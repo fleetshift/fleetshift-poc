@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
+	"github.com/stolostron/ocm-fleet/server/internal/infrastructure/querysql"
 )
 
 func TestCelTsNorm_MatchesGoFormatter(t *testing.T) {

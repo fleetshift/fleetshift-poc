@@ -25,4 +25,4 @@ plugins:
     opt:
       - output_format=yaml
       - allow_merge=true
-      - merge_file_name=fleetshift
+      - merge_file_name=ocm-fleet

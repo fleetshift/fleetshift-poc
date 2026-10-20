@@ -8,9 +8,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/directkey"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/protocol"
-	"github.com/fleetshift/fleetshift-poc/poc/provenance-suites/resourcemanager"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/directkey"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/protocol"
+	"github.com/stolostron/ocm-fleet/poc/provenance-suites/resourcemanager"
 )
 
 func TestDeliverRetainsCompleteAuthorizedActionAndDetachedObservation(t *testing.T) {

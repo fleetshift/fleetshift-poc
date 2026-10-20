@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/stolostron/ocm-fleet/server/internal/domain"
 )
 
 // Fake is an in-memory [domain.RegistryClient] for tests. Keys are

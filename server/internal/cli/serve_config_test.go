@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/bootstrap"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
+	"github.com/stolostron/ocm-fleet/server/internal/bootstrap"
+	"github.com/stolostron/ocm-fleet/server/internal/testutil"
 )
 
 func TestLoadServeConfig(t *testing.T) {

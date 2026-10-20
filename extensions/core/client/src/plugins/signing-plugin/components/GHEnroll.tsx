@@ -47,12 +47,12 @@ const GHEnroll = ({
             <img
               src={ghSigningKeyImg}
               alt="GitHub SSH key settings page — select Signing Key from the key type dropdown"
-              className="ome-signing-setup__screenshot ome-signing-setup__screenshot--light"
+              className="ocm-fleet-signing-setup__screenshot ocm-fleet-signing-setup__screenshot--light"
             />
             <img
               src={ghSigningKeyDarkImg}
               alt="GitHub SSH key settings page — select Signing Key from the key type dropdown"
-              className="ome-signing-setup__screenshot ome-signing-setup__screenshot--dark"
+              className="ocm-fleet-signing-setup__screenshot ocm-fleet-signing-setup__screenshot--dark"
             />
           </StackItem>
           <StackItem>
