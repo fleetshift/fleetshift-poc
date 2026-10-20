@@ -15,8 +15,8 @@ export type BaseExtensionProperties = {
 };
 
 export const OCM_FLEET_EXTENSION_TYPES = [
-  "ocm-fleet.module-group",
-  "ocm-fleet.module",
+  "ocm-fleet.route-group",
+  "ocm-fleet.route",
   "ocm-fleet.setup",
   "ocm-fleet.cluster-provider",
   "ocm-fleet.onboarding-action",
@@ -33,9 +33,9 @@ export type FleetExtension<
   properties: BaseExtensionProperties & TExtra;
 };
 
-export type ModuleGroupExtras = Record<never, never>;
+export type RouteGroupExtras = Record<never, never>;
 
-export type ModuleExtras = {
+export type RouteExtras = {
   component: EncodedCodeRef;
   icon: EncodedCodeRef;
   extensionPoints?: Record<string, ExtensionPointDeclaration>;
@@ -66,8 +66,8 @@ export type OnboardingActionExtras = {
   category?: FleetExtensionType;
 };
 
-export type ModuleGroupProperties = BaseExtensionProperties & ModuleGroupExtras;
-export type ModuleProperties = BaseExtensionProperties & ModuleExtras;
+export type RouteGroupProperties = BaseExtensionProperties & RouteGroupExtras;
+export type RouteProperties = BaseExtensionProperties & RouteExtras;
 export type SetupProperties = BaseExtensionProperties & SetupExtras;
 export type ClusterProviderProperties = BaseExtensionProperties &
   ClusterProviderExtras;

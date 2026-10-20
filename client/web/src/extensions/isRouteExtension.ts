@@ -8,19 +8,20 @@ export type ExtensionPointDeclaration = {
   type: string;
 };
 
-export type ModuleExtension = Extension<
-  "ocm-fleet.module",
+export type RouteExtension = Extension<
+  "ocm-fleet.route",
   {
     id: string;
     label: string;
     component: CodeRef<ComponentType>;
     icon: CodeRef<ComponentType>;
+    group?: string;
     description?: string;
     keywords?: string[];
     extensionPoints?: Record<string, ExtensionPointDeclaration>;
   } & SearchReservedProperties
 >;
 
-export function isModuleExtension(e: Extension): e is ModuleExtension {
-  return e.type === "ocm-fleet.module";
+export function isRouteExtension(e: Extension): e is RouteExtension {
+  return e.type === "ocm-fleet.route";
 }

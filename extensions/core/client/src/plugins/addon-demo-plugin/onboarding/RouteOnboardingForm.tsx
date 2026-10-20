@@ -7,12 +7,12 @@ import {
   EmptyStateFooter,
 } from "@patternfly/react-core";
 
-export interface ModuleFormConfig {
-  moduleLabel: string;
+export interface RouteFormConfig {
+  routeLabel: string;
 }
 
-export function createModuleOnboardingForm(config: ModuleFormConfig) {
-  return function ModuleForm({
+export function createRouteOnboardingForm(config: RouteFormConfig) {
+  return function RouteForm({
     onComplete,
     onCancel,
   }: OnboardingActionFormProps) {
@@ -21,10 +21,10 @@ export function createModuleOnboardingForm(config: ModuleFormConfig) {
         <div className="ocm-fleet-setup-whats-next__inner">
           <EmptyState
             headingLevel="h1"
-            titleText={`Enable ${config.moduleLabel}`}
+            titleText={`Enable ${config.routeLabel}`}
           >
             <EmptyStateBody>
-              Click &quot;Enable&quot; to activate the {config.moduleLabel}{" "}
+              Click &quot;Enable&quot; to activate the {config.routeLabel}{" "}
               extension for your fleet.
             </EmptyStateBody>
             <EmptyStateFooter>

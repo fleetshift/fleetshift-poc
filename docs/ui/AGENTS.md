@@ -1,10 +1,14 @@
 # Rules for Agents
 
-OCM Fleet console — React 18 shell + Scalprum micro-frontend plugins, rspack + Module Federation.
+OCM Fleet console — React 19 shell + Scalprum micro-frontend plugins, Rspack + Module Federation.
 
 ## Source of truth
 
 **Code > docs > diagrams.** Disagree → code wins, update doc/diagram. Design docs: `docs/ui/`. Architecture diagrams: `docs/ui/diagrams/` (LikeC4 `.c4`). Update on design changes.
+
+`index.md` is the reading guide. Document implemented behavior accurately, including important limitations. Preserve established future direction with explicit status; do not present draft proposals or removed prototypes as implemented contracts. Asset distribution remains planned: `docs/design/addon-ui-architecture.md` and the draft `docs/design/client-asset-separation.md` describe different delivery arrangements that still need reconciliation.
+
+Implemented UI references belong directly in `docs/ui/`. Use `spikes/` only for unimplemented experiments; retired link stubs may remain for existing references. Move implemented topics into the reference set and update inbound links. Mark future sections explicitly within reference pages.
 
 ## Packages
 
@@ -104,9 +108,11 @@ import clsx from "clsx";
 
 ## Plugins
 
-- Registered as `DynamicRemotePlugin` in `rspack.config.ts`.
+- Declared through `FleetPlugin` in `rspack.config.ts`; it validates metadata before delegating to `DynamicRemotePlugin`.
 - Core plugins: `extensions/core/client/src/plugins/<name>-plugin/`. Separated plugins (Kind): `extensions/<name>/client/src/` with own `rspack.config.ts` and `package.json`.
 - Extensions declare UI capabilities; Go backend reads manifests for navigation.
+- Page contributions use `ocm-fleet.route`/`createRoute` and `ocm-fleet.route-group`/`createRouteGroup`; contribution identity is `routeId`. Use route/route-group terminology for contracts, types, guards, and docs. Preserve JavaScript Module Federation names (`exposedModules`, CodeRefs, `module` props, and exposed component names).
+- New routes generate default links through `pluginPages` and `navLayout` without customization. See [routes and route groups](route-groups.md) before describing visibility, ordering, or enablement. Registry/config fetching is not live plugin discovery.
 - Shared deps (react, PF, scalprum, oidc) are MF singletons. New shared dep → update `sharedModules`.
 - `ScalprumComponent` `module` must match `exposedModules` key exactly — no `./` prefix.
 
@@ -137,11 +143,10 @@ npx nx run common:test              # vitest
 
 - `docs/ui/diagrams/<name>/` — each diagram is its own LikeC4 project (`likec4.config.json` + `.c4`). Projects must stay separate: LikeC4 merges all `.c4` files under one config into a single model.
 - **Code > diagrams.** Changed search/extensions/build/plugin code → validate `.c4` still matches. Diverged → update diagram.
-- **Generic, not specific.** Model pattern (modules → extensionPoints → extensions), not instances. Specific types = examples in descriptions only.
+- **Generic, not specific.** Model pattern (routes → extensionPoints → extensions), not instances. Specific types = examples in descriptions only.
 - Current:
   - `feature-contract/` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `sdk/build-utils/src/extensions/`, `extensions/core/client/rspack.config.ts`, `client/web/src/extensions/`.
-  - `extension-validation/` — self-validation and provider-side validation for extensions.
-  - `module-groups/` — module grouping model.
+  - `route-groups/` — route grouping and default navigation model.
   - `search/` — indexing, extensionPoint linking, query/grouping. Trigger: `client/web/src/components/Search/`.
 
 ## Verification
@@ -149,3 +154,4 @@ npx nx run common:test              # vitest
 - Don't run builds to verify. Use LSP diagnostics + browser MCP.
 - App served on port 8085. `/app/debug` route for plugin/nav troubleshooting.
 - `npx nx run web:lint` + `npx nx run common:test` before done.
+- Documentation-only audits: verify relative links, examples, source claims, and `git diff --check`. No application build is required. Validate LikeC4 syntax when tooling is available; report when it is not.

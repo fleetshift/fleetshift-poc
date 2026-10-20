@@ -15,9 +15,9 @@ import {
   type ClusterProviderProperties,
   type EncodedCodeRef,
   type FleetExtension,
-  type ModuleGroupProperties,
-  type ModuleProperties,
   type OnboardingActionProperties,
+  type RouteGroupProperties,
+  type RouteProperties,
   type SetupProperties,
 } from "./types";
 
@@ -87,8 +87,8 @@ function validateBaseProperties(
   ];
 }
 
-export function validateModuleProperties(props: ModuleProperties): string[] {
-  const ctx = `ocm-fleet.module "${props.id || "(no id)"}"`;
+export function validateRouteProperties(props: RouteProperties): string[] {
+  const ctx = `ocm-fleet.route "${props.id || "(no id)"}"`;
   return [
     ...validateBaseProperties(props, ctx),
     ...validateCodeRef(props.component, "component", ctx),
@@ -96,10 +96,10 @@ export function validateModuleProperties(props: ModuleProperties): string[] {
   ];
 }
 
-export function validateModuleGroupProperties(
-  props: ModuleGroupProperties,
+export function validateRouteGroupProperties(
+  props: RouteGroupProperties,
 ): string[] {
-  const ctx = `ocm-fleet.module-group "${props.id || "(no id)"}"`;
+  const ctx = `ocm-fleet.route-group "${props.id || "(no id)"}"`;
   return [...validateBaseProperties(props, ctx)];
 }
 
@@ -185,12 +185,12 @@ function validateSingleExtension(ext: FleetExtension): string[] {
         `${RENDER_SEARCH_TYPE} "${id}"`,
       );
     }
-    case "ocm-fleet.module-group":
-      return validateModuleGroupProperties(
-        props as unknown as ModuleGroupProperties,
+    case "ocm-fleet.route-group":
+      return validateRouteGroupProperties(
+        props as unknown as RouteGroupProperties,
       );
-    case "ocm-fleet.module":
-      return validateModuleProperties(props as unknown as ModuleProperties);
+    case "ocm-fleet.route":
+      return validateRouteProperties(props as unknown as RouteProperties);
     case "ocm-fleet.setup":
       return validateSetupProperties(props as unknown as SetupProperties);
     case "ocm-fleet.cluster-provider":
@@ -248,7 +248,7 @@ export function validateExtensionSet(
 
     if (typeof props.id === "string" && props.id.length > 0) {
       const group =
-        ext.type === "ocm-fleet.module"
+        ext.type === "ocm-fleet.route"
           ? (props.group as string | undefined)
           : undefined;
       const dedupKey = group ? `${group}.${props.id}` : props.id;
@@ -274,7 +274,7 @@ export function validateExtensionSet(
 
   const groupIds = new Set<string>();
   for (const ext of extensions) {
-    if (ext.type === "ocm-fleet.module-group") {
+    if (ext.type === "ocm-fleet.route-group") {
       const id = (ext.properties as { id?: string }).id;
       if (typeof id === "string" && id.length > 0) {
         groupIds.add(id);
@@ -282,9 +282,9 @@ export function validateExtensionSet(
     }
   }
 
-  const moduleIdsPerGroup = new Map<string, string[]>();
+  const routeIdsPerGroup = new Map<string, string[]>();
   for (const ext of extensions) {
-    if (ext.type !== "ocm-fleet.module") continue;
+    if (ext.type !== "ocm-fleet.route") continue;
     const props = asRecord(ext.properties);
     if (!props) continue;
     const group = props.group as string | undefined;
@@ -292,21 +292,19 @@ export function validateExtensionSet(
 
     if (!groupIds.has(group)) {
       errors.push(
-        `Module "${props.id}" references group "${group}" which does not exist in this plugin's extensions`,
+        `Route "${props.id}" references group "${group}" which does not exist in this plugin's extensions`,
       );
     }
 
-    const existing = moduleIdsPerGroup.get(group);
-    const moduleId = props.id as string;
+    const existing = routeIdsPerGroup.get(group);
+    const routeId = props.id as string;
     if (existing) {
-      if (existing.includes(moduleId)) {
-        errors.push(
-          `Duplicate module id "${moduleId}" within group "${group}"`,
-        );
+      if (existing.includes(routeId)) {
+        errors.push(`Duplicate route id "${routeId}" within group "${group}"`);
       }
-      existing.push(moduleId);
+      existing.push(routeId);
     } else {
-      moduleIdsPerGroup.set(group, [moduleId]);
+      routeIdsPerGroup.set(group, [routeId]);
     }
   }
 

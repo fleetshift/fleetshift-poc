@@ -3,24 +3,24 @@ import { describe, expect, it } from "vitest";
 import type {
   ClusterProviderProperties,
   FleetExtension,
-  ModuleGroupProperties,
-  ModuleProperties,
   OnboardingActionProperties,
+  RouteGroupProperties,
+  RouteProperties,
   SetupProperties,
 } from "../types";
 import {
   validateClusterProviderProperties,
   validateCodeRef,
   validateExtensionSet,
-  validateModuleGroupProperties,
-  validateModuleProperties,
   validateOnboardingActionProperties,
+  validateRouteGroupProperties,
+  validateRouteProperties,
   validateSetupProperties,
 } from "../validate";
 
 const validCodeRef = { $codeRef: "SomeModule.default" };
 
-const validModule: ModuleProperties = {
+const validRoute: RouteProperties = {
   id: "clusters",
   label: "Clusters",
   component: validCodeRef,
@@ -99,19 +99,19 @@ describe("validateCodeRef", () => {
   });
 });
 
-const validModuleGroup: ModuleGroupProperties = {
+const validRouteGroup: RouteGroupProperties = {
   id: "settings",
   label: "Settings",
 };
 
-describe("validateModuleGroupProperties", () => {
-  it("accepts valid module group", () => {
-    expect(validateModuleGroupProperties(validModuleGroup)).toEqual([]);
+describe("validateRouteGroupProperties", () => {
+  it("accepts valid route group", () => {
+    expect(validateRouteGroupProperties(validRouteGroup)).toEqual([]);
   });
 
   it("rejects empty id", () => {
-    const errors = validateModuleGroupProperties({
-      ...validModuleGroup,
+    const errors = validateRouteGroupProperties({
+      ...validRouteGroup,
       id: "",
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -119,8 +119,8 @@ describe("validateModuleGroupProperties", () => {
   });
 
   it("rejects uppercase id", () => {
-    const errors = validateModuleGroupProperties({
-      ...validModuleGroup,
+    const errors = validateRouteGroupProperties({
+      ...validRouteGroup,
       id: "BadId",
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -128,14 +128,14 @@ describe("validateModuleGroupProperties", () => {
   });
 });
 
-describe("validateModuleProperties", () => {
-  it("accepts valid module", () => {
-    expect(validateModuleProperties(validModule)).toEqual([]);
+describe("validateRouteProperties", () => {
+  it("accepts valid route", () => {
+    expect(validateRouteProperties(validRoute)).toEqual([]);
   });
 
-  it("accepts module with optional search fields", () => {
-    const errors = validateModuleProperties({
-      ...validModule,
+  it("accepts route with optional search fields", () => {
+    const errors = validateRouteProperties({
+      ...validRoute,
       searchResult: { $codeRef: "SearchResult.default" },
       searchIcon: { $codeRef: "SearchIcon.default" },
     });
@@ -143,14 +143,14 @@ describe("validateModuleProperties", () => {
   });
 
   it("rejects empty id", () => {
-    const errors = validateModuleProperties({ ...validModule, id: "" });
+    const errors = validateRouteProperties({ ...validRoute, id: "" });
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]).toContain("id");
   });
 
   it("rejects uppercase id", () => {
-    const errors = validateModuleProperties({
-      ...validModule,
+    const errors = validateRouteProperties({
+      ...validRoute,
       id: "BadId",
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -158,14 +158,14 @@ describe("validateModuleProperties", () => {
   });
 
   it("rejects empty label", () => {
-    const errors = validateModuleProperties({ ...validModule, label: "" });
+    const errors = validateRouteProperties({ ...validRoute, label: "" });
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]).toContain("label");
   });
 
   it("rejects invalid component CodeRef", () => {
-    const errors = validateModuleProperties({
-      ...validModule,
+    const errors = validateRouteProperties({
+      ...validRoute,
       component: { $codeRef: "invalid" },
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -173,8 +173,8 @@ describe("validateModuleProperties", () => {
   });
 
   it("rejects invalid icon CodeRef", () => {
-    const errors = validateModuleProperties({
-      ...validModule,
+    const errors = validateRouteProperties({
+      ...validRoute,
       icon: { $codeRef: "invalid" },
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -182,8 +182,8 @@ describe("validateModuleProperties", () => {
   });
 
   it("validates searchResult CodeRef format", () => {
-    const errors = validateModuleProperties({
-      ...validModule,
+    const errors = validateRouteProperties({
+      ...validRoute,
       searchResult: { $codeRef: "bad" },
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -324,7 +324,7 @@ describe("validateExtensionSet", () => {
   it("accepts valid extension set", () => {
     expect(() =>
       validateExtensionSet(
-        [{ type: "ocm-fleet.module", properties: validModule }],
+        [{ type: "ocm-fleet.route", properties: validRoute }],
         exposedModules,
       ),
     ).not.toThrow();
@@ -334,10 +334,10 @@ describe("validateExtensionSet", () => {
     expect(() =>
       validateExtensionSet(
         [
-          { type: "ocm-fleet.module", properties: validModule },
+          { type: "ocm-fleet.route", properties: validRoute },
           {
-            type: "ocm-fleet.module",
-            properties: { ...validModule, label: "Different" },
+            type: "ocm-fleet.route",
+            properties: { ...validRoute, label: "Different" },
           },
         ],
         exposedModules,
@@ -350,9 +350,9 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               component: { $codeRef: "MissingModule.default" },
             },
           },
@@ -395,7 +395,7 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: null as unknown as FleetExtension["properties"],
           },
         ],
@@ -404,18 +404,18 @@ describe("validateExtensionSet", () => {
     ).toThrow(/properties.*must be an object/);
   });
 
-  it("accepts module group with grouped modules", () => {
+  it("accepts route group with grouped routes", () => {
     expect(() =>
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module-group",
-            properties: validModuleGroup,
+            type: "ocm-fleet.route-group",
+            properties: validRouteGroup,
           },
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "navigation",
               group: "settings",
             },
@@ -426,14 +426,14 @@ describe("validateExtensionSet", () => {
     ).not.toThrow();
   });
 
-  it("rejects module referencing non-existent group", () => {
+  it("rejects route referencing non-existent group", () => {
     expect(() =>
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "navigation",
               group: "nonexistent",
             },
@@ -444,27 +444,27 @@ describe("validateExtensionSet", () => {
     ).toThrow(/references group "nonexistent" which does not exist/);
   });
 
-  it("rejects duplicate module ids within the same group", () => {
+  it("rejects duplicate route ids within the same group", () => {
     expect(() =>
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module-group",
-            properties: validModuleGroup,
+            type: "ocm-fleet.route-group",
+            properties: validRouteGroup,
           },
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "nav",
               label: "First",
               group: "settings",
             },
           },
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "nav",
               label: "Second",
               group: "settings",
@@ -473,38 +473,38 @@ describe("validateExtensionSet", () => {
         ],
         exposedModules,
       ),
-    ).toThrow(/Duplicate module id "nav" within group "settings"/);
+    ).toThrow(/Duplicate route id "nav" within group "settings"/);
   });
 
-  it("allows same module id in different groups", () => {
+  it("allows same route id in different groups", () => {
     expect(() =>
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module-group",
-            properties: { ...validModuleGroup, id: "group-a" },
+            type: "ocm-fleet.route-group",
+            properties: { ...validRouteGroup, id: "group-a" },
           },
           {
-            type: "ocm-fleet.module-group",
+            type: "ocm-fleet.route-group",
             properties: {
-              ...validModuleGroup,
+              ...validRouteGroup,
               id: "group-b",
               label: "Group B",
             },
           },
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "overview",
               label: "Overview A",
               group: "group-a",
             },
           },
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "overview",
               label: "Overview B",
               group: "group-b",
@@ -521,9 +521,9 @@ describe("validateExtensionSet", () => {
       validateExtensionSet(
         [
           {
-            type: "ocm-fleet.module",
+            type: "ocm-fleet.route",
             properties: {
-              ...validModule,
+              ...validRoute,
               id: "",
               label: "",
               component: { $codeRef: "Missing.default" },

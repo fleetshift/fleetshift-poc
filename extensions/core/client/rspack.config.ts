@@ -1,20 +1,20 @@
+import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
 import {
   createClusterDetailTab,
   createClusterProvider,
   createCommonModuleReplacementPlugin,
   createCommonTransformImport,
-  createModule,
-  createModuleGroup,
   createOnboardingAction,
   createPfModuleReplacementPlugin,
   createPfTransformImport,
+  createRoute,
+  createRouteGroup,
   createSearchResultRenderer,
   createSetup,
   FleetPlugin,
   getCommonDynamicModules,
   getDynamicModules,
 } from "@ocm-fleet/build-utils";
-import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
 import type { Configuration } from "@rspack/core";
 import rspack from "@rspack/core";
 import path from "path";
@@ -78,7 +78,7 @@ const p = (rel: string) => path.resolve(configDir, rel);
 
 const ManagementPlugin = new FleetPlugin({
   extensions: [
-    createModule({
+    createRoute({
       id: "targets",
       label: "Targets",
       component: { $codeRef: "TargetsPage.default" },
@@ -103,7 +103,7 @@ const ManagementPlugin = new FleetPlugin({
 
 const CorePlugin = new FleetPlugin({
   extensions: [
-    createModule({
+    createRoute({
       id: "clusters",
       label: "Clusters",
       component: { $codeRef: "ClustersModule.default" },
@@ -121,7 +121,7 @@ const CorePlugin = new FleetPlugin({
         },
       },
     }),
-    createModule({
+    createRoute({
       id: "pods",
       label: "Pods",
       component: { $codeRef: "PodsModule.default" },
@@ -129,7 +129,7 @@ const CorePlugin = new FleetPlugin({
       description: "View pod details across your fleet",
       keywords: ["pod", "container", "workload"],
     }),
-    createModule({
+    createRoute({
       id: "namespaces",
       label: "Namespaces",
       component: { $codeRef: "NamespacesModule.default" },
@@ -137,7 +137,7 @@ const CorePlugin = new FleetPlugin({
       description: "View namespace details across your fleet",
       keywords: ["namespace", "project"],
     }),
-    createModule({
+    createRoute({
       id: "nodes",
       label: "Nodes",
       component: { $codeRef: "NodesModule.default" },
@@ -207,7 +207,7 @@ const CorePlugin = new FleetPlugin({
 
 const SigningPlugin = new FleetPlugin({
   extensions: [
-    createModule({
+    createRoute({
       id: "signing-keys",
       label: "Signing Keys",
       component: { $codeRef: "SigningKeyEnrollment.default" },
@@ -265,7 +265,7 @@ const RoutingPlugin = new FleetPlugin({
 
 const OverviewPlugin = new FleetPlugin({
   extensions: [
-    createModule({
+    createRoute({
       id: "overview",
       label: "Overview",
       component: { $codeRef: "OverviewDashboard.default" },
@@ -292,13 +292,13 @@ const OverviewPlugin = new FleetPlugin({
 
 const SettingsPlugin = new FleetPlugin({
   extensions: [
-    createModuleGroup({
+    createRouteGroup({
       id: "settings",
       label: "Settings",
       description: "Workspace configuration and preferences",
       keywords: ["settings", "preferences", "configuration"],
     }),
-    createModule({
+    createRoute({
       id: "navigation",
       label: "Navigation",
       group: "settings",
@@ -307,7 +307,7 @@ const SettingsPlugin = new FleetPlugin({
       description: "Manage nav layout and workspace preferences",
       keywords: ["settings", "preferences", "nav", "order", "navigation"],
     }),
-    createModule({
+    createRoute({
       id: "extensions",
       label: "Extensions",
       group: "settings",
@@ -368,7 +368,7 @@ const SetupPlugin = new FleetPlugin({
 
 const ConfigurationPlugin = new FleetPlugin({
   extensions: [
-    createModule({
+    createRoute({
       id: "configuration",
       label: "Configuration",
       component: { $codeRef: "ConfigurationPage.default" },
@@ -400,7 +400,7 @@ const ConfigurationPlugin = new FleetPlugin({
 
 const VirtualizationPlugin = new FleetPlugin({
   extensions: [
-    createModule({
+    createRoute({
       id: "virtualization",
       label: "Virtualization",
       component: { $codeRef: "VirtualizationPage.default" },
@@ -495,8 +495,8 @@ const AddonDemoPlugin = new FleetPlugin({
       category: "ocm-fleet.cluster-provider",
     }),
 
-    // --- Module pages ---
-    createModule({
+    // --- Route pages ---
+    createRoute({
       id: "security",
       label: "Security",
       component: { $codeRef: "SecurityPage.default" },
@@ -513,7 +513,7 @@ const AddonDemoPlugin = new FleetPlugin({
         "cve",
       ],
     }),
-    createModule({
+    createRoute({
       id: "observability",
       label: "Observability",
       component: { $codeRef: "ObservabilityPage.default" },
@@ -529,7 +529,7 @@ const AddonDemoPlugin = new FleetPlugin({
         "alerting",
       ],
     }),
-    createModule({
+    createRoute({
       id: "compliance",
       label: "Compliance",
       component: { $codeRef: "CompliancePage.default" },
@@ -539,7 +539,7 @@ const AddonDemoPlugin = new FleetPlugin({
       keywords: ["compliance", "audit", "regulation", "policy", "governance"],
     }),
 
-    // --- Module onboarding ---
+    // --- Route onboarding ---
     createOnboardingAction({
       id: "security-enable",
       label: "Security",
@@ -548,7 +548,7 @@ const AddonDemoPlugin = new FleetPlugin({
       icon: { $codeRef: "SecurityIcon.default" },
       card: { $codeRef: "SecurityOnboardingCard.SecurityOnboardingCard" },
       form: { $codeRef: "SecurityOnboardingForm.default" },
-      category: "ocm-fleet.module",
+      category: "ocm-fleet.route",
     }),
     createOnboardingAction({
       id: "observability-enable",
@@ -559,7 +559,7 @@ const AddonDemoPlugin = new FleetPlugin({
         $codeRef: "ObservabilityOnboardingCard.ObservabilityOnboardingCard",
       },
       form: { $codeRef: "ObservabilityOnboardingForm.default" },
-      category: "ocm-fleet.module",
+      category: "ocm-fleet.route",
     }),
     createOnboardingAction({
       id: "compliance-enable",
@@ -568,7 +568,7 @@ const AddonDemoPlugin = new FleetPlugin({
       icon: { $codeRef: "ComplianceIcon.default" },
       card: { $codeRef: "ComplianceOnboardingCard.ComplianceOnboardingCard" },
       form: { $codeRef: "ComplianceOnboardingForm.default" },
-      category: "ocm-fleet.module",
+      category: "ocm-fleet.route",
     }),
   ],
   sharedModules,
@@ -602,7 +602,7 @@ const AddonDemoPlugin = new FleetPlugin({
       KindOnboardingIcon: p(
         "./src/plugins/addon-demo-plugin/icons/KindIcon.tsx",
       ),
-      // Module pages
+      // Route pages
       SecurityPage: p(
         "./src/plugins/addon-demo-plugin/security/SecurityPage.tsx",
       ),
@@ -612,7 +612,7 @@ const AddonDemoPlugin = new FleetPlugin({
       CompliancePage: p(
         "./src/plugins/addon-demo-plugin/compliance/CompliancePage.tsx",
       ),
-      // Module icons
+      // Route icons
       SecurityIcon: p("./src/plugins/addon-demo-plugin/icons/SecurityIcon.tsx"),
       ObservabilityIcon: p(
         "./src/plugins/addon-demo-plugin/icons/ObservabilityIcon.tsx",
@@ -620,7 +620,7 @@ const AddonDemoPlugin = new FleetPlugin({
       ComplianceIcon: p(
         "./src/plugins/addon-demo-plugin/icons/ComplianceIcon.tsx",
       ),
-      // Module onboarding
+      // Route onboarding
       SecurityOnboardingCard: p(
         "./src/plugins/addon-demo-plugin/onboarding/SecurityOnboardingCard.tsx",
       ),

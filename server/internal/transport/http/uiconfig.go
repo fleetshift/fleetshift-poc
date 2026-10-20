@@ -83,7 +83,7 @@ type navLayoutEntry struct {
 	Children  []navLayoutEntry `json:"children,omitempty"`
 }
 
-type moduleGroupMeta struct {
+type routeGroupMeta struct {
 	id        string
 	label     string
 	pluginKey string
@@ -297,7 +297,7 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 
 	for _, entry := range registry.Plugins {
 		for _, ext := range entry.PluginManifest.Extensions {
-			if ext.Type != "ocm-fleet.module" {
+			if ext.Type != "ocm-fleet.route" {
 				continue
 			}
 
@@ -355,11 +355,11 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 	return pages
 }
 
-func collectModuleGroups(registry pluginRegistry) map[string]moduleGroupMeta {
-	groups := make(map[string]moduleGroupMeta)
+func collectRouteGroups(registry pluginRegistry) map[string]routeGroupMeta {
+	groups := make(map[string]routeGroupMeta)
 	for _, entry := range registry.Plugins {
 		for _, ext := range entry.PluginManifest.Extensions {
-			if ext.Type != "ocm-fleet.module-group" {
+			if ext.Type != "ocm-fleet.route-group" {
 				continue
 			}
 			id, _ := ext.Properties["id"].(string)
@@ -367,7 +367,7 @@ func collectModuleGroups(registry pluginRegistry) map[string]moduleGroupMeta {
 				continue
 			}
 			label, _ := ext.Properties["label"].(string)
-			groups[id] = moduleGroupMeta{
+			groups[id] = routeGroupMeta{
 				id:        id,
 				label:     label,
 				pluginKey: entry.Key,
@@ -378,14 +378,14 @@ func collectModuleGroups(registry pluginRegistry) map[string]moduleGroupMeta {
 }
 
 func generateNavLayout(registry pluginRegistry, pages []pluginPage) []navLayoutEntry {
-	groups := collectModuleGroups(registry)
+	groups := collectRouteGroups(registry)
 
 	groupChildren := make(map[string][]navLayoutEntry)
 	groupedPageIDs := make(map[string]bool)
 
 	for _, entry := range registry.Plugins {
 		for _, ext := range entry.PluginManifest.Extensions {
-			if ext.Type != "ocm-fleet.module" {
+			if ext.Type != "ocm-fleet.route" {
 				continue
 			}
 			group, _ := ext.Properties["group"].(string)

@@ -2,20 +2,20 @@ import type {
   ClusterProviderExtras,
   ClusterProviderProperties,
   FleetExtension,
-  ModuleExtras,
-  ModuleGroupExtras,
-  ModuleGroupProperties,
-  ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
+  RouteExtras,
+  RouteGroupExtras,
+  RouteGroupProperties,
+  RouteProperties,
   SetupExtras,
   SetupProperties,
 } from "./types";
 import {
   validateClusterProviderProperties,
-  validateModuleGroupProperties,
-  validateModuleProperties,
   validateOnboardingActionProperties,
+  validateRouteGroupProperties,
+  validateRouteProperties,
   validateSetupProperties,
 } from "./validate";
 
@@ -27,21 +27,21 @@ function throwOnErrors(errors: string[], type: string): void {
   }
 }
 
-export function createModuleGroup(
-  properties: ModuleGroupProperties,
-): FleetExtension<"ocm-fleet.module-group", ModuleGroupExtras> {
+export function createRouteGroup(
+  properties: RouteGroupProperties,
+): FleetExtension<"ocm-fleet.route-group", RouteGroupExtras> {
   throwOnErrors(
-    validateModuleGroupProperties(properties),
-    "ocm-fleet.module-group",
+    validateRouteGroupProperties(properties),
+    "ocm-fleet.route-group",
   );
-  return { type: "ocm-fleet.module-group", properties };
+  return { type: "ocm-fleet.route-group", properties };
 }
 
-export function createModule(
-  properties: ModuleProperties,
-): FleetExtension<"ocm-fleet.module", ModuleExtras> {
-  throwOnErrors(validateModuleProperties(properties), "ocm-fleet.module");
-  return { type: "ocm-fleet.module", properties };
+export function createRoute(
+  properties: RouteProperties,
+): FleetExtension<"ocm-fleet.route", RouteExtras> {
+  throwOnErrors(validateRouteProperties(properties), "ocm-fleet.route");
+  return { type: "ocm-fleet.route", properties };
 }
 
 export function createSetup(

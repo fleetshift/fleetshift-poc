@@ -1,0 +1,114 @@
+// OCM Fleet UI — route contribution contracts and current navigation behavior.
+// Sources: sdk/build-utils/src/extensions/validate.ts;
+// server/internal/transport/http/uiconfig.go; sdk/common/src/{navLayout,useNavLayout}.ts;
+// extensions/core/client/src/plugins/settings-plugin/nav-layout/NavLayoutEditor.tsx;
+// client/web/src/components/AppNav/; client/web/src/routes/ConsoleRoutes.tsx;
+// client/web/src/components/Root/ScalprumShell.tsx;
+// client/web/src/components/Search/SearchProvider.tsx.
+
+specification {
+  element component
+  element store {
+    style {
+      shape storage
+      color amber
+    }
+  }
+}
+
+model {
+  declarations = component 'Plugin route groups + routes' {
+    description '''
+      ocm-fleet.route-group declares id and label, not a component.
+      A route's optional group references a group in the same FleetPlugin
+      extension array. validateExtensionSet checks that reference and duplicate
+      route IDs within a group. This is a per-plugin build check only.
+    '''
+  }
+  projection = component 'Go manifest projection' {
+    description '''
+      uiconfig.go reads the build registry. Runtime group maps use bare group IDs,
+      not plugin-qualified keys: collisions across plugins have no namespace safety.
+      Grouped route paths use group/id; ungrouped paths use pluginKey/id.
+      Page IDs remain pluginKey.id even when build validation allows the same route
+      ID in different groups. Duplicate paths are skipped; ID collisions remain possible.
+    '''
+  }
+  pages = store 'pluginPages: canonical page registry' {
+    description '/api/ui/config returns flat page IDs, paths, scopes and module names. This registry is independent of local layout customization.'
+  }
+  defaults = store 'navLayout: backend default tree' {
+    description '/api/ui/user-config returns groups with child pageId references and ungrouped pages without customization. Current response is not personalized per identity. Fresh config fetch is required for newly packaged declarations; no live registry discovery.'
+  }
+  editor = component 'Settings navigation editor' {
+    description '''
+      Existing full layout editor: reorder and move pages; create/edit/delete
+      custom groups; change icons; hide in More, restore, or reset to defaults.
+      Grouping is cosmetic and can move pages across their original plugin groups.
+    '''
+  }
+  local = store 'IndexedDB nav-layout override' {
+    description '''
+      Stores version: 1 plus the full layout tree, not only a flat order list.
+      useNavLayout reads and subscribes to changes. New-format override wins;
+      AppNav falls back to legacy nav-order string[] when no override exists.
+      Local browser storage, not server-side per-user/organization persistence.
+    '''
+  }
+  merged = component 'mergeLayout(defaults, override)' {
+    description 'Reconciles local layout with backend entries. Shared by navigation and search; search does not apply the legacy flat ordering fallback.'
+  }
+  nav = component 'AppNav' {
+    description '''
+      Renders pages, expandable groups and More using canonical page references.
+      Without saved order, top-level labels sort within Main/Bottom; children keep
+      backend order. Settings and Signing are Bottom; unknown scopes default Main.
+      Disabled plugins keep links with puzzle icons; missing resolved route icons
+      do not remove links. Unknown page IDs are skipped; empty groups are hidden.
+      AppNavGroup active/expanded state tests the /groupId/ path prefix, so moved
+      pages and custom groups do not reliably auto-expand from active child routes.
+      No automatic generic breadcrumb generation exists.
+    '''
+  }
+  router = component 'ConsoleRoutes + reference navigation' {
+    description '''
+      Registers canonical page routes from pluginPages. Default backend groups
+      redirect /groupId to their first child page; local custom groups do not
+      create redirects. PluginLink/hooks resolve scope + module via pluginPages.
+      Reordering, regrouping or hiding navigation does not change canonical routes.
+    '''
+  }
+  search = component 'Feature search grouping' {
+    description '''
+      SearchProvider indexes merged-layout group parents and links route entries
+      to groups via feature IDs, including entries in More. Provider children link
+      through route extensionPoints; not all extension types are indexed.
+      Search ranks by relevance, not saved navigation order. Group search URLs use
+      the first child's first path segment, which may lack a redirect for custom groups.
+    '''
+  }
+
+  declarations -> projection 'validated manifests in build registry'
+  projection -> pages '/api/ui/config'
+  projection -> defaults '/api/ui/user-config'
+  defaults -> editor 'editable starting layout'
+  editor -> local 'save or clear full override'
+  defaults -> merged 'current default layout'
+  local -> merged 'local customization'
+  merged -> nav 'effective navigation tree'
+  merged -> search 'group membership and metadata'
+  pages -> nav 'resolve pageId to label and link'
+  pages -> router 'register routes; resolve scope + module'
+  defaults -> router 'default group redirects only'
+  pages -> search 'canonical page paths'
+  nav -> router 'navigate without changing page identity'
+}
+
+views {
+  view index {
+    title 'Route groups — CURRENT defaults, local overrides and canonical routes'
+    description 'Build-local group references do not establish runtime namespace isolation. Cosmetic grouping changes navigation, not route ownership.'
+    include *
+    autoLayout LeftRight
+  }
+}

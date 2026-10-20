@@ -1,407 +1,130 @@
-# Advanced Search with CEL Expressions
+# Advanced Search with CEL
 
-**Jira:** OME-210
-**Status:** Draft
-**Authors:** Martin Marosi
+Advanced search lets users express precise fleet-wide resource filters beyond simple name-prefix searches, combining conditions in CEL. It sends the expression to `QueryResources` and displays matching resources in the masthead dropdown, using a raw-expression input with autocomplete, syntax highlighting, and browser-local history; the backend remains the authority on supported expressions and queryable fields.
 
-## Problem
+Simple search is separate: it combines Orama feature search with a limited set of inventory prefix queries. See [Feature Contracts](feature-contracts.md), [Search Result Renderers](search-result-renderer-contract.md), and the [search diagram](diagrams/search/search.c4).
 
-The current search is client-side full-text (Orama) over plugin-contributed `ocm-fleet.search-index` extensions. It handles keyword lookups well but cannot express structured queries like field comparisons, label selectors, or date ranges. Users managing fleets need to filter by status, provider, node count, labels, and other resource attributes — things that require a query language, not a text box.
+## Opening and using advanced mode
 
-## Proposal
+- Click the code icon beside search, or press Ctrl+Shift+F / Command+Shift+F to toggle advanced mode.
+- Type an expression; nonempty changes trigger a query after a 400 ms debounce.
+- Use arrow keys to select suggestions. Left/right also navigate operator suggestions when those are shown.
+- Tab accepts the selected suggestion or history item. Enter executes the expression, executes a selected history entry, or follows a selected result; it does not insert the selected autocomplete suggestion.
+- Escape closes the dropdown first. A subsequent Escape exits advanced mode.
+- Clicking outside closes the dropdown while keeping the mounted input's expression.
 
-Add CEL (Common Expression Language) as the query language for advanced search. CEL is already used in the backend for output constraints and auth policy, so extending it to search gives a consistent expression language across the stack.
+The expression is component state, not a URL query parameter or hash. Exiting advanced mode unmounts that state. Refreshing or reopening does not restore it automatically; saved history can be selected explicitly.
 
-## Architecture
+Sources: [FleetSearch](../../client/web/src/components/Search/FleetSearch.tsx), [AdvancedSearchBar](../../client/web/src/components/Search/advanced/AdvancedSearchBar.tsx).
 
-### Approach: Headless query builder with custom PatternFly UI
+## Query flow and result limits
 
-Use `@react-querybuilder/core` (Option A — logic only, no vendor UI) as the query manipulation and CEL formatting engine. Build a fully custom PatternFly interface on top.
+The UI keeps an expression string, parses cursor context for suggestions, and sends the string directly. It does not maintain a query-builder object or format one with `formatQuery`.
 
-**Why headless:** The UI must feel native to our PF design system with `ocm-fleet-` scoped styles. Wrapping a third-party widget with `controlElements` overrides (Option B) still couples us to their component tree and context. The core package gives us everything we need without the UI baggage.
-
-#### `@react-querybuilder/core` provides
-
-| Function | Import | Purpose |
-|----------|--------|---------|
-| `formatQuery(query, 'cel')` | `@react-querybuilder/core` | Query object → CEL expression string |
-| `parseCEL(celString)` | `@react-querybuilder/core/parseCEL` | CEL expression string → query object |
-| `add`, `remove`, `update`, `move`, `group` | `@react-querybuilder/core` | Immutable query object manipulation |
-
-These are pure functions — no React dependency. We manage query state in `useState` and build PF `Select`, `TextInput`, `Button`, `ChipGroup` components that call these utilities.
-
-#### Data flow
-
-```
-User interacts with PF UI
-  → query object updated via add/remove/update
-  → formatQuery(query, 'cel') produces CEL string
-  → CEL string sent as ?filter= param to QueryResources API
-  → Go backend compiles CEL to SQL, returns matching resources
+```text
+Raw expression input
+  → cursor-aware suggestions and preview
+  → debounced or explicit execution
+  → QueryResources filter parameter
+  → inventory result renderers
 ```
 
-### Backend: existing `QueryResources` endpoint
+The resource client URL-encodes the filter and uses platform scope `-`:
 
-The Go backend already has a `QueryResources` gRPC/REST endpoint that accepts a CEL `filter` string. The CEL expression is compiled to parameterized SQL (not evaluated at runtime) via an AST-to-SQL transpiler in `internal/infrastructure/querysql/querysql.go`.
-
-**CEL environment variables:**
-
-| Variable | Type | Description |
-|----------|------|-------------|
-| `name` | `string` | Full resource name, e.g. `//kind.open-cluster-management.io/clusters/my-cluster` |
-| `resourceType` | `string` | Resource type, e.g. `kind.open-cluster-management.io/Cluster` |
-| `resource` | `dyn` | Dynamic — access `.labels`, `.state`, `.spec.*`, `.conditions`, etc. |
-
-**Supported CEL operators** (built-in only, no custom functions):
-
-`==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`, `in`, `startsWith`, `timestamp()`
-
-### Resource fields available for filtering
-
-| CEL Path | Type | Description |
-|----------|------|-------------|
-| `name` | string | Envelope full name |
-| `resourceType` | string | `service/type` |
-| `resource.name` | string | Relative name (`collection/id`) |
-| `resource.uid` | string | UUID |
-| `resource.labels["key"]` | string | Managed labels (JSONB) |
-| `resource.localLabels["key"]` | string | Inventory labels |
-| `resource.intentVersion` | int | Version counter |
-| `resource.state` | enum | `CREATING`, `ACTIVE`, `DELETING`, `FAILED` |
-| `resource.pauseReason` | string | Pause reason |
-| `resource.generation` | int | Generation counter |
-| `resource.spec.*` | dynamic | Schema-validated spec fields |
-| `resource.observation.*` | dynamic | Schema-validated observation fields |
-| `resource.conditions["Type"].status` | string | Condition status |
-| `resource.conditions["Type"].reason` | string | Condition reason |
-| `resource.conditions["Type"].message` | string | Condition message |
-| `resource.conditions["Type"].lastTransitionTime` | timestamp | Condition transition time |
-| `resource.localUpdateTime` | timestamp | Local update timestamp |
-| `resource.indexUpdateTime` | timestamp | Index update timestamp |
-
-## API Contract
-
-### Filtering (exists today)
-
-The UI sends CEL expressions as the `filter` query parameter to the existing `QueryResources` endpoint; `-` selects the whole platform. The example shows a decoded filter for readability; clients URL-encode query parameters:
-
-```
-GET /apis/open-cluster-management.io/v1alpha/-:queryResources?filter=resource.state == "ACTIVE" && resource.name.startsWith("clusters/prod")&pageSize=50
+```text
+GET /apis/open-cluster-management.io/v1alpha/-:queryResources?filter=...&pageSize=20
 ```
 
-No new endpoints needed for basic filtering. The backend compiles the CEL to SQL and returns paginated results.
+Advanced search requests one page of 20 results and does not follow `nextPageToken`. It waits for renderer extension resolution before querying. Results share the inventory renderer path with simple search, including disabled fallbacks for types without a renderer. Referenced field values can be displayed beside results as context; those values are not an explanation of which boolean branch matched.
 
-### Schema discovery (new — backend work required)
+Query errors are logged and converted into an empty result list. The dropdown does not distinguish an invalid or failed request from a successful query with no matches. The current UI also logs the CEL filter, so it does not provide a filter-content privacy guarantee.
 
-The backend holds resource type schemas in an in-memory `ActiveResourceRegistry`, populated when addons connect and activate resource types via `DynamicSchemaActivator`. The registry stores compiled proto descriptors per resource type, which the `FieldResolver` already walks to validate CEL field paths. **No API currently exposes this data to the UI.**
+Sources: [resource client](../../sdk/common/src/resourceApi.ts), [inventory search](../../client/web/src/hooks/useInventorySearch.tsx), [field extraction](../../client/web/src/components/Search/advanced/extractMatchFields.ts).
 
-Proposed endpoints (not yet implemented), using Kind addon resource types as examples:
+## Examples
 
-```
-GET /v1alpha/resourceTypes
-→ [
-    { "type": "kind.open-cluster-management.io/Cluster", "apiVersion": "v1alpha" },
-    { "type": "kind.open-cluster-management.io/Node",    "apiVersion": "v1alpha" },
-    ...
-  ]
+These are decoded CEL expressions, not literal unencoded URLs:
 
-GET /v1alpha/resourceTypes/{type}/schema
-→ {
-    "type": "kind.open-cluster-management.io/Cluster",
-    "fields": [
-      { "path": "spec.name",                "type": "string" },
-      { "path": "spec.nodes",               "type": "repeated", "itemType": "message" },
-      { "path": "spec.networking.podSubnet", "type": "string" },
-      ...
-    ]
-  }
+```cel
+resourceType == "kind.open-cluster-management.io/Cluster"
 ```
 
-These read from the existing `ActiveResourceRegistry` and serialize the proto descriptors into a flat field list the UI can consume. The field `type` maps to CEL types so the UI knows which operators to offer.
-
-### Schema change events (new — backend work required)
-
-When the `ActiveResourceRegistry` mutates — addon installed, schema activated, resource type added/removed/updated — the backend broadcasts a WebSocket event so the UI can refresh its field registry without polling.
-
-This is a **type-level** event, not per-instance. It fires on structural changes to the resource type collection:
-
-- Addon installation / uninstallation
-- Schema activation / deactivation
-- Resource type collection added / removed / mutated
-
-```
-WS /api/ui/events/ws
-
-← { "eventKind": "schema.registry.changed",
-    "resourceType": "kind.open-cluster-management.io/Cluster",
-    "action": "activated",
-    "timestamp": 1721474400 }
+```cel
+resourceType == "kubernetes.open-cluster-management.io/Object" && resource.observation.kind == "Pod"
 ```
 
-The UI receives this event and re-fetches `/v1alpha/resourceTypes` and any cached per-type schemas. This keeps the field registry in sync without polling — the schema only changes on addon lifecycle events, not on every resource instance write.
-
-## UI Design
-
-### Philosophy: search bar, not form builder
-
-No "nasty clicker" query builder with rows of dropdowns. The primary interface is a **search input with intelligent autocomplete** — feels like a code editor's command palette or a terminal with tab completion.
-
-### Activation
-
-The masthead search bar starts in its current simple text mode. Advanced search activates via:
-
-- **Keyboard shortcut** — `/` + `Space` (or just `/` when search is not focused) opens advanced mode
-- **Button** — small filter/advanced icon next to the search input
-
-On activation, the search input **expands to full width** with a smooth animation, and a **results/preview panel** drops open below it.
-
-### Layout (activated state)
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ 🔍  resource.state == "ACTIVE" && name.startsWith("prod|")          │  ← full-width input
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  Suggestions:                                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │ ▸ resource.state      enum    — Resource lifecycle state    │    │  ← autocomplete list
-│  │   resource.generation number  — Generation counter          │    │
-│  │   resource.labels     map     — Managed labels              │    │
-│  │   resource.name       string  — Relative resource name      │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                     │
-│  CEL preview:                                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │ resource.state == "ACTIVE" && name.startsWith("prod")       │    │  ← formatted expression
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                     │
-│  [ Search ]  [ Clear ]                                    Esc close │
-└─────────────────────────────────────────────────────────────────────┘
+```cel
+resource.labels["env"] == "production" && resource.state == "ACTIVE"
 ```
 
-### Autocomplete behavior
-
-The autocomplete is **context-aware** — it knows where the cursor is in the expression and what's valid next:
-
-| Cursor position | Suggestions shown |
-|----------------|-------------------|
-| Empty / start of expression | Field names from registry (base + dynamic) |
-| After a field name | Valid operators for that field's type |
-| After an operator | Valid values (enum list for enums, "type a value" hint for strings/numbers) |
-| After a complete clause | Combinators: `&&`, `\|\|` |
-| After a combinator | Field names again (start next clause) |
-
-**Tab completion:** pressing `Tab` accepts the first (closest match) suggestion. Arrow keys navigate the list. `Enter` on a suggestion inserts it.
-
-### Autocomplete search index (Orama)
-
-Build a **separate Orama index** for the field registry to power fuzzy autocomplete. Index entries are the available fields with their names, types, descriptions, and aliases. This gives us:
-
-- Fuzzy matching — user types `stat` and gets `resource.state`
-- Ranked results — exact prefix matches first, then fuzzy
-- Fast client-side — no network round-trip for autocomplete
-
-```ts
-const searchIndex = create({
-  schema: {
-    fieldPath: "string",    // "resource.state"
-    label: "string",        // "State"
-    description: "string",  // "Resource lifecycle state"
-    type: "string",         // "enum"
-    aliases: "string[]",    // ["status", "lifecycle"]
-  },
-});
-
-// Index base fields + dynamic fields from schema
-insert(searchIndex, {
-  fieldPath: "resource.state",
-  label: "State",
-  description: "Resource lifecycle state",
-  type: "enum",
-  aliases: ["status", "lifecycle"],
-});
+```cel
+has(resource.conditions.Ready.status) && resource.conditions.Ready.status == "False"
 ```
 
-When dynamic schemas arrive (phase 2), their fields get inserted into the same index.
-
-### CEL preview panel
-
-Below the input, a **live preview** shows the current expression formatted and syntax-highlighted. As the user types, `parseCEL` attempts to parse the current input:
-
-- **Valid expression** — preview shows the formatted CEL, highlighted. "Ready to search" indicator.
-- **Partial expression** — preview shows what's been parsed so far + hint for what's needed next.
-- **Invalid expression** — preview shows the error position with a helpful message ("expected operator after field name").
-
-### Interaction flow
-
-1. User presses `/` or clicks advanced search icon
-2. Search bar animates to full width, dropdown opens
-3. Autocomplete shows available fields immediately
-4. User types `res` → autocomplete narrows to `resource.state`, `resource.name`, `resource.labels`, etc.
-5. User presses `Tab` → `resource.state` inserted
-6. Autocomplete now shows operators for enum type: `==`, `!=`
-7. User types `==` or presses `Tab` for `==`
-8. Autocomplete shows enum values: `ACTIVE`, `CREATING`, `DELETING`, `FAILED`
-9. User selects `"ACTIVE"` → complete clause: `resource.state == "ACTIVE"`
-10. Autocomplete offers `&&`, `||` to continue, or user presses `Enter` to search
-11. CEL preview panel shows the final expression, search fires against `QueryResources`
-
-### Deactivation
-
-- `Esc` closes advanced search, reverts to normal search bar width
-- Clicking outside the dropdown closes it but keeps the expression in the input
-- Active filter expression persists as URL query param for shareability
-
-### Search history & favorites
-
-Store search history and user-favorited filters in **IndexedDB** (phase 1, local-only). Show them in the dropdown when the input is empty or as a separate section.
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ 🔍  |                                                               │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ★ Favorites:                                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │ ★ Active clusters        resource.state == "ACTIVE"         │    │
-│  │ ★ Prod fleet             name.startsWith("prod")            │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                     │
-│  Recent:                                                            │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │ ↻ resource.state == "FAILED"                         2m ago │    │
-│  │ ↻ resource.labels["env"] == "staging"               15m ago │    │
-│  │ ↻ name.startsWith("kind-") && resource.state == ...  1h ago │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```cel
+"node-role" in resource.localLabels
 ```
 
-**Phase 1 — IndexedDB (local):**
-
-- History: last N searches (capped at ~50), deduplicated, most recent first
-- Favorites: user clicks a star icon to pin a filter expression with a custom label
-- Clicking a history/favorite item loads it into the search input
-- Stored per-browser, no auth required
-
-**Future — server-persisted (post-RBAC):**
-
-- Saved filters stored per user on the backend
-- Shareable filter links (URL with `?filter=` already covers basic sharing)
-- Shared team filters — curated filters visible to all users in a workspace/org
-- Requires user identity and RBAC — not in scope for phase 1
-
-## Operator & Field Registry
-
-The registry has two layers: **base fields** (static, same for every resource type) and **spec/observation fields** (dynamic, fetched per resource type from the schema endpoint).
-
-### Operators (static)
-
-```ts
-const operators = [
-  { name: "==",         label: "equals" },
-  { name: "!=",         label: "not equals" },
-  { name: "startsWith", label: "starts with" },
-  { name: "<",          label: "less than" },
-  { name: ">",          label: "greater than" },
-  { name: "<=",         label: "at most" },
-  { name: ">=",         label: "at least" },
-  { name: "in",         label: "in" },
-];
+```cel
+timestamp(resource.localUpdateTime) >= timestamp("2026-06-01T00:00:00Z")
 ```
 
-Operator availability per field is derived from the field's type:
+Field availability depends on the resource type's managed/inventory capabilities and response shape. A full envelope name starts with `//{service}/...`; `resource.name` is the relative collection/name form.
 
-| Field type | Available operators |
-|------------|-------------------|
-| `string` | `==`, `!=`, `startsWith` |
-| `number` / `int` | `==`, `!=`, `<`, `>`, `<=`, `>=` |
-| `enum` | `==`, `!=` |
-| `map` | `in`, `==` (key lookup) |
-| `timestamp` | `==`, `!=`, `<`, `>`, `<=`, `>=` |
-| `bool` | `==`, `!=` |
+## Autocomplete
 
-### Base fields (static — hardcoded in UI)
+The current suggestion sources are local:
 
-These exist on every resource envelope regardless of type:
+- A hardcoded field tree with conditions, Kubernetes observation fields, resource-type values, namespace values, and shortcuts.
+- Type-based operator lists, enum/value suggestions, `has()` path completion, and `&&` / `||` combinators.
+- A semantic Orama index mapping search terms such as "clusters" or "running pods" to predefined expressions or values.
 
-```ts
-const baseFields = [
-  { name: "name",                    type: "string" },
-  { name: "resourceType",           type: "string" },
-  { name: "resource.name",          type: "string" },
-  { name: "resource.uid",           type: "string" },
-  { name: "resource.state",         type: "enum",
-    values: ["CREATING", "ACTIVE", "DELETING", "FAILED"] },
-  { name: "resource.generation",    type: "number" },
-  { name: "resource.intentVersion", type: "number" },
-  { name: "resource.pauseReason",   type: "string" },
-  { name: "resource.labels",        type: "map" },
-  { name: "resource.localLabels",   type: "map" },
-  { name: "resource.localUpdateTime",  type: "timestamp" },
-  { name: "resource.indexUpdateTime",  type: "timestamp" },
-];
-```
+Field traversal uses prefix/label matching. Semantic suggestions provide fuzzy matching when direct field matching does not produce results. The separate `fieldSearchIndex.ts` utility is not used by the active advanced-search hook.
 
-### Spec/observation fields (dynamic — fetched from backend)
+These suggestions are not fetched from active backend schemas and are not guaranteed to describe the installed resource types or valid values. Unknown `resource.*` paths can receive generic operator suggestions. Some static suggestions, such as `resource.createTime` and `resource.updateTime`, are not accepted by the current query field resolver. A suggestion is an editing aid, not a validity guarantee.
 
-Fetched from `GET /v1alpha/resourceTypes/{type}/schema` and merged with base fields when the user selects a resource type (or inferred from page context, e.g. "I'm on the clusters page").
+Sources: [advanced-search hook](../../client/web/src/components/Search/advanced/useAdvancedSearch.ts), [field tree](../../client/web/src/components/Search/advanced/fieldTree.ts), [field registry](../../client/web/src/components/Search/advanced/fieldRegistry.ts), [semantic index](../../client/web/src/components/Search/advanced/semanticIndex.ts), [operator map](../../client/web/src/components/Search/advanced/operatorMap.ts).
 
-The UI caches per-type schemas and invalidates on `schema.registry.changed` WebSocket events.
+## Future work: inventory-driven discovery and caching
 
-### Flow
+This is not implemented; the static autocomplete described above remains the current implementation. The backend should eventually own CEL discovery, producing hints and suggestions from active queryable inventory schemas, resource types, and the current inventory state, respecting the query scope.
 
-1. User opens advanced search → base fields available immediately
-2. User selects resource type (or page context implies it) → fetch schema → merge spec fields into picker
-3. Addon installed/changed → WS event → re-fetch affected schemas → update field picker
+The frontend should cache and reuse the discovered CEL tree and hint metadata rather than discover or rebuild the whole tree on every keystroke or search opening. Cached metadata should respect the query scope and be refreshed or invalidated when inventory or schemas change. Cursor handling and suggestion rendering should remain local to the UI.
 
-## Decisions
+## Preview and validation limits
 
-1. **CEL validation** — client-side via `parseCEL` round-trip. The live preview panel shows parse errors inline before the request is sent. The backend will reject invalid expressions anyway, but the user should never have to wait for a network round-trip to learn their expression is malformed.
-2. **Expression persistence** — URL hash fragment (`#filter=resource.state == "ACTIVE"`). Shareable, bookmarkable, doesn't pollute server logs with filter content, survives page refresh.
+The preview tokenizes and highlights the original expression. It does not produce a normalized CEL expression from a query-builder model.
 
-## Open Questions
+Client validation runs after a short debounce and rejects unmatched double quotes or unequal parenthesis counts. It calls `parseCEL` from `@react-querybuilder/core/parseCEL`, but accepts parser failures and unrecognized forms after those basic checks. A green indicator is therefore best-effort feedback, not proof that the backend accepts the expression.
 
-1. **Cross-resource queries** — can a single filter span multiple resource types, or does the user pick a resource type first and then filter within it? Needs experimentation — unclear if the backend's CEL-to-SQL compiler handles unscoped queries across heterogeneous spec schemas.
-2. **Keyboard shortcut conflict** — `/` is natural but may conflict if the search input is already focused. Need to test with existing masthead behavior.
+Neither live queries nor explicit execution are gated by this validation result. Partial or invalid input can reach the backend.
 
-## Security
+Sources: [validator](../../client/web/src/components/Search/advanced/celValidator.ts), [preview](../../client/web/src/components/Search/advanced/CelPreview.tsx), [execution](../../client/web/src/components/Search/advanced/useAdvancedSearch.ts).
 
-CEL is compiled to SQL, not evaluated. The backend's `querysql.Compiler` handles parameterization, preventing SQL injection. The CEL environment has no custom functions and no side effects — only read-only field access and comparison operators.
+## Backend semantics
 
-Execution limits (expression complexity, AST depth) should be enforced server-side.
+Use the [QueryResources CEL reference](../query-resources-cel-filters.md) for the complete supported subset, missing-field behavior, and value rules. Important distinctions for UI authors are:
 
-## Implementation Plan
+| Topic | Current semantics |
+|-------|-------------------|
+| Envelope variables | `name`, `resourceType`, and `resource` |
+| Field spelling | Canonical ProtoJSON names; `resourceType`, not `resource_type` |
+| Managed counters | `intentVersion` and `generation` are decimal strings, not numeric literals |
+| Timestamps | Response strings; wrap both operands in `timestamp()` for instant comparisons |
+| Presence | `has(resource.labels.team)` accepts a select; `has(resource.labels["team"])` is not supported |
+| Membership | Both value-list membership and string-key container membership are supported |
+| Resource fields | Availability depends on capabilities and the projected resource body |
 
-### Phase 1 — Static search bar with autocomplete (frontend only)
+The backend compiles its supported CEL subset into parameterized SQL. Unsupported operations and rejected field paths fail the request. Cross-resource-type filters are supported without choosing a type first. A top-level conjunctive `resourceType == "..."` guard enables descriptor-backed validation of spec/observation paths when a descriptor exists; without that guard or descriptor, those paths can use structural JSON extraction.
 
-No backend changes. Uses existing `QueryResources` endpoint with `?filter=`.
+Sources: [CEL compiler](../../server/internal/infrastructure/querysql/querysql.go), [schema resolution](../../server/internal/infrastructure/querysql/resolve_context.go), [SQLite field resolver](../../server/internal/infrastructure/sqlite/query_filter.go).
 
-1. Add `@react-querybuilder/core` dependency — CEL formatting (`formatQuery`) and parsing (`parseCEL`)
-2. Define static base field registry in `@ocm-fleet/common` — fields, types, operators, enum values, descriptions, aliases
-3. Build Orama autocomplete index from the field registry — fuzzy field name matching for suggestions
-4. Build advanced search components (shell — `web`):
-   - **Search bar expansion** — full-width animation on activation (`/` shortcut or icon button)
-   - **Autocomplete dropdown** — context-aware suggestions (fields → operators → values → combinators)
-   - **Tab completion** — `Tab` accepts top suggestion, arrow keys navigate
-   - **CEL preview panel** — live-parsed expression with syntax highlighting and error hints
-5. Build cursor-position parser — determines where in the expression the cursor is and what token type is expected next (field, operator, value, combinator)
-6. Wire `formatQuery(query, 'cel')` output to `QueryResources` API calls
-7. Client-side validation via `parseCEL` round-trip — preview panel shows valid/partial/error state
+## History and favorites
 
-8. Search history & favorites (IndexedDB):
-   - `useSearchHistory()` hook — stores last ~50 searches, deduped, most recent first
-   - `useSearchFavorites()` hook — star/unstar filters with custom labels
-   - Show favorites + recent in dropdown when input is empty
+Explicit execution saves the trimmed expression in IndexedDB database `ocm-fleet-search-history`. Expressions are deduplicated by their text and sorted newest first. Automatic debounced queries do not save every edit.
 
-**Scope:** base fields only (`name`, `resourceType`, `resource.state`, `resource.labels`, `resource.generation`, etc.). No `resource.spec.*` fields — those require dynamic schema from phase 2.
+History retains up to 50 nonfavorite entries. Favorites are retained separately from that cap and can be toggled or removed; they have no custom-label field. With an empty input, the dropdown shows favorites and up to ten recent nonfavorites. Selecting an entry loads its expression.
 
-### Phase 2 — Dynamic schema discovery (requires backend work)
+This is browser-local storage, not identity-scoped backend persistence or a shared-filter service. The current UI has no schema-discovery endpoint integration, schema-change event subscription, or server-provided autocomplete contract.
 
-Backend discussion needed before starting.
-
-1. **Backend:** expose `GET /v1alpha/resourceTypes` and `GET /v1alpha/resourceTypes/{type}/schema` from `ActiveResourceRegistry`
-2. **Backend:** broadcast `schema.registry.changed` WS events on addon lifecycle mutations
-3. **Frontend:** `useResourceTypeSchema(type)` hook — fetches and caches per-type field schemas, invalidates on WS event
-4. **Frontend:** merge dynamic spec/observation fields into query builder field picker based on selected resource type
-5. **Frontend:** resource type selector in query builder (or infer from page context)
+Sources: [history storage](../../client/web/src/components/Search/advanced/useSearchHistory.ts), [history panel](../../client/web/src/components/Search/advanced/HistoryPanel.tsx), [dropdown behavior](../../client/web/src/components/Search/advanced/AdvancedSearchBar.tsx).

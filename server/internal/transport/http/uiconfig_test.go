@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestGeneratePluginPages_GroupedModulePath(t *testing.T) {
+func TestGeneratePluginPages_GroupedRoutePath(t *testing.T) {
 	registry := pluginRegistry{
 		Plugins: map[string]pluginEntry{
 			"settings-plugin": {
@@ -22,14 +22,14 @@ func TestGeneratePluginPages_GroupedModulePath(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "ocm-fleet.module-group",
+							Type: "ocm-fleet.route-group",
 							Properties: map[string]interface{}{
 								"id":    "settings",
 								"label": "Settings",
 							},
 						},
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "navigation",
 								"label":     "Navigation",
@@ -38,7 +38,7 @@ func TestGeneratePluginPages_GroupedModulePath(t *testing.T) {
 							},
 						},
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "auth",
 								"label":     "Authentication",
@@ -68,18 +68,18 @@ func TestGeneratePluginPages_GroupedModulePath(t *testing.T) {
 		t.Fatal("expected settings.navigation page")
 	}
 	if navPage.Path != "settings/navigation" {
-		t.Errorf("grouped module path: got %q, want %q", navPage.Path, "settings/navigation")
+		t.Errorf("grouped route path: got %q, want %q", navPage.Path, "settings/navigation")
 	}
 
 	if authPage == nil {
 		t.Fatal("expected settings.auth page")
 	}
 	if authPage.Path != "settings/auth" {
-		t.Errorf("grouped module path: got %q, want %q", authPage.Path, "settings/auth")
+		t.Errorf("grouped route path: got %q, want %q", authPage.Path, "settings/auth")
 	}
 }
 
-func TestGeneratePluginPages_UngroupedModulePath(t *testing.T) {
+func TestGeneratePluginPages_UngroupedRoutePath(t *testing.T) {
 	registry := pluginRegistry{
 		Plugins: map[string]pluginEntry{
 			"core-plugin": {
@@ -89,7 +89,7 @@ func TestGeneratePluginPages_UngroupedModulePath(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "clusters",
 								"label":     "Clusters",
@@ -115,7 +115,10 @@ func TestGeneratePluginPages_UngroupedModulePath(t *testing.T) {
 		t.Fatal("expected core.clusters page")
 	}
 	if clusterPage.Path != "core/clusters" {
-		t.Errorf("ungrouped module path: got %q, want %q", clusterPage.Path, "core/clusters")
+		t.Errorf("ungrouped route path: got %q, want %q", clusterPage.Path, "core/clusters")
+	}
+	if clusterPage.Module != "ClustersPage" {
+		t.Errorf("exposed module: got %q, want %q", clusterPage.Module, "ClustersPage")
 	}
 }
 
@@ -129,14 +132,14 @@ func TestGenerateNavLayout_NestedGroups(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "ocm-fleet.module-group",
+							Type: "ocm-fleet.route-group",
 							Properties: map[string]interface{}{
 								"id":    "settings",
 								"label": "Settings",
 							},
 						},
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "navigation",
 								"label":     "Navigation",
@@ -145,7 +148,7 @@ func TestGenerateNavLayout_NestedGroups(t *testing.T) {
 							},
 						},
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "auth",
 								"label":     "Authentication",
@@ -163,7 +166,7 @@ func TestGenerateNavLayout_NestedGroups(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "clusters",
 								"label":     "Clusters",
@@ -232,7 +235,7 @@ func TestGenerateNavLayout_NoGroups(t *testing.T) {
 				PluginManifest: pluginManifest{
 					Extensions: []extension{
 						{
-							Type: "ocm-fleet.module",
+							Type: "ocm-fleet.route",
 							Properties: map[string]interface{}{
 								"id":        "clusters",
 								"label":     "Clusters",
@@ -248,9 +251,12 @@ func TestGenerateNavLayout_NoGroups(t *testing.T) {
 	pages := generatePluginPages(registry)
 	layout := generateNavLayout(registry, pages)
 
+	if len(layout) != 1 || layout[0].PageID != "core.clusters" {
+		t.Fatalf("expected core.clusters navigation entry, got %#v", layout)
+	}
 	for _, entry := range layout {
 		if entry.Type == "group" {
-			t.Error("expected no group entries when no module-group extensions exist")
+			t.Error("expected no group entries when no route-group extensions exist")
 		}
 	}
 }
@@ -450,7 +456,7 @@ func TestHandleConfig_IncludesPluginFields(t *testing.T) {
 					"version": "1.0.0",
 					"extensions": [
 						{
-							"type": "ocm-fleet.module",
+							"type": "ocm-fleet.route",
 							"properties": {
 								"id": "home",
 								"label": "Home",
@@ -498,6 +504,15 @@ func TestHandleConfig_IncludesPluginFields(t *testing.T) {
 	}
 	if resp["assetsHost"] != "/app" {
 		t.Fatalf("assetsHost = %v, want /app", resp["assetsHost"])
+	}
+	pages, ok := resp["pluginPages"].([]any)
+	if !ok || len(pages) != len(builtinPages)+1 {
+		t.Fatalf("pluginPages = %v", resp["pluginPages"])
+	}
+	page := pages[len(builtinPages)].(map[string]any)
+	if page["id"] != "core.home" || page["path"] != "core/home" ||
+		page["scope"] != "core-plugin" || page["module"] != "HomePage" {
+		t.Fatalf("route page = %#v", page)
 	}
 	entries, ok := resp["pluginEntries"].([]any)
 	if !ok || len(entries) != 1 {

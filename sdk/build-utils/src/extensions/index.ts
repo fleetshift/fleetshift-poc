@@ -1,8 +1,8 @@
 export {
   createClusterProvider,
-  createModule,
-  createModuleGroup,
   createOnboardingAction,
+  createRoute,
+  createRouteGroup,
   createSetup,
 } from "./builders";
 export type {
@@ -34,12 +34,12 @@ export type {
   ExtensionPointDeclaration,
   FleetExtension,
   FleetExtensionType,
-  ModuleExtras,
-  ModuleGroupExtras,
-  ModuleGroupProperties,
-  ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
+  RouteExtras,
+  RouteGroupExtras,
+  RouteGroupProperties,
+  RouteProperties,
   SetupExtras,
   SetupProperties,
 } from "./types";
@@ -48,8 +48,8 @@ export {
   validateClusterProviderProperties,
   validateCodeRef,
   validateExtensionSet,
-  validateModuleGroupProperties,
-  validateModuleProperties,
   validateOnboardingActionProperties,
+  validateRouteGroupProperties,
+  validateRouteProperties,
   validateSetupProperties,
 } from "./validate";

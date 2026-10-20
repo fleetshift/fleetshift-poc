@@ -1,7 +1,7 @@
-import { createModuleOnboardingForm } from "./ModuleOnboardingForm";
+import { createRouteOnboardingForm } from "./RouteOnboardingForm";
 
-export const ObservabilityOnboardingForm = createModuleOnboardingForm({
-  moduleLabel: "Observability",
+export const ObservabilityOnboardingForm = createRouteOnboardingForm({
+  routeLabel: "Observability",
 });
 
 export default ObservabilityOnboardingForm;

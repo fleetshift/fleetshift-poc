@@ -45,7 +45,7 @@ const CATEGORY_CTA: Record<string, string> = {
   "ocm-fleet.cluster-provider": "Configure a provider",
 };
 
-const HIDDEN_CATEGORIES = new Set(["ocm-fleet.module"]);
+const HIDDEN_CATEGORIES = new Set(["ocm-fleet.route"]);
 
 type OnboardingActionExtension = Extension<
   "ocm-fleet.onboarding-action",

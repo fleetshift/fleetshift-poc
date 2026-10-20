@@ -24,7 +24,7 @@ import {
 
 import { useAppConfig } from "../../contexts/AppConfigContext";
 import { isClusterProviderExtension } from "../../extensions/isClusterProviderExtension";
-import { isModuleExtension } from "../../extensions/isModuleExtension";
+import { isRouteExtension } from "../../extensions/isRouteExtension";
 import type { SearchResultProps } from "../../extensions/searchTypes";
 import {
   createSearchDB,
@@ -76,9 +76,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     state: installState,
   } = useExtensionInstall();
 
-  const allModuleExtensions = useExtensions(isModuleExtension);
-  const [moduleExtensions, modulesLoaded] =
-    useResolvedExtensions(allModuleExtensions);
+  const allRouteExtensions = useExtensions(isRouteExtension);
+  const [routeExtensions, routesLoaded] =
+    useResolvedExtensions(allRouteExtensions);
   const allCpExtensions = useExtensions(isClusterProviderExtension);
   const [cpExtensions, cpLoaded] = useResolvedExtensions(allCpExtensions);
   const dbRef = useRef<SearchDB | null>(null);
@@ -98,11 +98,11 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const currentInstallVersion = installVersion.current;
 
   useEffect(() => {
-    if (!modulesLoaded || !cpLoaded || !installLoaded) return;
+    if (!routesLoaded || !cpLoaded || !installLoaded) return;
     let cancelled = false;
 
     // Merge backend layout with user override so search reflects custom groups,
-    // moved modules, and hidden ("more") items.
+    // moved routes, and hidden ("more") items.
     const mergedLayout = override
       ? mergeLayout(navLayout, override)
       : navLayout;
@@ -118,11 +118,11 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     // Maps extension type → global feature ID for parent-child linking
     const typeToFeatureId = new Map<string, string>();
 
-    // Build a set of page IDs that have a richer module extension
-    const modulePageIds = new Set<string>();
-    for (const ext of moduleExtensions) {
+    // Build a set of page IDs that have a richer route extension
+    const routePageIds = new Set<string>();
+    for (const ext of routeExtensions) {
       const page = pluginPages.find((p) => p.title === ext.properties.label);
-      if (page) modulePageIds.add(page.id);
+      if (page) routePageIds.add(page.id);
     }
 
     // Build page lookup for group path resolution
@@ -157,13 +157,13 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Pages inside groups are indexed via module extensions below — skip them here
+    // Pages inside groups are indexed via route extensions below — skip them here
     const groupedPageIds = new Set(pageToGroup.keys());
 
-    // Nav pages — skip any that have a module extension or belong to a group
+    // Nav pages — skip any that have a route extension or belong to a group
     // Also skip detail pages whose path contains route params (e.g. ":id")
     for (const page of pluginPages) {
-      if (modulePageIds.has(page.id)) continue;
+      if (routePageIds.has(page.id)) continue;
       if (groupedPageIds.has(page.id)) continue;
       if (page.path.includes(":")) continue;
 
@@ -214,8 +214,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       );
     }
 
-    // Module extensions: feature entries with description, keywords, extensionPoints
-    for (const ext of moduleExtensions) {
+    // Route extensions: feature entries with description, keywords, extensionPoints
+    for (const ext of routeExtensions) {
       const {
         id,
         label,
@@ -232,7 +232,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const globalFeatureId = `${page.pluginKey}.${id}`;
       const basePath = `/${page.path}`;
       const entryId = `ext-${globalFeatureId}`;
-      const moduleStatus = isInstalled(page.scope) ? "" : "not-enabled";
+      const routeStatus = isInstalled(page.scope) ? "" : "not-enabled";
 
       const group = pageToGroup.get(page.id);
       const groupFeature = group ? `group.${group.groupId}` : undefined;
@@ -254,7 +254,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           category: "nav",
           pathname: basePath,
           icon: resolvedIconName,
-          status: moduleStatus,
+          status: routeStatus,
           meta: keywords ? keywords.join(" ") : "",
           feature: groupFeature,
         }),
@@ -284,7 +284,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         category: "nav",
         pathname: basePath,
         icon: resolvedIconName,
-        status: moduleStatus,
+        status: routeStatus,
         feature: groupFeature,
       });
 
@@ -302,7 +302,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
                 category: "nav",
                 pathname: `${basePath}?create`,
                 icon: "",
-                status: moduleStatus,
+                status: routeStatus,
                 meta: "create deploy provision wizard",
                 feature: globalFeatureId,
               }),
@@ -419,11 +419,11 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [
-    modulesLoaded,
+    routesLoaded,
     cpLoaded,
     installLoaded,
     isInstalled,
-    moduleExtensions,
+    routeExtensions,
     cpExtensions,
     pluginPages,
     navLayout,

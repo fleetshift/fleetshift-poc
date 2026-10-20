@@ -1,7 +1,7 @@
-import { createModuleOnboardingForm } from "./ModuleOnboardingForm";
+import { createRouteOnboardingForm } from "./RouteOnboardingForm";
 
-export const SecurityOnboardingForm = createModuleOnboardingForm({
-  moduleLabel: "Security",
+export const SecurityOnboardingForm = createRouteOnboardingForm({
+  routeLabel: "Security",
 });
 
 export default SecurityOnboardingForm;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createModule, createModuleGroup, createSetup } from "../builders";
+import { createRoute, createRouteGroup, createSetup } from "../builders";
 import { FleetPlugin } from "../FleetPlugin";
 
 const { applySpy } = vi.hoisted(() => ({ applySpy: vi.fn() }));
@@ -38,7 +38,7 @@ describe("FleetPlugin", () => {
         new FleetPlugin({
           ...baseOptions,
           extensions: [
-            createModule({
+            createRoute({
               id: "test",
               label: "Test",
               component: { $codeRef: "TestPage.default" },
@@ -55,7 +55,7 @@ describe("FleetPlugin", () => {
         new FleetPlugin({
           ...baseOptions,
           extensions: [
-            createModule({
+            createRoute({
               id: "test",
               label: "Test",
               component: { $codeRef: "MissingModule.default" },
@@ -80,13 +80,13 @@ describe("FleetPlugin", () => {
             },
           },
           extensions: [
-            createModule({
+            createRoute({
               id: "same-id",
               label: "First",
               component: { $codeRef: "PageA.default" },
               icon: { $codeRef: "TestIcon.default" },
             }),
-            createModule({
+            createRoute({
               id: "same-id",
               label: "Second",
               component: { $codeRef: "PageB.default" },
@@ -111,8 +111,8 @@ describe("FleetPlugin", () => {
             },
           },
           extensions: [
-            createModule({
-              id: "test-module",
+            createRoute({
+              id: "test-route",
               label: "Test",
               component: { $codeRef: "TestPage.default" },
               icon: { $codeRef: "TestIcon.default" },
@@ -130,7 +130,7 @@ describe("FleetPlugin", () => {
     ).not.toThrow();
   });
 
-  it("constructs with module group and grouped modules", () => {
+  it("constructs with route group and grouped routes", () => {
     expect(
       () =>
         new FleetPlugin({
@@ -144,11 +144,11 @@ describe("FleetPlugin", () => {
             },
           },
           extensions: [
-            createModuleGroup({
+            createRouteGroup({
               id: "settings",
               label: "Settings",
             }),
-            createModule({
+            createRoute({
               id: "navigation",
               label: "Navigation",
               component: { $codeRef: "TestPage.default" },
@@ -160,13 +160,13 @@ describe("FleetPlugin", () => {
     ).not.toThrow();
   });
 
-  it("throws when module references non-existent group", () => {
+  it("throws when route references non-existent group", () => {
     expect(
       () =>
         new FleetPlugin({
           ...baseOptions,
           extensions: [
-            createModule({
+            createRoute({
               id: "navigation",
               label: "Navigation",
               component: { $codeRef: "TestPage.default" },

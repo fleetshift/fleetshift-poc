@@ -1,447 +1,132 @@
-// OCM Fleet UI — Feature Contract Architecture
-// Source of truth: docs/feature-contracts.md, build-utils/src/extensions/
-//
-// How plugins declare capabilities via typed extension builders,
-// how the shell discovers and renders them, and how the Go backend
-// reads manifests for navigation and routing.
-//
-// The model is generic: modules are the primary unit, extensionPoints
-// are the linking mechanism, and any extension type can register against
-// them. Specific types (cluster-provider, setup) are examples, not
-// first-class architectural concepts.
-
-// ─────────────────────────────────────────────
-//  Specification
-// ─────────────────────────────────────────────
+// OCM Fleet UI — route contribution contracts and current build/bootstrap behavior.
+// Sources: sdk/build-utils/src/extensions/{FleetPlugin,validate,types}.ts;
+// extensions/core/client/rspack.config.ts; tools/generate-plugin-registry.mjs;
+// server/internal/transport/http/uiconfig.go; client/web/src/routes/ConsoleRoutes.tsx;
+// client/web/src/components/Root/ScalprumShell.tsx; client/web/src/extensions/;
+// client/web/src/components/Search/SearchProvider.tsx; sdk/common/src/PluginLink.tsx.
+// Older proposed distribution: docs/design/addon-ui-architecture.md.
+// Alternative draft: docs/design/client-asset-separation.md; reconciliation unresolved.
 
 specification {
-
-  element actor {
-    style {
-      shape person
-      color green
-    }
-  }
-
-  element system {
-    style {
-      shape rectangle
-      color primary
-    }
-  }
-
-  element component {
-    style {
-      shape rectangle
-      color secondary
-    }
-  }
-
+  element component
   element store {
     style {
       shape storage
       color amber
     }
   }
-
-  element external {
+  element planned {
     style {
-      shape rectangle
       color gray
     }
   }
-
-  relationship produces {
-    color green
-    line solid
-  }
-
-  relationship consumes {
-    color amber
-    line solid
-  }
-
-  relationship validates {
-    color red
-    line dashed
-  }
 }
-
-// ─────────────────────────────────────────────
-//  Model
-// ─────────────────────────────────────────────
 
 model {
-
-  // ── Actors ──────────────────────────────────
-
-  pluginDev = actor 'Plugin Developer' {
-    description 'Authors plugins using typed builder functions. Declares extensions in webpack config.'
-  }
-
-  endUser = actor 'End User' {
-    description 'Interacts with the shell UI — navigates pages, uses search, runs wizards.'
-  }
-
-  // ── Build-Time Layer ────────────────────────
-
-  buildTime = system 'Build-Time Validation' {
+  declarations = component 'Typed extension declarations' {
     description '''
-      Webpack build pipeline. Plugins declare extensions via typed builders.
-      FleetPlugin validates all extensions at compile time before
-      delegating to the SDK's DynamicRemotePlugin for Module Federation output.
+      Rspack configs declare extensions and exposedModules using FleetPlugin.
+      Routes declare id, label, component and icon CodeRefs, optional group
+      and extensionPoints. Slots advertise type strings; consumers explicitly
+      select and render supported extension types (for example providers or tabs).
+      A slot declaration alone creates no route, breadcrumb or universal index.
     '''
-
-    builders = component 'Extension Builders' {
-      description '''
-        Typed factory functions: createModule(), createSetup(),
-        createClusterProvider(), or any builder wrapping FleetExtension.
-        Each returns a FleetExtension<TType, TExtra> with the correct
-        type tag and validated properties.
-
-        The TType parameter accepts any string — built-in types get
-        domain-specific validation, custom types get base validation
-        (id, label). This is how addons define new extension types.
-
-        Builder functions are convenience wrappers. The underlying
-        FleetExtension type is the contract.
-      '''
-      technology 'TypeScript'
-    }
-
-    fleetPlugin = component 'FleetPlugin' {
-      description '''
-        Webpack plugin wrapper. Receives extensions[] + pluginMetadata
-        (including exposedModules). Runs validateExtensionSet() in the
-        constructor — fails the build on:
-        • Invalid IDs, labels, CodeRef format
-        • CodeRef referencing a module not in exposedModules
-        • Duplicate extension IDs within a plugin
-        • Invalid requires entries on setup extensions
-        • Null or non-object properties
-
-        Then delegates to DynamicRemotePlugin for MF output.
-        The plugin is the enforcement boundary — invalid extensions
-        never make it to a manifest.
-      '''
-      technology 'Webpack Plugin'
-    }
-
-    sdkPlugin = component 'DynamicRemotePlugin' {
-      description '''
-        OpenShift Dynamic Plugin SDK webpack plugin.
-        Generates Module Federation container entry and plugin-manifest.json.
-        FleetPlugin delegates to this after validation passes.
-      '''
-      technology '@openshift/dynamic-plugin-sdk-webpack'
-    }
-
-    manifest = store 'Plugin Manifest' {
-      description '''
-        plugin-manifest.json — generated per plugin at build time.
-        Contains the extension array (types + properties with CodeRefs),
-        plugin metadata (name, version), and exposed module references.
-        Served as a static asset alongside the MF entry script.
-      '''
-    }
   }
-
-  // ── Plugin Extension Model ──────────────────
-
-  pluginModel = system 'Plugin Extension Model' {
+  build = component 'Rspack + FleetPlugin' {
     description '''
-      The conceptual model plugins use to declare capabilities.
-      Modules are pages. Modules can declare extensionPoints.
-      Extensions register against extensionPoints by type string.
-      All extensions share base properties (id, label, description,
-      keywords, search customization). Domain-specific properties
-      are layered on top per type.
+      Constructor runs validateExtensionSet, then delegates to DynamicRemotePlugin.
+      Checks known-type properties, IDs, duplicate keys, same-plugin group references
+      and top-level CodeRefs against exposedModules keys. Does not verify runtime
+      export types, successful loading or renderability. Build success is not readiness.
     '''
-
-    modules = component 'Modules' {
-      description '''
-        The primary unit. A module is a routable page in the shell.
-        Declares id, label, component CodeRef, description, keywords.
-
-        A module may also declare extensionPoints — named slots that
-        advertise a type string. Other plugins register extensions
-        against that type string to contribute content to the module.
-
-        Example: "Clusters" module declares extensionPoint
-        "providers" with type "ocm-fleet.cluster-provider".
-      '''
-    }
-
-    extensionPoints = component 'Extension Points' {
-      description '''
-        Declared on modules: Record<name, { type, description }>.
-        The type string is the contract — any extension with a matching
-        type becomes a child of the declaring module.
-
-        Extension points are the generic linking mechanism. The shell
-        uses them to compose navigation trees, search groupings, and
-        route hierarchies. No hard-coded knowledge of specific types.
-      '''
-    }
-
-    extensions = component 'Extensions' {
-      description '''
-        Any extension registering against an extensionPoint.
-        Shares base properties with modules (id, label, description,
-        keywords, searchResult, searchIcon). Adds domain-specific
-        properties per type — icon/card/wizard for cluster providers,
-        path/requires/requiresAuth for setup steps, etc.
-
-        Extensions are contributed by any plugin, not just the one
-        declaring the extensionPoint. This is the cross-plugin
-        composition model.
-      '''
-    }
   }
-
-  // ── Runtime: Go Backend ─────────────────────
-
-  goBackend = system 'Go Backend' {
+  artifacts = store 'Manifests + federated assets' {
+    description 'DynamicRemotePlugin emits plugin manifests and Module Federation scripts. Current packaging serves plugin assets under /app.'
+  }
+  registry = store 'Build-generated plugin-registry.json' {
+    description 'generate-plugin-registry.mjs collects recognized built plugin manifests with plugin keys, labels and asset locations. Go reads this local file when serving UI config requests.'
+  }
+  config = component 'Go /api/ui/config' {
     description '''
-      Reads plugin manifests at startup. Generates navigation layout,
-      route configuration, and UI config from extension metadata.
-      Serves the shell SPA and proxies plugin assets.
+      Global bootstrap: scalprumConfig, pluginEntries, pluginPages and auth inputs.
+      Route page id = pluginKey.id; path = group/id or pluginKey/id.
+      Label slug is a fallback for missing/invalid id; duplicate paths are skipped.
+      Scope comes from manifest name; module from component CodeRef module key.
+      Includes an explicit built-in detail page, outside route projection.
     '''
-
-    manifestReader = component 'Manifest Reader' {
-      description '''
-        Parses plugin-manifest.json files. Extracts all extension types.
-        The backend reads extension metadata generically — it does not
-        contain per-type business logic beyond route generation.
-      '''
-    }
-
-    routeGenerator = component 'Route & Nav Generator' {
-      description '''
-        Generates page slugs from module labels (lowercase, hyphenated).
-        Composes global feature IDs as {pluginKey}.{extensionId}.
-        Builds the nav layout tree and route config served to the shell.
-      '''
-    }
-
-    uiConfig = component 'UI Config API' {
-      description '''
-        /api/v1/ui-config endpoint. Returns the full plugin registry,
-        navigation layout, available routes, and user configuration.
-        The shell bootstraps from this response.
-      '''
-      technology 'REST'
-    }
   }
-
-  // ── Runtime: Shell (GUI) ────────────────────
-
-  shell = system 'Shell (GUI)' {
+  userConfig = component 'Go /api/ui/user-config' {
+    description 'Returns default navLayout projected from route and route-group metadata without customization. Optional auth middleware; currently no identity-specific layout persistence.'
+  }
+  runtime = component 'Shell + Scalprum / SDK' {
     description '''
-      React 18 SPA. Bootstraps from UI config, initializes Scalprum plugin
-      runtime, loads plugin MF entries on demand. Renders navigation, search,
-      and plugin content. Consumes the extension model generically.
+      Shell bootstraps Scalprum from config. SDK resolves CodeRefs recursively,
+      including nested properties; no proposed two-pass validator exists.
+      Extension consumers handle their own supported contracts and failure states.
     '''
-
-    scalprumRuntime = component 'Scalprum Runtime' {
-      description '''
-        Plugin loader and registry. Fetches plugin manifests,
-        initializes Module Federation containers, resolves CodeRefs
-        to actual React components via getExposedModule().
-        Shared dependencies (React, PF, router) are MF singletons.
-      '''
-      technology 'Scalprum / Module Federation'
-    }
-
-    searchEngine = component 'Search Engine' {
-      description '''
-        Indexes modules and their extensions for full-text search.
-        Uses extensionPoints to build parent-child groupings —
-        entirely generic, no per-type logic. Plugin-provided
-        searchResult and searchIcon CodeRefs customize rendering.
-        See: search.c4 for the detailed search architecture.
-      '''
-      technology 'Orama'
-    }
-
-    extensionRenderer = component 'Extension Renderer' {
-      description '''
-        Resolves CodeRefs and renders plugin components.
-        ScalprumComponent loads the MF module by name
-        (must match exposedModules key exactly — no ./ prefix).
-        Handles page routing, setup wizard step ordering (topological
-        sort on requires), and provider selection pages.
-      '''
-      technology 'React'
-    }
+  }
+  pages = component 'Routes + page rendering' {
+    description '''
+      ConsoleRoutes registers /{page.path}/* and default group redirects.
+      PluginPage handles availability/enable states and ScalprumComponent rendering.
+      PluginLink/navigation hooks resolve scope + module through pluginPages.
+      Route existence alone does not imply enablement, permission or plugin health.
+      Local cosmetic navigation grouping does not rewrite canonical page routes.
+    '''
+  }
+  consumers = component 'Navigation + typed feature consumers' {
+    description '''
+      AppNav merges default navLayout with local IndexedDB overrides.
+      Route/provider search eagerly resolves those two extension types and indexes
+      their metadata. Inventory search separately resolves render-search extensions.
+      Provider, setup and detail-tab consumers implement their own composition logic.
+      This is not automatic discovery/indexing of all extension types.
+    '''
   }
 
-  // ─────────────────────────────────────────────
-  //  Relationships
-  // ─────────────────────────────────────────────
+  // Older direct-fetch model; deliberately disconnected from current flow.
+  // Asset separation is planned; direct-fetch versus Gateway/Operator is unresolved.
+  oci = planned 'PLANNED: UI OCI artifact' {
+    description 'Versioned manifest and JS/CSS bundle deployed to an external static asset host.'
+  }
+  catalog = planned 'PLANNED: runtime addon UI catalog' {
+    description 'Resource manager owns UI capability metadata, dependencies and manifest/assets URLs. UI capability integration is not implemented; current discovery uses the build registry.'
+  }
+  host = planned 'PLANNED: external asset host' {
+    description 'Deployment extracts OCI assets here. Resource manager stores metadata and URLs rather than serving addon JS bytes.'
+  }
+  browser = planned 'PLANNED: browser discovery' {
+    description 'Older model: shell loads manifests/assets directly from external host. The Client Asset Separation draft instead proposes a same-origin Gateway and independent Operator. Delivery/authority reconciliation and bootstrap API remain unresolved.'
+  }
 
-  // Developer → Build
-  pluginDev -> buildTime.builders 'declares extensions with typed builders'
+  declarations -> build 'extensions + exposedModules'
+  build -> artifacts 'validate declarations; emit manifests and scripts'
+  artifacts -> registry 'collect manifests during packaging'
+  registry -> config 'project routes into pages and loader config'
+  registry -> userConfig 'project default navigation'
+  config -> runtime 'bootstrap plugin runtime'
+  artifacts -> runtime 'load federated scripts'
+  config -> pages 'pluginPages'
+  runtime -> pages 'federated page components'
+  runtime -> consumers 'resolved typed extensions'
+  userConfig -> consumers 'default navLayout'
+  consumers -> pages 'navigate by canonical page paths'
 
-  // Plugin model → Build
-  pluginModel.modules -> buildTime.builders 'createModule()'
-  pluginModel.extensions -> buildTime.builders 'createSetup(), createClusterProvider(), custom builders'
-  pluginModel.modules -> pluginModel.extensionPoints 'declares extensionPoints with type strings'
-  pluginModel.extensionPoints -> pluginModel.extensions 'type string match → parent-child link'
-
-  // Build-time flow
-  buildTime.builders -[produces]-> buildTime.fleetPlugin 'FleetExtension[]'
-  buildTime.fleetPlugin -[validates]-> buildTime.builders 'validates CodeRefs, IDs, requires'
-  buildTime.fleetPlugin -> buildTime.sdkPlugin 'delegates after validation'
-  buildTime.sdkPlugin -[produces]-> buildTime.manifest 'generates plugin-manifest.json + MF entry'
-
-  // Manifest → Backend
-  goBackend.manifestReader -> buildTime.manifest 'reads at startup'
-  goBackend.manifestReader -> goBackend.routeGenerator 'extracted extensions'
-  goBackend.routeGenerator -> goBackend.uiConfig 'nav layout, routes, feature IDs'
-
-  // Backend → Shell
-  shell.scalprumRuntime -[consumes]-> goBackend.uiConfig 'bootstraps plugin registry'
-  shell.scalprumRuntime -> buildTime.manifest 'fetches MF entry scripts'
-
-  // Shell internals
-  shell.scalprumRuntime -> shell.searchEngine 'feeds extension metadata'
-  shell.scalprumRuntime -> shell.extensionRenderer 'resolves CodeRefs to components'
-
-  // User → Shell
-  endUser -> shell.searchEngine 'searches for features'
-  endUser -> shell.extensionRenderer 'navigates to pages, runs wizards'
+  oci -> host 'deploy compiled assets'
+  catalog -> browser 'metadata + URLs'
+  host -> browser 'manifest + JS/CSS'
 }
 
-// ─────────────────────────────────────────────
-//  Views
-// ─────────────────────────────────────────────
-
 views {
-
-  // ── Landscape ───────────────────────────────
-
   view index {
-    title 'Feature Contract — Landscape'
-    description '''
-      End-to-end flow: plugin developers declare modules and extensions
-      via typed builders. The build validates and generates manifests.
-      The Go backend reads manifests for navigation. The shell renders
-      plugin content and indexes everything for search.
-    '''
-
-    include
-      pluginDev,
-      endUser,
-      pluginModel,
-      buildTime,
-      goBackend,
-      shell
-
-    style pluginModel {
-      color green
-    }
-    style buildTime {
-      color red
-    }
-    style goBackend {
-      color primary
-    }
-    style shell {
-      color secondary
-    }
+    title 'Feature contract — CURRENT build, bootstrap and rendering'
+    include declarations, build, artifacts, registry, config, userConfig, runtime, pages, consumers
+    autoLayout LeftRight
   }
-
-  // ── Extension Model ─────────────────────────
-
-  view extensionModelView of pluginModel {
-    title 'Feature Contract — Extension Model'
-    description '''
-      The generic extension model. Modules are pages with optional
-      extensionPoints. Extensions register against extensionPoints
-      by type string. The type string is the only coupling —
-      modules and extensions can live in different plugins.
-
-      This model drives navigation (backend), search grouping (shell),
-      and component rendering (shell) without any per-type logic
-      in the platform.
-    '''
-
-    include
-      *,
-      buildTime.builders,
-      shell.searchEngine,
-      shell.extensionRenderer
-
-    style modules {
-      color primary
-    }
-    style extensionPoints {
-      color red
-    }
-    style extensions {
-      color green
-    }
-  }
-
-  // ── Build-Time Validation ───────────────────
-
-  view buildView of buildTime {
-    title 'Feature Contract — Build-Time Validation'
-    description '''
-      FleetPlugin wraps DynamicRemotePlugin with extension validation.
-      Typed builders enforce correct properties at the TypeScript level.
-      The plugin constructor validates cross-extension constraints
-      (duplicate IDs, CodeRef→exposedModules) and fails the webpack build
-      on any error. Only after validation passes does it delegate to the
-      SDK plugin for Module Federation output.
-    '''
-
-    include
-      *,
-      pluginDev,
-      goBackend.manifestReader,
-      pluginModel.modules,
-      pluginModel.extensions
-
-    style builders {
-      color green
-    }
-    style fleetPlugin {
-      color red
-    }
-    style sdkPlugin {
-      color muted
-    }
-  }
-
-  // ── Runtime ─────────────────────────────────
-
-  view runtimeView of shell {
-    title 'Feature Contract — Runtime'
-    description '''
-      The shell bootstraps from the Go backend's UI config.
-      Scalprum loads plugin MF entries, resolves CodeRefs to React
-      components, and feeds extension metadata into the search engine.
-      The extension renderer handles page routing, setup wizard ordering,
-      and provider selection — all driven by the generic extension model.
-    '''
-
-    include
-      *,
-      endUser,
-      goBackend,
-      buildTime.manifest,
-      pluginModel
-
-    style scalprumRuntime {
-      color primary
-    }
-    style searchEngine {
-      color indigo
-    }
-    style extensionRenderer {
-      color green
-    }
+  view plannedDistribution {
+    title 'Feature contract — older PROPOSED direct-fetch distribution'
+    description 'Not current runtime behavior or settled delivery arrangement. Sources: docs/design/addon-ui-architecture.md and the differing docs/design/client-asset-separation.md draft. Shared direction: separate asset distribution from the resource manager.'
+    include oci, catalog, host, browser
+    autoLayout LeftRight
   }
 }

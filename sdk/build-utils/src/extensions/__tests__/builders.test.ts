@@ -2,24 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import {
   createClusterProvider,
-  createModule,
-  createModuleGroup,
   createOnboardingAction,
+  createRoute,
+  createRouteGroup,
   createSetup,
 } from "../builders";
 
-describe("createModuleGroup", () => {
+describe("createRouteGroup", () => {
   it("returns extension with correct type", () => {
-    const ext = createModuleGroup({
+    const ext = createRouteGroup({
       id: "settings",
       label: "Settings",
     });
-    expect(ext.type).toBe("ocm-fleet.module-group");
+    expect(ext.type).toBe("ocm-fleet.route-group");
     expect(ext.properties.id).toBe("settings");
   });
 
   it("preserves optional fields", () => {
-    const ext = createModuleGroup({
+    const ext = createRouteGroup({
       id: "settings",
       label: "Settings",
       description: "Workspace settings",
@@ -31,7 +31,7 @@ describe("createModuleGroup", () => {
 
   it("throws on invalid id", () => {
     expect(() =>
-      createModuleGroup({
+      createRouteGroup({
         id: "BadId",
         label: "Bad",
       }),
@@ -39,15 +39,15 @@ describe("createModuleGroup", () => {
   });
 });
 
-describe("createModule", () => {
+describe("createRoute", () => {
   it("returns extension with correct type", () => {
-    const ext = createModule({
+    const ext = createRoute({
       id: "clusters",
       label: "Clusters",
       component: { $codeRef: "ClustersModule.default" },
       icon: { $codeRef: "ClustersIcon.default" },
     });
-    expect(ext.type).toBe("ocm-fleet.module");
+    expect(ext.type).toBe("ocm-fleet.route");
     expect(ext.properties.id).toBe("clusters");
     expect(ext.properties.component).toEqual({
       $codeRef: "ClustersModule.default",
@@ -58,7 +58,7 @@ describe("createModule", () => {
   });
 
   it("preserves optional fields", () => {
-    const ext = createModule({
+    const ext = createRoute({
       id: "clusters",
       label: "Clusters",
       component: { $codeRef: "ClustersModule.default" },
@@ -85,7 +85,7 @@ describe("createModule", () => {
 
   it("throws on invalid properties", () => {
     expect(() =>
-      createModule({
+      createRoute({
         id: "",
         label: "X",
         component: { $codeRef: "M.default" },
@@ -95,7 +95,7 @@ describe("createModule", () => {
   });
 
   it("preserves optional group field", () => {
-    const ext = createModule({
+    const ext = createRoute({
       id: "navigation",
       label: "Navigation",
       component: { $codeRef: "ClustersModule.default" },
@@ -106,7 +106,7 @@ describe("createModule", () => {
   });
 
   it("omits group when not provided", () => {
-    const ext = createModule({
+    const ext = createRoute({
       id: "clusters",
       label: "Clusters",
       component: { $codeRef: "ClustersModule.default" },
@@ -117,7 +117,7 @@ describe("createModule", () => {
 
   it("throws on invalid CodeRef", () => {
     expect(() =>
-      createModule({
+      createRoute({
         id: "test",
         label: "Test",
         component: { $codeRef: "bad" },
@@ -128,7 +128,7 @@ describe("createModule", () => {
 
   it("throws on invalid icon CodeRef", () => {
     expect(() =>
-      createModule({
+      createRoute({
         id: "test",
         label: "Test",
         component: { $codeRef: "M.default" },

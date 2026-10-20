@@ -1,347 +1,122 @@
-# Feature Contracts — Plugin Extension Points and Automated Search
+# UI Feature Contracts
 
-**Jira:** OME-102
-**Epic:** OME-3 — Addon / Extension Model
-**Status:** Draft
+Feature contracts give independently built plugins a predictable way to contribute pages and extension slots, with metadata the console can use for routing and feature discovery. This document describes current metadata, routing, and feature-search behavior; see the [feature-contract diagram](diagrams/feature-contract/feature-contract.c4) for the overall flow.
 
-## Context
+## Plugin declarations
 
-OCM Fleet's UI is a plugin shell — plugins contribute pages, wizards, and actions via extension types like `ocm-fleet.module`. We are building a global search capability from scratch that lets users discover available UI features (pages, actions, sub-features) without navigating the menu tree.
+Plugins declare extensions through builders from `@ocm-fleet/build-utils` in their rspack configuration. `FleetPlugin` validates the extension set before delegating Module Federation output to the Dynamic Plugin SDK.
 
-## Search Wireframe
+Every extension has a type and properties. The shared properties are:
 
-![Search across pages and actions](images/search-proposal.png)
+| Property | Contract |
+|----------|----------|
+| `id` | Required local identifier matching `/^[a-z][a-z0-9-]*$/` |
+| `label` | Required nonempty display string |
+| `description` | Optional summary |
+| `keywords` | Optional search terms |
+| `searchResult` | Optional custom feature-search component CodeRef |
+| `searchIcon` | Optional feature-search icon CodeRef |
 
-Features and their extensions are grouped in a tree: the parent feature ("Create Cluster") with child extensions ("Create Kind cluster", "Create Example provider cluster") indented beneath it. The search index is built from plugin extension metadata — each `ocm-fleet.module` declares `id`, `description`, `keywords`, and `extensionPoints` which the shell indexes automatically.
+A CodeRef has the form `{ $codeRef: "ModuleName.exportName" }`. The module name identifies an entry in the declaring plugin's `exposedModules`. A type declaration is not proof that the runtime export has the expected shape; see [Extension Validation](extension-validation.md).
 
-## Goal
-
-New plugin features should be automatically discoverable via search based on the plugin registry alone — no separate search metadata required.
-
-Each `ocm-fleet.module` should declare enough metadata (stable ID, description, keywords, extension points) that the shell can:
-1. Automatically index it for search
-2. Allow other plugins to extend it with a formal contract
-3. Compose routes from the feature graph
-
-The search index becomes a **projection of the plugin feature graph** rather than a manually maintained parallel structure.
-
-## Types
-
-### Navigation
-
-The `to` type used throughout this model is the same `PluginNavigateTo` used by the routing plugin (`PluginLink`, `usePluginNavigate`). All paths are **relative to the parent feature's base path**.
+An `ocm-fleet.route` additionally requires `component` and `icon` CodeRefs. It declares a page and its default navigation link, and may declare a `group` and named `extensionPoints`. Each extension point contains `type` and `description`; the slot itself does not declare another route or a runtime validation function. A route contribution is distinct from the JavaScript exposed module it renders: `RouteProperties`/`RouteExtras` and `RouteGroupProperties`/`RouteGroupExtras` name contribution contracts, while `exposedModules`, CodeRefs, and Scalprum/`PluginLink` `module` props retain Module Federation terminology.
 
 ```typescript
-/**
- * Relative navigation target — same shape as the routing plugin's `to` prop.
- * Paths are relative to the feature's base path (resolved from label slug).
- */
-interface PluginNavigateTo {
-  pathname?: string;
-  search?: string;
-  hash?: string;
-}
+createRoute({
+  id: "clusters",
+  label: "Clusters",
+  component: { $codeRef: "ClustersModule.default" },
+  icon: { $codeRef: "ClustersIcon.default" },
+  description: "View and manage your fleet of clusters",
+  keywords: ["cluster", "fleet", "create"],
+  extensionPoints: {
+    providers: {
+      description: "Cluster providers available in the creation wizard",
+      type: "ocm-fleet.cluster-provider",
+    },
+  },
+});
 ```
 
-**Hash fragment contract (future work):** `hash` deep-linking is planned but not yet implemented — current route composition uses `pathname` and `search` only. When implemented, a `to` with `hash` (e.g., `{ hash: "notifications" }`) will scroll to a matching element ID in the target page.
+Other contracts include route groups (`ocm-fleet.route-group`, built with `createRouteGroup`), setup steps, cluster providers, onboarding actions, cluster-detail tabs, and inventory search renderers. An extension point advertises a contribution type; the consuming component implements how those contributions are selected and rendered. Matching metadata does not automatically create routes, navigation entries, or search results for every extension type.
 
-```typescript
-// Future: deep-link to the "Notifications" section of the Settings page
-{
-  "to": { "pathname": "settings", "hash": "notifications" }
-}
-// → would navigate to /settings#notifications
-// → target page must have <h2 id="notifications">Notifications</h2> or similar
-```
+Sources: [extension types](../../sdk/build-utils/src/extensions/types.ts), [builders](../../sdk/build-utils/src/extensions/builders.ts), [FleetPlugin](../../sdk/build-utils/src/extensions/FleetPlugin.ts), [core plugin declarations](../../extensions/core/client/rspack.config.ts).
 
-### Feature Declaration
+## Page identity and route ownership
 
-A `ocm-fleet.module` becomes a **feature declaration**. It gets an explicit, stable `id` and can advertise extension points by naming a custom extension type.
+The resource manager server projects route metadata into flat `pluginPages` entries containing `id`, `title`, `path`, `scope`, `module`, and `pluginKey`. The `module` field remains the exposed JavaScript module key, not the route ID.
 
-```typescript
-/**
- * A feature declaration — a `ocm-fleet.module` with enough metadata
- * for automatic search indexing and cross-plugin extension.
- */
-/**
- * Valid extension ID: lowercase letters, digits, and dashes.
- * Must start with a letter. Examples: "create-cluster", "auth-setup".
- */
-type ExtensionId = string; // /^[a-z][a-z0-9-]*$/
+| Route metadata | Router-relative path |
+|-----------------|----------------------|
+| Usable `id` and `group` | `/{group}/{id}` |
+| Usable `id`, no group | `/{pluginKey}/{id}` |
+| Missing or unusable `id` | Slug derived from label |
 
-interface FeatureDeclaration {
-  /**
-   * Local identifier within the plugin.
-   * Must match /^[a-z][a-z0-9-]*$/ (letters, digits, dashes; starts with a letter).
-   * The shell composes the global feature ID as `{key}.{id}`,
-   * e.g. plugin key "day-one" + id "create-cluster" → "day-one.create-cluster".
-   */
-  id: ExtensionId;
-  /** Display name (also used as search title) */
-  label: string;
-  /** Module component */
-  component: CodeRef;
-  /** Human-readable summary (used in search results) */
-  description?: string;
-  /** Search keywords for discoverability */
-  keywords?: string[];
-  /**
-   * Named extension points this feature accepts.
-   * Each key maps to an extension type string that other plugins register against.
-   * Optional — a feature without extension points is still searchable but not
-   * extendable by other plugins. Developers can define custom search entries
-   * for such features using the reserved search properties directly on the module.
-   */
-  extensionPoints?: Record<string, ExtensionPointDeclaration>;
-}
+For a usable ID, the page ID is `{pluginKey}.{id}`. The server extracts the exposed module name from the component CodeRef. Duplicate paths are skipped. These are projections of metadata, not runtime checks of plugin exports or route contents.
 
-interface ExtensionPointDeclaration {
-  /** Human-readable description of what this extension point accepts */
-  description: string;
-  /** The extension type string plugins use to contribute to this point */
-  type: string;
-}
-```
+The shell registers each page at `/{path}/*`. The plugin module owns the suffix and query parameters. It can use internal `<Routes>`, an outlet, or query-driven UI; an `<Outlet>` is not a universal requirement. Browser URLs include the `/app` basename, so `/core/clusters` corresponds to `/app/core/clusters`.
 
-### Extension Types
+Global `/api/ui/config` supplies plugin pages, plugin entries, and Scalprum configuration. `/api/ui/user-config` supplies `navLayout`. The current user-config layout is generated from the registry, not personalized by identity. Each projected route becomes a default page link or a child of its declared route group, without user customization. [Routes, Route Groups, and Default Navigation](route-groups.md) traces standalone and grouped declarations through both responses to visible links, including ordering, enablement, loading, and identity limits. Newly packaged declarations enter an open browser only after configuration is fetched again, not through live registry discovery.
 
-Each extension point defines its own extension type (e.g., `ocm-fleet.cluster-provider`). The type determines domain-specific properties — a cluster provider has a `card`, `wizard`, and `icon`; a different extension point would have different properties.
+Sources: [server UI configuration](../../server/internal/transport/http/uiconfig.go), [console routes](../../client/web/src/routes/ConsoleRoutes.tsx), [browser router](../../client/web/src/App.tsx).
 
-Search is a **cross-cutting concern**. Any extension type can include a reserved `searchResult` property to customize how it appears in search. The shell indexes all extensions automatically from their `label`, `description`, and `keywords`.
+## Cross-plugin navigation
 
-```typescript
-/**
- * Props the shell passes to a custom search result component.
- */
-interface SearchResultProps {
-  title: string;
-  description: string;
-}
-
-/**
- * Reserved properties available on any extension type for search customization.
- * These are mixed into the domain-specific extension properties.
- */
-interface SearchReservedProperties {
-  /** Custom search result component — receives { title, description } */
-  searchResult?: CodeRef<ComponentType<SearchResultProps>>;
-  /** Custom search result icon — rendered with no props */
-  searchIcon?: CodeRef<ComponentType>;
-}
-```
-
-The example provider below is illustrative; it does not represent an implemented provisioner.
-
-## Feature Graph
-
-The plugin registry forms a directed graph: plugins declare features (`ocm-fleet.module`), features declare extension points, and other plugins contribute extensions against those points.
-
-```mermaid
-graph TD
-    subgraph "day-one-plugin (key: day-one)"
-        F["ocm-fleet.module<br/>id: create-cluster<br/>label: Create Cluster"]
-        EP["extensionPoint: providers<br/>type: ocm-fleet.cluster-provider"]
-        F --> EP
-    end
-
-    subgraph "example-plugin (key: example)"
-        E1["ocm-fleet.cluster-provider<br/>id: example<br/>label: Example provider"]
-    end
-
-    subgraph "kind-plugin (key: kind)"
-        E2["ocm-fleet.cluster-provider<br/>id: kind<br/>label: Kind"]
-    end
-
-    EP -.->|"registers against"| E1
-    EP -.->|"registers against"| E2
-```
-
-## Search Index Build Flow
-
-The shell reads the plugin registry and builds a flat search index with parent–child relationships preserved via the `feature` field.
-
-```mermaid
-flowchart LR
-    R["Plugin Registry"] --> M["Scan ocm-fleet.module<br/>extensions"]
-    M --> IDX["Search Index"]
-    R --> X["Scan all other<br/>extension types"]
-    X --> MATCH{"Match type to<br/>extensionPoints?"}
-    MATCH -->|yes| RESOLVE["Resolve route:<br/>basePath + to.pathname"]
-    RESOLVE --> IDX
-    MATCH -->|no| SKIP["Skip"]
-
-    IDX --> TREE["Grouped results:<br/>feature → children"]
-```
-
-## Route Composition
-
-Extension routes are composed by combining the feature's base path with the extension's relative `to`.
-
-```mermaid
-flowchart LR
-    LABEL["Feature label:<br/>'Create Cluster'"] -->|slug| BASE["/create-cluster"]
-    TO["Extension to:<br/>{ pathname: 'example' }"] --> REL["example"]
-    BASE --> FULL["/create-cluster/example"]
-    REL --> FULL
-```
-
-## Example: Cluster Creation
-
-The "Create Cluster" page lives at `/create-cluster` (slug derived from label). It shows a list of available cluster providers. Selecting a provider navigates to a sub-path like `/create-cluster/example`. Provider plugins extend this feature by registering a `ocm-fleet.cluster-provider` extension.
-
-### Feature: Create Cluster page (day-one-plugin)
-
-Plugin key: `"day-one"`, extension id: `"create-cluster"` → global feature ID: `"day-one.create-cluster"`
-
-```json
-{
-  "type": "ocm-fleet.module",
-  "properties": {
-    "id": "create-cluster",
-    "label": "Create Cluster",
-    "component": { "$codeRef": "CreateClusterPage.default" },
-    "description": "Launch the cluster creation wizard",
-    "keywords": ["deploy", "new", "cluster", "wizard"],
-    "extensionPoints": {
-      "providers": {
-        "description": "Cluster providers available in the creation wizard",
-        "type": "ocm-fleet.cluster-provider"
-      }
-    }
-  }
-}
-```
-
-The Go backend resolves the route: `"Create Cluster"` → slug `create-cluster` → base path `/create-cluster`. The shell composes the global feature ID from the plugin registry key and the extension's local `id`.
-
-### Extension: Example provider provider (example-plugin)
-
-The extension type is `ocm-fleet.cluster-provider` — matching the extension point declaration. Domain-specific properties (`card`, `wizard`) are defined by the extension point contract. Search properties (`searchResult`, `searchIcon`) are reserved and handled by the shell.
-
-```json
-{
-  "type": "ocm-fleet.cluster-provider",
-  "properties": {
-    "id": "example",
-    "label": "Example provider",
-    "description": "Example Kubernetes cluster provider",
-    "keywords": ["kubernetes", "cluster", "example"],
-    "to": { "pathname": "example" },
-
-    "icon": { "$codeRef": "ExampleProvider.Icon" },
-    "card": { "$codeRef": "ExampleProvider.Card" },
-    "wizard": { "$codeRef": "ExampleProvider.Wizard" },
-
-    "searchResult": { "$codeRef": "ExampleSearchResult.default" },
-    "searchIcon": { "$codeRef": "ExampleProvider.Icon" }
-  }
-}
-```
-
-The `to` is relative — `{ pathname: "example" }` resolves to `/create-cluster/example`. This is the same `to` you'd pass to `PluginLink` or `usePluginNavigate`:
+`PluginLink` and `usePluginNavigate` from `@ocm-fleet/common` address a page by plugin scope and exposed module name:
 
 ```tsx
-<PluginLink scope="day-one-plugin" module="CreateClusterPage" to="example">
-  Example provider
+<PluginLink scope="core-plugin" module="ClustersModule" to="my-cluster">
+  View cluster
 </PluginLink>
 
-// equivalent to navigating to /create-cluster/example
+// Opens the Kind creation wizard on the Clusters page.
+navigate({ search: "?create=kind" });
 ```
 
-### Extension: Kind provider (kind-plugin)
+Here `navigate` is obtained from `usePluginNavigate("core-plugin", "ClustersModule")`. A string or object `pathname` is appended to the resolved base path; `search` supplies the query string. Callers must provide a suffix appropriate to the target module. The helpers do not validate that its internal route exists.
 
-No custom search component — the shell renders the default search result using `label` and `description`.
+The resolver returns the first `pluginPages` match for `(scope, module)`. Hook `available` means that such a page exists, not that the plugin is enabled, authorized, healthy, or loaded. Missing targets make navigation a no-op and make `PluginLink` render its fallback, which defaults to nothing. Local enablement is checked separately when the page renders.
 
-```json
-{
-  "type": "ocm-fleet.cluster-provider",
-  "properties": {
-    "id": "kind",
-    "label": "Kind",
-    "description": "Create a local Kind cluster for development and testing",
-    "keywords": ["kind", "local", "development", "testing"],
-    "to": { "pathname": "kind" },
+`PluginLink` accepts React Router's `To` object and preserves its `hash`. The navigation hook's `PluginNavigateTo` supports only `pathname` and `search`. Feature-search composition also uses only pathname and search. There is no automatic scroll-to-heading contract.
 
-    "icon": { "$codeRef": "KindProviderCard.KindIcon" },
-    "card": { "$codeRef": "KindProviderCard.default" },
-    "wizard": { "$codeRef": "CreateKindWizard.default" }
-  }
-}
+Sources: [shell resolver](../../client/web/src/components/Root/ScalprumShell.tsx), [PluginLink](../../sdk/common/src/PluginLink.tsx), [navigation hook](../../sdk/common/src/usePluginNavigate.tsx), [page enablement](../../client/web/src/pages/PluginPage.tsx).
+
+## Cluster-provider example
+
+The Clusters route lives at `/core/clusters`, rendering the exposed `ClustersModule`. `?create` opens provider selection; `?create=kind` opens the Kind wizard. A provider requires a description and icon, card, and wizard CodeRefs:
+
+```typescript
+createClusterProvider({
+  id: "kind",
+  label: "Kind",
+  description: "Create a local Kind cluster for development and testing.",
+  keywords: ["kind", "local", "development", "testing"],
+  to: { search: "?create=kind" },
+  icon: { $codeRef: "KindProviderCard.KindIcon" },
+  card: { $codeRef: "KindProviderCard.default" },
+  wizard: { $codeRef: "CreateClusterWizard.default" },
+  searchIcon: { $codeRef: "KindIcon.default" },
+});
 ```
 
-Resolves to `/create-cluster/kind`.
+The page component implements provider selection and renders the selected wizard. The provider metadata does not generate a `/kind` child route.
 
-### How the shell builds the search index
+Sources: [Kind declarations](../../extensions/kind/client/rspack.config.ts), [Clusters page](../../extensions/core/client/src/plugins/core-plugin/ClustersPage.tsx), [provider modal](../../extensions/core/client/src/plugins/core-plugin/CreateClusterModal.tsx).
 
-1. Reads `ocm-fleet.module` extensions from the plugin registry
-2. For plugin key `"day-one"`, extension id `"create-cluster"` → registers feature `"day-one.create-cluster"` with title "Create Cluster", description, keywords, route `/create-cluster`
-3. Reads all other extension types and matches them to features via extension point declarations
-4. For Example provider `ocm-fleet.cluster-provider`: the shell knows `ocm-fleet.cluster-provider` belongs to `"day-one.create-cluster"` (from its `extensionPoints`). Resolves base path `/create-cluster` + `to.pathname` → `/create-cluster/example`. Inserts child search entry grouped under the parent. Uses `searchResult` and `searchIcon` if provided, otherwise renders default.
-5. Same for Kind → `/create-cluster/kind`
+## Feature search
 
-Search result for "cluster":
-```
-Pages
-  Create Cluster — Launch the cluster creation wizard
-  ├── Example provider — Example Kubernetes cluster provider
-  └── Kind — Create a local Kind cluster for development and testing
-```
+`SearchProvider` eagerly resolves route and cluster-provider extensions through the SDK. It indexes route labels, descriptions, and keywords, fallback pages from `pluginPages`, a debug entry, and groups from the merged navigation layout. It does not build a metadata-only index over arbitrary extension types.
 
-## Route Resolution
+Route contributions are matched to pages by label, which makes duplicate labels ambiguous. Declared provider extension points establish parent links, and the provider scan composes the parent's path with `to.pathname` and `to.search`. A synthetic "Create cluster" entry is added for a cluster-provider extension point. Other extension-point types are not automatically indexed.
 
-The Go backend generates page slugs from labels:
+Groups, routes, and provider entries use category `nav`, displayed as "Pages". Parent relationships use the `feature` field. Results form an indented tree, not collapsible search groups. Orama ranks matches; the index keeps at most five raw hits per category before missing ancestors are injected. Sidebar customization changes grouping, not relevance ordering. Hidden items remain searchable, and disabled route pages are marked `not-enabled` rather than universally excluded.
 
-```go
-slug := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(label), "-"), "-")
-```
+Custom `searchResult` components receive `{ title, description }`; `searchIcon` is used by provider entries, while route entries use their route icon. These customization properties are not uniformly consumed across every extension type. Inventory results use the separate [search-result renderer contract](search-result-renderer-contract.md); [advanced search](cel-advanced-search.md) executes CEL against the resource API.
 
-Route composition for extensions:
+Sources: [SearchProvider](../../client/web/src/components/Search/SearchProvider.tsx), [index query](../../client/web/src/components/Search/searchIndex.ts), [search rendering](../../client/web/src/components/Search/FleetSearch.tsx), [search diagram](diagrams/search/search.c4).
 
-| Component | Source | Example |
-|-----------|--------|---------|
-| Base path | Feature label → slug | `/create-cluster` |
-| Extension path | `to.pathname` (relative) | `example` |
-| Full path | base + `/` + extension | `/create-cluster/example` |
-| Query params | `to.search` | `?provider=example` |
-| Hash fragment | (planned) `to.hash` | `#notifications` |
+## Asset delivery: current implementation and target design
 
-This matches the routing plugin's resolution: `PluginLink` and `usePluginNavigate` already compose paths as `${basePath}/${to.pathname}`.
+Currently, the server reads a local `plugin-registry.json`, advertises plugin bootstrap metadata, and serves configured frontend assets under `/app`. Origin-rooted asset paths are rewritten to that prefix.
 
-### Routing Convention
-
-Extensions should prefer defining their own `ocm-fleet.module` (own top-level route) over using relative `to` paths under a parent feature. Relative child routing only makes sense when the parent page renders an `<Outlet>` — i.e., the parent explicitly supports nested content.
-
-| Pattern | When to use | Example |
-|---------|-------------|---------|
-| Own `ocm-fleet.module` | Extension is a standalone page (no `<Outlet>` in parent) | Signing Keys page at `/signing-keys` |
-| Relative `to` under parent | Parent page renders child content via `<Outlet>` | Example provider wizard at `/create-cluster/example` |
-
-If an extension declares a relative `to` but the target feature's page has no `<Outlet>`, the child route will never render. Developers should check the parent feature's contract before using relative paths.
-
-## Required Changes
-
-### Backend: dot-separated feature IDs
-
-The Go backend currently composes page IDs with a dash (`fmt.Sprintf("%s-%s", entry.Key, strings.ToLower(moduleName))`). This must change to a dot separator (`%s.%s`) to match the `{key}.{id}` format. The dot makes the boundary between plugin key and extension ID unambiguous — with dashes, `"day-one-create-cluster"` could split multiple ways.
-
-Affected code: `generatePluginPages` in `server/internal/transport/http/uiconfig.go`. The nav layout and user-config responses will reflect the new format automatically since they derive from the same function.
-
-## Open Questions
-
-- [ ] **Backend awareness of extension points (post-POC):** For now, extension points are resolved purely in the UI shell at runtime. In the future, the backend addon registration API could also track extension points — enabling validation (reject unknown types), discovery (query available extension points), and dependency ordering. Not in scope for the initial POC milestone, but worth keeping in mind as the addon model (OME-3) matures.
-- [ ] **Developer tooling for the feature graph (post-POC):** The feature graph is internal — end users see pages and actions, not extensions. A developer-facing tool (MCP server, CLI skill, or Claude Code agent) that queries the graph ("show all extensions registered against `day-one.create-cluster`") would improve the plugin developer experience. Could also power the `/debug` console. Not POC scope.
-- [ ] **Non-page features (settings, toolbar actions):** Most non-page features are core platform concerns. If the feature has a page (e.g., Settings), search navigates there via normal routing. Hash fragments (`#section-id`) can deep-link to a specific section — the contract is that a `to` with a hash (e.g., `{ pathname: "settings", hash: "notifications" }`) requires a matching heading ID in the target page. Note: `hash` support is not yet implemented in the routing runtime. Toolbar actions (e.g., "Toggle glass theme") are trickier — selecting them in search would need to trigger a callback rather than a navigation. Needs design for action-type results.
-- [ ] **Inline actions from search:** Should some search results trigger actions directly (e.g., toggling a theme, opening a modal) rather than navigating? This is a UX question — command palette patterns (VS Code, Spotlight) do this, but it adds complexity and may confuse users who expect search to mean "find and go to". Needs UX input.
-- [ ] **Build-time validation of extension `to` params (post-POC):** A future OCM Fleet plugin SDK (wrapping the dynamic plugin SDK) could validate at build time that an extension's `to` params match the target feature's contract — e.g., that the parent feature declares an `<Outlet>` if a relative path is used. Runtime validation in the shell is also possible but less useful (the plugin is already built and shipped). SDK-level validation is the right layer for this.
-- [ ] **Feature visibility and permissions (post-POC):** Features and extensions should respect the platform's RBAC model — a feature can declare a required permission (e.g., `"requires": "clusters.create"`) and the shell only shows it in search and navigation if the current user has that permission. This follows the same pattern as the rest of the platform's access control and will be designed alongside it. Not in POC scope.
-- [ ] **Reserved property enforcement:** `searchResult` and `searchIcon` are reserved across all extension types. The future SDK should enforce this at build time — error if a domain extension type redefines them with an incompatible signature. At runtime, the server should discard extensions that reference features which don't exist or aren't enabled for the current user.
-
-## Relationship to Addon Model (OME-3)
-
-The addon/extension model (OME-3) covers the full lifecycle: registration,
-discovery, delivery. Feature contracts are the **UI-facing slice** — how addons
-surface capabilities in the shell. An addon registers with the resource manager
-server, and its UI plugin declares features and extensions that the shell
-indexes for search and navigation.
-
-The feature contract model should be designed so that when the addon registration API lands, a registered addon's UI plugin can declare its features and have them automatically discoverable via search.
+The established direction is independently packaged frontend assets distributed outside the resource manager, without fleetlet asset uploads. The older [addon UI distribution design](../design/addon-ui-architecture.md) describes OCI artifacts, catalog metadata and asset URLs, with direct browser fetches from an external host. The newer [Client Asset Separation draft](../design/client-asset-separation.md) instead proposes deployment-owned asset policy and a same-origin Gateway/Operator arrangement. Their delivery and authority differences remain unresolved; neither is implemented by the current local registry-serving path. See [Plugin Discovery](plugin-discovery.md#draft-asset-trust-refinement).

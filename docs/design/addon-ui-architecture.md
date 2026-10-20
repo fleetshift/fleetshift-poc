@@ -532,7 +532,8 @@ graph TD
 
 Extension types:
 
-- **`ocm-fleet.module`** -- standalone page with its own nav item
+- **`ocm-fleet.route`** -- standalone page with its own default nav item; its component references a JavaScript exposed module
+- **`ocm-fleet.route-group`** -- expandable navigation container and canonical prefix for its member routes; see [routes and route groups](../ui/route-groups.md)
 - **`ocm-fleet.dashboard-widget`** -- widget rendered on the dashboard
 - **Core extension points** -- tabs, panels, or other slots defined by core
   plugins (e.g. a tab on the cluster detail page)
@@ -567,8 +568,8 @@ registered, the modules they expose, and the routes they occupy. Its API can
 provide the page registry that the shell uses for resolution, keeping routing
 knowledge centralized rather than scattered across plugins.
 
-See [007-cross-plugin-navigation](../ui/spikes/007-cross-plugin-navigation.md)
-for the implementation spike.
+See the [cross-plugin navigation reference](../ui/cross-plugin-navigation.md)
+for current resolver and helper behavior and its limits.
 
 ## Explored Alternative: Allowing Core Plugin Overrides
 

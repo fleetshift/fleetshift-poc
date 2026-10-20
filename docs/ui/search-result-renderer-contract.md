@@ -1,439 +1,122 @@
-# Search Result Renderer Contract — Extension-Driven Inventory Display
+# Search Result Renderer Contract
 
-**Jira:** OME-194
-**Epic:** OME-3 — Addon / Extension Model
-**Status:** Implemented
-**Depends on:** [Feature Contracts](feature-contracts.md), [Search Architecture](diagrams/search/search.c4)
+Search-result renderers separate resource retrieval from domain-specific display and navigation, letting plugins explain results without putting each resource schema into shell rendering code. Resources returned by `QueryResources` carry a `resourceType`, a full `name`, and a resource body; plugins contribute `ocm-fleet.render-search` extensions to map those results to display information and module-reference links.
 
-## Problem
+This contract is implemented. Renderer lookup is extensible, but the current simple inventory-search queries still contain type-specific policy. See [Feature Contracts](feature-contracts.md), [Advanced Search](cel-advanced-search.md), and the [search diagram](diagrams/search/search.c4).
 
-The inventory API (`QueryResources`) returns resources with a `resourceType` (e.g., `kind.open-cluster-management.io/Cluster`, `kubernetes.open-cluster-management.io/Object`) and a `name` in AIP-123 format (e.g., `//kind.open-cluster-management.io/clusters/martin-kind01471218`). The shell needs to render these in search results but doesn't know:
+## Extension declaration
 
-- Where each resource type links to (route)
-- What icon to show
-- What description or badges to display
+The extension type is the static string `ocm-fleet.render-search`; the backend resource type is a property, not encoded into the extension type.
 
-That knowledge belongs to addon plugins. The shell must not embed it.
-
-## Goal
-
-Define a **build-time contract** so addon plugins can declare search result renderers keyed by resource type. The shell discovers these renderers via the existing extension system and resolves them lazily — only loading plugin code when a search result of that type actually appears.
-
-This doc covers three layers in order:
-
-1. **Build-utils** — encoding function, builder, validation
-2. **Extension discovery** — how the shell finds and loads renderers
-3. **Rendering** — deferred to a follow-up doc / iteration
-
-## Layer 1: Build-Utils
-
-### Extension type
-
-All search result renderers share a single static extension type: `ocm-fleet.render-search`. The `resourceType` string (e.g. `kind.open-cluster-management.io/Cluster`) is stored as a property, not encoded into the type.
-
-**Why static, not encoded?** The SDK's `DynamicRemotePlugin` validates extension types against `/^[a-zA-Z]+(?:-[a-zA-Z]+)*\.[a-zA-Z]+(?:-[a-zA-Z]+)*$/` — only letters and hyphens. Base64url encoding (an earlier approach) produces digits and underscores, which the regex rejects. A static type with `resourceType` as a property is simpler and SDK-compliant.
-
-**Renderer lookup at runtime:** The shell collects all resolved `ocm-fleet.render-search` extensions into a `Map<resourceType, renderer>`. For each inventory result, it looks up `result.resourceType` directly — no encoding needed.
-
-### Why use `resourceType` as the renderer key?
-
-The inventory API returns each resource with a `resourceType` (type-level) and a `name` (instance-level). Sample response:
-
-```json
-{
-  "name": "//kind.open-cluster-management.io/clusters/martin-kind01471218",
-  "resourceType": "kind.open-cluster-management.io/Cluster",
-  "resource": {
-    "name": "clusters/martin-kind01471218",
-    "uid": "2b1ec087-72f7-484e-817a-9ce0d02945b5",
-    "spec": {},
-    "conditions": { "Ready": { "status": "True" } }
-  }
-}
-```
-
-`resourceType` is the addon + kind combination. It's defined by the addon at registration time and returned on every resource. The `name` is instance-specific (carries the cluster ID) — useful inside `resolve()` to build the route, but not as the renderer key.
-
-Using `resourceType` as the key in `properties.resourceType` means:
-
-1. **Direct mapping** — no encoding, no intermediary. `result.resourceType` → map lookup → resolved renderer.
-2. **Addon-defined** — the addon chooses its resource type when it registers with the backend. The same string becomes the UI renderer key.
-3. **1:1 with backend types** — `ExtensionResourceTypeService.ListTypes()` returns the same `resourceType` values.
-4. **All resources of the same type render the same way** — every `kind.open-cluster-management.io/Cluster` uses the same renderer. Instance-specific data (name, state, conditions) is passed to the `resolve` function.
-
-### Builder function
-
-Follows the existing `createClusterProvider` pattern — CodeRefs are passed already wrapped as `{ $codeRef: "Module.export" }`:
+| Property | Contract |
+|----------|----------|
+| `id` | Required local ID matching `/^[a-z][a-z0-9-]*$/` |
+| `label` | Required display string, used as a result badge |
+| `resourceType` | Required nonempty backend type identity |
+| `resolve` | Required CodeRef to a synchronous resolver |
+| `icon` | Optional CodeRef to a result icon |
+| `component` | Optional CodeRef accepted by the build contract, but not consumed by the current renderer path |
 
 ```typescript
-// build-utils/src/extensions/searchResultRenderer.ts
-
-export const RENDER_SEARCH_TYPE = "ocm-fleet.render-search" as const;
-
-export type SearchResultRendererExtras = {
-  resourceType: string;
-  resolve: EncodedCodeRef;      // required
-  component?: EncodedCodeRef;
-  icon?: EncodedCodeRef;
-};
-
-export type SearchResultRendererProperties = BaseExtensionProperties & SearchResultRendererExtras;
-
-export function createSearchResultRenderer(
-  properties: SearchResultRendererProperties,
-): FleetExtension<typeof RENDER_SEARCH_TYPE, SearchResultRendererExtras> {
-  const ctx = `${RENDER_SEARCH_TYPE} "${properties.id || "(no id)"}"`;
-  throwOnErrors(validateSearchResultRendererProperties(properties, ctx), RENDER_SEARCH_TYPE);
-  return { type: RENDER_SEARCH_TYPE, properties };
-}
-```
-
-### Validation
-
-Added to `validate.ts` as a `case RENDER_SEARCH_TYPE:` in the switch:
-
-- `id` — required, matches `/^[a-z][a-z0-9-]*$/`
-- `label` — required string
-- `resourceType` — required, non-empty string
-- `resolve` — required, valid CodeRef
-- `component` — optional CodeRef
-- `icon` — optional CodeRef
-
-### `resolve` return type
-
-The `resolve` CodeRef points to a function that takes an inventory resource and returns a **module reference** — not a raw pathname. Routing is handled by `PluginLink`/`usePluginNavigate`, which resolve the actual URL from the plugin module registry.
-
-```typescript
-interface SearchResultRender {
-  scope: string;          // plugin scope (e.g., "core-plugin")
-  module: string;         // exposed module that handles this route (e.g., "ClustersModule")
-  to?: string;            // relative path within the module route (e.g., "martin-kind01471218")
-  search?: string;        // optional query string
-  description: ReactNode; // plugin owns the rendering — string, PF Labels, custom layout
-}
-```
-
-`description` is a `ReactNode`, not a string. The shell renders it as-is inside the search result item — no format enforcement. A plugin can return a plain string, PF `Label` components, status badges, or any custom layout.
-
-The shell renders the link as `<PluginLink scope={r.scope} module={r.module} to={r.to}>` — the same mechanism the clusters table uses. The `resolve` function never hardcodes a pathname; it only references the module that owns the detail route.
-
-### Plugin registration example
-
-```typescript
-// rspack.config.ts — kind-plugin extensions array
 createSearchResultRenderer({
   id: "kind-cluster-renderer",
   label: "Kind Cluster",
   resourceType: "kind.open-cluster-management.io/Cluster",
   resolve: { $codeRef: "KindSearchResult.resolveKindCluster" },
   icon: { $codeRef: "KindSearchResult.KindClusterIcon" },
-}),
+});
 ```
 
+CodeRefs use `{ $codeRef: "Module.export" }` and refer to exposed modules in the declaring plugin. Build checks validate the required metadata, reference syntax, and exposed-module keys; they do not execute the resolver or validate its return value. See [Extension Validation](extension-validation.md) for runtime resolution and guard limits.
+
+Sources: [builder and validation](../../sdk/build-utils/src/extensions/searchResultRenderer.ts), [set validation](../../sdk/build-utils/src/extensions/validate.ts), [Kind declarations](../../extensions/kind/client/rspack.config.ts).
+
+## Resolver input and output
+
+`InventoryResource` aliases the shared resource-query result type. The resolver receives the full envelope, not just the nested resource body. `resourceType` selects the renderer; instance identity is available through `name` and `resource.name`.
+
 ```typescript
-// extensions/kind/client/src/KindSearchResult.tsx
-export function resolveKindCluster(resource: InventoryResource): SearchResultRender {
-  const clusterId = resource.resource.name.split("/").pop() ?? resource.resource.name;
+interface SearchResultRender {
+  scope: string;
+  module: string;
+  to?: string;
+  search?: string;
+  title?: string;
+  description: ReactNode;
+  navigable?: boolean;
+}
+
+type SearchResultResolve = (
+  resource: InventoryResource,
+) => SearchResultRender;
+```
+
+The resolver is synchronous: its job is to map already-fetched data to display and navigation properties. The description is rendered as a React node, allowing text or plugin-supplied badges/layout. The optional title overrides the default final segment of `resource.name`.
+
+The Kind renderer targets the core Clusters route through its exposed JavaScript module `ClustersModule`. The route contribution uses `ocm-fleet.route`; the resolver's `module` field still names an `exposedModules` key, not a route ID:
+
+```typescript
+export function resolveKindCluster(
+  resource: InventoryResource,
+): SearchResultRender {
+  const clusterId =
+    resource.resource.name.split("/").pop() ?? resource.resource.name;
   return {
     scope: "core-plugin",
     module: "ClustersModule",
     to: clusterId,
     description:
-      (resource.resource as Record<string, unknown>).state?.toLowerCase() ?? "unknown",
+      ((resource.resource as Record<string, unknown>).state as string)
+        ?.toLowerCase() ?? "unknown",
   };
 }
 ```
 
-The Kind addon routes to `ClustersModule` in `core-plugin`. An addon with its own detail page would reference its own scope/module instead.
+Sources: [shared types](../../sdk/common/src/searchResultRenderer.ts), [resource result types](../../sdk/common/src/resourceApi.ts), [Kind resolver](../../extensions/kind/client/src/KindSearchResult.tsx).
 
-## Layer 2: Extension Discovery
+## Discovery and loading
 
-### What the SDK gives us
+`useInventorySearch` obtains matching extensions with `useExtensions` and resolves them with `useResolvedExtensions`. `FleetSearch` mounts this hook regardless of whether a result of a particular type is present. All matching renderer CodeRefs are resolved eagerly by that hook; loading is not deferred per encountered resource type.
 
-1. **Plugin registry** — the shell knows which plugin scopes exist and can load their manifests on demand.
-2. **CodeRef resolution** — once a manifest is loaded, the SDK resolves CodeRefs (`{ $codeRef: "Module.export" }`) by loading the plugin's MF remote and grabbing the export.
-3. **Open type system** — any extension type string is accepted. The `default` case in `validate.ts` applies base validation to unrecognized types.
+Resolved renderers are stored in a map keyed by the exact `resourceType` string. Later entries replace earlier entries for a duplicate key; there is no renderer-type uniqueness check or priority contract. The extension label, resolver, and icon enter the map. The optional `component` does not.
 
-### What we build on top
+The hook waits for renderer resolution before executing inventory queries. SDK resolution failures can exclude extensions, but successful resolution is not a structural check of the resolver's return value or icon component.
 
-The SDK's `useResolvedExtensions` hook already handles the discovery flow — it takes a type-guard predicate, scans all loaded plugin manifests, resolves CodeRefs, and returns live functions/components. We define a type guard `isSearchResultRendererExtension` that matches `ocm-fleet.render-search` exactly:
+Sources: [renderer guard](../../client/web/src/extensions/isSearchResultRendererExtension.ts), [inventory hook](../../client/web/src/hooks/useInventorySearch.tsx), [FleetSearch](../../client/web/src/components/Search/FleetSearch.tsx).
 
-```typescript
-// web/src/extensions/isSearchResultRendererExtension.ts
+## Rendering and navigation
 
-export function isSearchResultRendererExtension(
-  e: Extension,
-): e is SearchResultRendererExtension {
-  return e.type === "ocm-fleet.render-search";
-}
-```
+For a matching renderer, the shell calls `resolve(result)`, adds a compact badge from the extension label, and displays the returned description and optional icon. All inventory results appear under Resources in simple search; advanced results use the same item-rendering path.
 
-### Discovery flow
+Links use `PluginLink` with the returned scope/module, relative `to`, and optional query string. The shell resolves the first matching backend page entry; it does not derive routes from resource names. A renderer must return a target module that actually implements the suffix it supplies.
 
-```
-Shell startup
-  └─ useResolvedExtensions(isSearchResultRendererExtension)
-       └─ Scans all loaded manifests for ocm-fleet.render-search extensions
-       └─ Resolves CodeRefs → live resolve/icon functions
-       └─ Returns [extensions, loaded]
-
-useInventorySearch hook
-  └─ Builds Map<resourceType, ResolvedRenderer> from extensions
-  └─ search(term) called by FleetSearch
-
-User types search query
-  └─ search(term) → inventoryAPI.searchAll(...)
-  └─ For each resource:
-       ├─ Look up result.resourceType in rendererMap
-       ├─ Found → call resolve(resource) → { scope, module, to, description }
-       └─ Not found → fallback (visible, disabled, no link)
-```
-
-### Key property: SDK-driven resolution
-
-The SDK resolves all renderer extensions eagerly via `useResolvedExtensions`. This is the same pattern used by `isClusterProviderExtension` for cluster provider extensions — consistent, proven, minimal custom code. The renderer map is built once from the resolved extensions and updated when extensions change.
-
-### Backend: `ListTypes` as discovery source
-
-The backend's `ExtensionResourceTypeService.ListTypes()` returns all registered `ExtensionResourceType` definitions. This is not currently exposed via HTTP/gRPC but could be:
-
-- **UI config endpoint** — the `/api/v1/ui/config` response (which already provides `pluginPages`) could include a `resourceTypes: string[]` field listing all registered types. The shell would know upfront what types exist, even before any search happens.
-- **Validation** — at build time or runtime, the shell could cross-reference declared renderer extensions against known backend types and warn about missing renderers.
-- **Future: auto-enable plugins** — if the backend knows a resource type exists and a plugin provides a renderer for it, the shell could auto-enable that plugin (similar to how `plugin-discovery.md` describes CRD-based plugin enablement).
-
-Not needed for v1. The search results themselves carry the `resourceType`, which is sufficient for on-demand discovery.
-
-## Layer 3: Rendering
-
-### Current state
-
-`FleetSearch.tsx` renders search results as PF `MenuItem` components inside a `Menu`. Each item gets:
-
-- An icon (`ResultIcon`)
-- A title with highlighted text (`HighlightedText`)
-- A description (also highlighted)
-- A link via `getLinkComponent(pathname)` which creates `<Link to={pathname}>`
-
-Inventory results are returned by `inventorySearch()` as `SearchResultItem[]` and merged into `GroupedResults` under a `resources` category. Currently they have hardcoded TODOs for pathname, description, and icon.
-
-### What changes
-
-Inventory results get a **separate rendering path** from Orama results. The shell renders them using `PluginLink` (module reference) instead of `Link` (raw pathname).
-
-### `SearchResultItem` extension
-
-The existing `SearchResultItem` interface gains optional fields for plugin-resolved results:
-
-```typescript
-interface SearchResultItem {
-  // existing fields
-  id: string;
-  title: string;
-  description: string;  // HTML string for Orama results
-  category: string;
-  pathname: string;
-  icon: string;
-  status: string;
-  feature?: string;
-  IconComponent?: React.ComponentType;
-  Component?: React.ComponentType<{ title: string; description: string }>;
-
-  // new: plugin-resolved inventory results
-  pluginLink?: {
-    scope: string;
-    module: string;
-    to?: string;
-    search?: string;
-  };
-  descriptionNode?: ReactNode;  // from resolve(), replaces HTML description
-}
-```
-
-When `pluginLink` is present, `renderItem` uses `PluginLink` instead of `getLinkComponent`. When `descriptionNode` is present, it renders the node directly instead of `HighlightedText`.
-
-### `renderItem` changes
-
-```typescript
-const renderItem = (item: SearchResultItem) => {
-  if (item.Component) {
-    return (
-      <div key={item.id} role="none" onClick={clearSearch}>
-        <item.Component title={item.title} description={item.description} />
-      </div>
-    );
-  }
-
-  // Inventory result with resolved renderer — uses MenuItem's component prop
-  // with a cached forwardRef wrapper around PluginLink (same pattern as getLinkComponent)
-  if (item.pluginLink) {
-    return (
-      <MenuItem
-        key={item.id}
-        icon={<ResultIcon name={item.icon} IconComponent={item.IconComponent} />}
-        description={item.descriptionNode ?? item.description}
-        component={getPluginLinkComponent(item.pluginLink)}
-        onClick={clearSearch}
-      >
-        <HighlightedText html={item.title} />
-      </MenuItem>
-    );
-  }
-
-  // Fallback: no renderer found — visible but not clickable
-  if (!item.pathname) {
-    return (
-      <MenuItem
-        key={item.id}
-        icon={<ResultIcon name={item.icon} />}
-        description={item.description}
-        isDisabled
-      >
-        <HighlightedText html={item.title} />
-      </MenuItem>
-    );
-  }
-
-  // Orama result — existing path
-  return (
-    <MenuItem
-      key={item.id}
-      icon={<ResultIcon name={item.icon} IconComponent={item.IconComponent} />}
-      description={
-        item.description ? <HighlightedText html={item.description} /> : undefined
-      }
-      component={getLinkComponent(item.pathname)}
-      onClick={clearSearch}
-    >
-      <HighlightedText html={item.title} />
-    </MenuItem>
-  );
-};
-```
-
-Three render paths:
-1. **Custom component** — plugin fully owns rendering (`item.Component`)
-2. **Plugin-resolved** — `PluginLink` + `descriptionNode` from `resolve()`
-3. **Fallback** — disabled `MenuItem`, no link, raw resource name
-4. **Orama** — existing `Link` + highlighted text (nav, settings, etc.)
-
-### `inventorySearch` → `useInventorySearch` hook
-
-`inventorySearch` is currently a plain async function. To consume resolved extensions, it becomes a hook that uses `useResolvedExtensions` from the SDK:
-
-```typescript
-// web/src/hooks/useInventorySearch.tsx
-
-function useInventorySearch(): {
-  search: (term: string) => Promise<SearchResultItem[]>;
-  loaded: boolean;
-} {
-  const [extensions, loaded] = useResolvedExtensions<SearchResultRendererExtension>(
-    isSearchResultRendererExtension,
-  );
-
-  const rendererMap = useMemo(() => {
-    const map = new Map<string, ResolvedRenderer>();
-    for (const ext of extensions) {
-      map.set(ext.properties.resourceType, {
-        label: ext.properties.label,
-        resolve: ext.properties.resolve,
-        icon: ext.properties.icon,
-      });
-    }
-    return map;
-  }, [extensions]);
-
-  const search = useCallback(async (term: string): Promise<SearchResultItem[]> => {
-    const escaped = term.replace(/"/g, '\\"');
-    const parts = [
-      `resource.name.startsWith("${escaped}")`,
-      `resource.name.startsWith("clusters/${escaped}")`,
-      `resource_type.startsWith("${escaped}")`,
-    ];
-    const results = await client.searchAll({ filter: parts.join(" || ") });
-
-    return results.map((result) => {
-      const renderer = rendererMap.get(result.resourceType);
-      if (!renderer) {
-        return { /* fallback: disabled, no link */ };
-      }
-      const rendered = renderer.resolve(result);
-      return {
-        /* pluginLink + badgedDescription(renderer.label, rendered.description) */
-      };
-    });
-  }, [rendererMap]);
-
-  return { search, loaded };
-}
-```
-
-The renderer map is keyed by `resourceType` directly — no encoding step. The `label` from the extension is used to render a compact PF `Label` badge in the search result description.
-
-### Category grouping
-
-All inventory results go under a single **"Resources"** group. The `label` from the renderer extension (e.g., "Kind Cluster", "Kubernetes Object") is not used for category splitting — too many small groups creates clutter when results are sparse. The label is available for future use (e.g., sub-headers within the Resources group).
-
-### `resolve` is synchronous
-
-The `resolve` function is sync. It maps resource data to display props — no I/O needed. The resource data is already available from the inventory API response. Plugin code loading (the async part) happens in `useRendererIndex` before `resolve` is ever called.
-
-### Fallback
-
-When no plugin provides a renderer for a `resourceType`:
-
-- **Visible** — the user should know the resource exists
-- **Not clickable** — no `PluginLink`, `MenuItem` is `isDisabled`
-- **Raw description** — shows `resourceType` and `state` as plain text
-- **Generic icon** — `SearchIcon` (default from `ResultIcon`)
-- **No descriptionNode** — falls back to string `description`
-
-This handles: addon provides backend resources but hasn't shipped a UI plugin, or the UI plugin is not installed.
-
-## Files Changed
-
-### New
-
-| File | Layer | What |
-|------|-------|------|
-| `build-utils/src/extensions/searchResultRenderer.ts` | Build | `RENDER_SEARCH_TYPE`, `createSearchResultRenderer`, types |
-| `build-utils/src/extensions/__tests__/searchResultRenderer.test.ts` | Build | Builder output, validation, `validateExtensionSet` integration |
-| `common/src/searchResultRenderer.ts` | Common | `SearchResultRender`, `InventoryResource`, `SearchResultResolve` types |
-| `web/src/extensions/isSearchResultRendererExtension.ts` | Discovery | Type guard for `ocm-fleet.render-search` extensions |
-| `web/src/hooks/useInventorySearch.tsx` | Rendering | Hook: `useResolvedExtensions` → renderer map → search function |
-| `extensions/kind/client/src/KindSearchResult.tsx` | Plugin | `resolveKindCluster`, `KindClusterIcon` re-export |
-
-### Modified
-
-| File | Layer | What |
-|------|-------|------|
-| `build-utils/src/extensions/validate.ts` | Build | `case RENDER_SEARCH_TYPE` in validation switch |
-| `build-utils/src/extensions/index.ts` | Build | Re-export builder, type constant, types |
-| `common/src/index.ts` | Common | Re-export `SearchResultRender`, `InventoryResource`, `SearchResultResolve` |
-| `extensions/kind/client/rspack.config.ts` | Build | `createSearchResultRenderer` + `exposedModules` per plugin |
-| `web/src/components/Search/FleetSearch.tsx` | Rendering | `useInventorySearch` hook, `PluginLink` branch, fallback branch |
-| `web/src/components/Search/searchIndex.ts` | Rendering | `SearchResultItem` gains `pluginLink?` + `descriptionNode?` fields |
-
-### Deleted
-
-| File | Why |
-|------|-----|
-| `web/src/components/Search/inventorySearch.ts` | Replaced by `useInventorySearch` hook |
-
-### Not changed
-
-| File | Why |
-|------|-----|
-| `SearchProvider.tsx` | Mock clusters removed; inventory results come from live API via `useInventorySearch` |
-
-## Open Questions
-
-- [x] **~~Expose `ListTypes` via HTTP?~~** — Not needed for v1. The search results carry the `resourceType` — sufficient for on-demand discovery.
-
-- [x] **~~Extension type encoding~~** — Resolved. Static type `ocm-fleet.render-search` with `resourceType` as a property. No encoding needed — SDK regex rejects digits/underscores from base64url.
-
-- [x] **~~Extension ID from resource name?~~** — Resolved. `resourceType` is the type-level key. `name` is instance-level, passed to `resolve()`.
-
-- [x] **~~`inventorySearch` → hook refactor~~** — Resolved. Becomes `useInventorySearch` hook with `useResolvedExtensions`. See Layer 3.
-
-- [x] **~~MenuItem click handling~~** — Resolved. PF `MenuItem` renders a `<button>` by default; nested `<a>` tags don't navigate. Use MenuItem's `component` prop with a cached `forwardRef` wrapper around `PluginLink`. `PluginLink` itself also gained `forwardRef` support.
+Page registration is the only availability condition in this resolver. It does not prove local enablement, authorization, plugin health, or a matching detail route. A missing target makes `PluginLink` render its default empty fallback; a locally disabled target can still resolve and open its enablement page.
+
+The current `navigable: false` flag does **not** disable the link. It mutes the description and adds a "Cluster" badge while retaining the module link. The Kubernetes renderer uses this for objects that link to their containing cluster rather than an object detail page. Pods, Namespaces, and Nodes have their own module targets.
+
+Sources: [result rendering](../../client/web/src/components/Search/FleetSearch.tsx), [PluginLink](../../sdk/common/src/PluginLink.tsx), [page resolver](../../client/web/src/components/Root/ScalprumShell.tsx), [Kubernetes resolver](../../extensions/core/client/src/plugins/core-plugin/K8sObjectSearchResult.tsx).
+
+## Fallbacks and failure boundaries
+
+When a renderer is missing, or calling its resolver throws, the hook produces a fallback with the resource-name leaf as title and `resourceType` as description. It has no path and is rendered as a disabled menu item with a generic search icon. Resolver exceptions are logged.
+
+This fallback does not add resource state to the description. The catch covers the resolver call, not every later property access or React render. A malformed return value, throwing description component, or broken icon is not universally isolated by this contract.
+
+Feature-search `searchResult` components have a separate custom-component branch. That branch does not make the renderer extension's optional `component` property functional.
+
+Sources: [result mapping](../../client/web/src/hooks/useInventorySearch.tsx), [menu branches](../../client/web/src/components/Search/FleetSearch.tsx).
+
+## Current query policy and completeness
+
+Simple inventory search makes two parallel requests after a 300 ms input debounce:
+
+| Query | Filter scope | Requested page size |
+|-------|--------------|---------------------|
+| Clusters | Kind Cluster type; relative name starts with the term or `clusters/` plus the term | 5 |
+| Kubernetes objects | Kubernetes Object type; Pod, Namespace, or Node; observation metadata name starts with the term | 5 |
+
+The term is escaped for backslashes and double quotes before insertion into CEL. These are prefix queries, not Orama full-text queries over all inventory fields. Registering another renderer does not automatically add its type to simple search.
+
+Advanced search sends the raw CEL filter in one request with page size 20. Both modes query scope `-`, do not traverse next-page tokens, and return empty results after logged API failures. Simple search uses `Promise.all`, so failure of either request discards the combined inventory result set. Neither mode promises a complete inventory listing or distinct user-visible query-error state.
+
+Sources: [query construction and mapping](../../client/web/src/hooks/useInventorySearch.tsx), [debouncing](../../client/web/src/components/Search/FleetSearch.tsx), [query API client](../../sdk/common/src/resourceApi.ts).

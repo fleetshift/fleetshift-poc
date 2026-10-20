@@ -15,7 +15,7 @@ import { useMemo } from "react";
 
 import type { PluginPage } from "../../contexts/AppConfigContext";
 import { useAppConfig } from "../../contexts/AppConfigContext";
-import { isModuleExtension } from "../../extensions/isModuleExtension";
+import { isRouteExtension } from "../../extensions/isRouteExtension";
 import AppNavGroup from "./AppNavGroup";
 import AppNavItem from "./AppNavItem";
 import AppNavMore from "./AppNavMore";
@@ -74,16 +74,16 @@ function tagEntries(
 const AppNav = () => {
   const { pluginPages, navLayout } = useAppConfig();
   const { override, legacyOrder, loaded } = useNavLayout();
-  const allModuleExtensions = useExtensions(isModuleExtension);
-  const [moduleExtensions] = useResolvedExtensions(allModuleExtensions);
+  const allRouteExtensions = useExtensions(isRouteExtension);
+  const [routeExtensions] = useResolvedExtensions(allRouteExtensions);
 
   const iconMap = useMemo(() => {
     const map = new Map<string, ComponentType>();
-    for (const ext of moduleExtensions) {
+    for (const ext of routeExtensions) {
       map.set(ext.properties.label, ext.properties.icon);
     }
     return map;
-  }, [moduleExtensions]);
+  }, [routeExtensions]);
 
   const pageMap = useMemo(() => {
     const map = new Map<string, PluginPage>();
