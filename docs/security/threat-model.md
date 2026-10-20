@@ -15,14 +15,88 @@ FleetShift manages declarative infrastructure for multiple tenants and targets. 
 
 ## 2. Trust boundaries and data flow
 
-```text
-User / automation --credentials, intent--> Resource manager --channels--> Fleetlet
-       |                                      |                         |
-       v                                      v                         v
-Identity / provenance authority          Database                 Delivery agent
-                                                                      |
-                                                                      v
-                                                               Target infrastructure
+```mermaid
+flowchart 
+    direction TD
+    %% External Actors
+    subgraph ExternalActors
+        TenantUser([TENANT USER])
+        ProviderUser([PROVIDER USER])
+        GitOps([GITOPS K8S OPER])
+        DBAdmin([DB ADMIN])
+    end
+
+    %% User Interface and compatibility shim
+    subgraph UIAndShim
+        UI[UI WEB/CLI]
+        Shim[OCM Shim]
+
+    end
+
+  
+
+    %% Keep targets below the resource manager while services remain to its right.
+    subgraph ResourceManagerColumn[" "]
+
+        %% Authenticated Boundary
+        subgraph ResourceManager
+            direction TB
+            AuthBroker[AUTH BROKER]
+            CustomerAPIs[CUSTOMER-FACING APIs]
+            Orchestrate[ORCHESTRATE]
+            InventorySearch[INVENTORY SEARCH]
+            Storage[(STORAGE)]
+        end
+
+        
+            %% External Services
+        subgraph ExternalServices
+            direction TD
+            OCI[OCI REGISTRY]
+            NPM[NPM REGISTRY]
+            OIDC[OIDC PROVIDER]
+        end
+    end
+    %% Targets are downstream of the resource manager.
+    subgraph targets
+        Fleetlet[FLEETLET]
+        AddOn[ ADD-ON]
+        Target[Target / K8s]
+    end
+    TenantUser --> UI
+    TenantUser --> OIDC
+    ProviderUser --> OIDC
+    ProviderUser --> UI
+    GitOps --> Shim
+    DBAdmin -.-> Storage
+
+    UI --> NPM
+    UI <--> OIDC
+    UI <--> AuthBroker
+    UI --> CustomerAPIs
+    Shim --> CustomerAPIs
+    OIDC <-->AuthBroker
+    OIDC <--> CustomerAPIs
+
+    CustomerAPIs --> Orchestrate
+    CustomerAPIs --> InventorySearch
+    CustomerAPIs --> Storage
+    Orchestrate --> Storage
+    InventorySearch --> Storage
+    DBAdmin --> Storage
+
+    Fleetlet <--> OIDC
+    Target --> OCI
+    CustomerAPIs --> AuthBroker
+    AddOn <--> Fleetlet
+    Orchestrate <--> Fleetlet
+    InventorySearch --> Fleetlet
+    AddOn <--> Target
+
+        
+    %% Hide the layout-only wrappers' borders.
+    style ResourceManagerColumn fill:transparent,stroke:transparent,stroke-width:0px
+
 ```
 
 The resource manager is trusted for ordinary API authorization and availability in the normal case. A provenance-verifying delivery agent does not trust it to author user intent. A target-local credential and target-native policy remain separate enforcement points. Direct proxy or break-glass paths have their own controls.
