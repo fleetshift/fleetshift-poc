@@ -13,9 +13,9 @@ This example deploys OCM Fleet to an OpenShift cluster using Kustomize manifests
 ## Prerequisites
 
 - `oc` CLI installed and logged into an OpenShift cluster
-- External Keycloak deployed and accessible (see [deploy/openshift/keycloak/README.md](keycloak/README.md))
+- An accessible external OIDC provider with clients and audiences configured for this deployment. The [Keycloak sample](keycloak/README.md) is one option.
 - Images pushed to quay.io (`quay.io/stolostron/ocm-fleet-server:latest`, `quay.io/stolostron/ocm-fleet-web:latest`)
-- `.env` configured at the repo root (copy from `.env.template`)
+- `.env` configured at the repo root (copy from `.env.template`, then uncomment and configure the OpenShift application settings, PostgreSQL credentials, and external OIDC settings)
 
 ## Quick Start
 

@@ -72,8 +72,8 @@ or console. Remove any previous development clusters and volumes explicitly.
 
 ### Prerequisites
 
-- **Go 1.22+**
-- **Node.js 20+** — for Nx and UI packages
+- **Go 1.26.6**
+- **Node.js 24** — for Nx and UI packages
 - **buf** — for protobuf generation (`brew install bufbuild/buf/buf`)
 - `.env` file — copy from `.env.template` for the Podman and OpenShift examples
 
@@ -83,11 +83,15 @@ deployment guide.
 ### Setup
 
 ```bash
-npm install                 # install all workspace dependencies (from repo root)
+npm ci                      # install locked workspace dependencies (from repo root)
 ```
 
-All UI packages are npm workspaces declared at the root. A single `npm install`
+All UI packages are npm workspaces declared at the root. A single `npm ci`
 at the repo root handles everything — no separate install needed per package.
+
+Before opening a pull request, run the relevant build and test targets below
+and update affected tests and documentation. Follow the
+[API conventions](docs/api-design.md) for API changes.
 
 ### Monorepo
 
@@ -101,8 +105,6 @@ npx nx run server:test      # run a single target (cached)
 npx nx run-many -t test     # run target across all projects (parallel)
 npx nx affected -t test     # only test what changed
 ```
-
-Projects: `server`, `cli`, `deploy-aio`, `proto`, `web`, `common`, `build-utils`, `plugins`.
 
 ### Build
 
@@ -160,20 +162,24 @@ npx nx run plugins:test:ct  # plugin component tests
 ```
 
 UI packages: `web` (SPA shell), `common` (shared types), `build-utils` (rspack
-helpers), `plugins` (12 MF remotes)
+helpers), `plugins` (core MF remotes), and `@ocm-fleet/kind-plugin`.
 
 ### Test
 
 ```bash
-npx nx run-many -t test     # unit tests for all modules
+npx nx run-many -t test     # unit tests for Nx projects
 npx nx affected -t test     # only test what changed
 npx nx run server:test      # Go server tests (cached)
 npx nx run deploy-aio:test  # AIO packaging unit tests
 npx nx run common:test      # shared UI lib tests
 
-npx nx test:e2e e2e-web      # Playwright UI journeys (needs AIO at :8085)
+npx nx test:e2e e2e-web      # Playwright UI journeys (starts a fresh AIO sandbox)
 npx nx test:e2e e2e-cli      # Playwright CLI journeys (fleetctl, Kind, delivery)
 ```
+
+Container-based tests need Podman and its compatible socket; see the
+[E2E prerequisites](docs/testing/end-to-end.md). `deploy-aio:test` also fetches
+the destination's live CI configuration from `openshift/release`.
 
 Frontend e2e expects the sandbox origin
 (`https://ocm-fleet.localhost:8085`). Playwright flags after `--`,
