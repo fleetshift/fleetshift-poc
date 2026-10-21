@@ -1,4 +1,4 @@
-# FleetShift threat model
+# OCM Fleet threat model
 
 **Status:** Unratified draft  
 **Modeled version:** intended architecture at commit `93c8da00129ade559e476177f33c40b2231f0b5f`  
@@ -7,11 +7,11 @@
 **Generation:** GPT-5.6 Luna; high effort; threat-model skill; OpenSSF and CNSC references.  
 **Confidence:** documented 31 / maintainer 9 / inferred 8 / assumption 0
 
-This model describes FleetShift's intended security contract. Design claims are not implementation evidence. A control marked planned or unresolved receives no residual-risk credit.
+This model describes OCM Fleet's intended security contract. Design claims are not implementation evidence. A control marked planned or unresolved receives no residual-risk credit.
 
 ## 1. Scope and intended use
 
-FleetShift manages declarative infrastructure for multiple tenants and targets. The primary profile is a shared multi-tenant management plane. Provider/factory and recursive-platform deployments are included as profile variants. Product code is in scope; POCs are evidence only; archived designs and unshipped examples are out of scope.
+OCM Fleet manages declarative infrastructure for multiple tenants and targets. The primary profile is a shared multi-tenant management plane. Provider/factory and recursive-platform deployments are included as profile variants. Product code is in scope; POCs are evidence only; archived designs and unshipped examples are out of scope.
 
 ## 2. Trust boundaries and data flow
 
@@ -99,21 +99,21 @@ flowchart
 
 ```
 
-The resource manager is trusted for ordinary API authorization and availability in the normal case. A provenance-verifying delivery agent does not trust it to author user intent. A target-local credential and target-native policy remain separate enforcement points. Direct proxy or break-glass paths have their own controls.
+The resource manager is trusted for ordinary API authorization and availability in the normal case. A provenance-verifying delivery agent does not trust it to author user intent. A target-local credential and target-native policy remain separate enforcement points.
 
 ## 3. Deployment profiles
 
 | Profile | Main boundary | Important residual risk |
 | --- | --- | --- |
 | Local/sandbox | One operator and one instance | Host privileges and setup exposure dominate. |
-| Shared multi-tenant | Tenant/workspace authorization inside one platform | RM, database, addon, and shared-runtime compromise can have broad blast radius. |
-| Provider/factory | Consumer intent crosses a provider boundary to factory targets | Factory credentials, channel profiles, and tenant intent must be independently constrained. |
+| Shared multi-tenant (a target belongs to 1 tenant) | Tenant/workspace authorization inside one platform | RM, database, addon, and shared-runtime compromise can have broad blast radius. |
+| Provider/factory (targets belong to the platform and each host multi-tenant resources) | Consumer intent crosses a provider boundary to factory targets | Factory credentials, channel profiles, and tenant intent must be independently constrained. |
 
 ## 4. Assumptions
 
 - Cryptographic algorithms, TLS, and platform isolation work as specified. *(documented, Trust model v3 §3)*
-- Trust roots, identity providers, target APIs, and target verifiers are separately administered authorities. *(maintainer, 2026-10)*
-- Bootstrap and explicit recovery are controlled ceremonies. *(maintainer, 2026-10)*
+- Trust roots, identity providers, target APIs, and target verifiers are separately administered authorities. *(TBC, see [Q9](#10-open-questions))*
+- Bootstrap and explicit recovery are controlled ceremonies. *(TBC, see [Q4](#10-open-questions))*
 - A verifier that has been initialized never silently returns to TOFU. *(documented, Trust model v3 §3 and §6)*
 - Users and automation protect their signing keys and approve the intended content. *(documented, Trust model v3 §3, controlled-client considerations)*
 - Exact security properties apply only on paths that reach an enforcing delivery agent. *(documented, Trust model v3 §3, enforcement boundary)*
@@ -123,15 +123,15 @@ The resource manager is trusted for ordinary API authorization and availability 
 | Actor | In scope | Capabilities excluded | Goals |
 | --- | --- | --- | --- |
 | Network attacker | Intercept, replay, delay, or reorder traffic | Break cryptography or compromise both endpoints | Spoofing, tampering, disclosure, denial of service |
-| Malicious tenant user | Submit authorized API requests and crafted inputs | Provider trust-root control or another tenant's credentials | Cross-tenant access, unauthorized delivery, data disclosure |
-| Compromised resource manager | Alter database state, bypass RM checks, omit or replay evidence, route traffic | Forge retained user provenance or rewrite an established verifier checkpoint | Unauthorized changes, tenant escape, denial of service |
-| Compromised addon/UI plugin | Execute declared addon or browser code and send its protocol traffic | Undeclared signing-key, trust-root, or platform-admin authority | Malicious output, data theft, lateral movement |
+| Malicious tenant user | Submit authorized API requests and crafted inputs | Provider trust-root control or another tenant's credentials | Cross-tenant access, unauthorized delivery, data disclosure, denial of service |
+| Compromised resource manager | Alter database state, bypass RM checks, omit or replay evidence, route traffic, update trust configuration | Forge retained user provenance | Unauthorized changes, tenant escape, denial of service, control over targets |
+| Compromised addon/UI plugin | Execute declared addon or browser code and send its protocol traffic | Undeclared signing-key, trust-root, or platform-admin authority | Malicious output, data theft, unauthorized changes, lateral movement |
 | Compromised fleetlet/agent | Control one target-side transport or verifier | Other targets' local credentials and trust state | Local compromise, lateral movement, channel abuse |
 | Compromised target/host | Control one target or host | RM, other targets, or independent trust roots | Local persistence, credential theft, lateral movement |
 | Malicious or compromised authority | Issue valid credentials or trust updates within its authority | Authority outside its configured scope | Identity takeover, broad signing, trust substitution |
 | Insider/colluding actors | Combine the capabilities of named actors | Capabilities not supplied by the collusion | Defeat separation of duties and accountability |
 
-Root on the host running FleetShift or a target is not expected to preserve that host's own security. The model instead tests whether compromise spreads beyond that host or target.
+Root on the host running OCM Fleet or a target is not expected to preserve that host's own security. The model instead tests whether compromise spreads beyond that host or target.
 
 ## 6. Security properties provided
 
@@ -157,7 +157,7 @@ P-AVAIL is not yet backed by defined quotas and resource limits. The stronger go
 | D-RM-CONF | A compromised RM and database can read platform-held desired state, inventory, credentials it stores, and query data. | security-critical |
 | D-RM-READ | A compromised RM can omit, delay, or falsify ordinary reads and observations. | security-critical |
 | D-RM-DOS | A compromised RM can withhold delivery or cause `PausedAuth` and denial of service. | security-critical |
-| D-TARGET-ROOT | FleetShift does not preserve a target's integrity after target-host or verifier-root compromise. | security-critical |
+| D-TARGET-ROOT | OCM Fleet does not preserve a target's integrity after target-host or verifier-root compromise. | security-critical |
 | D-GLOBAL-FORK | Continuity/v3 does not provide global fork detection without witnesses or gossip. | correctness-only |
 | D-WALL-CLOCK | Continuity/v3 does not provide trusted wall-clock freshness by itself. | correctness-only |
 | D-CRED-ONLY | Credential-only delivery does not bind exact content against a compromised courier. | security-critical |
@@ -175,6 +175,7 @@ P-AVAIL is not yet backed by defined quotas and resource limits. The stronger go
 - Constrain addon installation, UI asset hosting, dynamic schemas, and external registries.
 - Keep target credentials local or short-lived where possible.
 - Monitor trust changes, break-glass sessions, unusual delivery volume, and cross-tenant access.
+- DB restore with loss of data might lead to incoherent state on targets (generation mismatch, out of sync trust authority configurations, inability to verify intent)
 
 ## 9. Known misuse patterns
 
@@ -212,6 +213,7 @@ P-AVAIL is not yet backed by defined quotas and resource limits. The stronger go
 - **Q8** — What historical findings and maintainer rulings should be used for backtesting?
   - Proposed answer: assemble a de-identified corpus before acceptance.
   - Lands in: backtest and §1.15.
+- **Q9** - Are target verifiers administered separately from the resource manager? *(TBC)*
 
 ## 11. Triage dispositions
 
@@ -219,4 +221,4 @@ Use exactly one route, in this order: `KNOWN-NON-FINDING`; unsupported component
 
 ## 12. Change triggers
 
-Revise this model when FleetShift adds a trust boundary, target profile, credential mode, direct mutation path, dynamic-code path, tenant-isolation mechanism, recovery path, or security-relevant dependency. Any finding that cannot be routed uniquely is also a revision trigger.
+Revise this model when OCM Fleet adds a trust boundary, target profile, credential mode, direct mutation path, dynamic-code path, tenant-isolation mechanism, recovery path, or security-relevant dependency. Any finding that cannot be routed uniquely is also a revision trigger.
