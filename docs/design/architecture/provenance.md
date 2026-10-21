@@ -49,6 +49,7 @@ root.
 - [Hybrid attestation prototype](../../../poc/attestation/hybrid/README.md)
 - [Sigstore/TUF bundle prototype](../../../poc/attestation/sigstore_tuf_bundle/README.md)
 - [Provenance suite APIs prototype](../../../poc/provenance-suites/README.md)
+- [Registered risks](../../security/risk-register.md)
 
 ## Overview
 
@@ -176,6 +177,32 @@ compromise. The controlled producer, provenance implementation, delivery agent,
 bootstrap path, configured external authorities, and target enforcement path
 remain trusted for their stated roles. A direct target mutation path that
 bypasses the delivery agent is outside this guarantee.
+
+### Risk coverage summary
+
+To illustrate the above better, the table below maps each mechanism described in this doc with the threat it addresses.
+The risk IDs are defined in [the security risk register](../../security/risk-register.md).
+
+| Mechanism | Threat addressed | Risk IDs | Coverage |
+| --- | --- | --- | --- |
+| [Canonical external tenants](#canonical-principals-and-external-tenants), [signed scope](#strategy-placement-and-removal-constraints), and [target-side tenant checks](#target) | Cross-tenant access; RM authorization remains required. | T-01 | Partial |
+| [Exact evidence](#profile-owned-proof-common-meaning), [independent assertions](#independent-assertions), and [attestation relationships](#common-attestation-graph) | Compromised RM changes delivery. | T-02 | Direct on verifying paths |
+| [Retained state](#retained-state-and-evidence-log-ordering) and [fail-closed behavior](#failure-and-recovery) | RM withholds work; these controls prevent unsafe fallback but cannot restore availability. | T-03 | Limited |
+| [Evidence-log checkpoints](#common-append-only-evidence-log), [generation fencing](#generation-and-replay-checks), [append-only consistency](#common-append-only-evidence-log), and [replay checks](#generation-and-replay-checks) | Replay or reordering. | T-04 | Direct where configured |
+| [Predecessor-authorized updates](#trust-updates), [retained checkpoints](#profile-owned-verifier-state), and [no silent return to TOFU](#bootstrap-and-steady-state) | Trust replacement or rollback. | T-05 | Direct |
+| [Authority scoping](#authority-registry), [tenant partitions](#canonical-principals-and-external-tenants), [profile constraints](#delivery-policy-and-profile-selection), [rotation](#trust-updates), and [revocation](#trust-updates) | Compromised authority; a trusted root can still misuse its authority. | T-06 | Partial |
+| [Authenticated addon identity](#strategy-placement-and-removal-constraints), [purpose](#profile-owned-proof-common-meaning), [exact output](#intent-and-output-authentication), [placement](#strategy-placement-and-removal-constraints), and [fulfillment relationships](#common-attestation-graph) | Malicious addon output. | T-07 | Partial |
+| [Separate signing boundary](../trust_model_v3.md#controlled-client-security-considerations) and [asset-integrity controls](addon_integration.md#plugin-model) | Malicious UI asset. | T-08 | Limited; outside this provenance guarantee |
+| [Target-bound evidence](#strategy-placement-and-removal-constraints) and [local verification](#target) | Compromised fleetlet or agent uses access across targets. | T-09 | Partial |
+| [Deployment and network isolation](fleetlet_and_transport.md#fleetlet-trust-boundary) | Compromised target host and lateral movement. | T-10 | Not addressed here |
+| [Bounded verification work](#common-attestation-graph) | Resource exhaustion; tenant quotas and platform budgets remain separate. | T-11 | Limited |
+| [Authenticated generations](#generation-and-replay-checks), [durable progress](#profile-owned-verifier-state), [idempotency](#profile-owned-verifier-state), and [target-side fencing](#target) | Stale or partial apply. | T-12 | Direct with a conforming agent |
+| [Creation nonces](#generation-and-replay-checks), [execution secrets](#optional-execution-secret), and [retained revocation state](#profile-owned-verifier-state) | Replay after deletion. | T-13 | Partial; retention is unresolved |
+| [Canonical identity](#canonical-principals-and-external-tenants), [tenant binding](#canonical-principals-and-external-tenants), [signed scope](#strategy-placement-and-removal-constraints), and [authenticated relationships](#common-attestation-graph) | Inventory or alias confusion. | T-14 | Partial |
+| [Signed consumer intent](#intent-and-output-authentication) and [independently authenticated provider output](#independent-assertions) | Factory bypass of consumer intent; channel and vault controls remain separate. | T-15 | Partial |
+| [Purpose-typed](#profile-owned-proof-common-meaning), [signed](#independent-assertions), [target-bound](#strategy-placement-and-removal-constraints), and [scope-bound approvals](#common-attestation-graph) | Excessive break-glass access; expiry and enforcement remain separate. | T-16 | Partial |
+| [Authenticated typed configuration](#well-known-provenance-types) and [content binding](#profile-owned-proof-common-meaning) | Malicious dynamic registration; registration policy and asset trust remain open. | T-17 | Partial |
+| [Trusted installed implementations](#well-known-provenance-types) | Supply-chain compromise; release, SBOM, and registry controls are outside this document. | T-18 | Not addressed here |
 
 ## Authenticated Trust Configuration
 
@@ -1398,7 +1425,25 @@ never makes it an uninitialized verifier.
 17. **Bounded verification:** package size, evidence count, graph depth,
     indexes, proof sizes, and profile-specific work have enforced limits.
 
+These invariants summarize the mechanisms above and the threats they target:
+
+- **Trust continuity (1, 2, 13–15):** prevents trust replacement, rollback,
+  unknown verifier code, and unauthorized profile installation (T-05, T-06,
+  T-17).
+- **Identity and scope (3–6, 9–11):** prevents identity confusion, tenant
+  escape, purpose confusion, graph retargeting, and RM elevation of courier
+  authority (T-01, T-02, T-06, T-07, T-14, T-15).
+- **Durability and ordering (7, 8, 12, 16):** prevents evidence substitution,
+  replay, stale apply, duplicate authority, and crash-induced unsafe progress
+  (T-02, T-04, T-12, T-13).
+- **Bounded work (17):** limits malformed-package and proof-processing abuse,
+  but does not replace tenant quotas or resource budgets (T-11).
+
 ## Validation
+
+The validation plan exercises the mapped risk classes under explicit
+profile/configuration assumptions. Tests do not establish protection for
+controls still marked unresolved in the risk register.
 
 Common protocol tests apply to every provenance implementation:
 
@@ -1453,6 +1498,10 @@ attack tests remain profile-specific where the profiles intentionally make
 different security and availability tradeoffs.
 
 ## Open Questions
+
+The unresolved items below are residual risks, not implied protections. In
+particular, provenance does not close T-03, T-08, T-10, T-11, or T-18, and only
+partially closes T-01, T-06, T-07, T-09, T-13, T-14, T-15, T-16, and T-17.
 
 - Should producers sign claimed provenance type and authority attributes, or
   should verifiers derive all of them from authenticated evidence? A focused
