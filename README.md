@@ -1,6 +1,8 @@
-# fleetshift-poc
+# fleetshift-poc (ARCHIVED)
 
 This repository represents both a **prototype** for a next generation k8s/OpenShift cluster management vision, alongside **individual POCs** for exploration of isolated concepts.
+
+It is ARCHIVED. The work lives on in github.com/stolostron/ocm-fleet.
 
 ## Start here
 
